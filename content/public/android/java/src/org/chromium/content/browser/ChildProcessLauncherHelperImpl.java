@@ -43,6 +43,11 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import android.support.v4.content.LocalBroadcastManager;
+import android.content.IntentFilter;
+import android.content.Intent;
+
+
 /**
  * This is the java counterpart to ChildProcessLauncherHelper. It is owned by native side and
  * has an explicit destroy method.
@@ -106,6 +111,8 @@ public final class ChildProcessLauncherHelperImpl {
     // Whether the process can use warmed up connection.
     private final boolean mCanUseWarmUpConnection;
 
+ private static int renderers_died;
+
     private final ChildProcessLauncher.Delegate mLauncherDelegate =
             new ChildProcessLauncher.Delegate() {
                 @Override
@@ -164,6 +171,14 @@ public final class ChildProcessLauncherHelperImpl {
                 @Override
                 public void onConnectionLost(ChildProcessConnection connection) {
                     assert LauncherThread.runningOnLauncherThread();
+		    Log.i(TAG, "process died - " + getProcessType() + " | pid: " + connection.getPid());
+		    if (getProcessType() != null && (getProcessType().equals("gpu-process") || (getProcessType().equals("renderer") && --renderers_died <= 0))) {
+				try {
+                                        Intent intent = new Intent("reloadCR");
+                                         LocalBroadcastManager.getInstance(null).sendBroadcastSync(intent);
+                                } catch (Exception e) {}
+
+		    }
                     if (connection.getPid() == 0) return;
                     sLauncherByPid.remove(connection.getPid());
                     if (mBindingManager != null) mBindingManager.removeConnection(connection);
@@ -405,6 +420,8 @@ public final class ChildProcessLauncherHelperImpl {
                 sSandboxedChildConnectionRanking = new ChildProcessRanking(
                         sSandboxedChildConnectionAllocator.getNumberOfServices());
             }
+
+	    renderers_died = 2;
         }
         return sSandboxedChildConnectionAllocator;
     }

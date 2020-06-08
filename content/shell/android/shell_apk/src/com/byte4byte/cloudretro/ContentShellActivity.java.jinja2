@@ -654,6 +654,9 @@ private void toastIt(String msg) {
 
     protected void afterDownloads() {
 
+LocalBroadcastManager.getInstance(this).registerReceiver(mReloadReceiver,
+                                         new IntentFilter("reloadCR"));
+
         /*Log.i("peppermsg", "trying to load lib");
         try {
         	System.load(getFilesDir().getPath() + "/libecemu.cr.so");
@@ -897,7 +900,10 @@ private void toastIt(String msg) {
 	@SuppressLint("NewAPi")
     protected void onCreate(final Bundle savedInstanceState) {
         getWindow().getDecorView().setBackgroundColor(Color.BLACK);
-		
+	
+Log.i(TAG, "oncreate 1");
+m_NeedReload = false;
+	
 		ctx = this;
 		
 		if (Build.VERSION.SDK_INT >= 21) { 
@@ -1446,6 +1452,19 @@ private BroadcastReceiver mMessageReceiver = new BroadcastReceiver() {
     callJS(js);
   }
 };
+
+
+ boolean m_NeedReload;
+
+private BroadcastReceiver mReloadReceiver = new BroadcastReceiver() {
+  @Override
+  public void onReceive(Context context, Intent intent) {
+    // Extract data included in the Intent
+   	Log.i(TAG, "RELOADING 2");
+    //mShellManager.launchShell(CRURL);
+    m_NeedReload = true;
+  }
+};
 	
 	@Override
 	protected void onResume() {
@@ -1459,6 +1478,21 @@ private BroadcastReceiver mMessageReceiver = new BroadcastReceiver() {
 
 		LocalBroadcastManager.getInstance(this).registerReceiver(mMessageReceiver,
                                          new IntentFilter("callJS"));
+
+
+		//LocalBroadcastManager.getInstance(this).registerReceiver(mReloadReceiver,
+                //                         new IntentFilter("reloadCR"));
+
+
+Log.i(TAG, "resume 1");
+
+		if (m_NeedReload) {
+			m_NeedReload = false;
+			Log.i(TAG, "resume reload");
+			afterDownloads();                
+}
+
+
 
 		active = true;//
 		
@@ -1484,6 +1518,10 @@ private BroadcastReceiver mMessageReceiver = new BroadcastReceiver() {
 // Unregister since the activity is not visible
   LocalBroadcastManager.getInstance(this)
                        .unregisterReceiver(mMessageReceiver);
+
+//LocalBroadcastManager.getInstance(this)
+ //                      .unregisterReceiver(mReloadReceiver);
+
 		super.onPause();
 	}
 
@@ -1495,6 +1533,10 @@ private BroadcastReceiver mMessageReceiver = new BroadcastReceiver() {
 
         WebContents webContents = getActiveWebContents();
         if (webContents != null) webContents.onShow();
+	else {
+		Log.d(TAG, "RELOADING");
+		if (mShellManager != null) mShellManager.launchShell(CRURL);
+	}
     }
 	
 /*	private static final String PRIMARY_VOLUME_NAME = "primary";
