@@ -40,8 +40,16 @@ NativeLibrary LoadNativeLibraryWithOptions(const FilePath& library_path,
     flags |= RTLD_DEEPBIND;
 #endif
   void* dl = dlopen(library_path.value().c_str(), flags);
-  if (!dl && error)
-    error->message = dlerror();
+  printf("DL OPENING %s\n", library_path.value().c_str());
+  char *err;
+  if (! dl) {
+	  err = dlerror();
+	  printf("DL ERROR %s\n", err);
+	  exit(0);
+  }
+  if (!dl && error) {
+    error->message = err;
+  }
 
   return dl;
 }

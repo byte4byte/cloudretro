@@ -314,6 +314,15 @@ void Shell::RunFileChooser(
 
 }
 
+#elif defined(__linux__)
+
+void Shell::RunFileChooser(
+    content::RenderFrameHost* render_frame_host,
+        std::unique_ptr<FileSelectListener> listener,
+    const FileChooserParams& params) {
+
+}
+
 
 #endif
 

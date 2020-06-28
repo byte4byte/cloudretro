@@ -35,11 +35,19 @@ int main() {
 
 #else
 
-int main(int argc, const char** argv) {
+int main(int old_argc, char** old_argv) {
+	int new_argc = old_argc + 1;
+	char **new_argv = (char **)malloc(sizeof(char *) * (new_argc));
+	const char *nosandbox = "--no-sandbox";
+	for (int i = 0; i < old_argc; i++) {
+		new_argv[i] = old_argv[i];
+	}
+	new_argv[old_argc] = (char *)nosandbox;
+	
   content::ShellMainDelegate delegate;
   content::ContentMainParams params(&delegate);
-  params.argc = argc;
-  params.argv = argv;
+  params.argc = new_argc;
+  params.argv = (const char **)new_argv;
   return content::ContentMain(params);
 }
 

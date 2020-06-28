@@ -256,11 +256,42 @@ void XWindow::Init(const Configuration& config) {
   swa.border_pixel = 0;
 
   bounds_in_pixels_ = SanitizeBounds(config.bounds);
-  xwindow_ = XCreateWindow(xdisplay_, x_root_window_, bounds_in_pixels_.x(),
+   if (window_type != gfx::GetAtom("_NET_WM_WINDOW_TYPE_NORMAL")) {
+		xwindow_ = XCreateWindow(xdisplay_, x_root_window_, bounds_in_pixels_.x(),
                            bounds_in_pixels_.y(), bounds_in_pixels_.width(),
                            bounds_in_pixels_.height(),
                            0,  // border width
                            depth, InputOutput, visual, attribute_mask, &swa);
+   }
+	else {
+						   
+		xwindow_ = XCreateWindow(xdisplay_, x_root_window_, 0,
+                           0, XDisplayWidth(xdisplay_, DefaultScreen(xdisplay_)),
+                           XDisplayHeight(xdisplay_, DefaultScreen(xdisplay_)),
+                           0,  // border width
+                           depth, InputOutput, visual, attribute_mask, &swa);
+
+		XChangeProperty(xdisplay_, xwindow_, gfx::GetAtom("_NET_WM_NAME"),
+                  gfx::GetAtom("UTF8_STRING"), 8, PropModeReplace,
+                  reinterpret_cast<const unsigned char*>("Cloud Retro"),
+                  strlen("Cloud Retro"));
+				  
+				  Maximize();
+				  SetFullscreen(true);
+#if 0				  
+		Atom atoms[2] = { XInternAtom(xdisplay_, "_NET_WM_STATE_FULLSCREEN", x11::False), x11::None };
+	XChangeProperty(
+    xdisplay_,
+    xwindow_,
+    XInternAtom(xdisplay_, "_NET_WM_STATE", x11::False),
+    XA_ATOM, 32, PropModeReplace, (unsigned char*)atoms, 1);
+	
+#endif
+		//XChangeProperty(xdisplay_,xwindow_,property,property,32,PropModeReplace,(unsigned char *)&hints,5);
+		
+		
+						   
+	}
 
   // It can be a status icon window. If it fails to initialize, don't provide
   // him with a native window handle, close self and let the client destroy

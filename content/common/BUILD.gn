@@ -41,7 +41,7 @@ shared_library("eclaunch") {
   cflags += [ "-Wno-unused-value" ]  
   cflags += [ "-Wno-tautological-constant-out-of-range-compare" ]
   cflags += [ "-I" + rebase_path("//ppapi/examples/ecemu/libuv") ]
-  if (is_android) {
+  if (is_android || is_linux) {
     cflags += [ "-I" + rebase_path("//ppapi/examples/ecemu/libssl/android") ]
   }    
   if (is_mac) {
@@ -57,7 +57,7 @@ shared_library("eclaunch") {
   cflags += [ "-I" + rebase_path("//ppapi/examples/ecemu/libssl/providers/common/include") ]   
   cflags += [ "-I" + rebase_path("//ppapi/examples/ecemu") ]  
   cflags += [ "-I" + rebase_path("//ppapi/examples/ecemu/libcurl/include") ]  
-  cflags += [ "-I" + rebase_path("//ppapi/examples/ecemu/libcurl/lib") ]  
+  cflags += [ "-I" + rebase_path("//ppapi/examples/ecemu/libcurl/lib") ] 
   
   sources = [
     rebase_path("//ppapi/examples/ecemu") + "/libssl/crypto/mem.c",
@@ -1042,8 +1042,9 @@ shared_library("eclaunch") {
     rebase_path("//ppapi/examples/ecemu") + "/libcurl/lib/warnless.c",
     rebase_path("//ppapi/examples/ecemu") + "/libcurl/lib/wildcard.c",
     rebase_path("//ppapi/examples/ecemu") + "/libcurl/lib/x509asn1.c",
-    "eclaunch.mm"
+    "eclaunch.cc"
   ]
+  
   ldflags = []
   if (is_win) {
     sources +=[ rebase_path("//ppapi/examples/ecemu") + "/libssl/crypto/async/arch/async_win.c",
@@ -1065,12 +1066,12 @@ shared_library("eclaunch") {
         rebase_path("//ppapi/examples/ecemu") + "/libssl/crypto/armv4cpuid.S"
     ]
   }  
-  if (is_android) {
+  if (is_android || is_linux) {
     sources +=[ rebase_path("//ppapi/examples/ecemu") + "/libssl/crypto/threads_pthread.c",
                 rebase_path("//ppapi/examples/ecemu") + "/libssl/crypto/bn/bn_asm.c",
                 rebase_path("//ppapi/examples/ecemu") + "/libssl/crypto/armcap.c",
-                rebase_path("//ppapi/examples/ecemu") + "/libssl/crypto/cryptlib.c",
-                rebase_path("//ppapi/examples/ecemu") + "/libssl/crypto/rand/rand_unix.c"
+                rebase_path("//ppapi/examples/ecemu") + "/libssl/crypto/rand/rand_unix.c",
+                rebase_path("//ppapi/examples/ecemu") + "/libssl/crypto/cryptlib.c"
             ]
   }
   if (is_mac) {
@@ -1090,7 +1091,13 @@ shared_library("eclaunch") {
       "Foundation.framework",
     ]
   }
- ldflags = [ "-Wl,-install_name,@executable_path/../Libraries/libeclaunch.dylib" ]
+  if (is_mac) {
+   ldflags = [ "-Wl,-install_name,@executable_path/../Libraries/libeclaunch.dylib" ]
+  }
+  if (is_linux) {
+     ldflags = [ "-L" + rebase_path("//out/Default") ]
+     libs = [ "eclaunch_win" ]  
+  }
  # ldflags = [ "-Wl,-install_name,libeclaunch.dylib" ]
  #ldflags += [
  #       "-rpath",

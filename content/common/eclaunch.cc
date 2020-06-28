@@ -20,7 +20,7 @@ size_t dl_filesize(void *ptr, size_t size, size_t nmemb, struct string *s)
 	return size*nmemb;
 }
 
-int curl_get_file_size( std::string url, curl_off_t *filetime) {
+int curl_get_file_size( std::string url, time_t *filetime) {
   // Assume failure.
   int result = -1;
 
@@ -49,7 +49,9 @@ int curl_get_file_size( std::string url, curl_off_t *filetime) {
 		curl_easy_getinfo(curl, CURLINFO_CONTENT_LENGTH_DOWNLOAD,   &cl);
 		result = (int)cl;
 		if (filetime) {
-			curl_easy_getinfo(curl, CURLINFO_FILETIME_T, filetime);
+			long mtime;
+			curl_easy_getinfo(curl, CURLINFO_FILETIME, &mtime);
+			*filetime = (time_t)mtime;
 		}
 		  
 		curl_easy_cleanup(curl);
@@ -115,8 +117,10 @@ time_t getFileModTime(const char *path) {
 		// linux file time here
 		struct stat st;
 		if (stat(path, &st) == 0) {
-			return st.st_mtime * 1000;
+			puts("stat success");
+			return st.st_mtime;
 		}
+		puts("stat failed");
 /*		long        value;
 
 		value = st.st_mtim
@@ -127,11 +131,15 @@ time_t getFileModTime(const char *path) {
 	return 0;
 }
 
-bool shouldDownloadFile(const char *path, curl_off_t filetime, int size) {
+bool shouldDownloadFile(const char *path, time_t filetime, int size) {
 	bool mod_test = true;
 	bool size_test = true;
 	
-	if (getFileModTime(path) < filetime * 1000) {
+	time_t path_time = getFileModTime(path);
+	time_t remote_time = filetime;
+	printf("mod failed - %s | %s\n", ctime(&path_time), ctime(&remote_time));
+	if (path_time < remote_time) {
+		
 		mod_test = false;
 	}
 
@@ -148,6 +156,7 @@ bool shouldDownloadFile(const char *path, curl_off_t filetime, int size) {
 		stat(path, &st);
 		if (size != st.st_size) {
 			size_test = false;
+			puts("size failed");
 		}
 	#endif
 
@@ -939,3 +948,263 @@ EXPORT void setECEmuPath(t_GetSwitchValueASCII GetSwitchValueASCII, t_HasSwitch 
 
 #endif
 #endif
+
+#ifdef __linux__
+
+static void (* g_ready_func)(int success) = NULL;
+static void (* g_set_status_text)(const char *txt)  = NULL;
+
+static bool launching = false;
+
+typedef struct {
+	char *url;
+} dnlinfo;
+
+#include <fcntl.h>
+#include <unistd.h>
+#if defined(__APPLE__) || defined(__FreeBSD__)
+#include <copyfile.h>
+#else
+#include <sys/sendfile.h>
+#endif
+#include <unistd.h>
+#include <sys/types.h>
+#include <pwd.h>
+#include <dlfcn.h>
+
+int copy_file(const char* source, const char* destination)
+{    
+    int input, output;    
+    if ((input = open(source, O_RDONLY)) == -1)
+    {
+        return -1;
+    }    
+    if ((output = creat(destination, 0660)) == -1)
+    {
+        close(input);
+        return -1;
+    }
+
+    //Here we use kernel-space copying for performance reasons
+#if defined(__APPLE__) || defined(__FreeBSD__)
+    //fcopyfile works on FreeBSD and OS X 10.5+ 
+    int result = fcopyfile(input, output, 0, COPYFILE_ALL);
+#else
+    //sendfile will work with non-socket output (i.e. regular file) on Linux 2.6.33+
+    off_t bytesCopied = 0;
+    struct stat fileinfo = {0};
+    fstat(input, &fileinfo);
+    int result = sendfile(output, input, &bytesCopied, fileinfo.st_size);
+#endif
+
+    close(input);
+    close(output);
+
+    return result;
+}
+
+void *DownloadThread(void *vdl) {
+	dnlinfo *dl = (dnlinfo *)vdl;
+	
+	struct passwd *pw = getpwuid(getuid());
+	const char *home = pw->pw_dir;
+	//puts(homedir);
+	
+	char *hpath = (char *)malloc(strlen(home) + 100);
+	strcpy(hpath, home);
+	strcat(hpath, "/CloudRetro");
+	
+	puts(hpath);
+	mkdir(hpath, 0777);
+	
+	char *fsbridge = (char *)malloc(strlen(hpath) + 100);
+	strcpy(fsbridge, hpath);
+	strcat(fsbridge, "/libecbridge.so");
+	
+	strcat(hpath, "/libecemu.so");
+	
+	const char *path = hpath;
+	const char *fspath = fsbridge;
+	
+	//const char * path = [hpath UTF8String];
+	//const char *fspath = [fsbridge UTF8String];
+	
+	const char *ecemupath = "/native/linux/arm/libecemu.so";
+	char *ecemu = (char *)malloc(strlen(dl->url) + strlen(ecemupath) + 4);
+	char *text = (char *)malloc(strlen(dl->url) + strlen(ecemupath) + 200);
+	sprintf(ecemu, "%s%s", dl->url, ecemupath);
+	sprintf(text, "Status: Checking - %s", ecemu);
+	puts(text);
+	//SetWindowTextA(dl->hStatus, text);
+	
+	time_t filetime;
+	int size = curl_get_file_size(ecemu, &filetime);
+	
+	//char path[1024];
+	//SHGetFolderPathA(NULL, CSIDL_PROFILE, NULL, 0, path);
+	//strcpy(path, "/Users/patrick/byte4byte/cloudretro/ecemu.dll");
+	//strcat(path, "\\CloudRetro");
+	//CreateDirectoryA(path, NULL);
+	//strcat(path, "\\ecemu.dll");
+	
+	if (shouldDownloadFile(path, filetime, size)) {
+		free(text);
+		text = (char *)malloc(strlen(dl->url) + strlen(ecemu) + 200);
+		sprintf(text, "Status: Downloading - %s", ecemu);
+		puts(text);
+		//SetWindowTextA(dl->hStatus, text);
+		
+		g_dep_fp = fopen(path, "wb");
+
+		CURL *curl = curl_easy_init();
+		if(curl) {
+			CURLcode res;
+			curl_easy_setopt(curl, CURLOPT_URL, ecemu);
+			curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writedep);
+			curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0);
+			curl_easy_setopt(curl, CURLOPT_PROGRESSFUNCTION, emu_dl_progress_callback);
+			curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
+			res = curl_easy_perform(curl);
+			if(res != CURLE_OK) {
+				//mytoast(ec_curl_easy_strerror(res));
+			}
+			else {
+				curl_easy_cleanup(curl);
+			}
+		  
+			//total_emu_dl_installed += dl_wrote;
+			//dl_wrote = 0;
+		}
+		
+		if (g_dep_fp) fclose(g_dep_fp);
+		
+		
+		copy_file(path, fspath);
+	}
+	
+	free(ecemu);
+	free(text);
+
+	//free((void *)dl->url);
+	//PostMessage(dl->hWnd, WM_LAUNCHREADY, 0, 0L);
+	
+	free(dl);
+	
+	launching = false;
+	
+	free(hpath);
+	free(fsbridge);
+	
+	puts("done");
+	
+	if (g_ready_func) g_ready_func(1);
+	
+	
+	return NULL;
+}
+
+static char *g_szCRURL = NULL;
+
+const char *get_val(const char *szKey) {
+	static const char *ret = "https://cloudretro.com/";
+	return ret;
+}
+
+bool set_val(const char *szKey, const char *szVal) {
+	return true;
+}
+
+pthread_t dl_thread=0;
+
+void LaunchDownload(const char *url) {
+	set_val("cloudretro_url", url);
+	g_szCRURL = (char *)malloc(strlen(url)+1);
+	strcpy(g_szCRURL, url);
+	dnlinfo *dl = (dnlinfo *)malloc(sizeof(dnlinfo));
+	dl->url = (char *)url;
+	
+	pthread_create(&dl_thread, NULL, DownloadThread, (void *)dl);
+}
+
+
+static void g_launch_click_callback(const char *url) {
+	if (launching) return;
+	launching = true;
+	
+	LaunchDownload(url);
+	//g_ready_func(1);
+}
+
+
+extern "C" void launch_window(const char *url,
+				void (* launch_click_callback)(const char *url),
+				   void (** ready)(int success),
+				   void (** set_status_text)(const char *txt));
+
+
+typedef std::string (*t_GetSwitchValueASCII)(const char *str);
+typedef bool (*t_HasSwitch)(const char *str);
+typedef void (*t_AppendSwitchNative)(const char *str, const char *val);
+#define EXPORT __attribute__((visibility("default")))
+EXPORT void setECEmuPath(t_GetSwitchValueASCII GetSwitchValueASCII, t_HasSwitch HasSwitch, t_AppendSwitchNative AppendSwitchNative) {
+    bool is_browser_process = GetSwitchValueASCII(kProcessType).empty();
+    if (is_browser_process) {		
+		if (! HasSwitch("no-launcher")) {
+			launch_window(get_val("url"), g_launch_click_callback, &g_ready_func, &g_set_status_text);
+			AppendSwitchNative(kEcUrl, g_szCRURL);
+		}
+		else {
+			LaunchDownload(get_val("url"));
+			void *unused;
+			pthread_join(dl_thread, &unused);
+			AppendSwitchNative(get_val("url"), g_szCRURL);
+		}
+		
+	
+	struct passwd *pw = getpwuid(getuid());
+	const char *home = pw->pw_dir;
+	
+	//const char *home = "/home/pi";
+	
+	//puts(homedir);
+	
+	char *path = (char *)malloc(strlen(home) * 2 + 512);
+	strcpy(path, "");
+	strcpy(path, home);
+	strcat(path, "/CloudRetro/");
+	
+  strcat(path, "libecemu.so");
+  strcat(path, ";application/x-ppapi-ecemu");
+  
+  strcat(path, ",");
+  
+  strcat(path, home);
+  strcat(path, "/CloudRetro/");
+  strcat(path, "libecbridge.so");
+  strcat(path, ";application/x-ppapi-ecfs");
+ /* 
+  if (! dlopen("/home/pi/CloudRetro/libecbridge.so", RTLD_LAZY | RTLD_GLOBAL)) {
+	  puts(dlerror());
+	  //exit(0);
+  }
+  else {
+	  puts("opened");
+	  //exit(0);
+  }*/
+  
+   AppendSwitchNative(
+    kRegisterPepperPlugins, path);
+	
+	puts(path);
+	 
+	 free(path);
+	 
+	}
+	 
+	 //putenv((char *)"LD_LIBRARY_PATH=/home/pi/CloudRetro");
+
+ if (kRegisterPepperPlugins[0]){}
+}
+
+#endif
+
