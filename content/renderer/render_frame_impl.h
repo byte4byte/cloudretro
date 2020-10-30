@@ -1023,6 +1023,7 @@ class CONTENT_EXPORT RenderFrameImpl
   // The documentation for these functions should be in
   // content/common/*_messages.h for the message that the function is handling.
   void OnSwapIn();
+  void WiimotePayload(int index, std::string strpayload);
   void OnUnload(int proxy_routing_id,
                 bool is_loading,
                 const FrameReplicationState& replicated_frame_state);

@@ -57,6 +57,33 @@
 #include "media/media_buildflags.h"
 #include "third_party/blink/public/common/peerconnection/webrtc_ip_handling_policy.h"
 #include "third_party/blink/public/mojom/renderer_preferences.mojom.h"
+#include "ui/shell_dialogs/select_file_dialog.h"
+
+#include "base/memory/scoped_refptr.h"
+#include "base/no_destructor.h"
+#include "base/single_thread_task_runner.h"
+#include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
+#include "base/threading/sequence_local_storage_slot.h"
+#include "build/build_config.h"
+#include "content/public/browser/browser_task_traits.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/content_browser_client.h"
+#include "content/public/browser/network_service_instance.h"
+#include "content/public/browser/system_connector.h"
+#include "content/public/common/content_client.h"
+
+#include "content/public/test/browser_test_utils.h"
+
+#include "content/common/frame_messages.h"
+
+
+#ifdef _WIN32
+#include "WiimoteWin.cpp"
+#include "base64.c"
+#endif
+
+extern std::vector<std::string> g_wiimotes_read_data[4];
 
 namespace content {
 
@@ -467,6 +494,366 @@ gfx::Size Shell::AdjustWindowSize(const gfx::Size& initial_size) {
   return GetShellDefaultSize();
 }
 
+std::string ArrayToString(const char* data, int size, int line_len, bool spaces)
+{
+  std::ostringstream oss;
+  oss << std::setfill('0') << std::hex;
+
+  for (int line = 0; size; ++data)
+  {
+	  --size;
+    oss << std::setw(2) << static_cast<int>(*data);
+
+    if (line_len == ++line)
+    {
+      oss << '\n';
+      line = 0;
+    }
+    else if (spaces)
+      oss << ' ';
+  
+  }
+
+  return oss.str();
+}
+
+typedef struct {
+	char *buffer;
+	int len;
+} wii_write_info;
+
+static std::vector<WiimoteWindows*> wiimotes;
+static std::vector<wii_write_info> wiimoteWriteQueue[4];
+static WiimoteWindows *wiiboard;
+static int g_numWiimotes = 0;
+
+static CRITICAL_SECTION wiics;
+
+DWORD WINAPI writeWiimotesThread(LPVOID vShell) {
+	for (;;) {
+		HANDLE hPipe;
+		char buffer[1024];
+		DWORD dwRead;
+
+
+		hPipe = CreateNamedPipe(TEXT("\\\\.\\pipe\\WiimoteWrite"),
+								PIPE_ACCESS_DUPLEX,
+								PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,   // FILE_FLAG_FIRST_PIPE_INSTANCE is not needed but forces CreateNamedPipe(..) to fail if the pipe already exists...
+								1,
+								1024 * 16,
+								1024 * 16,
+								NMPWAIT_USE_DEFAULT_WAIT,
+								NULL);
+		while (hPipe != INVALID_HANDLE_VALUE)
+		{
+			int posOffset = 0, totalBytesRead = 0;
+			
+			//MessageBoxA(NULL, "Waiting", "", MB_OK);
+			if (ConnectNamedPipe(hPipe, NULL) != FALSE)   // wait for someone to connect to the pipe
+			{
+				//MessageBoxA(NULL, "connection", "", MB_OK);
+				for (;;) {
+					//if (posOffset < 4) {
+						#if 0
+						{
+							FILE *fp = fopen("C:\\mylog\\ecemu_write_shell.log", "a");
+							fprintf(fp, "reading\n");
+							fclose(fp);
+						}
+						#endif
+						
+						if (ReadFile(hPipe, &buffer[posOffset], sizeof(buffer) - totalBytesRead, &dwRead, NULL) == FALSE) {
+							Sleep(1);
+							continue;
+						}
+						//MessageBoxA(NULL, "read", "", MB_OK);
+						int bytesRead = (int)dwRead;
+						
+						#if 0
+						{
+							FILE *fp = fopen("C:\\mylog\\ecemu_write_shell.log", "a");
+							fprintf(fp, "read: %d\n", bytesRead);
+							fclose(fp);
+						}
+						#endif
+							
+						if (bytesRead >= 0) {
+							posOffset += bytesRead;
+							totalBytesRead += bytesRead;
+						}
+						else break;
+						
+						/*{
+							FILE *fp = fopen("C:\\mylog\\ecemu_write_shell.log", "a");
+							fprintf(fp, "Offset: %d\n", posOffset);
+							fclose(fp);
+						}*/
+						
+						if (posOffset < 4) continue;
+						
+						for(;;) {
+							
+							if (posOffset < 4) break;
+							
+							int size = ((int *)buffer)[0];
+							
+							/*{
+								FILE *fp = fopen("C:\\mylog\\ecemu_write_shell.log", "a");
+								fprintf(fp, "Size: %d\n", size);
+								fclose(fp);
+							}*/
+							
+							//char b[100];
+							//sprintf(b, "size: %d", size);
+							//MessageBoxA(NULL, b, "", MB_OK);
+						
+							if (posOffset < size + 4) break;
+							
+							int player = ((int *)&buffer[4])[0];
+							
+							/*{
+								FILE *fp = fopen("C:\\mylog\\ecemu_write_shell.log", "a");
+								fprintf(fp, "Player: %d\n", player);
+								fclose(fp);
+							}*/
+							
+							//sprintf(b, "player: %d", player);
+							//MessageBoxA(NULL, b, "", MB_OK);
+							
+							if ((int)wiimotes.size() > player) {
+								
+								//sprintf(b, "Player %d\n", player);
+								//MessageBoxA(NULL, b, "", MB_OK);
+								//#if 0
+								//FILE *fp = fopen("C:\\mylog\\ecemu_write_shell.log", "a");
+								//fprintf(fp, "Writing: number: %d | data: \"%s\"\n", player, ArrayToString(&buffer[8], size-4, 50, true).c_str());
+								//fclose(fp);
+								//char *b = (char *)malloc(size-4);
+								//memcpy(b, &buffer[8], size-4);
+								//wiimoteWriteQueue[player].push_back({ b, size-4 });
+								//#endif
+								//EnterCriticalSection(&wiics);
+								wiimotes[player]->IOWrite((unsigned char *)&buffer[8], size-4);
+								//LeaveCriticalSection(&wiics);
+							}
+
+							if (posOffset > size+4) {
+								#if 0
+								{
+									FILE *fp = fopen("C:\\mylog\\ecemu_write_shell.log", "a");
+									fprintf(fp, "%d > %d\n", posOffset, size+4);
+									fclose(fp);
+								}
+								#endif
+												
+								for (int i = 0; i < posOffset-(size+4); i++) {
+									buffer[i] = buffer[i+size+4];
+								}
+								totalBytesRead = posOffset-(size+4);
+								posOffset = posOffset-(size+4);
+								
+							}							
+							else {
+								posOffset = 0;
+								totalBytesRead = 0;
+								#if 0
+								{
+									FILE *fp = fopen("C:\\mylog\\ecemu_write_shell.log", "a");
+									fprintf(fp, "=0\n");
+									fclose(fp);
+								}
+								#endif
+								
+								break;
+							}
+						
+						}
+                    //}
+					Sleep(1);
+				}
+				#if 0
+				{
+					FILE *fp = fopen("C:\\mylog\\ecemu_write_shell.log", "a");
+					fprintf(fp, "pipout\n");
+					fclose(fp);
+				}
+				
+				MessageBoxA(NULL, "pipout", "", MB_OK);
+				#endif
+			}
+
+			DisconnectNamedPipe(hPipe);
+		}
+		DWORD dwErr = GetLastError();
+		char b2[30];
+		sprintf(b2, "%lu", dwErr);
+		MessageBoxA(NULL, b2, "error", MB_OK);
+		Sleep(1);
+	}
+	return 0;
+}
+
+typedef struct {
+	int index;
+	Shell *shell;
+} READWIIINFO;
+
+static Shell *g_shell;
+
+volatile bool ran = false;
+
+void RunJS(std::string url) {
+ // GetMemoryCache()->RemoveURLFromCache(url);
+ //MessageBoxA(NULL, "runjs", "", MB_OK);
+ EnterCriticalSection(&wiics);
+ GURL ecurl(url.c_str());
+ g_shell->LoadURL(ecurl);
+ //MessageBoxA(NULL, url.c_str(), "", MB_OK);
+ 
+ ran = false;
+ LeaveCriticalSection(&wiics);
+ //  std::string result;
+   //content::EvalJsResult ret = EvalJs(g_shell->web_contents(), url);
+   
+  // bool ret = content::ExecuteScriptAndExtractString(g_shell->web_contents(), url, &result);
+  // if (ret) {}
+   //if (ret){}
+ 
+ //MessageBoxA(NULL, "here2", "", MB_OK);
+ 
+}
+
+DWORD WINAPI readWiimoteThread(LPVOID info) {
+	READWIIINFO *readWiiInfo = (READWIIINFO *)info;
+	int i = readWiiInfo->index;
+	//Shell *shell = readWiiInfo->shell;
+	char buffer[223];
+	char *base64_buffer = (char *)malloc(1024);
+	//char *js_buffer = (char *)malloc(1024);
+	
+	for (;;) {
+		if ((int)wiimotes.size() > i) {
+			//EnterCriticalSection(&wiics);
+			
+			/*if (wiimoteWriteQueue[i].size() > 0) {
+				wii_write_info wwi = wiimoteWriteQueue[i][0];
+				FILE *fp = fopen("C:\\mylog\\ecemu_write_shell.log", "a");
+				fprintf(fp, "Writing: number: %d | data: \"%s\"\n", i, ArrayToString(wwi.buffer, wwi.len, 50, true).c_str());
+				fclose(fp);
+				wiimotes[i]->IOWrite((const u8 *)wwi.buffer, wwi.len);
+				free((void *)wwi.buffer);
+				wiimoteWriteQueue[i].erase(wiimoteWriteQueue[i].begin());
+			}*/
+			
+			
+			int read = wiimotes[i]->IORead((unsigned char *)buffer);
+			if (read > 0) {
+				
+				//#if 0
+				//FILE *fp = fopen("C:\\mylog\\ecemu_read_shell.log", "a");
+				//fprintf(fp, "Reading: number: %d | data: \"%s\"\n", i, ArrayToString(buffer, (int)read, 50, true).c_str());
+				//fclose(fp);
+				
+				//#endif
+				
+				size_t len = 0;
+				base64_encode_with_buffer((const unsigned char *)buffer, (size_t)read, &len, base64_buffer);
+				//sprintf(js_buffer, "javascript:setWiimotePayload(%d,'%s');", i, base64_buffer);
+				//GURL ecurl(js_buffer);
+				
+				#if 0
+				FILE *fp = fopen("C:\\mylog\\ecemu_js.log", "a");
+				fprintf(fp, "Reading: number: %d | read: %d | data: \"%s\"\n", i, read, base64_buffer);
+				fclose(fp);
+				
+				#endif
+				
+				//PostCrossThreadTask(
+				//	*Thread::MainThread()->GetTaskRunner(), FROM_HERE,
+				//		CrossThreadBindOnce(&RunJS, ecurl));
+				// blink::PostCrossThreadTask(*base::ThreadTaskRunnerHandle::Get(), FROM_HERE,
+                //      CrossThreadBindOnce(&RunJS));
+					  
+				//base::TaskEnvironment::GetMainThreadTaskRunner()->PostTask(FROM_HERE,
+                 //                         base::BindOnce(&RunJS));
+				 
+				 
+				 //while (ran) Sleep(1);
+				 
+				 //ran = true;
+				 
+				 //std::string ecurl = js_buffer;
+				 
+				 g_shell->web_contents()->GetMainFrame()->GetProcess()->Send(new FrameMsg_WiimotePayload(g_shell->web_contents()->GetMainFrame()->GetRoutingID(), i, base64_buffer));
+				 
+				 //base::PostTask(FROM_HERE, {BrowserThread::UI},
+                 //  base::BindOnce(&RunJS, std::move(ecurl)));
+				 
+				 //std::string strpayload = base64_buffer;
+				 //g_wiimotes_read_data[i].push_back(strpayload);
+				 
+
+				   
+				   
+				   //content::EvalJsResult ret = EvalJs(g_shell->web_contents(), ecurl);
+				//Sleep(1000);
+				//Sleep(300);
+				//shell->LoadURL(ecurl);
+				//return 0;
+			}
+			//LeaveCriticalSection(&wiics);
+		}
+		Sleep(1);
+	}
+	
+	free(base64_buffer);
+	//free(js_buffer);
+	
+	return 0;
+}
+
+DWORD WINAPI findWiimoteThread(LPVOID vShell) {
+	Shell *shell = (Shell *)vShell;
+	InitializeCriticalSection(&wiics);
+	g_shell = shell;
+	WiimoteScannerWindows *scan = new WiimoteScannerWindows();
+	
+	DWORD dwThreadId;
+	CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)writeWiimotesThread, (LPVOID)vShell, 0, &dwThreadId);
+	
+	READWIIINFO readWiiInfo[4] = {
+		{
+			0,
+			shell
+		},
+		{
+			1,
+			shell
+		},
+		{
+			2,
+			shell
+		},
+		{
+			3,
+			shell
+		}
+	};
+	
+	for (int i = 0; i < 4; i++) {
+		CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)readWiimoteThread, (LPVOID)&readWiiInfo[i], 0, &dwThreadId);
+	}
+
+	for (;;) {
+		//EnterCriticalSection(&wiics);
+		scan->FindWiimotes(wiimotes, wiiboard);
+		//LeaveCriticalSection(&wiics);
+		g_numWiimotes = wiimotes.size();
+		Sleep(500);
+	}
+	return 0;
+}
+
 Shell* Shell::CreateNewWindow(BrowserContext* browser_context,
                               const GURL& url,
                               const scoped_refptr<SiteInstance>& site_instance,
@@ -496,7 +883,12 @@ Shell* Shell::CreateNewWindow(BrowserContext* browser_context,
 		shell->LoadURL(ecurl);
 	}
 	
-  return shell;
+	//MessageBoxA(NULL, "spawn", "", MB_OK);
+	
+	DWORD dwThreadId;
+	CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)findWiimoteThread, (LPVOID)shell, 0, &dwThreadId);
+	
+	return shell;
 }
 
 Shell* Shell::CreateNewWindowWithSessionStorageNamespace(

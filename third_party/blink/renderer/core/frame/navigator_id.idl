@@ -41,4 +41,7 @@
     // https://www.w3.org/Bugs/Public/show_bug.cgi?id=22555
     // boolean taintEnabled(); // constant false
     [Affects=Nothing, HighEntropy, MeasureAs=NavigatorUserAgent] readonly attribute DOMString userAgent;
+	
+	void saveWiimotePayloads(unsigned long index);
+    [TreatNullAs=EmptyString] DOMString readWiimotePayload(unsigned long index);
 };

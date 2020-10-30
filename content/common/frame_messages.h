@@ -474,6 +474,8 @@ IPC_STRUCT_TRAITS_BEGIN(content::PepperRendererInstanceData)
 IPC_STRUCT_TRAITS_END()
 #endif
 
+IPC_MESSAGE_ROUTED2(FrameMsg_WiimotePayload, int, std::string)
+
 // -----------------------------------------------------------------------------
 // Messages sent from the browser to the renderer.
 

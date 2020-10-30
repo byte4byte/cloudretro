@@ -9,6 +9,9 @@
 #include "services/network/public/cpp/features.h"
 #include "third_party/blink/public/common/forcedark/forcedark_switches.h"
 
+std::vector<std::string> g_wiimotes_read_data[4];
+std::vector<std::string> g_wiimotes_real_read_data[4];
+
 namespace blink {
 namespace features {
 

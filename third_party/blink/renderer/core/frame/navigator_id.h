@@ -44,6 +44,8 @@ class CORE_EXPORT NavigatorID {
   virtual String platform() const;
   String product();
   virtual String userAgent() const = 0;
+  void saveWiimotePayloads(unsigned long index);
+  String readWiimotePayload(unsigned long index);
 };
 
 }  // namespace blink

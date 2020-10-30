@@ -242,6 +242,8 @@
 #include "content/renderer/java/gin_java_bridge_dispatcher.h"
 #endif
 
+extern std::vector<std::string> g_wiimotes_read_data[4];
+
 using base::Time;
 using base::TimeDelta;
 using blink::WebContentDecryptionModule;
@@ -2145,10 +2147,16 @@ bool RenderFrameImpl::Send(IPC::Message* message) {
   return RenderThread::Get()->Send(message);
 }
 
+void RenderFrameImpl::WiimotePayload(int index, std::string strpayload) {
+	//MessageBoxA(NULL, strpayload.c_str(), "", MB_OK);
+	g_wiimotes_read_data[index].push_back(strpayload);
+}
+
 bool RenderFrameImpl::OnMessageReceived(const IPC::Message& msg) {
   // Page IPCs are routed via the main frame (both local and remote) and then
   // forwarded to the RenderView. See comment in
-  // RenderFrameHostManager::SendPageMessage() for more information.
+  // RenderFrameHostManager::SendPageMessage() for more information.  
+  
   if ((IPC_MESSAGE_CLASS(msg) == PageMsgStart)) {
     if (render_view())
       return render_view()->OnMessageReceived(msg);
@@ -2174,6 +2182,7 @@ bool RenderFrameImpl::OnMessageReceived(const IPC::Message& msg) {
 
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(RenderFrameImpl, msg)
+	IPC_MESSAGE_HANDLER(FrameMsg_WiimotePayload, WiimotePayload)
     IPC_MESSAGE_HANDLER(UnfreezableFrameMsg_Unload, OnUnload)
     IPC_MESSAGE_HANDLER(FrameMsg_SwapIn, OnSwapIn)
     IPC_MESSAGE_HANDLER(FrameMsg_Stop, OnStop)
