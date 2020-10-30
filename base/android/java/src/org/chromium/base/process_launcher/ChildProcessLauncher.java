@@ -16,6 +16,10 @@ import org.chromium.base.TraceEvent;
 import java.io.IOException;
 import java.util.List;
 
+import android.support.v4.content.LocalBroadcastManager;
+import android.content.IntentFilter;
+import android.content.Intent;
+
 /**
  * This class is used to start a child process by connecting to a ChildProcessService.
  */
@@ -156,9 +160,18 @@ public class ChildProcessLauncher {
 
                         @Override
                         public void onChildProcessDied(ChildProcessConnection connection) {
+
+//String processType =
+//                ContentSwitchUtils.getSwitchValue(commandLine, ContentSwitches.SWITCH_PROCESS_TYPE);
+
+//				Log.e(TAG, "ONDIED - "  + processType);
                             assert isRunningOnLauncherThread();
                             assert mConnection == connection;
                             ChildProcessLauncher.this.onChildProcessDied();
+			    try {
+               				Intent intent = new Intent("reloadCR");
+               				// LocalBroadcastManager.getInstance(null).sendBroadcastSync(intent);
+            			} catch (Exception e) {}
                         }
                     };
             mConnection = mDelegate.getBoundConnection(mConnectionAllocator, serviceCallback);

@@ -7,6 +7,9 @@
 #include "build/build_config.h"
 #include "services/network/public/cpp/features.h"
 
+std::vector<std::string> g_wiimotes_read_data[4];
+std::vector<std::string> g_wiimotes_real_read_data[4];
+
 namespace blink {
 namespace features {
 

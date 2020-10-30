@@ -745,6 +745,8 @@ IPC_STRUCT_TRAITS_BEGIN(blink::WebMediaPlayerAction)
   IPC_STRUCT_TRAITS_MEMBER(enable)
 IPC_STRUCT_TRAITS_END()
 
+IPC_MESSAGE_ROUTED2(FrameMsg_WiimotePayload, int, std::string)
+
 // -----------------------------------------------------------------------------
 // Messages sent from the browser to the renderer.
 

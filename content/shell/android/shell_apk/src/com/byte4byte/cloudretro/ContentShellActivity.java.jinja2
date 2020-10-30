@@ -18,6 +18,16 @@ import android.view.KeyEvent;
 import android.widget.Toast;
 import android.graphics.Color;
 
+import java.nio.ByteBuffer;
+
+import android.net.LocalServerSocket;
+import android.net.LocalSocket;
+import android.net.LocalSocketAddress;
+
+import android.util.Base64;
+
+import android.hardware.usb.UsbManager;
+
 import android.os.SystemClock;
 
 import android.app.Instrumentation;
@@ -118,6 +128,8 @@ public class ContentShellActivity extends Activity {
 	private static final int DIR_SELECT_CODE = 1;
 	
 	public static native void fileChooserResults(String []results);
+	
+	public static native void nativeSendWiimotePayload(int idx, String strpayload);
 	
 	public ContentShellActivity() {
 		mWindowAndroid = null;
@@ -903,6 +915,7 @@ LocalBroadcastManager.getInstance(this).registerReceiver(mReloadReceiver,
 	
 Log.i(TAG, "oncreate 1");
 m_NeedReload = false;
+g_wiimote_threads_created = false;
 	
 		ctx = this;
 		
@@ -1023,6 +1036,352 @@ m_NeedReload = false;
       }
 
     private final int SPLASH_DISPLAY_LENGTH = 2000;
+	
+	
+	
+	public class WiimoteAuthThread extends Thread {
+
+        public WiimoteAuthThread() {
+
+        }
+
+		@Override
+        public void run() { 
+			WiimoteAdapter.manager = (UsbManager) getSystemService(Context.USB_SERVICE);
+			for (;;) {
+				boolean auth = WiimoteAdapter.QueryAdapter(ctx);
+				if (auth) {
+				
+					if (WiimoteAdapter.OpenAdapter()) {
+						
+						/*Writing: number: 0 | data: "52 12 00 30 "
+						Writing: number: 0 | data: "52 11 11 "
+						Writing: number: 0 | data: "52 10 00 "
+						Writing: number: 0 | data: "52 15 00 "*/
+						
+						WiimoteWriteThread wiimoteWriteThread = new WiimoteWriteThread();
+						wiimoteWriteThread.start();
+						
+						for (int i = 0; i < 4; i++) {
+							WiimoteThread wiimoteThread = new WiimoteThread(i);
+							wiimoteThread.start();
+						}
+						
+						for (;;) {
+						
+							for (int player = 0; player < 4; player++) { // todo need to reset this on game exit/change
+								if (! wiimote_inited[player]) {
+									WiimoteAdapter.Output(player, new byte[]{0x55, 0x12, 0x00, 0x30}, 0, 4);
+									WiimoteAdapter.Output(player, new byte[]{0x55, 0x11, 0x11}, 0, 3);
+									WiimoteAdapter.Output(player, new byte[]{0x55, 0x10, 0x00}, 0, 3);
+									WiimoteAdapter.Output(player, new byte[]{0x55, 0x15, 0x00}, 0, 3);
+								}
+							}
+							try {
+								Thread.sleep(1000);
+							} catch (Exception e){}
+						}
+						
+						//return;
+					}
+					
+				}
+				
+				try {
+					Thread.sleep(1000);
+				} catch (Exception e){}
+			}
+		
+		}
+		
+	}
+	
+	public class WiimoteWriteThread extends Thread {
+
+        int bufferSize = 1024;
+        byte[] buffer;
+        int bytesRead;
+        int totalBytesRead;
+        int posOffset;
+        LocalServerSocket server;
+        LocalSocket receiver;
+        InputStream input;
+        private volatile boolean stopThread;
+		public String SOCKET_ADDRESS = "my.local.socket.address";
+
+        public WiimoteWriteThread() {
+            //toastIt(" +++ Begin of localServerSocket() +++ ");
+            buffer = new byte[bufferSize];
+            bytesRead = 0;
+            totalBytesRead = 0;
+            posOffset = 0;
+
+            try {
+                server = new LocalServerSocket(SOCKET_ADDRESS);
+            } catch (IOException e) {
+                // TODO Auto-generated catch block
+                toastIt("The LocalServerSocket created failed !!!");
+                e.printStackTrace();
+            }
+
+            stopThread = false;
+        }
+
+		@Override
+        public void run() {            
+				int cnt[] = {0,0,0,0};
+           // toastIt(" +++ Begin of run() +++ ");
+                while (!stopThread) {
+
+                    if (null == server){
+                        //toastIt( "The LocalServerSocket is NULL !!!");
+                        stopThread = true;
+                        break;
+                    }
+
+                    try {
+                       // toastIt("LocalServerSocket begins to accept()");
+                        receiver = server.accept();
+                    } catch (IOException e) {
+                        // TODO Auto-generated catch block
+                        toastIt("LocalServerSocket accept() failed !!!");
+                        e.printStackTrace();
+                        continue;
+                    }                   
+
+                    try {
+                        input = receiver.getInputStream();
+                    } catch (IOException e) {
+                        // TODO Auto-generated catch block
+                       toastIt( "getInputStream() failed !!!");
+                        e.printStackTrace();
+                        continue;
+                    }
+
+					//toastIt("The client connect to LocalServerSocket");
+
+					
+                    while (receiver != null) {
+
+					//Log.i(TAG, "reading: + " + posOffset + " | " + totalBytesRead);
+					
+					//if (posOffset < 4) {
+                        try {
+							Log.i(TAG, "reading: " + posOffset + ", " + (bufferSize - totalBytesRead));
+                           bytesRead = input.read(buffer, posOffset,
+                                    (bufferSize - totalBytesRead));
+							//Log.i(TAG, "readb: " +bytesRead);
+                        } catch (IOException e) {
+                            // TODO Auto-generated catch block
+                           toastIt("There is an exception when reading socket");
+                            e.printStackTrace();
+                            break;
+                        }
+						Log.i(TAG, "read: " + bytesRead);
+						
+						if (bytesRead >= 0) {
+                           // Log.d(TAG, "Receive data from socket, bytesRead = "
+                           //         + bytesRead);
+                            posOffset += bytesRead;
+                            totalBytesRead += bytesRead;
+                        }
+						else break;
+						
+					//}
+						if (posOffset < 4) continue;
+						
+						for(;;) {
+							
+							if (posOffset < 4) break;
+						
+						byte[] lenarr = { buffer[3], buffer[2], buffer[1], buffer[0] };
+						ByteBuffer lenwrapped = ByteBuffer.wrap(lenarr); // big-endian by default
+						int size = lenwrapped.getInt();
+						
+						Log.i(TAG, "size: " + size);
+						
+						if (posOffset < size + 4) break;
+						
+						
+						
+						byte[] arr = { buffer[7], buffer[6], buffer[5], buffer[4] };
+						
+						ByteBuffer wrapped = ByteBuffer.wrap(arr); // big-endian by default
+						int player = wrapped.getInt(); // 1
+						
+						Log.i(TAG, "player: " + player);
+						
+						
+						WiimoteAdapter.Output(player, buffer, 8, size-4);
+						
+						//if (++cnt[player] >= 4) wiimote_inited[player] = true;
+						
+						Log.i(TAG, "Wrote: " + (size-4));
+						
+						//if (true) {
+						//	posOffset = 0;
+                        //    totalBytesRead = 0;
+						//	continue;
+						//}
+						
+						//posOffset++;
+						if (posOffset > size+4) {
+							
+							Log.i("ECWRITE", "Wrapped: " + posOffset + " | " + (size+4));
+							
+							//System.arraycopy(b1, bytes, result, 0, bytes);
+							//public static void arraycopy(Object src, int srcPos, Object dest, int destPos, int length)
+							//System.arraycopy(buffer, size+4, buffer, 0, 
+							for (int i = 0; i < posOffset-(size+4); i++) {
+								buffer[i] = buffer[i+size+4];
+							}
+							totalBytesRead = posOffset-(size+4);
+							posOffset = posOffset-(size+4);
+							
+							
+							
+						}							
+						else {
+							posOffset = 0;
+                            totalBytesRead = 0;
+							Log.i("ECWRITE", "Complete");
+						}
+						
+						}
+
+                       /* if (bytesRead >= 0) {
+                            toastIt("Receive data from socket, bytesRead = "
+                                    + bytesRead);
+                            posOffset += bytesRead;
+                            totalBytesRead += bytesRead;
+                        }
+
+                        if (totalBytesRead == bufferSize) {
+                            toastIt("The buffer is full !!!");
+                            String str = new String(buffer);
+                            toastIt("The context of buffer is : " + str);
+
+                            bytesRead = 0;
+                            totalBytesRead = 0;
+                            posOffset = 0;
+                        }*/
+
+                    }
+					
+				//}
+                    Log.i(TAG, "The client socket is NULL !!!");
+                }
+                Log.i(TAG, "The LocalSocketServer thread is going to stop !!!");
+                if (receiver != null){
+                    try {
+                        receiver.close();
+                    } catch (IOException e) {
+                        // TODO Auto-generated catch block
+                        e.printStackTrace();
+                    }
+                }
+                if (server != null){
+                    try {
+                        server.close();
+                    } catch (IOException e) {
+                        // TODO Auto-generated catch block
+                        e.printStackTrace();
+                    }
+                }
+        }
+
+        public void setStopThread(boolean value){
+            stopThread = value;
+            Thread.currentThread().interrupt(); // TODO : Check
+        }
+
+    }
+	
+	  public class WiimoteThread extends Thread {
+		  boolean ran;
+		  int m_index;
+		  
+		  public WiimoteThread(int idx) {
+			  m_index = idx;
+		  }
+		  
+		  private void sendPayload(int idx, String strpayload) {
+			 // toastIt(str);
+			 
+			 nativeSendWiimotePayload(idx, strpayload);
+			 
+			 /* ran = false;
+			  runOnUiThread(new Runnable() {
+					@Override
+					public void run() {
+						callJS(str);
+						ran = true;
+					}
+			  });
+			  
+			  while (ran == false) {
+				  try {
+					Thread.sleep(1);
+				  } catch (Exception e) {}
+			  }*/
+		  }
+
+		@Override
+		public void run(){
+			
+			for (;;) {
+				//runOnUiThread(new Runnable() {
+				//	@Override
+				//	public void run() {
+				
+			//		}
+				//});
+				
+				/*if (! auth) {
+					try {
+						Thread.sleep(1000 * 2);
+					} catch (Exception e) {}
+					continue;
+				}*/
+				
+				/*while (! wiimote_inited[m_index]) {
+					try {
+						Thread.sleep(1000 * 4);
+					} catch (Exception e) {}
+				}
+				
+				*/
+					for (;;) {
+						
+						//for (int i = 0; i < 1/*WiimoteAdapter.MAX_WIIMOTES*/; ++i) {
+							int read_size = WiimoteAdapter.Input(m_index);
+							if (read_size > 0) {
+								byte buff[] = WiimoteAdapter.wiimote_payload[m_index];
+								String strWiimotePayload = Base64.encodeToString(buff, 0, read_size, Base64.NO_WRAP);
+								//toastIt(strWiimotePayload);
+								//Log.i(TAG, "setWiimotePayload(" + m_index + ",'" + strWiimotePayload + "');");
+								//sendPayload("setWiimotePayload(" + m_index + ",'" + strWiimotePayload + "');");
+								sendPayload(m_index, strWiimotePayload);
+								wiimote_inited[m_index] = true;
+							}
+						//}
+						
+						try {
+							Thread.sleep(1);
+						} catch (Exception e) {}
+					}
+			//	}
+				
+				
+				//try {
+				//	Thread.sleep(1000);
+				//} catch (Exception e) {}
+				
+			}
+		}
+	  }
+	  
+	  private static boolean g_wiimote_threads_created;
 
     private void finishInitialization(Bundle savedInstanceState) {
         String shellUrl;
@@ -1047,7 +1406,14 @@ m_NeedReload = false;
         mShellManager.launchShell(shellUrl);
 		
 		
+		//wiimote_inited = false;
 		
+		if (! g_wiimote_threads_created) {
+			g_wiimote_threads_created = true;
+			
+			WiimoteAuthThread wiimoteAuthThread = new WiimoteAuthThread();
+			wiimoteAuthThread.start();	
+		}
 
         new Handler().postDelayed(new Runnable() {
             @Override
@@ -1091,6 +1457,8 @@ m_NeedReload = false;
 			mWindowAndroid.saveInstanceState(outState);
 		}
     }
+	
+	private boolean wiimote_inited[] = {false, false, false, false};
 
     public void callJS(String js) {
         Shell activeView = getActiveShell();

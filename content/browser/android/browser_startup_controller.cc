@@ -11,21 +11,43 @@
 #include "ppapi/buildflags/buildflags.h"
 
 #include "content/public/android/content_jni_headers/BrowserStartupControllerImpl_jni.h"
+#include "content/shell/browser/shell.h"
+#include "content/common/frame_messages.h"
 
 #include <sys/time.h>
 #include <sys/resource.h>
+
+extern content::Shell *g_shell;
 
 #ifdef __aarch64__
 	#define setpriorityName Java_com_byte4byte_cloudretro64_ContentShellActivity_setpriority
 	#define SetCommandLineFlagsName Java_com_byte4byte_cloudretro64_ContentShellActivity_SetCommandLineFlags
 	#define setEcUrlName Java_com_byte4byte_cloudretro64_ContentShellActivity_setEcUrl
+	#define nativeSendWiimotePayload Java_com_byte4byte_cloudretro64_ContentShellActivity_nativeSendWiimotePayload
 #else
 	#define setpriorityName Java_com_byte4byte_cloudretro32_ContentShellActivity_setpriority
 	#define SetCommandLineFlagsName Java_com_byte4byte_cloudretro32_ContentShellActivity_SetCommandLineFlags
 	#define setEcUrlName Java_com_byte4byte_cloudretro32_ContentShellActivity_setEcUrl
+	#define nativeSendWiimotePayload Java_com_byte4byte_cloudretro32_ContentShellActivity_nativeSendWiimotePayload
 #endif
 
 extern "C" {
+
+JNIEXPORT void JNICALL nativeSendWiimotePayload(JNIEnv* env,
+    jclass,
+    jint idx,
+    jstring strpayload) {
+	if (! g_shell) return;
+	const char *str;
+    	str = env->GetStringUTFChars(strpayload, NULL); //1
+        //printf("Hello %s\n", str);
+        std::string payload_str = str;
+        env->ReleaseStringUTFChars(strpayload, str); //
+	g_shell->web_contents()->GetMainFrame()->GetProcess()->Send(new FrameMsg_WiimotePayload(g_shell->web_contents()->GetMainFrame()->GetRoutingID(), (int)idx, payload_str));
+	
+}
+
+
 JNIEXPORT void JNICALL setpriorityName(
     JNIEnv* env,
     jclass,

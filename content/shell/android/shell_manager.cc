@@ -20,6 +20,8 @@ using base::android::JavaParamRef;
 using base::android::JavaRef;
 using base::android::ScopedJavaLocalRef;
 
+content::Shell *g_shell = NULL;
+
 namespace {
 
 struct GlobalState {
@@ -36,6 +38,7 @@ namespace content {
 
 ScopedJavaLocalRef<jobject> CreateShellView(Shell* shell) {
   JNIEnv* env = base::android::AttachCurrentThread();
+  g_shell = shell;
   return Java_ShellManager_createShell(env,
                                        g_global_state.Get().j_shell_manager,
                                        reinterpret_cast<intptr_t>(shell));

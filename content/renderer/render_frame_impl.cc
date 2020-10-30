@@ -247,6 +247,8 @@
 #include "third_party/blink/public/platform/web_float_point.h"
 #endif
 
+extern std::vector<std::string> g_wiimotes_read_data[4];
+
 using base::Time;
 using base::TimeDelta;
 using blink::WebContentDecryptionModule;
@@ -2197,6 +2199,11 @@ void RenderFrameImpl::ScriptedPrint(bool user_initiated) {
     observer.ScriptedPrint(user_initiated);
 }
 
+void RenderFrameImpl::WiimotePayload(int index, std::string strpayload) {
+	//MessageBoxA(NULL, strpayload.c_str(), "", MB_OK);
+	g_wiimotes_read_data[index].push_back(strpayload);
+}
+
 bool RenderFrameImpl::Send(IPC::Message* message) {
   return RenderThread::Get()->Send(message);
 }
@@ -2236,6 +2243,7 @@ bool RenderFrameImpl::OnMessageReceived(const IPC::Message& msg) {
 
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(RenderFrameImpl, msg)
+    IPC_MESSAGE_HANDLER(FrameMsg_WiimotePayload, WiimotePayload)
     IPC_MESSAGE_HANDLER(FrameMsg_BeforeUnload, OnBeforeUnload)
     IPC_MESSAGE_HANDLER(UnfreezableFrameMsg_SwapOut, OnSwapOut)
     IPC_MESSAGE_HANDLER(FrameMsg_SwapIn, OnSwapIn)

@@ -1117,6 +1117,7 @@ class CONTENT_EXPORT RenderFrameImpl
   // content/common/*_messages.h for the message that the function is handling.
   void OnBeforeUnload(bool is_reload);
   void OnSwapIn();
+  void WiimotePayload(int index, std::string strpayload);
   void OnSwapOut(int proxy_routing_id,
                  bool is_loading,
                  const FrameReplicationState& replicated_frame_state);

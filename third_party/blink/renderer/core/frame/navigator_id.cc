@@ -41,6 +41,9 @@
 #include "third_party/blink/renderer/platform/wtf/threading.h"
 #endif
 
+extern std::vector<std::string> g_wiimotes_read_data[4];
+extern std::vector<std::string> g_wiimotes_real_read_data[4];
+
 namespace blink {
 
 String NavigatorID::appCodeName() {
@@ -92,6 +95,25 @@ String NavigatorID::platform() const {
 
 String NavigatorID::product() {
   return "Gecko";
+}
+
+void NavigatorID::saveWiimotePayloads(unsigned long index) {
+	while (! g_wiimotes_read_data[(int)index].empty()) {
+		g_wiimotes_real_read_data[(int)index].push_back(g_wiimotes_read_data[(int)index][0]);
+
+		g_wiimotes_read_data[(int)index].erase(g_wiimotes_read_data[(int)index].begin());
+	}
+}
+
+String NavigatorID::readWiimotePayload(unsigned long index) {
+	if (! g_wiimotes_real_read_data[(int)index].size()) return g_empty_string;
+
+	std::string str = g_wiimotes_real_read_data[(int)index][0];
+
+
+	g_wiimotes_real_read_data[(int)index].erase(g_wiimotes_real_read_data[(int)index].begin());
+
+	return str.c_str();
 }
 
 }  // namespace blink

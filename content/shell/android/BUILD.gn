@@ -212,6 +212,28 @@ jinja_template("IChildProcessTest") {
     "cpu=arm64",
   ]  
 }
+jinja_template("USBPermService") {
+  testonly = false
+  input = "shell_apk/src/com/byte4byte/cloudretro/USBPermService.java.jinja2"
+  output = "$target_out_dir/shell_apk/src/com/byte4byte/cloudretro64/USBPermService.java"
+
+  variables = [
+    "bits=64",
+    "cpu=arm64",
+  ]
+}
+jinja_template("WiimoteAdapter") {
+  testonly = false
+  input = "shell_apk/src/com/byte4byte/cloudretro/WiimoteAdapter.java.jinja2"
+  output = "$target_out_dir/shell_apk/src/com/byte4byte/cloudretro64/WiimoteAdapter.java"
+
+  variables = [
+    "bits=64",
+    "cpu=arm64",
+  ]
+}
+
+
 
 }
 else {
@@ -341,6 +363,27 @@ jinja_template("IChildProcessTest") {
     "cpu=arm",
   ]  
 }
+jinja_template("USBPermService") {
+  testonly = false
+  input = "shell_apk/src/com/byte4byte/cloudretro/USBPermService.java.jinja2"
+  output = "$target_out_dir/shell_apk/src/com/byte4byte/cloudretro32/USBPermService.java"
+
+  variables = [
+    "bits=32",
+    "cpu=arm",
+  ]
+}
+jinja_template("WiimoteAdapter") {
+  testonly = false
+  input = "shell_apk/src/com/byte4byte/cloudretro/WiimoteAdapter.java.jinja2"
+  output = "$target_out_dir/shell_apk/src/com/byte4byte/cloudretro32/WiimoteAdapter.java"
+
+  variables = [
+    "bits=32",
+    "cpu=arm",
+  ]
+}
+
   
 }
 
@@ -375,6 +418,8 @@ android_library("content_shell_apk_java") {
     "//content/shell/android:TestChildProcessService",
     "//content/shell/android:ContentShellApplication",
  "//content/shell/android:MyDeviceAdminReceiver",
+"//content/shell/android:USBPermService",
+"//content/shell/android:WiimoteAdapter",
  "//content/shell/android:BootUpReceiver",
     "//content/shell/android:ContentShellActivity",
     "//content/shell/android:ChildProcessLauncherTestUtils",
@@ -396,6 +441,8 @@ android_library("content_shell_apk_java") {
     "$target_out_dir/shell_apk/src/com/byte4byte/cloudretro64/TestChildProcessService0.java",
     "$target_out_dir/shell_apk/src/com/byte4byte/cloudretro64/TestChildProcessService1.java",
     "$target_out_dir/shell_apk/src/com/byte4byte/cloudretro64/GetPathUtils.java",
+    "$target_out_dir/shell_apk/src/com/byte4byte/cloudretro64/USBPermService.java",
+    "$target_out_dir/shell_apk/src/com/byte4byte/cloudretro64/WiimoteAdapter.java"
     ]
   }
   else {
@@ -410,7 +457,9 @@ android_library("content_shell_apk_java") {
     "$target_out_dir/shell_apk/src/com/byte4byte/cloudretro32/TestChildProcessService0.java",
     "$target_out_dir/shell_apk/src/com/byte4byte/cloudretro32/TestChildProcessService1.java",
     "$target_out_dir/shell_apk/src/com/byte4byte/cloudretro32/GetPathUtils.java", 
-   ]
+    "$target_out_dir/shell_apk/src/com/byte4byte/cloudretro32/USBPermService.java",
+    "$target_out_dir/shell_apk/src/com/byte4byte/cloudretro32/WiimoteAdapter.java"  
+    ]
   }
 }
 
