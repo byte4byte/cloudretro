@@ -28,6 +28,8 @@ enum class HideReason {
   kSystem,
 };
 
+struct KeyRepeatSettings;
+
 class ASH_PUBLIC_EXPORT KeyboardController {
  public:
   static KeyboardController* Get();
@@ -104,6 +106,9 @@ class ASH_PUBLIC_EXPORT KeyboardController {
   // Sets the bounds of the keyboard window in screen coordinates.
   virtual bool SetWindowBoundsInScreen(const gfx::Rect& bounds) = 0;
 
+  // Sets the keyboard config from the preference service.
+  virtual void SetKeyboardConfigFromPref(bool enabled) = 0;
+
   // Whether to adjust the viewport of child windows in the current root window,
   // in order for the keyboard to avoid occluding the window contents.
   virtual bool ShouldOverscroll() = 0;
@@ -111,6 +116,9 @@ class ASH_PUBLIC_EXPORT KeyboardController {
   // Adds/removes a KeyboardControllerObserver.
   virtual void AddObserver(KeyboardControllerObserver* observer) = 0;
   virtual void RemoveObserver(KeyboardControllerObserver* observer) = 0;
+
+  // Returns current key repeat settings, derived from the active user's prefs.
+  virtual KeyRepeatSettings GetKeyRepeatSettings() = 0;
 
  protected:
   static KeyboardController* g_instance_;

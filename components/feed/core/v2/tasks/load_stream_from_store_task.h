@@ -15,10 +15,6 @@
 #include "components/feed/core/v2/feed_store.h"
 #include "components/offline_pages/task/task.h"
 
-namespace base {
-class Clock;
-}
-
 namespace feed {
 struct StreamModelUpdateRequest;
 
@@ -33,20 +29,21 @@ class LoadStreamFromStoreTask : public offline_pages::Task {
     LoadStreamStatus status = LoadStreamStatus::kNoStatus;
     // Only provided if using |LoadType::kFullLoad| AND successful.
     std::unique_ptr<StreamModelUpdateRequest> update_request;
-    // This data is provided when |LoadType::kConsistencyTokenOnly|, or when
-    // loading fails.
+    // This data is provided when |LoadType::kPendingActionsOnly|, or
+    // when loading fails.
     std::string consistency_token;
+    // Pending actions to be uploaded if the stream is to be loaded from the
+    // network.
+    std::vector<feedstore::StoredAction> pending_actions;
   };
 
   enum class LoadType {
     kFullLoad = 0,
-    kConsistencyTokenOnly = 1,
+    kPendingActionsOnly = 1,
   };
 
   LoadStreamFromStoreTask(LoadType load_type,
                           FeedStore* store,
-                          const base::Clock* clock,
-                          UserClass user_class,
                           base::OnceCallback<void(Result)> callback);
   ~LoadStreamFromStoreTask() override;
   LoadStreamFromStoreTask(const LoadStreamFromStoreTask&) = delete;
@@ -68,14 +65,12 @@ class LoadStreamFromStoreTask : public offline_pages::Task {
 
   LoadType load_type_;
   FeedStore* store_;  // Unowned.
-  const base::Clock* clock_;
-  UserClass user_class_;
   bool ignore_staleness_ = false;
   base::OnceCallback<void(Result)> result_callback_;
 
   // Data to be stuffed into the Result when the task is complete.
   std::unique_ptr<StreamModelUpdateRequest> update_request_;
-  std::string consistency_token_;
+  std::vector<feedstore::StoredAction> pending_actions_;
 
   base::WeakPtrFactory<LoadStreamFromStoreTask> weak_ptr_factory_{this};
 };

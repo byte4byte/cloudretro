@@ -7,8 +7,9 @@
 #include <memory>
 #include <utility>
 
+#include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
-#include "components/sync/engine/sync_engine_switches.h"
+#include "base/notreached.h"
 #include "components/sync/engine_impl/commit_contribution.h"
 #include "components/sync/engine_impl/commit_contributor.h"
 #include "components/sync/protocol/sync.pb.h"
@@ -21,7 +22,7 @@ CommitProcessor::CommitProcessor(ModelTypeSet commit_types,
                                  CommitContributorMap* commit_contributor_map)
     : commit_types_(commit_types),
       commit_contributor_map_(commit_contributor_map),
-      gathered_all_contributions_(false) {
+      phase_(GatheringPhase::kPriority) {
   // NIGORI contributions must be collected in every commit cycle.
   DCHECK(commit_types_.Has(NIGORI));
   DCHECK(commit_contributor_map);
@@ -33,60 +34,85 @@ Commit::ContributionMap CommitProcessor::GatherCommitContributions(
     size_t max_entries,
     bool cookie_jar_mismatch,
     bool cookie_jar_empty) {
-  if (gathered_all_contributions_ &&
-      base::FeatureList::IsEnabled(
-          switches::kSyncPreventCommitsBypassingNudgeDelay)) {
+  DCHECK_GT(max_entries, 0u);
+  if (phase_ == GatheringPhase::kDone) {
     return Commit::ContributionMap();
   }
 
-  ModelTypeSet contributing_commit_types = commit_types_;
-
   Commit::ContributionMap contributions;
-  size_t num_entries = 0;
 
-  // NIGORI should be committed before any other datatype.
-  num_entries +=
+  // NIGORI contributions are always gathered to make sure that no encrypted
+  // data gets committed before the corresponding NIGORI commit, which can
+  // otherwise leave to data loss if the commit fails partially.
+  size_t num_entries =
       GatherCommitContributionsForType(NIGORI, max_entries, cookie_jar_mismatch,
                                        cookie_jar_empty, &contributions);
-
-  if (num_entries != 0) {
-    // If the outgoing commit has a NIGORI update, there are some risks if
-    // changes from other datatypes are bundled together in the same commit, as
-    // long as the datatype is encryptable. Hence, restrict to
-    // PriorityUserTypes() which are never encrypted.
-    contributing_commit_types.RetainAll(PriorityUserTypes());
+  if (num_entries > 0) {
+    // Encryptable entities cannot get combined in the same commit with NIGORI.
+    // NIGORI commits are rare so to keep it simple and to play it safe, the
+    // processor does not combine any other entities with NIGORI.
+    return contributions;
   }
 
-  for (ModelType type :
-       Difference(contributing_commit_types, ModelTypeSet(NIGORI))) {
-    num_entries += GatherCommitContributionsForType(
-        type, max_entries - num_entries, cookie_jar_mismatch, cookie_jar_empty,
-        &contributions);
-    if (num_entries >= max_entries) {
-      DCHECK_EQ(num_entries, max_entries)
-          << "Number of commit entries exceeds maximum";
-      break;
+  num_entries += GatherCommitContributionsForTypes(
+      GetUserTypesForCurrentCommitPhase(), max_entries - num_entries,
+      cookie_jar_mismatch, cookie_jar_empty, &contributions);
+  DCHECK_LE(num_entries, max_entries);
+  if (num_entries < max_entries) {
+    // Move to the next phase because there are no further commit contributions
+    // for this phase at this moment (as there's still capacity left). Even if
+    // new contributions for this phase appear while this commit is in flight,
+    // they will get ignored until the next nudge. This prevents infinite commit
+    // cycles.
+    phase_ = IncrementGatheringPhase(phase_);
+
+    if (num_entries == 0) {
+      // If there are no entries in this phase, return contributions from the
+      // next phase immediately. Otherwise, the processor gathers contribution
+      // from the next phase in the next commit.
+      return GatherCommitContributions(max_entries, cookie_jar_mismatch,
+                                       cookie_jar_empty);
     }
   }
-
-  if (contributing_commit_types == commit_types_ && num_entries < max_entries) {
-    // Technically |num_entries| == |max_entries| may also mean that all
-    // contributions have been gathered, but it's safe to ignore, since this
-    // will lead to empty contribution in the next call and exiting commit
-    // cycle (or additional commit cycle in rare cases when new contributions
-    // come meanwhile).
-    gathered_all_contributions_ = true;
-  }
-
   return contributions;
 }
 
-int CommitProcessor::GatherCommitContributionsForType(
+// static
+CommitProcessor::GatheringPhase CommitProcessor::IncrementGatheringPhase(
+    GatheringPhase phase) {
+  switch (phase) {
+    case GatheringPhase::kPriority:
+      return GatheringPhase::kRegular;
+    case GatheringPhase::kRegular:
+      return GatheringPhase::kDone;
+    case GatheringPhase::kDone:
+      NOTREACHED();
+      return GatheringPhase::kDone;
+  }
+}
+
+ModelTypeSet CommitProcessor::GetUserTypesForCurrentCommitPhase() const {
+  switch (phase_) {
+    case GatheringPhase::kPriority:
+      return Intersection(commit_types_, PriorityUserTypes());
+    case GatheringPhase::kRegular:
+      return Difference(commit_types_,
+                        Union(PriorityUserTypes(), ModelTypeSet(NIGORI)));
+    case GatheringPhase::kDone:
+      NOTREACHED();
+      return ModelTypeSet();
+  }
+}
+
+size_t CommitProcessor::GatherCommitContributionsForType(
     ModelType type,
     size_t max_entries,
     bool cookie_jar_mismatch,
     bool cookie_jar_empty,
     Commit::ContributionMap* contributions) {
+  if (max_entries == 0) {
+    return 0;
+  }
   auto cm_it = commit_contributor_map_->find(type);
   if (cm_it == commit_contributor_map_->end()) {
     DLOG(ERROR) << "Could not find requested type " << ModelTypeToString(type)
@@ -100,8 +126,8 @@ int CommitProcessor::GatherCommitContributionsForType(
     return 0;
   }
 
-  int num_entries = contribution->GetNumEntries();
-  DCHECK_LE(num_entries, static_cast<int>(max_entries));
+  size_t num_entries = contribution->GetNumEntries();
+  DCHECK_LE(num_entries, max_entries);
   contributions->emplace(type, std::move(contribution));
 
   if (type == SESSIONS) {
@@ -112,6 +138,26 @@ int CommitProcessor::GatherCommitContributionsForType(
     }
   }
 
+  return num_entries;
+}
+
+size_t CommitProcessor::GatherCommitContributionsForTypes(
+    ModelTypeSet types,
+    size_t max_entries,
+    bool cookie_jar_mismatch,
+    bool cookie_jar_empty,
+    Commit::ContributionMap* contributions) {
+  size_t num_entries = 0;
+  for (ModelType type : types) {
+    num_entries += GatherCommitContributionsForType(
+        type, max_entries - num_entries, cookie_jar_mismatch, cookie_jar_empty,
+        contributions);
+    if (num_entries >= max_entries) {
+      DCHECK_EQ(num_entries, max_entries)
+          << "Number of commit entries exceeds maximum";
+      break;
+    }
+  }
   return num_entries;
 }
 

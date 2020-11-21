@@ -32,8 +32,7 @@ class AssistantCardElement::Processor : public AssistantWebView::Observer {
 
   void Process() {
     // TODO(dmblack): Find a better way of determining desired card size.
-    const int width_dip =
-        kPreferredWidthDip - 2 * kUiElementHorizontalMarginDip;
+    const int width_dip = kPreferredWidthDip - 2 * kHorizontalMarginDip;
 
     // Configure parameters for the card.
     AssistantWebView::InitParams contents_params;
@@ -42,10 +41,9 @@ class AssistantCardElement::Processor : public AssistantWebView::Observer {
     contents_params.max_size = gfx::Size(width_dip, INT_MAX);
     contents_params.suppress_navigation = true;
 
-    // Create |contents_view_| and retain ownership so that is properly cleaned
-    // up in the case where it is never added to the view hierarchy.
+    // Create |contents_view_| and retain ownership until it is added to the
+    // view hierarchy. If that never happens, it will be still be cleaned up.
     contents_view_ = AssistantWebViewFactory::Get()->Create(contents_params);
-    contents_view_->set_owned_by_client();
 
     // Observe |contents_view_| so that we are notified when loading is
     // complete.
@@ -94,6 +92,11 @@ AssistantCardElement::~AssistantCardElement() {
 void AssistantCardElement::Process(ProcessingCallback callback) {
   processor_ = std::make_unique<Processor>(this, std::move(callback));
   processor_->Process();
+}
+
+bool AssistantCardElement::Compare(const AssistantUiElement& other) const {
+  return other.type() == AssistantUiElementType::kCard &&
+         static_cast<const AssistantCardElement&>(other).html() == html_;
 }
 
 }  // namespace ash

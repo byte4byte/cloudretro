@@ -7,10 +7,9 @@ package org.chromium.chrome.browser.payments.ui;
 import android.text.TextUtils;
 
 import androidx.annotation.Nullable;
-import androidx.annotation.VisibleForTesting;
 
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.autofill.prefeditor.EditableOption;
+import org.chromium.components.autofill.EditableOption;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -278,13 +277,9 @@ public class SectionInformation {
         return mAddditionalText;
     }
 
-    /**
-     * Returns all the items in the section. Used for testing.
-     *
-     * @return List of items in the section.
-     */
-    @VisibleForTesting
-    public List<EditableOption> getItemsForTesting() {
+    /** @return List of items in the section. Can be null. */
+    @Nullable
+    public List<EditableOption> getItems() {
         return mItems;
     }
 

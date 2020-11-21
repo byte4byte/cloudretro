@@ -32,11 +32,9 @@ using ::testing::StrictMock;
 
 class MockClient : public GarbageCollected<MockClient>,
                    public OutgoingStream::Client {
-  USING_GARBAGE_COLLECTED_MIXIN(MockClient);
-
  public:
   MOCK_METHOD0(SendFin, void());
-  MOCK_METHOD0(ForgetStream, void());
+  MOCK_METHOD0(OnOutgoingStreamAbort, void());
 };
 
 // The purpose of this class is to ensure that the data pipe is reset before the
@@ -118,7 +116,7 @@ TEST(OutgoingStreamTest, Create) {
   auto* outgoing_stream = stream_creator.Create(scope);
   EXPECT_TRUE(outgoing_stream->Writable());
 
-  EXPECT_CALL(stream_creator.GetMockClient(), ForgetStream());
+  EXPECT_CALL(stream_creator.GetMockClient(), OnOutgoingStreamAbort());
 }
 
 TEST(OutgoingStreamTest, AbortWriting) {
@@ -133,7 +131,7 @@ TEST(OutgoingStreamTest, AbortWriting) {
 
   ScriptPromise writing_aborted = outgoing_stream->WritingAborted();
 
-  EXPECT_CALL(stream_creator.GetMockClient(), ForgetStream());
+  EXPECT_CALL(stream_creator.GetMockClient(), OnOutgoingStreamAbort());
 
   outgoing_stream->AbortWriting(nullptr);
 
@@ -167,7 +165,7 @@ TEST(OutgoingStreamTest, WriteArrayBuffer) {
   EXPECT_TRUE(tester.IsFulfilled());
   EXPECT_THAT(stream_creator.ReadAllPendingData(), ElementsAre('A'));
 
-  EXPECT_CALL(stream_creator.GetMockClient(), ForgetStream());
+  EXPECT_CALL(stream_creator.GetMockClient(), OnOutgoingStreamAbort());
 }
 
 TEST(OutgoingStreamTest, WriteArrayBufferView) {
@@ -188,7 +186,7 @@ TEST(OutgoingStreamTest, WriteArrayBufferView) {
   EXPECT_TRUE(tester.IsFulfilled());
   EXPECT_THAT(stream_creator.ReadAllPendingData(), ElementsAre('B'));
 
-  EXPECT_CALL(stream_creator.GetMockClient(), ForgetStream());
+  EXPECT_CALL(stream_creator.GetMockClient(), OnOutgoingStreamAbort());
 }
 
 bool IsAllNulls(base::span<const uint8_t> data) {
@@ -250,7 +248,7 @@ TEST(OutgoingStreamTest, AsyncWrite) {
   // Nothing should be left to read.
   EXPECT_THAT(stream_creator.ReadAllPendingData(), ElementsAre());
 
-  EXPECT_CALL(stream_creator.GetMockClient(), ForgetStream());
+  EXPECT_CALL(stream_creator.GetMockClient(), OnOutgoingStreamAbort());
 }
 
 // Writing immediately followed by closing should not lose data.
@@ -301,7 +299,7 @@ TEST(OutgoingStreamTest, DataPipeClosed) {
   ScriptPromise closed = writer->closed(script_state);
   ScriptPromiseTester closed_tester(script_state, closed);
 
-  EXPECT_CALL(stream_creator.GetMockClient(), ForgetStream());
+  EXPECT_CALL(stream_creator.GetMockClient(), OnOutgoingStreamAbort());
 
   // Close the other end of the pipe.
   stream_creator.Reset();
@@ -361,7 +359,7 @@ TEST(OutgoingStreamTest, DataPipeClosedDuringAsyncWrite) {
   ScriptPromise closed = writer->closed(script_state);
   ScriptPromiseTester closed_tester(script_state, closed);
 
-  EXPECT_CALL(stream_creator.GetMockClient(), ForgetStream());
+  EXPECT_CALL(stream_creator.GetMockClient(), OnOutgoingStreamAbort());
 
   // Close the other end of the pipe.
   stream_creator.Reset();

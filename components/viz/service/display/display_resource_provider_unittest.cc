@@ -15,8 +15,8 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
-#include "base/logging.h"
+#include "base/callback_helpers.h"
+#include "base/check.h"
 #include "base/memory/read_only_shared_memory_region.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/shared_memory_mapping.h"

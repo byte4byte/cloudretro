@@ -3,6 +3,8 @@
 # found in the LICENSE file.
 
 import("//build/compiled_action.gni")
+import("//build/config/python.gni")
+import("//testing/libfuzzer/fuzzer_test.gni")
 
 source_set("unit_tests") {
   testonly = true
@@ -18,7 +20,9 @@ source_set("unit_tests") {
     ":schema_org",
     ":schema_org_properties",
     "//base",
+    "//base/test:test_support",
     "//components/schema_org/common:improved_mojom",
+    "//services/data_decoder/public/cpp:test_support",
     "//testing/gmock",
     "//testing/gtest",
   ]
@@ -42,14 +46,15 @@ compiled_action("schema_org_name_data") {
   ]
 
   inputs = [
-    rebase_path("//third_party/schema_org/schema.jsonld", root_build_dir),
-    rebase_path("//third_party/schema_org/overrides.jsonld", root_build_dir),
+    "//third_party/schema_org/schema.jsonld",
+    "//third_party/schema_org/overrides.jsonld",
   ]
 
   outputs = [ "$target_gen_dir/schema_org_name_data.json" ]
 }
 
-action("generate_schema_org_code") {
+# TODO(crbug.com/1112471): Get this to run cleanly under Python 3.
+python2_action("generate_schema_org_code") {
   script = "//components/schema_org/generate_schema_org_code.py"
 
   sources = [
@@ -79,8 +84,8 @@ action("generate_schema_org_code") {
       ] + sources
 
   inputs = [
-    rebase_path("//third_party/schema_org/schema.jsonld", root_build_dir),
-    rebase_path("//third_party/schema_org/overrides.jsonld", root_build_dir),
+    "//third_party/schema_org/schema.jsonld",
+    "//third_party/schema_org/overrides.jsonld",
   ]
 
   outputs = [
@@ -128,6 +133,7 @@ static_library("extractor") {
     "//components/schema_org:schema_org_properties",
     "//components/schema_org/common",
     "//components/schema_org/common:improved_mojom",
+    "//services/data_decoder/public/cpp",
   ]
 }
 
@@ -142,5 +148,17 @@ static_library("schema_org") {
     "//components/schema_org:generate_schema_org_code",
     "//components/schema_org:schema_org_properties",
     "//components/schema_org/common:improved_mojom",
+  ]
+}
+
+fuzzer_test("extractor_fuzzer") {
+  sources = [ "extractor_fuzzer.cc" ]
+  deps = [
+    ":extractor",
+    ":schema_org_properties",
+    "//base",
+    "//base/test:test_support",
+    "//components/schema_org/common:improved_mojom",
+    "//services/data_decoder/public/cpp:test_support",
   ]
 }

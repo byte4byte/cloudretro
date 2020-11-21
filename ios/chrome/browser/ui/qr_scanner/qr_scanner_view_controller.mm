@@ -104,9 +104,9 @@ using base::UserMetricsAction;
 
 #pragma mark - Public methods
 
-- (UIViewController*)getViewControllerToPresent {
+- (UIViewController*)viewControllerToPresent {
   DCHECK(self.cameraController);
-  switch ([self.cameraController getAuthorizationStatus]) {
+  switch ([self.cameraController authorizationStatus]) {
     case AVAuthorizationStatusNotDetermined:
     case AVAuthorizationStatusAuthorized:
       _transitioningDelegate = [[ScannerTransitioningDelegate alloc] init];

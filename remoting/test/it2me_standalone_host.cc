@@ -10,7 +10,6 @@
 
 #include "base/bind.h"
 #include "base/location.h"
-#include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -50,7 +49,7 @@ It2MeStandaloneHost::It2MeStandaloneHost()
                context_->ui_task_runner()),
       connection_(base::WrapUnique(new testing::NiceMock<MockSession>())),
       session_jid_(kSessionJid),
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
       // We cannot support audio capturing for linux, since a pipe name is
       // needed to initialize AudioCapturerLinux.
       config_(protocol::SessionConfig::ForTest()),

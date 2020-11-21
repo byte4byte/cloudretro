@@ -15,17 +15,13 @@ namespace autofill {
 class PersonalDataManager;
 }  // namespace autofill
 
-namespace password_manager {
-class PasswordManagerClient;
-}  // namespace password_manager
-
 namespace version_info {
 enum class Channel;
 }  // namespace version_info
 
 namespace autofill_assistant {
 class AccessTokenFetcher;
-class WebsiteLoginFetcher;
+class WebsiteLoginManager;
 
 // A client interface that needs to be supplied to the controller by the
 // embedder.
@@ -48,7 +44,11 @@ class Client {
 
   // Returns the e-mail address that corresponds to the auth credentials. Might
   // be empty.
-  virtual std::string GetAccountEmailAddress() const = 0;
+  virtual std::string GetEmailAddressForAccessTokenAccount() const = 0;
+
+  // Returns the e-mail address used to sign into Chrome, or an empty string if
+  // the user is not signed in.
+  virtual std::string GetChromeSignedInEmailAddress() const = 0;
 
   // Returns the AccessTokenFetcher to use to get oauth credentials.
   virtual AccessTokenFetcher* GetAccessTokenFetcher() = 0;
@@ -56,12 +56,8 @@ class Client {
   // Returns the current active personal data manager.
   virtual autofill::PersonalDataManager* GetPersonalDataManager() const = 0;
 
-  // Return the password manager client for the current WebContents.
-  virtual password_manager::PasswordManagerClient* GetPasswordManagerClient()
-      const = 0;
-
   // Returns the currently active login fetcher.
-  virtual WebsiteLoginFetcher* GetWebsiteLoginFetcher() const = 0;
+  virtual WebsiteLoginManager* GetWebsiteLoginManager() const = 0;
 
   // Returns the locale.
   virtual std::string GetLocale() const = 0;
@@ -72,12 +68,26 @@ class Client {
   // Returns details about the device.
   virtual DeviceContext GetDeviceContext() const = 0;
 
+  // Returns whether a11y (talkback and touch exploration) is enabled or not.
+  virtual bool IsAccessibilityEnabled() const = 0;
+
   // Returns current WebContents.
   virtual content::WebContents* GetWebContents() const = 0;
 
   // Stops autofill assistant for the current WebContents, both controller
   // and UI.
+  // The reason is ignored if RecordDropOut has been previously called.
   virtual void Shutdown(Metrics::DropOutReason reason) = 0;
+
+  // Records the reason of the drop out. Any subsequent reason for the current
+  // run will be ignored.
+  virtual void RecordDropOut(Metrics::DropOutReason reason) = 0;
+
+  // Whether this client has had an UI.
+  virtual bool HasHadUI() const = 0;
+
+  // Returns whether the user has seen a trigger script before or not.
+  virtual bool IsFirstTimeTriggerScriptUser() const = 0;
 
  protected:
   Client() = default;

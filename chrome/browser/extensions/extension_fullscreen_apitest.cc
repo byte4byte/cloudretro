@@ -7,6 +7,7 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/exclusive_access/exclusive_access_context.h"
 #include "chrome/browser/ui/exclusive_access/exclusive_access_manager.h"
+#include "content/public/test/browser_test.h"
 #include "ui/base/ui_base_features.h"
 #include "ui/display/types/display_constants.h"
 
@@ -19,19 +20,19 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest,
   ASSERT_TRUE(RunPlatformAppTest("fullscreen/no_permission")) << message_;
 }
 
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
 // Fails on MAC: http://crbug.com/480370
 #define MAYBE_ExtensionFullscreenAccessPass \
     DISABLED_ExtensionFullscreenAccessPass
 #else
 #define MAYBE_ExtensionFullscreenAccessPass ExtensionFullscreenAccessPass
-#endif  // defined(OS_MACOSX)
+#endif  // defined(OS_MAC)
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, MAYBE_ExtensionFullscreenAccessPass) {
   // Test that fullscreen can be accessed from an extension with permission.
   ASSERT_TRUE(RunPlatformAppTest("fullscreen/has_permission")) << message_;
 }
 
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
 // Entering fullscreen is flaky on Mac: http://crbug.com/824517
 #define MAYBE_FocusWindowDoesNotExitFullscreen \
     DISABLED_FocusWindowDoesNotExitFullscreen
@@ -48,13 +49,13 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest,
   ASSERT_TRUE(browser()->window()->IsFullscreen());
 }
 
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
 // Fails flakily on Mac: http://crbug.com/308041
 #define MAYBE_UpdateWindowSizeExitsFullscreen \
     DISABLED_UpdateWindowSizeExitsFullscreen
 #else
 #define MAYBE_UpdateWindowSizeExitsFullscreen UpdateWindowSizeExitsFullscreen
-#endif  // defined(OS_MACOSX)
+#endif  // defined(OS_MAC)
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest,
                        MAYBE_UpdateWindowSizeExitsFullscreen) {
   browser()->exclusive_access_manager()->context()->EnterFullscreen(
@@ -64,7 +65,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest,
   ASSERT_FALSE(browser()->window()->IsFullscreen());
 }
 
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
 // Fails on MAC: http://crbug.com/480370
 #define MAYBE_DisplayModeWindowIsInFullscreen \
   DISABLED_DisplayModeWindowIsInFullscreen

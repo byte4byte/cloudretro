@@ -7,7 +7,7 @@
 #include "base/bind.h"
 #import "base/strings/sys_string_conversions.h"
 #include "components/strings/grit/components_strings.h"
-#import "ios/chrome/browser/overlays/public/common/alerts/alert_overlay.h"
+#import "ios/chrome/browser/overlays/public/web_content_area/alert_overlay.h"
 #import "ios/chrome/browser/ui/elements/text_field_configuration.h"
 #include "ios/chrome/grit/ios_strings.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -19,6 +19,9 @@
 using alert_overlays::AlertRequest;
 using alert_overlays::AlertResponse;
 using alert_overlays::ButtonConfig;
+
+const char kHttpAuthSignInTappedActionName[] = "MobileHttpAuthSignIn";
+const char kHttpAuthCancelTappedActionName[] = "MobileHttpAuthCancel";
 
 namespace {
 // The index of the alert for the OK button.
@@ -79,8 +82,9 @@ void HTTPAuthOverlayRequestConfig::CreateAuxiliaryData(
       l10n_util::GetNSStringWithFixup(IDS_LOGIN_DIALOG_OK_BUTTON_LABEL);
   NSString* cancel_label = l10n_util::GetNSString(IDS_CANCEL);
   const std::vector<ButtonConfig> alert_button_configs{
-      ButtonConfig(ok_label),
-      ButtonConfig(cancel_label, UIAlertActionStyleCancel)};
+      ButtonConfig(ok_label, kHttpAuthSignInTappedActionName),
+      ButtonConfig(cancel_label, kHttpAuthCancelTappedActionName,
+                   UIAlertActionStyleCancel)};
   AlertRequest::CreateForUserData(
       user_data, alert_title, alert_message,
       /*accessibility_identifier=*/nil, alert_text_field_configs,

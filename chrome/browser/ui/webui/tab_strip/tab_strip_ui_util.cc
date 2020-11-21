@@ -4,12 +4,17 @@
 
 #include "chrome/browser/ui/webui/tab_strip/tab_strip_ui_util.h"
 
+#include <memory>
+#include <string>
+#include <utility>
+
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/tabs/tab_group.h"
 #include "chrome/browser/ui/tabs/tab_group_model.h"
 #include "chrome/browser/ui/webui/tab_strip/tab_strip_ui.h"
 #include "components/tab_groups/tab_group_id.h"
@@ -72,6 +77,30 @@ void MoveTabAcrossWindows(Browser* source_browser,
       to_index, std::move(detached_contents), add_types, to_group_id);
 }
 
+bool IsDraggedTab(const ui::OSExchangeData& drop_data) {
+  base::Pickle pickle;
+  drop_data.GetPickledData(ui::ClipboardFormatType::GetWebCustomDataType(),
+                           &pickle);
+  base::PickleIterator iter(pickle);
+
+  uint32_t entry_count = 0;
+  if (!iter.ReadUInt32(&entry_count))
+    return false;
+
+  for (uint32_t i = 0; i < entry_count; ++i) {
+    base::StringPiece16 type;
+    base::StringPiece16 data;
+    if (!iter.ReadStringPiece16(&type) || !iter.ReadStringPiece16(&data))
+      return false;
+
+    if (type == base::ASCIIToUTF16(kWebUITabIdDataType) ||
+        type == base::ASCIIToUTF16(kWebUITabGroupIdDataType))
+      return true;
+  }
+
+  return false;
+}
+
 bool DropTabsInNewBrowser(Browser* new_browser,
                           const ui::OSExchangeData& drop_data) {
   base::Pickle pickle;
@@ -79,28 +108,65 @@ bool DropTabsInNewBrowser(Browser* new_browser,
                            &pickle);
 
   base::string16 tab_id_str;
+  base::string16 group_id_str;
   ui::ReadCustomDataForType(pickle.data(), pickle.size(),
                             base::ASCIIToUTF16(kWebUITabIdDataType),
                             &tab_id_str);
-  if (tab_id_str.empty())
-    return false;
+  if (tab_id_str.empty()) {
+    ui::ReadCustomDataForType(pickle.data(), pickle.size(),
+                              base::ASCIIToUTF16(kWebUITabGroupIdDataType),
+                              &group_id_str);
+  }
 
-  // |tab_id_str| should contain the extension tab id as a string.
-  int tab_id = -1;
-  if (!base::StringToInt(tab_id_str, &tab_id))
+  if (tab_id_str.empty() && group_id_str.empty())
     return false;
 
   Browser* source_browser = nullptr;
-  int source_index = -1;
-  if (!extensions::ExtensionTabUtil::GetTabById(
-          tab_id, new_browser->profile(), /* include_incognito = */ false,
-          &source_browser, /* tab_strip = */ nullptr,
-          /* contents = */ nullptr, &source_index)) {
-    return false;
+  std::vector<int> tab_indices_to_move;
+  base::Optional<tab_groups::TabGroupId> source_group_id;
+
+  // TODO(https://crbug.com/1069869): de-duplicate with
+  // TabStripUIHandler::HandleMoveTab and
+  // TabStripUIHandler::HandleMoveGroup.
+
+  if (!tab_id_str.empty()) {
+    int tab_id = -1;
+    if (!base::StringToInt(tab_id_str, &tab_id))
+      return false;
+
+    int source_index = -1;
+    if (!extensions::ExtensionTabUtil::GetTabById(
+            tab_id, new_browser->profile(), /* include_incognito = */ false,
+            &source_browser, /* tab_strip = */ nullptr,
+            /* contents = */ nullptr, &source_index)) {
+      return false;
+    }
+    tab_indices_to_move.push_back(source_index);
+  } else {
+    std::string group_id_utf8 = base::UTF16ToUTF8(group_id_str);
+    source_browser =
+        GetBrowserWithGroupId(new_browser->profile(), group_id_utf8);
+    if (!source_browser)
+      return false;
+    source_group_id = GetTabGroupIdFromString(
+        source_browser->tab_strip_model()->group_model(), group_id_utf8);
+    if (!source_group_id)
+      return false;
+
+    TabGroup* source_group =
+        source_browser->tab_strip_model()->group_model()->GetTabGroup(
+            *source_group_id);
+    tab_indices_to_move = source_group->ListTabs();
+
+    new_browser->tab_strip_model()->group_model()->AddTabGroup(
+        *source_group_id, *source_group->visual_data());
   }
 
-  MoveTabAcrossWindows(source_browser, source_index, new_browser, 0,
-                       base::nullopt);
+  for (size_t i = 0; i < tab_indices_to_move.size(); ++i) {
+    int source_index = tab_indices_to_move[i] - i;
+    MoveTabAcrossWindows(source_browser, source_index, new_browser, i,
+                         source_group_id);
+  }
   new_browser->tab_strip_model()->ActivateTabAt(0);
   return true;
 }

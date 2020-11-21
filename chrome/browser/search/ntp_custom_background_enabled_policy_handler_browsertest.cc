@@ -16,6 +16,7 @@
 #include "components/policy/core/common/policy_types.h"
 #include "components/policy/policy_constants.h"
 #include "components/prefs/pref_service.h"
+#include "content/public/test/browser_test.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -47,8 +48,7 @@ IN_PROC_BROWSER_TEST_F(NtpCustomBackgroundEnabledPolicyHandlerTest, Override) {
   policy::PolicyMap policies;
   policies.Set(policy::key::kNTPCustomBackgroundEnabled,
                policy::POLICY_LEVEL_MANDATORY, policy::POLICY_SCOPE_USER,
-               policy::POLICY_SOURCE_CLOUD,
-               std::make_unique<base::Value>(false), nullptr);
+               policy::POLICY_SOURCE_CLOUD, base::Value(false), nullptr);
   policy_provider_.UpdateChromePolicy(policies);
 
   EXPECT_TRUE(prefs->GetDictionary(prefs::kNtpCustomBackgroundDict)->empty());
@@ -57,8 +57,7 @@ IN_PROC_BROWSER_TEST_F(NtpCustomBackgroundEnabledPolicyHandlerTest, Override) {
   // Flip the value, and check again.
   policies.Set(policy::key::kNTPCustomBackgroundEnabled,
                policy::POLICY_LEVEL_MANDATORY, policy::POLICY_SCOPE_USER,
-               policy::POLICY_SOURCE_CLOUD, std::make_unique<base::Value>(true),
-               nullptr);
+               policy::POLICY_SOURCE_CLOUD, base::Value(true), nullptr);
   policy_provider_.UpdateChromePolicy(policies);
 
   EXPECT_FALSE(prefs->GetDictionary(prefs::kNtpCustomBackgroundDict)->empty());

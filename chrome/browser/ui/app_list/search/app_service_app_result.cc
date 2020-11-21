@@ -7,7 +7,10 @@
 #include "ash/public/cpp/app_list/app_list_config.h"
 #include "ash/public/cpp/app_list/app_list_types.h"
 #include "ash/public/cpp/app_list/internal_app_id_constants.h"
+#include "ash/strings/grit/ash_strings.h"
 #include "base/bind.h"
+#include "base/metrics/user_metrics.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/apps/app_service/app_service_metrics.h"
 #include "chrome/browser/apps/app_service/app_service_proxy.h"
 #include "chrome/browser/apps/app_service/app_service_proxy_factory.h"
@@ -19,11 +22,14 @@
 #include "chrome/browser/ui/app_list/app_service/app_service_context_menu.h"
 #include "chrome/browser/ui/app_list/internal_app/internal_app_metadata.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller.h"
+#include "chrome/browser/ui/web_applications/system_web_app_ui_utils.h"
+#include "chrome/browser/web_applications/system_web_app_manager.h"
 #include "chrome/common/chrome_features.h"
-#include "chrome/services/app_service/public/cpp/app_update.h"
-#include "chrome/services/app_service/public/mojom/types.mojom.h"
 #include "components/favicon/core/large_icon_service.h"
+#include "components/services/app_service/public/cpp/app_update.h"
+#include "components/services/app_service/public/mojom/types.mojom.h"
 #include "extensions/common/extension.h"
+#include "ui/base/l10n/l10n_util.h"
 
 namespace app_list {
 
@@ -40,22 +46,32 @@ AppServiceAppResult::AppServiceAppResult(Profile* profile,
   apps::AppServiceProxy* proxy =
       apps::AppServiceProxyFactory::GetForProfile(profile);
 
-  if (proxy) {
-    proxy->AppRegistryCache().ForOneApp(
-        app_id, [this](const apps::AppUpdate& update) {
-          app_type_ = update.AppType();
-          is_platform_app_ =
-              update.IsPlatformApp() == apps::mojom::OptionalBool::kTrue;
-          show_in_launcher_ =
-              update.ShowInLauncher() == apps::mojom::OptionalBool::kTrue;
-        });
+  proxy->AppRegistryCache().ForOneApp(
+      app_id, [this](const apps::AppUpdate& update) {
+        app_type_ = update.AppType();
+        is_platform_app_ =
+            update.IsPlatformApp() == apps::mojom::OptionalBool::kTrue;
+        show_in_launcher_ =
+            update.ShowInLauncher() == apps::mojom::OptionalBool::kTrue;
 
-    constexpr bool allow_placeholder_icon = true;
-    CallLoadIcon(false, allow_placeholder_icon);
-    if (is_recommendation) {
-      CallLoadIcon(true, allow_placeholder_icon);
-    }
+        if (update.Readiness() == apps::mojom::Readiness::kDisabledByPolicy) {
+          SetAccessibleName(l10n_util::GetStringFUTF16(
+              IDS_APP_ACCESSIBILITY_BLOCKED_INSTALLED_APP_ANNOUNCEMENT,
+              base::UTF8ToUTF16(update.ShortName())));
+        } else if (update.Paused() == apps::mojom::OptionalBool::kTrue) {
+          SetAccessibleName(l10n_util::GetStringFUTF16(
+              IDS_APP_ACCESSIBILITY_PAUSED_INSTALLED_APP_ANNOUNCEMENT,
+              base::UTF8ToUTF16(update.ShortName())));
+        }
+      });
+
+  constexpr bool allow_placeholder_icon = true;
+  CallLoadIcon(false, allow_placeholder_icon);
+  if (is_recommendation) {
+    CallLoadIcon(true, allow_placeholder_icon);
   }
+
+  SetMetricsType(GetSearchResultType());
 
   switch (app_type_) {
     case apps::mojom::AppType::kBuiltIn:
@@ -97,22 +113,9 @@ void AppServiceAppResult::GetContextMenuModel(GetMenuModelCallback callback) {
     return;
   }
 
-  if (base::FeatureList::IsEnabled(features::kAppServiceContextMenu)) {
-    context_menu_ = std::make_unique<AppServiceContextMenu>(
-        this, profile(), app_id(), controller());
-  } else {
-    context_menu_ = AppServiceAppItem::MakeAppContextMenu(
-        app_type_, this, profile(), app_id(), controller(), is_platform_app_);
-  }
+  context_menu_ = std::make_unique<AppServiceContextMenu>(
+      this, profile(), app_id(), controller());
   context_menu_->GetMenuModel(std::move(callback));
-}
-
-void AppServiceAppResult::OnVisibilityChanged(bool visibility) {
-  if (id() == ash::kReleaseNotesAppId && visibility) {
-    DCHECK(chromeos::ReleaseNotesStorage(profile()).ShouldShowSuggestionChip());
-    chromeos::ReleaseNotesStorage(profile())
-        .DecreaseTimesLeftToShowSuggestionChip();
-  }
 }
 
 ash::SearchResultType AppServiceAppResult::GetSearchResultType() const {
@@ -128,7 +131,14 @@ ash::SearchResultType AppServiceAppResult::GetSearchResultType() const {
     case apps::mojom::AppType::kExtension:
     case apps::mojom::AppType::kWeb:
       return ash::EXTENSION_APP;
-    default:
+    case apps::mojom::AppType::kLacros:
+      return ash::LACROS;
+    case apps::mojom::AppType::kRemote:
+      return ash::REMOTE_APP;
+    case apps::mojom::AppType::kBorealis:
+      return ash::BOREALIS_APP;
+    case apps::mojom::AppType::kMacOs:
+    case apps::mojom::AppType::kUnknown:
       NOTREACHED();
       return ash::SEARCH_RESULT_TYPE_BOUNDARY;
   }
@@ -155,8 +165,6 @@ void AppServiceAppResult::Launch(int event_flags,
 
   apps::AppServiceProxy* proxy =
       apps::AppServiceProxyFactory::GetForProfile(profile());
-  if (!proxy)
-    return;
 
   // For Chrome apps or Web apps, if it is non-platform app, it could be
   // selecting an existing delegate for the app, so call
@@ -191,8 +199,12 @@ void AppServiceAppResult::CallLoadIcon(bool chip, bool allow_placeholder_icon) {
     // If |icon_loader_releaser_| is non-null, assigning to it will signal to
     // |icon_loader_| that the previous icon is no longer being used, as a hint
     // that it could be flushed from any caches.
+    auto icon_type =
+        (base::FeatureList::IsEnabled(features::kAppServiceAdaptiveIcon))
+            ? apps::mojom::IconType::kStandard
+            : apps::mojom::IconType::kUncompressed;
     icon_loader_releaser_ = icon_loader_->LoadIcon(
-        app_type_, app_id(), apps::mojom::IconCompression::kUncompressed,
+        app_type_, app_id(), icon_type,
         chip ? ash::AppListConfig::instance().suggestion_chip_icon_dimension()
              : ash::AppListConfig::instance().GetPreferredIconDimension(
                    display_type()),
@@ -204,8 +216,11 @@ void AppServiceAppResult::CallLoadIcon(bool chip, bool allow_placeholder_icon) {
 
 void AppServiceAppResult::OnLoadIcon(bool chip,
                                      apps::mojom::IconValuePtr icon_value) {
-  if (icon_value->icon_compression !=
-      apps::mojom::IconCompression::kUncompressed) {
+  auto icon_type =
+      (base::FeatureList::IsEnabled(features::kAppServiceAdaptiveIcon))
+          ? apps::mojom::IconType::kStandard
+          : apps::mojom::IconType::kUncompressed;
+  if (icon_value->icon_type != icon_type) {
     return;
   }
 
@@ -234,7 +249,10 @@ void AppServiceAppResult::HandleSuggestionChip(Profile* profile) {
   SetDisplayType(ash::SearchResultDisplayType::kChip);
 
   if (id() == ash::kReleaseNotesAppId) {
-    SetNotifyVisibilityChange(true);
+    // TODO(b/169711884): Decrease times left only when the chip becomes
+    // visible.
+    chromeos::ReleaseNotesStorage(profile)
+        .DecreaseTimesLeftToShowSuggestionChip();
     // Make sure that if both Continue Reading and Release Notes are available,
     // Release Notes shows up first in the suggestion chip container.
     SetPositionPriority(1.0f);

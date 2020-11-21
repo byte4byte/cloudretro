@@ -9,10 +9,14 @@
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #import "base/strings/sys_string_conversions.h"
+#include "components/policy/core/browser/url_blocklist_manager.h"
 #include "components/reading_list/core/reading_list_model.h"
 #import "ios/chrome/browser/app_launcher/app_launcher_tab_helper_delegate.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #import "ios/chrome/browser/chrome_url_util.h"
+#import "ios/chrome/browser/policy/policy_features.h"
+#import "ios/chrome/browser/policy_url_blocking/policy_url_blocking_service.h"
+#import "ios/chrome/browser/policy_url_blocking/policy_url_blocking_util.h"
 #include "ios/chrome/browser/reading_list/reading_list_model_factory.h"
 #import "ios/chrome/browser/u2f/u2f_tab_helper.h"
 #import "ios/web/common/url_scheme_util.h"
@@ -51,7 +55,7 @@ bool IsValidAppUrl(const GURL& app_url) {
 // Returns True if |app_url| has a Chrome bundle URL scheme.
 bool HasChromeAppScheme(const GURL& app_url) {
   NSArray* chrome_schemes =
-      [[ChromeAppConstants sharedInstance] getAllBundleURLSchemes];
+      [[ChromeAppConstants sharedInstance] allBundleURLSchemes];
   NSString* app_url_scheme = base::SysUTF8ToNSString(app_url.scheme());
   return [chrome_schemes containsObject:app_url_scheme];
 }
@@ -140,7 +144,7 @@ void AppLauncherTabHelper::RequestToLaunchApp(const GURL& url,
       if (!delegate_)
         return;
       delegate_->ShowRepeatedAppLaunchAlert(
-          this, base::BindOnce(^(BOOL user_allowed) {
+          this, base::BindOnce(^(bool user_allowed) {
             if (!weak_this.get())
               return;
             if (user_allowed && weak_this->delegate()) {
@@ -166,6 +170,18 @@ AppLauncherTabHelper::ShouldAllowRequest(
     // This URL can be handled by the WebState and doesn't require App launcher
     // handling.
     return web::WebStatePolicyDecider::PolicyDecision::Allow();
+  }
+
+  if (IsURLBlocklistEnabled()) {
+    // Do not allow allow navigation if URL is blocked by enterprise policy.
+    PolicyBlocklistService* blocklistService =
+        PolicyBlocklistServiceFactory::GetForBrowserState(
+            web_state()->GetBrowserState());
+    if (blocklistService->GetURLBlocklistState(request_url) ==
+        policy::URLBlocklist::URLBlocklistState::URL_IN_BLOCKLIST) {
+      return web::WebStatePolicyDecider::PolicyDecision::CancelAndDisplayError(
+          policy_url_blocking_util::CreateBlockedUrlError());
+    }
   }
 
   ExternalURLRequestStatus request_status =

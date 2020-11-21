@@ -41,18 +41,6 @@ TestStoragePartition::GetCookieManagerForBrowserProcess() {
   return cookie_manager_for_browser_process_;
 }
 
-void TestStoragePartition::CreateRestrictedCookieManager(
-    network::mojom::RestrictedCookieManagerRole role,
-    const url::Origin& origin,
-    const net::SiteForCookies& site_for_cookies,
-    const url::Origin& top_frame_origin,
-    bool is_service_worker,
-    int process_id,
-    int routing_id,
-    mojo::PendingReceiver<network::mojom::RestrictedCookieManager> receiver) {
-  NOTREACHED();
-}
-
 void TestStoragePartition::CreateHasTrustTokensAnswerer(
     mojo::PendingReceiver<network::mojom::HasTrustTokensAnswerer> receiver,
     const url::Origin& top_frame_origin) {
@@ -96,6 +84,10 @@ TestStoragePartition::GetNativeFileSystemEntryFactory() {
   return nullptr;
 }
 
+FontAccessContext* TestStoragePartition::GetFontAccessContext() {
+  return nullptr;
+}
+
 ServiceWorkerContext* TestStoragePartition::GetServiceWorkerContext() {
   return service_worker_context_;
 }
@@ -110,6 +102,12 @@ SharedWorkerService* TestStoragePartition::GetSharedWorkerService() {
 
 CacheStorageContext* TestStoragePartition::GetCacheStorageContext() {
   return cache_storage_context_;
+}
+
+CacheStorageContextImpl*
+TestStoragePartition::GetCacheStorageContextImplForTesting() {
+  NOTREACHED();
+  return nullptr;
 }
 
 GeneratedCodeCacheContext*
@@ -138,6 +136,11 @@ TestStoragePartition::GetProtoDatabaseProvider() {
 
 void TestStoragePartition::SetProtoDatabaseProvider(
     std::unique_ptr<leveldb_proto::ProtoDatabaseProvider> proto_db_provider) {}
+
+leveldb_proto::ProtoDatabaseProvider*
+TestStoragePartition::GetProtoDatabaseProviderForTesting() {
+  return nullptr;
+}
 
 #if !defined(OS_ANDROID)
 HostZoomMap* TestStoragePartition::GetHostZoomMap() {
@@ -186,6 +189,18 @@ void TestStoragePartition::Flush() {}
 
 void TestStoragePartition::ResetURLLoaderFactories() {}
 
+void TestStoragePartition::AddObserver(DataRemovalObserver* observer) {
+  data_removal_observer_count_++;
+}
+
+void TestStoragePartition::RemoveObserver(DataRemovalObserver* observer) {
+  data_removal_observer_count_--;
+}
+
+int TestStoragePartition::GetDataRemovalObserverCount() {
+  return data_removal_observer_count_;
+}
+
 void TestStoragePartition::ClearBluetoothAllowedDevicesMapForTesting() {}
 
 void TestStoragePartition::FlushNetworkInterfaceForTesting() {}
@@ -193,5 +208,9 @@ void TestStoragePartition::FlushNetworkInterfaceForTesting() {}
 void TestStoragePartition::WaitForDeletionTasksForTesting() {}
 
 void TestStoragePartition::WaitForCodeCacheShutdownForTesting() {}
+
+void TestStoragePartition::SetNetworkContextForTesting(
+    mojo::PendingRemote<network::mojom::NetworkContext>
+        network_context_remote) {}
 
 }  // namespace content

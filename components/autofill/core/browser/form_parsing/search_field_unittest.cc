@@ -22,22 +22,24 @@ namespace autofill {
 
 class SearchFieldTest : public testing::Test {
  public:
-  SearchFieldTest() {}
+  SearchFieldTest() = default;
+  SearchFieldTest(const SearchFieldTest&) = delete;
+  SearchFieldTest& operator=(const SearchFieldTest&) = delete;
 
  protected:
-  std::vector<std::unique_ptr<AutofillField>> list_;
-  std::unique_ptr<SearchField> field_;
-  FieldCandidatesMap field_candidates_map_;
-
   // Downcast for tests.
   static std::unique_ptr<SearchField> Parse(AutofillScanner* scanner) {
-    std::unique_ptr<FormField> field = SearchField::Parse(scanner, nullptr);
+    // An empty page_language means the language is unknown and patterns of all
+    // languages are used.
+    std::unique_ptr<FormField> field =
+        SearchField::Parse(scanner, LanguageCode(""), nullptr);
     return std::unique_ptr<SearchField>(
         static_cast<SearchField*>(field.release()));
   }
 
- private:
-  DISALLOW_COPY_AND_ASSIGN(SearchFieldTest);
+  std::vector<std::unique_ptr<AutofillField>> list_;
+  std::unique_ptr<SearchField> field_;
+  FieldCandidatesMap field_candidates_map_;
 };
 
 TEST_F(SearchFieldTest, ParseSearchTerm) {

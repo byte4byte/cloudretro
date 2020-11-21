@@ -8,19 +8,10 @@
 
 namespace updater {
 
-void DoForegroundUpdate() {
-  // TODO(1068693): Implement TestApp Functionality
+int InstallUpdater() {
+  // TODO(1068693): Implement TestApp Functionality.
   NOTIMPLEMENTED();
-}
-
-void InstallUpdater() {
-  // TODO(1068693): Implement TestApp Functionality
-  NOTIMPLEMENTED();
-}
-
-void RegisterToUpdater() {
-  // TODO(1068693): Implement TestApp Functionality
-  NOTIMPLEMENTED();
+  return 0;
 }
 
 }  // namespace updater

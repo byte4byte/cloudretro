@@ -177,7 +177,7 @@ TabsEventRouter::~TabsEventRouter() {
 }
 
 bool TabsEventRouter::ShouldTrackBrowser(Browser* browser) {
-  return profile_->IsSameProfile(browser->profile()) &&
+  return profile_->IsSameOrParent(browser->profile()) &&
          ExtensionTabUtil::BrowserSupportsTabs(browser);
 }
 
@@ -203,9 +203,8 @@ void TabsEventRouter::OnTabStripModelChanged(
       break;
     }
     case TabStripModelChange::kRemoved: {
-      const bool will_be_deleted = change.GetRemove()->will_be_deleted;
       for (const auto& contents : change.GetRemove()->contents) {
-        if (will_be_deleted) {
+        if (contents.will_be_deleted) {
           DispatchTabClosingAt(tab_strip_model, contents.contents,
                                contents.index);
         }
@@ -258,6 +257,15 @@ void TabsEventRouter::TabPinnedStateChanged(TabStripModel* tab_strip_model,
                                             int index) {
   std::set<std::string> changed_property_names;
   changed_property_names.insert(tabs_constants::kPinnedKey);
+  DispatchTabUpdatedEvent(contents, std::move(changed_property_names));
+}
+
+void TabsEventRouter::TabGroupedStateChanged(
+    base::Optional<tab_groups::TabGroupId> group,
+    content::WebContents* contents,
+    int index) {
+  std::set<std::string> changed_property_names;
+  changed_property_names.insert(tabs_constants::kGroupIdKey);
   DispatchTabUpdatedEvent(contents, std::move(changed_property_names));
 }
 
@@ -571,7 +579,7 @@ void TabsEventRouter::DispatchEvent(
     std::unique_ptr<base::ListValue> args,
     EventRouter::UserGestureState user_gesture) {
   EventRouter* event_router = EventRouter::Get(profile);
-  if (!profile_->IsSameProfile(profile) || !event_router)
+  if (!profile_->IsSameOrParent(profile) || !event_router)
     return;
 
   auto event = std::make_unique<Event>(histogram_value, event_name,

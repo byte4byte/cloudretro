@@ -23,7 +23,7 @@
 #include "ui/aura/window.h"
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/base/cursor/cursor.h"
-#include "ui/base/mojom/cursor_type.mojom-shared.h"
+#include "ui/base/cursor/mojom/cursor_type.mojom-shared.h"
 #include "ui/display/display.h"
 #include "ui/display/display_layout.h"
 #include "ui/display/manager/display_manager.h"
@@ -46,18 +46,6 @@ void SetSecondaryDisplayLayout(display::DisplayPlacement::Position position) {
   Shell::Get()->display_manager()->SetLayoutForCurrentDisplays(
       std::move(layout));
 }
-
-class ModalWidgetDelegate : public views::WidgetDelegateView {
- public:
-  ModalWidgetDelegate() = default;
-  ~ModalWidgetDelegate() override = default;
-
-  // Overridden from views::WidgetDelegate:
-  ui::ModalType GetModalType() const override { return ui::MODAL_TYPE_SYSTEM; }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(ModalWidgetDelegate);
-};
 
 // An event handler which moves the target window to the secondary root window
 // at pre-handle phase of a mouse release event.
@@ -234,8 +222,10 @@ TEST_F(ExtendedDesktopTest, SystemModal) {
   EXPECT_EQ(root_windows[0], Shell::GetRootWindowForNewWindows());
 
   // Open system modal. Make sure it's on 2nd root window and active.
+  auto delegate = std::make_unique<views::WidgetDelegateView>();
+  delegate->SetModalType(ui::MODAL_TYPE_SYSTEM);
   views::Widget* modal_widget = views::Widget::CreateWindowWithContext(
-      new ModalWidgetDelegate(), GetContext(), gfx::Rect(1200, 100, 100, 100));
+      delegate.release(), GetContext(), gfx::Rect(1200, 100, 100, 100));
   modal_widget->Show();
   EXPECT_TRUE(wm::IsActiveWindow(modal_widget->GetNativeView()));
   EXPECT_EQ(root_windows[1], modal_widget->GetNativeView()->GetRootWindow());

@@ -4,9 +4,8 @@
 
 #include "content/browser/system_connector_impl.h"
 
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "base/no_destructor.h"
-#include "base/task/post_task.h"
 #include "base/threading/sequence_local_storage_slot.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
@@ -48,8 +47,8 @@ service_manager::Connector* GetSystemConnector() {
 
   if (!storage) {
     mojo::PendingRemote<service_manager::mojom::Connector> remote;
-    base::PostTask(FROM_HERE, {BrowserThread::UI},
-                   base::BindOnce(&BindReceiverOnMainThread,
+    GetUIThreadTaskRunner({})->PostTask(
+        FROM_HERE, base::BindOnce(&BindReceiverOnMainThread,
                                   remote.InitWithNewPipeAndPassReceiver()));
     storage.emplace(std::move(remote));
   }
@@ -65,11 +64,6 @@ void SetSystemConnector(std::unique_ptr<service_manager::Connector> connector) {
   mojo::PendingRemote<service_manager::mojom::Connector> remote;
   connector->BindConnectorReceiver(remote.InitWithNewPipeAndPassReceiver());
   GetConnectorStorage().emplace(std::move(remote));
-}
-
-void SetSystemConnectorForTesting(
-    std::unique_ptr<service_manager::Connector> connector) {
-  SetSystemConnector(std::move(connector));
 }
 
 }  // namespace content

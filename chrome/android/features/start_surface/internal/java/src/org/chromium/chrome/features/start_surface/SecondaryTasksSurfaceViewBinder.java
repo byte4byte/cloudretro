@@ -6,10 +6,11 @@ package org.chromium.chrome.features.start_surface;
 
 import static org.chromium.chrome.features.start_surface.StartSurfaceProperties.IS_SECONDARY_SURFACE_VISIBLE;
 import static org.chromium.chrome.features.start_surface.StartSurfaceProperties.IS_SHOWING_OVERVIEW;
-import static org.chromium.chrome.features.start_surface.StartSurfaceProperties.TOP_BAR_HEIGHT;
+import static org.chromium.chrome.features.start_surface.StartSurfaceProperties.IS_SHOWING_STACK_TAB_SWITCHER;
+import static org.chromium.chrome.features.start_surface.StartSurfaceProperties.TOP_MARGIN;
 
 import android.view.View;
-import android.view.ViewGroup.MarginLayoutParams;
+import android.view.ViewGroup;
 
 import org.chromium.ui.modelutil.PropertyKey;
 import org.chromium.ui.modelutil.PropertyModel;
@@ -19,34 +20,34 @@ class SecondaryTasksSurfaceViewBinder {
     public static void bind(PropertyModel model, TasksSurfaceViewBinder.ViewHolder viewHolder,
             PropertyKey propertyKey) {
         if (IS_SECONDARY_SURFACE_VISIBLE == propertyKey) {
-            setVisibility(viewHolder, model,
-                    model.get(IS_SHOWING_OVERVIEW) && model.get(IS_SECONDARY_SURFACE_VISIBLE));
+            updateVisibility(viewHolder, model);
         } else if (IS_SHOWING_OVERVIEW == propertyKey) {
-            setVisibility(viewHolder, model,
-                    model.get(IS_SHOWING_OVERVIEW) && model.get(IS_SECONDARY_SURFACE_VISIBLE));
-        } else if (TOP_BAR_HEIGHT == propertyKey) {
-            setTopBarHeight(viewHolder, model.get(TOP_BAR_HEIGHT));
+            updateVisibility(viewHolder, model);
+        } else if (IS_SHOWING_STACK_TAB_SWITCHER == propertyKey) {
+            updateVisibility(viewHolder, model);
+        } else if (TOP_MARGIN == propertyKey) {
+            setTopBarHeight(viewHolder, model.get(TOP_MARGIN));
         }
     }
 
-    private static void setVisibility(
-            TasksSurfaceViewBinder.ViewHolder viewHolder, PropertyModel model, boolean isShowing) {
+    private static void updateVisibility(
+            TasksSurfaceViewBinder.ViewHolder viewHolder, PropertyModel model) {
+        boolean isShowing = model.get(IS_SHOWING_OVERVIEW)
+                && model.get(IS_SECONDARY_SURFACE_VISIBLE)
+                && !model.get(IS_SHOWING_STACK_TAB_SWITCHER);
         if (isShowing && viewHolder.tasksSurfaceView.getParent() == null) {
             viewHolder.parentView.addView(viewHolder.tasksSurfaceView);
-            MarginLayoutParams layoutParams =
-                    (MarginLayoutParams) viewHolder.tasksSurfaceView.getLayoutParams();
-            layoutParams.topMargin = model.get(TOP_BAR_HEIGHT);
+            setTopBarHeight(viewHolder, model.get(TOP_MARGIN));
         }
 
         viewHolder.tasksSurfaceView.setVisibility(isShowing ? View.VISIBLE : View.GONE);
     }
 
     private static void setTopBarHeight(TasksSurfaceViewBinder.ViewHolder viewHolder, int height) {
-        MarginLayoutParams layoutParams =
-                (MarginLayoutParams) viewHolder.tasksSurfaceView.getLayoutParams();
-        if (layoutParams == null) return;
+        ViewGroup.LayoutParams lp = viewHolder.topToolbarPlaceholderView.getLayoutParams();
+        if (lp == null) return;
 
-        layoutParams.topMargin = height;
-        viewHolder.tasksSurfaceView.setLayoutParams(layoutParams);
+        lp.height = height;
+        viewHolder.topToolbarPlaceholderView.setLayoutParams(lp);
     }
 }

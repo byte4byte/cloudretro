@@ -31,20 +31,6 @@ class WebState;
 // exactly one NavigationManager.
 class NavigationManager {
  public:
-  // User agent override option used in LoadURLParams.
-  enum class UserAgentOverrideOption : short {
-    // Inherit the user agent type from the last committed non-native item if
-    // there is one, otherwise keep the default type, which is NONE for native
-    // item and MOBILE for non-native item.
-    INHERIT = 0,
-
-    // Use the mobile user agent.
-    MOBILE,
-
-    // Use the desktop user agent.
-    DESKTOP,
-  };
-
   // Parameters for URL loading. Most parameters are optional, and can be left
   // at the default values set by the constructor.
   struct WebLoadParams {
@@ -60,9 +46,6 @@ class NavigationManager {
 
     // The transition type for the load. Defaults to PAGE_TRANSITION_LINK.
     ui::PageTransition transition_type;
-
-    // The user agent override option for the load. Defualts to INHERIT.
-    UserAgentOverrideOption user_agent_override_option;
 
     // True for renderer-initiated navigations. This is
     // important for tracking whether to display pending URLs.
@@ -110,6 +93,8 @@ class NavigationManager {
   // Returns the transient item if any. This is an item which is removed and
   // discarded if any navigation occurs. Note that the returned item is owned
   // by the navigation manager and may be deleted at any time.
+  // TODO(crbug.com/1028755): Remove the transient item once SafeBrowsing is
+  // launched.
   virtual NavigationItem* GetTransientItem() const = 0;
 
   // Removes the transient and pending NavigationItems.

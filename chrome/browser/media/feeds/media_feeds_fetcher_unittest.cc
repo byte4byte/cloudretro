@@ -7,13 +7,16 @@
 #include <memory>
 
 #include "base/bind.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "base/test/mock_callback.h"
 #include "base/test/task_environment.h"
+#include "chrome/browser/media/history/media_history_keyed_service.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "components/schema_org/common/metadata.mojom.h"
 #include "components/schema_org/schema_org_entity_names.h"
 #include "content/public/browser/storage_partition.h"
+#include "net/cookies/cookie_access_result.h"
+#include "services/data_decoder/public/cpp/test_support/in_process_data_decoder.h"
 #include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
 #include "services/network/test/test_url_loader_factory.h"
 #include "services/network/test/test_utils.h"
@@ -24,7 +27,60 @@ namespace media_feeds {
 
 using testing::_;
 
+namespace {
+
 const char kTestUrl[] = "https://www.google.com";
+
+const char kTestData[] = R"END({
+    "@context": "https://schema.org",
+    "@type": "CompleteDataFeed",
+    "dataFeedElement": [],
+    "provider": {
+      "@type": "Organization",
+      "name": "Media Feeds Developers",
+      "logo": [{
+        "@type": "ImageObject",
+        "width": 1113,
+        "height": 245,
+        "url": "https://wicg.github.io/media-feeds/data/logo_white.png",
+        "additionalProperty": {
+          "@type": "PropertyValue",
+          "name": "contentAttributes",
+          "value": ["forDarkBackground", "hasTitle", "transparentBackground"]
+        }
+      }]
+    }
+})END";
+
+const char kTestDataWithAssociatedOrigins[] = R"END({
+    "@context": "https://schema.org",
+    "@type": "CompleteDataFeed",
+    "dataFeedElement": [],
+    "additionalProperty": {
+      "@type": "PropertyValue",
+      "name": "associatedOrigin",
+      "value": ["https://login.example.org", "https://login.example.com"]
+    },
+    "provider": {
+      "@type": "Organization",
+      "name": "Media Feeds Developers",
+      "logo": [{
+        "@type": "ImageObject",
+        "width": 1113,
+        "height": 245,
+        "url": "https://wicg.github.io/media-feeds/data/logo_white.png",
+        "additionalProperty": {
+          "@type": "PropertyValue",
+          "name": "contentAttributes",
+          "value": ["forDarkBackground", "hasTitle", "transparentBackground"]
+        }
+      }]
+    }
+})END";
+
+const char kTestFeedName[] = "Media Feeds Developers";
+
+}  // namespace
 
 class MediaFeedsFetcherTest : public ChromeRenderViewHostTestHarness {
  public:
@@ -49,10 +105,14 @@ class MediaFeedsFetcherTest : public ChromeRenderViewHostTestHarness {
   bool RespondToFetch(
       const std::string& response_body,
       net::HttpStatusCode response_code = net::HttpStatusCode::HTTP_OK,
-      int net_error = net::OK) {
+      int net_error = net::OK,
+      bool was_fetched_via_cache = false) {
+    auto response_head = ::network::CreateURLResponseHead(response_code);
+    response_head->was_fetched_via_cache = was_fetched_via_cache;
+
     bool rv = url_loader_factory()->SimulateResponseForPendingRequest(
         GURL(kTestUrl), ::network::URLLoaderCompletionStatus(net_error),
-        ::network::CreateURLResponseHead(response_code), response_body);
+        std::move(response_head), response_body);
     task_environment()->RunUntilIdle();
     return rv;
   }
@@ -87,8 +147,8 @@ class MediaFeedsFetcherTest : public ChromeRenderViewHostTestHarness {
         *cc.get(), url, net::CookieOptions::MakeAllInclusive(),
         base::BindOnce(
             [](bool* result, base::RunLoop* run_loop,
-               net::CanonicalCookie::CookieInclusionStatus set_cookie_status) {
-              *result = set_cookie_status.IsInclude();
+               net::CookieAccessResult set_cookie_access_result) {
+              *result = set_cookie_access_result.status.IsInclude();
               run_loop->Quit();
             },
             &result, &run_loop));
@@ -109,68 +169,105 @@ class MediaFeedsFetcherTest : public ChromeRenderViewHostTestHarness {
 
   ::network::TestURLLoaderFactory url_loader_factory_;
   std::unique_ptr<MediaFeedsFetcher> fetcher_;
+  data_decoder::test::InProcessDataDecoder data_decoder_;
 };
 
 TEST_F(MediaFeedsFetcherTest, SucceedsOnBasicFetch) {
   GURL site_with_cookies(kTestUrl);
   ASSERT_TRUE(SetCookie(profile(), site_with_cookies, "testing"));
 
-  base::MockCallback<MediaFeedsFetcher::MediaFeedCallback> callback;
-
-  schema_org::improved::mojom::EntityPtr expected =
-      schema_org::improved::mojom::Entity::New();
-  expected->type = schema_org::entity::kCompleteDataFeed;
-  schema_org::improved::mojom::PropertyPtr property =
-      schema_org::improved::mojom::Property::New();
-  property->name = "name";
-  property->values = schema_org::improved::mojom::Values::New();
-  property->values->string_values.push_back("Media Site");
-  expected->properties.push_back(std::move(property));
-
-  schema_org::improved::mojom::EntityPtr out;
-
   fetcher()->FetchFeed(
-      GURL("https://www.google.com"),
+      GURL("https://www.google.com"), false,
       base::BindLambdaForTesting(
-          [&](const schema_org::improved::mojom::EntityPtr& response,
-              MediaFeedsFetcher::Status status) {
-            EXPECT_EQ(status, MediaFeedsFetcher::Status::kOk);
-            out = response.Clone();
+          [&](media_history::MediaHistoryKeyedService::MediaFeedFetchResult
+                  result) {
+            EXPECT_EQ(result.status, mojom::FetchResult::kSuccess);
+            EXPECT_FALSE(result.was_fetched_from_cache);
+            EXPECT_FALSE(result.gone);
+            EXPECT_EQ(kTestFeedName, result.display_name);
           }));
 
   WaitForRequest();
-  ASSERT_TRUE(RespondToFetch(
-      "{\"@type\":\"CompleteDataFeed\",\"name\":\"Media Site\"}"));
+  ASSERT_TRUE(RespondToFetch(kTestData));
+}
 
-  EXPECT_EQ(out, expected);
+TEST_F(MediaFeedsFetcherTest, SucceedsOnBasicFetch_ForceCache) {
+  GURL site_with_cookies(kTestUrl);
+  ASSERT_TRUE(SetCookie(profile(), site_with_cookies, "testing"));
+
+  fetcher()->FetchFeed(
+      GURL("https://www.google.com"), true,
+      base::BindLambdaForTesting(
+          [&](media_history::MediaHistoryKeyedService::MediaFeedFetchResult
+                  result) {
+            EXPECT_EQ(result.status, mojom::FetchResult::kSuccess);
+            EXPECT_FALSE(result.was_fetched_from_cache);
+            EXPECT_FALSE(result.gone);
+            EXPECT_EQ(kTestFeedName, result.display_name);
+          }));
+
+  WaitForRequest();
+  ASSERT_TRUE(RespondToFetch(kTestData));
+}
+
+TEST_F(MediaFeedsFetcherTest, SucceedsFetchFromCache) {
+  fetcher()->FetchFeed(
+      GURL("https://www.google.com"), false,
+      base::BindLambdaForTesting(
+          [&](media_history::MediaHistoryKeyedService::MediaFeedFetchResult
+                  result) {
+            EXPECT_EQ(result.status, mojom::FetchResult::kSuccess);
+            EXPECT_TRUE(result.was_fetched_from_cache);
+            EXPECT_FALSE(result.gone);
+            EXPECT_EQ(kTestFeedName, result.display_name);
+          }));
+
+  WaitForRequest();
+  ASSERT_TRUE(
+      RespondToFetch(kTestData, net::HttpStatusCode::HTTP_OK, net::OK, true));
 }
 
 TEST_F(MediaFeedsFetcherTest, ReturnsFailedResponseCode) {
-  base::MockCallback<MediaFeedsFetcher::MediaFeedCallback> callback;
-
   fetcher()->FetchFeed(
-      GURL("https://www.google.com"),
+      GURL("https://www.google.com"), false,
       base::BindLambdaForTesting(
-          [&](const schema_org::improved::mojom::EntityPtr& response,
-              MediaFeedsFetcher::Status status) {
-            EXPECT_EQ(status, MediaFeedsFetcher::Status::kRequestFailed);
-            EXPECT_FALSE(response);
+          [&](media_history::MediaHistoryKeyedService::MediaFeedFetchResult
+                  result) {
+            EXPECT_EQ(result.status, mojom::FetchResult::kFailedBackendError);
+            EXPECT_FALSE(result.was_fetched_from_cache);
+            EXPECT_FALSE(result.gone);
           }));
 
   WaitForRequest();
   ASSERT_TRUE(RespondToFetch("", net::HTTP_BAD_REQUEST));
 }
 
-TEST_F(MediaFeedsFetcherTest, ReturnsNetError) {
+TEST_F(MediaFeedsFetcherTest, ReturnsGone) {
   base::MockCallback<MediaFeedsFetcher::MediaFeedCallback> callback;
 
   fetcher()->FetchFeed(
-      GURL("https://www.google.com"),
+      GURL("https://www.google.com"), false,
       base::BindLambdaForTesting(
-          [&](const schema_org::improved::mojom::EntityPtr& response,
-              MediaFeedsFetcher::Status status) {
-            EXPECT_EQ(status, MediaFeedsFetcher::Status::kRequestFailed);
-            EXPECT_FALSE(response);
+          [&](media_history::MediaHistoryKeyedService::MediaFeedFetchResult
+                  result) {
+            EXPECT_EQ(result.status, mojom::FetchResult::kNone);
+            EXPECT_FALSE(result.was_fetched_from_cache);
+            EXPECT_TRUE(result.gone);
+          }));
+
+  WaitForRequest();
+  ASSERT_TRUE(RespondToFetch("", net::HTTP_GONE));
+}
+
+TEST_F(MediaFeedsFetcherTest, ReturnsNetError) {
+  fetcher()->FetchFeed(
+      GURL("https://www.google.com"), false,
+      base::BindLambdaForTesting(
+          [&](media_history::MediaHistoryKeyedService::MediaFeedFetchResult
+                  result) {
+            EXPECT_EQ(result.status, mojom::FetchResult::kFailedBackendError);
+            EXPECT_FALSE(result.was_fetched_from_cache);
+            EXPECT_FALSE(result.gone);
           }));
 
   WaitForRequest();
@@ -178,15 +275,14 @@ TEST_F(MediaFeedsFetcherTest, ReturnsNetError) {
 }
 
 TEST_F(MediaFeedsFetcherTest, ReturnsErrFileNotFoundForEmptyFeedData) {
-  base::MockCallback<MediaFeedsFetcher::MediaFeedCallback> callback;
-
   fetcher()->FetchFeed(
-      GURL("https://www.google.com"),
+      GURL("https://www.google.com"), false,
       base::BindLambdaForTesting(
-          [&](const schema_org::improved::mojom::EntityPtr& response,
-              MediaFeedsFetcher::Status status) {
-            EXPECT_EQ(status, MediaFeedsFetcher::Status::kNotFound);
-            EXPECT_FALSE(response);
+          [&](media_history::MediaHistoryKeyedService::MediaFeedFetchResult
+                  result) {
+            EXPECT_EQ(result.status, mojom::FetchResult::kFailedNetworkError);
+            EXPECT_FALSE(result.was_fetched_from_cache);
+            EXPECT_FALSE(result.gone);
           }));
 
   WaitForRequest();
@@ -194,20 +290,38 @@ TEST_F(MediaFeedsFetcherTest, ReturnsErrFileNotFoundForEmptyFeedData) {
 }
 
 TEST_F(MediaFeedsFetcherTest, ReturnsErrFailedForBadEntityData) {
-  base::MockCallback<MediaFeedsFetcher::MediaFeedCallback> callback;
-
   fetcher()->FetchFeed(
-      GURL("https://www.google.com"),
+      GURL("https://www.google.com"), false,
       base::BindLambdaForTesting(
-          [&](const schema_org::improved::mojom::EntityPtr& response,
-              MediaFeedsFetcher::Status status) {
-            EXPECT_EQ(status, MediaFeedsFetcher::Status::kInvalidFeedData);
-            EXPECT_FALSE(response);
+          [&](media_history::MediaHistoryKeyedService::MediaFeedFetchResult
+                  result) {
+            EXPECT_EQ(result.status, mojom::FetchResult::kFailedBackendError);
+            EXPECT_FALSE(result.was_fetched_from_cache);
+            EXPECT_FALSE(result.gone);
           }));
 
   WaitForRequest();
   ASSERT_TRUE(RespondToFetch(
       "{\"@type\":\"CompleteDataFeed\"\"name\":\"Bad json missing a comma\"}"));
+}
+
+TEST_F(MediaFeedsFetcherTest, Success_AssociatedOrigins_BothWork) {
+  GURL site_with_cookies(kTestUrl);
+  ASSERT_TRUE(SetCookie(profile(), site_with_cookies, "testing"));
+
+  fetcher()->FetchFeed(
+      GURL("https://www.google.com"), false,
+      base::BindLambdaForTesting(
+          [&](media_history::MediaHistoryKeyedService::MediaFeedFetchResult
+                  result) {
+            EXPECT_EQ(result.status, mojom::FetchResult::kSuccess);
+            EXPECT_FALSE(result.was_fetched_from_cache);
+            EXPECT_FALSE(result.gone);
+            EXPECT_EQ(kTestFeedName, result.display_name);
+          }));
+
+  WaitForRequest();
+  ASSERT_TRUE(RespondToFetch(kTestDataWithAssociatedOrigins));
 }
 
 }  // namespace media_feeds

@@ -6,7 +6,7 @@
 
 #include <utility>
 
-#include "base/logging.h"
+#include "base/notreached.h"
 #include "third_party/blink/renderer/modules/webtransport/quic_transport.h"
 #include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/heap/visitor.h"
@@ -40,13 +40,15 @@ void SendStream::ContextDestroyed() {
 
 void SendStream::SendFin() {
   quic_transport_->SendFin(stream_id_);
-}
-
-void SendStream::ForgetStream() {
   quic_transport_->ForgetStream(stream_id_);
 }
 
-void SendStream::Trace(Visitor* visitor) {
+void SendStream::OnOutgoingStreamAbort() {
+  quic_transport_->AbortStream(stream_id_);
+  quic_transport_->ForgetStream(stream_id_);
+}
+
+void SendStream::Trace(Visitor* visitor) const {
   visitor->Trace(outgoing_stream_);
   visitor->Trace(quic_transport_);
   ScriptWrappable::Trace(visitor);

@@ -11,6 +11,7 @@
 #include "chrome/browser/sync/test/integration/updated_progress_marker_checker.h"
 #include "components/sync/driver/profile_sync_service.h"
 #include "components/sync/test/fake_server/fake_server_http_post_provider.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/network_connection_change_simulator.h"
 #include "net/base/network_change_notifier.h"
 
@@ -33,6 +34,18 @@ class SyncExponentialBackoffTest : public SyncTest {
 
  private:
   DISALLOW_COPY_AND_ASSIGN(SyncExponentialBackoffTest);
+};
+
+class SyncExponentialBackoffTestWithVerifier
+    : public SyncExponentialBackoffTest {
+ public:
+  SyncExponentialBackoffTestWithVerifier() = default;
+  ~SyncExponentialBackoffTestWithVerifier() override = default;
+
+  bool UseVerifier() override {
+    // TODO(crbug.com/1137787): rewrite test to not use verifier.
+    return true;
+  }
 };
 
 // Helper class that checks if a sync client has successfully gone through
@@ -66,7 +79,8 @@ class ExponentialBackoffChecker : public SingleClientStatusChangeChecker {
   DISALLOW_COPY_AND_ASSIGN(ExponentialBackoffChecker);
 };
 
-IN_PROC_BROWSER_TEST_F(SyncExponentialBackoffTest, OfflineToOnline) {
+IN_PROC_BROWSER_TEST_F(SyncExponentialBackoffTestWithVerifier,
+                       OfflineToOnline) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
 
   // Add an item and ensure that sync is successful.

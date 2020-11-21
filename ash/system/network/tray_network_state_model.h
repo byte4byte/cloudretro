@@ -15,6 +15,7 @@
 #include "base/observer_list.h"
 #include "base/timer/timer.h"
 #include "chromeos/services/network_config/public/mojom/cros_network_config.mojom-forward.h"
+#include "chromeos/services/network_config/public/mojom/network_types.mojom-forward.h"
 #include "mojo/public/cpp/bindings/struct_ptr.h"
 
 namespace ash {
@@ -38,12 +39,16 @@ class ASH_EXPORT TrayNetworkStateModel {
 
   // Returns the DeviceStateType for |type| if a device exists or kUnavailable.
   chromeos::network_config::mojom::DeviceStateType GetDeviceState(
-      chromeos::network_config::mojom::NetworkType type);
+      chromeos::network_config::mojom::NetworkType type) const;
 
   // Convenience method to call the |remote_cros_network_config_| method.
   void SetNetworkTypeEnabledState(
       chromeos::network_config::mojom::NetworkType type,
       bool enabled);
+
+  // Returns true if built-in VPN is enabled.
+  // Note: Currently only built-in VPNs can be disabled by policy.
+  bool IsBuiltinVpnEnabled() const;
 
   // This used to be inlined but now requires details from the Impl class.
   chromeos::network_config::mojom::CrosNetworkConfig* cros_network_config();

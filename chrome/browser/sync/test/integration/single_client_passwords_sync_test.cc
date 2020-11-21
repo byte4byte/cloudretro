@@ -18,11 +18,12 @@
 #include "components/signin/public/identity_manager/identity_test_utils.h"
 #include "components/sync/driver/profile_sync_service.h"
 #include "components/sync/test/fake_server/fake_server_nigori_helper.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/test_launcher.h"
 
 namespace {
 
-using password_manager::features_util::SetAccountStorageOptIn;
+using password_manager::features_util::OptInToAccountStorage;
 using passwords_helper::AddLogin;
 using passwords_helper::CreateTestPasswordForm;
 using passwords_helper::GetPasswordCount;
@@ -31,7 +32,7 @@ using passwords_helper::GetVerifierPasswordCount;
 using passwords_helper::GetVerifierPasswordStore;
 using passwords_helper::ProfileContainsSamePasswordFormsAsVerifier;
 
-using autofill::PasswordForm;
+using password_manager::PasswordForm;
 
 using testing::ElementsAre;
 using testing::IsEmpty;
@@ -43,12 +44,21 @@ class SingleClientPasswordsSyncTest : public SyncTest {
  public:
   SingleClientPasswordsSyncTest() : SyncTest(SINGLE_CLIENT) {}
   ~SingleClientPasswordsSyncTest() override = default;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(SingleClientPasswordsSyncTest);
 };
 
-IN_PROC_BROWSER_TEST_F(SingleClientPasswordsSyncTest, Sanity) {
+class SingleClientPasswordsSyncTestWithVerifier
+    : public SingleClientPasswordsSyncTest {
+ public:
+  SingleClientPasswordsSyncTestWithVerifier() = default;
+  ~SingleClientPasswordsSyncTestWithVerifier() override = default;
+
+  bool UseVerifier() override {
+    // TODO(crbug.com/1137740): rewrite tests to not use verifier.
+    return true;
+  }
+};
+
+IN_PROC_BROWSER_TEST_F(SingleClientPasswordsSyncTestWithVerifier, Sanity) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
 
   PasswordForm form = CreateTestPasswordForm(0);
@@ -65,7 +75,7 @@ IN_PROC_BROWSER_TEST_F(SingleClientPasswordsSyncTest, Sanity) {
 // Verifies that committed passwords contain the appropriate proto fields, and
 // in particular lack some others that could potentially contain unencrypted
 // data. In this test, custom passphrase is NOT set.
-IN_PROC_BROWSER_TEST_F(SingleClientPasswordsSyncTest,
+IN_PROC_BROWSER_TEST_F(SingleClientPasswordsSyncTestWithVerifier,
                        CommitWithoutCustomPassphrase) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
 
@@ -90,7 +100,7 @@ IN_PROC_BROWSER_TEST_F(SingleClientPasswordsSyncTest,
 
 // Same as above but with custom passphrase set, which requires to prune commit
 // data even further.
-IN_PROC_BROWSER_TEST_F(SingleClientPasswordsSyncTest,
+IN_PROC_BROWSER_TEST_F(SingleClientPasswordsSyncTestWithVerifier,
                        CommitWithCustomPassphrase) {
   SetEncryptionPassphraseForClient(/*index=*/0, "hunter2");
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
@@ -114,7 +124,7 @@ IN_PROC_BROWSER_TEST_F(SingleClientPasswordsSyncTest,
 
 // Tests the scenario when a syncing user enables a custom passphrase. PASSWORDS
 // should be recommitted with the new encryption key.
-IN_PROC_BROWSER_TEST_F(SingleClientPasswordsSyncTest,
+IN_PROC_BROWSER_TEST_F(SingleClientPasswordsSyncTestWithVerifier,
                        ReencryptsDataWhenPassphraseIsSet) {
   ASSERT_TRUE(SetupSync());
   ASSERT_TRUE(ServerNigoriChecker(GetSyncService(0), fake_server_.get(),
@@ -306,9 +316,9 @@ IN_PROC_BROWSER_TEST_F(SingleClientPasswordsWithAccountStorageSyncTest,
   ASSERT_TRUE(GetClient(0)->AwaitSyncTransportActive());
   ASSERT_FALSE(GetSyncService(0)->IsSyncFeatureEnabled());
 
-  // Let the user opt in to the passwords account storage, and wait for it to
-  // become active.
-  SetAccountStorageOptIn(GetProfile(0)->GetPrefs(), GetSyncService(0), true);
+  // Let the user opt in to the account-scoped password storage, and wait for it
+  // to become active.
+  OptInToAccountStorage(GetProfile(0)->GetPrefs(), GetSyncService(0));
   PasswordSyncActiveChecker(GetSyncService(0)).Wait();
   ASSERT_TRUE(GetSyncService(0)->GetActiveDataTypes().Has(syncer::PASSWORDS));
 
@@ -339,9 +349,9 @@ IN_PROC_BROWSER_TEST_F(SingleClientPasswordsWithAccountStorageSyncTest,
   ASSERT_TRUE(GetClient(0)->AwaitSyncTransportActive());
   ASSERT_FALSE(GetSyncService(0)->IsSyncFeatureEnabled());
 
-  // Let the user opt in to the passwords account storage, and wait for it to
-  // become active.
-  SetAccountStorageOptIn(GetProfile(0)->GetPrefs(), GetSyncService(0), true);
+  // Let the user opt in to the account-scoped password storage, and wait for it
+  // to become active.
+  OptInToAccountStorage(GetProfile(0)->GetPrefs(), GetSyncService(0));
   PasswordSyncActiveChecker(GetSyncService(0)).Wait();
   ASSERT_TRUE(GetSyncService(0)->GetActiveDataTypes().Has(syncer::PASSWORDS));
 
@@ -405,9 +415,9 @@ IN_PROC_BROWSER_TEST_F(SingleClientPasswordsWithAccountStorageSyncTest,
   ASSERT_TRUE(GetClient(0)->AwaitSyncTransportActive());
   ASSERT_FALSE(GetSyncService(0)->IsSyncFeatureEnabled());
 
-  // Let the user opt in to the passwords account storage, and wait for it to
-  // become active.
-  SetAccountStorageOptIn(GetProfile(0)->GetPrefs(), GetSyncService(0), true);
+  // Let the user opt in to the account-scoped password storage, and wait for it
+  // to become active.
+  OptInToAccountStorage(GetProfile(0)->GetPrefs(), GetSyncService(0));
   PasswordSyncActiveChecker(GetSyncService(0)).Wait();
 
   // Make sure the password showed up in the account store.
@@ -444,9 +454,9 @@ IN_PROC_BROWSER_TEST_F(SingleClientPasswordsWithAccountStorageSyncTest,
   ASSERT_TRUE(GetClient(0)->AwaitSyncTransportActive());
   ASSERT_FALSE(GetSyncService(0)->IsSyncFeatureEnabled());
 
-  // Let the user opt in to the passwords account storage, and wait for it to
-  // become active.
-  SetAccountStorageOptIn(GetProfile(0)->GetPrefs(), GetSyncService(0), true);
+  // Let the user opt in to the account-scoped password storage, and wait for it
+  // to become active.
+  OptInToAccountStorage(GetProfile(0)->GetPrefs(), GetSyncService(0));
   PasswordSyncActiveChecker(GetSyncService(0)).Wait();
 
   // Make sure the password showed up in the account store.
@@ -497,9 +507,9 @@ IN_PROC_BROWSER_TEST_F(SingleClientPasswordsWithAccountStorageSyncTest,
   ASSERT_TRUE(GetClient(0)->AwaitSyncTransportActive());
   ASSERT_FALSE(GetSyncService(0)->IsSyncFeatureEnabled());
 
-  // Let the user opt in to the passwords account storage, and wait for it to
-  // become active.
-  SetAccountStorageOptIn(GetProfile(0)->GetPrefs(), GetSyncService(0), true);
+  // Let the user opt in to the account-scoped password storage, and wait for it
+  // to become active.
+  OptInToAccountStorage(GetProfile(0)->GetPrefs(), GetSyncService(0));
   PasswordSyncActiveChecker(GetSyncService(0)).Wait();
 
   // Make sure the password showed up in the account store.
@@ -531,10 +541,44 @@ IN_PROC_BROWSER_TEST_F(SingleClientPasswordsWithAccountStorageSyncTest,
   ASSERT_TRUE(GetClient(0)->AwaitSyncTransportActive());
   ASSERT_FALSE(GetSyncService(0)->IsSyncFeatureEnabled());
 
+  // The account-storage opt-in gets cleared when turning off Sync, so opt in
+  // again.
+  OptInToAccountStorage(GetProfile(0)->GetPrefs(), GetSyncService(0));
+  PasswordSyncActiveChecker(GetSyncService(0)).Wait();
+
   // Now the password should be in both stores: The profile store does *not* get
   // cleared when Sync gets disabled.
   EXPECT_EQ(passwords_helper::GetAllLogins(profile_store).size(), 1u);
   EXPECT_EQ(passwords_helper::GetAllLogins(account_store).size(), 1u);
+}
+
+// Regression test for crbug.com/1076378.
+IN_PROC_BROWSER_TEST_F(SingleClientPasswordsWithAccountStorageSyncTest,
+                       EnablesPasswordSyncOnOptingInToSync) {
+  AddTestPasswordToFakeServer();
+
+  ASSERT_TRUE(SetupClients()) << "SetupClients() failed.";
+
+  // Setup Sync for a secondary account (i.e. in transport mode).
+  AccountInfo account_info = secondary_account_helper::SignInSecondaryAccount(
+      GetProfile(0), &test_url_loader_factory_, "user@email.com");
+  ASSERT_TRUE(GetClient(0)->AwaitSyncTransportActive());
+  ASSERT_FALSE(GetSyncService(0)->IsSyncFeatureEnabled());
+
+  // The user is not opted in to the account-scoped password storage, so the
+  // passwords data type should *not* be active.
+  ASSERT_FALSE(GetSyncService(0)->GetActiveDataTypes().Has(syncer::PASSWORDS));
+
+  // Make the account primary and turn on Sync-the-feature.
+  secondary_account_helper::MakeAccountPrimary(GetProfile(0), "user@email.com");
+  GetSyncService(0)->GetUserSettings()->SetSyncRequested(true);
+  GetSyncService(0)->GetUserSettings()->SetFirstSetupComplete(
+      kSetSourceFromTest);
+  ASSERT_TRUE(GetClient(0)->AwaitSyncSetupCompletion());
+  ASSERT_TRUE(GetSyncService(0)->IsSyncFeatureEnabled());
+
+  // Now password sync should be active.
+  EXPECT_TRUE(GetSyncService(0)->GetActiveDataTypes().Has(syncer::PASSWORDS));
 }
 #endif  // !defined(OS_CHROMEOS)
 

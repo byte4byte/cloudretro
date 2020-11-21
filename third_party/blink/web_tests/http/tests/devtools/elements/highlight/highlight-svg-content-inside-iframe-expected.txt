@@ -24,6 +24,8 @@ svg-rect{
   ],
   "showRulers": true,
   "showExtensionLines": true,
+  "showAccessibilityInfo": true,
+  "colorFormat": "hex",
   "elementInfo": {
     "tagName": "rect",
     "idValue": "svg-rect",
@@ -31,7 +33,9 @@ svg-rect{
     "nodeHeight": "80",
     "isKeyboardFocusable": false,
     "accessibleName": "",
-    "accessibleRole": "generic"
+    "accessibleRole": "generic",
+    "layoutObjectName": "LayoutSVGRect",
+    "showAccessibilityInfo": true
   }
 }
 

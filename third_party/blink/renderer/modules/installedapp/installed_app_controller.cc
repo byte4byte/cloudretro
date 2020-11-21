@@ -13,7 +13,6 @@
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
-#include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/modules/manifest/manifest_manager.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 
@@ -24,7 +23,7 @@ InstalledAppController::~InstalledAppController() = default;
 void InstalledAppController::GetInstalledRelatedApps(
     std::unique_ptr<AppInstalledCallbacks> callbacks) {
   // When detached, the fetch logic is no longer valid.
-  if (!GetExecutionContext()) {
+  if (!GetSupplementable()->GetFrame()) {
     // TODO(mgiuca): AbortError rather than simply undefined.
     // https://crbug.com/687846
     callbacks->OnError();
@@ -39,29 +38,31 @@ void InstalledAppController::GetInstalledRelatedApps(
                     WrapPersistent(this), std::move(callbacks)));
 }
 
-void InstalledAppController::ProvideTo(LocalFrame& frame) {
-  Supplement<LocalFrame>::ProvideTo(
-      frame, MakeGarbageCollected<InstalledAppController>(frame));
-}
-
-InstalledAppController* InstalledAppController::From(LocalFrame& frame) {
+InstalledAppController* InstalledAppController::From(LocalDOMWindow& window) {
   InstalledAppController* controller =
-      Supplement<LocalFrame>::From<InstalledAppController>(frame);
-  DCHECK(controller);
+      Supplement<LocalDOMWindow>::From<InstalledAppController>(window);
+  if (!controller) {
+    controller = MakeGarbageCollected<InstalledAppController>(window);
+    Supplement<LocalDOMWindow>::ProvideTo(window, controller);
+  }
+
   return controller;
 }
 
 const char InstalledAppController::kSupplementName[] = "InstalledAppController";
 
-InstalledAppController::InstalledAppController(LocalFrame& frame)
-    : Supplement<LocalFrame>(frame),
-      ExecutionContextClient(frame.DomWindow()),
-      provider_(frame.DomWindow()) {}
+InstalledAppController::InstalledAppController(LocalDOMWindow& window)
+    : Supplement<LocalDOMWindow>(window),
+      provider_(&window) {}
 
 void InstalledAppController::OnGetManifestForRelatedApps(
     std::unique_ptr<AppInstalledCallbacks> callbacks,
     const KURL& url,
     mojom::blink::ManifestPtr manifest) {
+  if (!GetSupplementable()->GetFrame()) {
+    callbacks->OnError();
+    return;
+  }
   Vector<mojom::blink::RelatedApplicationPtr> mojo_related_apps;
   for (const auto& related_application : manifest->related_applications) {
     auto application = mojom::blink::RelatedApplication::New();
@@ -76,7 +77,7 @@ void InstalledAppController::OnGetManifestForRelatedApps(
     // See https://bit.ly/2S0zRAS for task types.
     GetSupplementable()->GetBrowserInterfaceBroker().GetInterface(
         provider_.BindNewPipeAndPassReceiver(
-            GetExecutionContext()->GetTaskRunner(TaskType::kMiscPlatformAPI)));
+            GetSupplementable()->GetTaskRunner(TaskType::kMiscPlatformAPI)));
     // TODO(mgiuca): Set a connection error handler. This requires a refactor to
     // work like NavigatorShare.cpp (retain a persistent list of clients to
     // reject all of their promises).
@@ -94,20 +95,22 @@ void InstalledAppController::OnFilterInstalledApps(
     Vector<mojom::blink::RelatedApplicationPtr> result) {
   HeapVector<Member<RelatedApplication>> applications;
   for (const auto& res : result) {
-    auto* app = MakeGarbageCollected<RelatedApplication>();
+    auto* app = RelatedApplication::Create();
     app->setPlatform(res->platform);
-    app->setUrl(res->url);
-    app->setId(res->id);
-    app->setVersion(res->version);
+    if (!res->url.IsNull())
+      app->setUrl(res->url);
+    if (!res->id.IsNull())
+      app->setId(res->id);
+    if (!res->version.IsNull())
+      app->setVersion(res->version);
     applications.push_back(app);
   }
   callbacks->OnSuccess(applications);
 }
 
-void InstalledAppController::Trace(Visitor* visitor) {
+void InstalledAppController::Trace(Visitor* visitor) const {
   visitor->Trace(provider_);
-  Supplement<LocalFrame>::Trace(visitor);
-  ExecutionContextClient::Trace(visitor);
+  Supplement<LocalDOMWindow>::Trace(visitor);
 }
 
 }  // namespace blink

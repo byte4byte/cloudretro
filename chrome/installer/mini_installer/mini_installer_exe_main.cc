@@ -4,6 +4,7 @@
 
 #include <stdint.h>
 
+#include "base/clang_profiling_buildflags.h"
 #include "build/build_config.h"
 #include "chrome/installer/mini_installer/mini_installer.h"
 
@@ -16,7 +17,7 @@ extern "C" int __stdcall MainEntryPoint() {
   ::ExitProcess(result.exit_code);
 }
 
-#if defined(ADDRESS_SANITIZER)
+#if defined(ADDRESS_SANITIZER) || BUILDFLAG(CLANG_PROFILING)
 // Executables instrumented with ASAN need CRT functions. We do not use
 // the /ENTRY switch for ASAN instrumented executable and a "main" function
 // is required.
@@ -39,7 +40,7 @@ extern "C" int WINAPI wWinMain(HINSTANCE /* instance */,
 // This also avoids having to explicitly set the __sse2_available hack when
 // linking with both the x64 and x86 obj files which is required when not
 // linking with the std C lib in certain instances (including Chromium) with
-// MSVC.  __sse2_available determines whether to use SSE2 intructions with
+// MSVC.  __sse2_available determines whether to use SSE2 instructions with
 // std C lib routines, and is set by MSVC's std C lib implementation normally.
 extern "C" {
 #ifdef __clang__

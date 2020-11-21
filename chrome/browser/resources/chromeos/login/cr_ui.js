@@ -33,11 +33,12 @@ cr.define('cr.ui', function() {
 
   /**
    * Called when focus is returned from ash::SystemTray.
+   * @param {boolean} reverse Is focus returned in reverse order?
    */
-  Oobe.focusReturned = function() {
+  Oobe.focusReturned = function(reverse) {
     if (Oobe.getInstance().currentScreen &&
         Oobe.getInstance().currentScreen.onFocusReturned) {
-      Oobe.getInstance().currentScreen.onFocusReturned();
+      Oobe.getInstance().currentScreen.onFocusReturned(reverse);
     }
   };
 
@@ -131,29 +132,6 @@ cr.define('cr.ui', function() {
   };
 
   /**
-   * Shows password changed screen that offers migration.
-   * @param {boolean} showError Whether to show the incorrect password error.
-   */
-  Oobe.showPasswordChangedScreen = function(showError, email) {
-    DisplayManager.showPasswordChangedScreen(showError, email);
-  };
-
-  /**
-   * Shows TPM error screen.
-   */
-  Oobe.showTpmError = function() {
-    DisplayManager.showTpmError();
-  };
-
-  /**
-   * Shows Active Directory password change screen.
-   * @param {string} username Name of the user that should change the password.
-   */
-  Oobe.showActiveDirectoryPasswordChangeScreen = function(username) {
-    DisplayManager.showActiveDirectoryPasswordChangeScreen(username);
-  };
-
-  /**
    * Show user-pods.
    */
   Oobe.showUserPods = function() {
@@ -195,14 +173,6 @@ cr.define('cr.ui', function() {
    */
   Oobe.setBluetoothDeviceInfo = function(bluetoothName) {
     DisplayManager.setBluetoothDeviceInfo(bluetoothName);
-  };
-
-  /**
-   * Updates the device requisition string shown in the requisition prompt.
-   * @param {string} requisition The device requisition.
-   */
-  Oobe.updateDeviceRequisition = function(requisition) {
-    Oobe.getInstance().updateDeviceRequisition(requisition);
   };
 
   /**
@@ -279,7 +249,7 @@ cr.define('cr.ui', function() {
         chrome.send('toggleFakeEnrollment');
       });
 
-      waitForOobeScreen('oauth-enrollment', function() {
+      waitForOobeScreen('enterprise-enrollment', function() {
         chrome.send('oauthEnrollCompleteLogin', [username]);
       });
     }
@@ -322,7 +292,7 @@ cr.define('cr.ui', function() {
    * Hotrod requisition for telemetry.
    */
   Oobe.remoraRequisitionForTesting = function() {
-    chrome.send('setDeviceRequisition', ['remora']);
+    chrome.send('WelcomeScreen.setDeviceRequisition', ['remora']);
   };
 
   /**
@@ -342,15 +312,22 @@ cr.define('cr.ui', function() {
   /**
    * Returns true if enrollment was successful. Dismisses the enrollment
    * attribute screen if it's present.
+   *
+   *  TODO(crbug.com/1111387) - Remove inline values from
+   *  ENROLLMENT_STEP once fully migrated to JS modules.
    */
   Oobe.isEnrollmentSuccessfulForTest = function() {
-    const step = $('enterprise-enrollment').currentStep_;
-    if (step === ENROLLMENT_STEP.ATTRIBUTE_PROMPT) {
+    const step = $('enterprise-enrollment').uiStep;
+    // See [ENROLLMENT_STEP.ATTRIBUTE_PROMPT]
+    // from c/b/r/chromeos/login/enterprise_enrollment.js
+    if (step === 'attribute-prompt') {
       chrome.send('oauthEnrollAttributes', ['', '']);
       return true;
     }
 
-    return step === ENROLLMENT_STEP.SUCCESS;
+    // See [ENROLLMENT_STEP.SUCCESS]
+    // from c/b/r/chromeos/login/enterprise_enrollment.js
+    return step === 'success';
   };
 
   /**
@@ -407,6 +384,13 @@ cr.define('cr.ui', function() {
   };
 
   /**
+   * Click on the primary action button ("Next" usually).
+   */
+  Oobe.clickGaiaPrimaryButtonForTesting = function() {
+    $('gaia-signin').clickPrimaryButtonForTesting();
+  };
+
+  /**
    * Sets the number of users on the views login screen.
    * @param {number} userCount The number of users.
    */
@@ -427,28 +411,3 @@ disableTextSelectAndDrag(function(e) {
   return src instanceof HTMLTextAreaElement ||
       src instanceof HTMLInputElement && /text|password|search/.test(src.type);
 });
-
-
-(function() {
-'use strict';
-
-document.addEventListener('DOMContentLoaded', function() {
-  try {
-    Oobe.initialize();
-  } finally {
-    // TODO(crbug.com/712078): Do not set readyForTesting in case of that
-    // initialize() is failed. Currently, in some situation, initialize()
-    // raises an exception unexpectedly. It means testing APIs should not
-    // be called then. However, checking it here now causes bots failures
-    // unfortunately. So, as a short term workaround, here set
-    // readyForTesting even on failures, just to make test bots happy.
-    Oobe.readyForTesting = true;
-  }
-});
-
-// Install a global error handler so stack traces are included in logs.
-window.onerror = function(message, file, line, column, error) {
-  if (error && error.stack)
-    console.error(error.stack);
-};
-})();

@@ -34,19 +34,14 @@ void RequestFileSystemDialogView::ShowDialog(
     const std::string& extension_name,
     const std::string& volume_label,
     bool writable,
-    const base::Callback<void(ui::DialogButton)>& callback) {
+    base::OnceCallback<void(ui::DialogButton)> callback) {
   constrained_window::ShowWebModalDialogViews(
       new RequestFileSystemDialogView(extension_name, volume_label, writable,
-                                      callback),
+                                      std::move(callback)),
       web_contents);
 }
 
 RequestFileSystemDialogView::~RequestFileSystemDialogView() {}
-
-base::string16 RequestFileSystemDialogView::GetAccessibleWindowTitle() const {
-  return l10n_util::GetStringUTF16(
-      IDS_FILE_SYSTEM_REQUEST_FILE_SYSTEM_DIALOG_TITLE);
-}
 
 ui::ModalType RequestFileSystemDialogView::GetModalType() const {
   return ui::MODAL_TYPE_CHILD;
@@ -61,26 +56,26 @@ RequestFileSystemDialogView::RequestFileSystemDialogView(
     const std::string& extension_name,
     const std::string& volume_label,
     bool writable,
-    const base::Callback<void(ui::DialogButton)>& callback)
-    : callback_(callback) {
-  DialogDelegate::SetDefaultButton(ui::DIALOG_BUTTON_CANCEL);
-  DialogDelegate::SetButtonLabel(
-      ui::DIALOG_BUTTON_OK,
-      l10n_util::GetStringUTF16(
-          IDS_FILE_SYSTEM_REQUEST_FILE_SYSTEM_DIALOG_ALLOW_BUTTON));
-  DialogDelegate::SetButtonLabel(
-      ui::DIALOG_BUTTON_CANCEL,
-      l10n_util::GetStringUTF16(
-          IDS_FILE_SYSTEM_REQUEST_FILE_SYSTEM_DIALOG_DENY_BUTTON));
+    base::OnceCallback<void(ui::DialogButton)> callback)
+    : callback_(std::move(callback)) {
+  SetAccessibleTitle(l10n_util::GetStringUTF16(
+      IDS_FILE_SYSTEM_REQUEST_FILE_SYSTEM_DIALOG_TITLE));
+  SetDefaultButton(ui::DIALOG_BUTTON_CANCEL);
+  SetButtonLabel(ui::DIALOG_BUTTON_OK,
+                 l10n_util::GetStringUTF16(
+                     IDS_FILE_SYSTEM_REQUEST_FILE_SYSTEM_DIALOG_ALLOW_BUTTON));
+  SetButtonLabel(ui::DIALOG_BUTTON_CANCEL,
+                 l10n_util::GetStringUTF16(
+                     IDS_FILE_SYSTEM_REQUEST_FILE_SYSTEM_DIALOG_DENY_BUTTON));
 
   auto run_callback = [](RequestFileSystemDialogView* dialog,
                          ui::DialogButton button) {
-    dialog->callback_.Run(button);
+    std::move(dialog->callback_).Run(button);
   };
-  DialogDelegate::SetAcceptCallback(base::BindOnce(
-      run_callback, base::Unretained(this), ui::DIALOG_BUTTON_OK));
-  DialogDelegate::SetCancelCallback(base::BindOnce(
-      run_callback, base::Unretained(this), ui::DIALOG_BUTTON_CANCEL));
+  SetAcceptCallback(base::BindOnce(run_callback, base::Unretained(this),
+                                   ui::DIALOG_BUTTON_OK));
+  SetCancelCallback(base::BindOnce(run_callback, base::Unretained(this),
+                                   ui::DIALOG_BUTTON_CANCEL));
 
   DCHECK(!callback_.is_null());
   set_margins(ChromeLayoutProvider::Get()->GetDialogInsetsForContentType(
@@ -97,7 +92,9 @@ RequestFileSystemDialogView::RequestFileSystemDialogView(
                : IDS_FILE_SYSTEM_REQUEST_FILE_SYSTEM_DIALOG_MESSAGE,
       app_name, volume_name, &placeholder_offsets);
 
-  views::StyledLabel* const label = new views::StyledLabel(message, nullptr);
+  views::StyledLabel* const label =
+      AddChildView(std::make_unique<views::StyledLabel>());
+  label->SetText(message);
   views::StyledLabel::RangeStyleInfo bold_style;
   bold_style.text_style = STYLE_EMPHASIZED;
 
@@ -111,6 +108,4 @@ RequestFileSystemDialogView::RequestFileSystemDialogView(
       bold_style);
 
   SetLayoutManager(std::make_unique<views::FillLayout>());
-
-  AddChildView(label);
 }

@@ -5,7 +5,11 @@
 import 'chrome://resources/cr_elements/cr_button/cr_button.m.js';
 import 'chrome://resources/cr_elements/cr_input/cr_input.m.js';
 import 'chrome://resources/cr_elements/cr_slider/cr_slider.m.js';
+import 'chrome://resources/cr_elements/cr_radio_group/cr_radio_group.m.js';
+import 'chrome://resources/cr_elements/cr_radio_button/cr_radio_button.m.js';
+import 'chrome://resources/cr_elements/icons.m.js';
 import 'chrome://resources/cr_elements/shared_vars_css.m.js';
+import 'chrome://resources/polymer/v3_0/iron-icon/iron-icon.js';
 import 'chrome://resources/polymer/v3_0/paper-progress/paper-progress.js';
 import './strings.m.js';
 
@@ -25,6 +29,7 @@ const State = {
   CONFIGURE: 'configure',
   INSTALLING: 'installing',
   ERROR: 'error',
+  ERROR_NO_RETRY: 'error_no_retry',
   CANCELING: 'canceling',
 };
 
@@ -88,8 +93,8 @@ Polymer({
     },
 
     /** @private */
-    error_: {
-      type: Number,
+    errorMessage_: {
+      type: String,
     },
 
     /**
@@ -130,6 +135,15 @@ Polymer({
       type: Number,
     },
 
+    isLowSpaceAvailable_: {
+      type: Boolean,
+    },
+
+    showDiskSlider_: {
+      type: Boolean,
+      value: false,
+    },
+
     username_: {
       type: String,
       value: loadTimeData.getString('defaultContainerUsername')
@@ -158,34 +172,44 @@ Polymer({
       callbackRouter.onInstallFinished.addListener(error => {
         if (error === InstallerError.kNone) {
           // Install succeeded.
-          this.closeDialog_();
+          this.closePage_();
         } else {
           assert(this.state_ === State.INSTALLING);
-          this.error_ = error;
+          this.errorMessage_ = this.getErrorMessage_(error);
           this.state_ = State.ERROR;
         }
       }),
-      callbackRouter.onCanceled.addListener(() => this.closeDialog_()),
-      callbackRouter.onAmountOfFreeDiskSpace.addListener(
-          (ticks, defaultIndex) => {
+      callbackRouter.onCanceled.addListener(() => this.closePage_()),
+      callbackRouter.requestClose.addListener(() => this.cancelOrBack_(true)),
+    ];
+
+    // TODO(lxj): The listener should only be invoked once, so it is fine to use
+    // it with a promise. However, it is probably better to just make the mojom
+    // method requestAmountOfFreeDiskSpace() returns the result directly.
+    this.diskSpacePromise_ = new Promise((resolve, reject) => {
+      this.listenerIds_.push(callbackRouter.onAmountOfFreeDiskSpace.addListener(
+          (ticks, defaultIndex, isLowSpaceAvailable) => {
             if (ticks.length === 0) {
-              // Error getting the data we need for the slider e.g. unable to
-              // get the amount of free space.
-              // TODO(crbug/1043838): Handle this e.g. show an error to the
-              // user.
+              reject();
             } else {
               this.defaultDiskSizeTick_ = defaultIndex;
               this.diskSizeTicks_ = ticks;
 
               this.minDisk_ = ticks[0].label;
               this.maxDisk_ = ticks[ticks.length - 1].label;
+
+              this.isLowSpaceAvailable_ = isLowSpaceAvailable;
+              if (isLowSpaceAvailable) {
+                this.showDiskSlider_ = true;
+              }
+              resolve();
             }
-          }),
-    ];
+          }));
+    });
 
     document.addEventListener('keyup', event => {
       if (event.key == 'Escape') {
-        this.onCancelButtonClick_();
+        this.cancelOrBack_();
         event.preventDefault();
       }
     });
@@ -202,10 +226,28 @@ Polymer({
 
   /** @private */
   onNextButtonClick_() {
-    assert(this.state_ === State.PROMPT);
-    this.state_ = State.CONFIGURE;
-    // Focus the username input and move the cursor to the end.
-    this.$.username.select(this.username_.length, this.username_.length);
+    if (!this.onNextButtonClickIsRunning_) {
+      assert(this.state_ === State.PROMPT);
+      this.onNextButtonClickIsRunning_ = true;
+      // Making this async is not ideal, but we should get the disk space very
+      // soon (if have not already got it) so the user will at worst see a very
+      // short delay.
+      this.diskSpacePromise_
+          .then(() => {
+            this.state_ = State.CONFIGURE;
+            // Focus the username input and move the cursor to the end.
+            this.$.username.select(
+                this.username_.length, this.username_.length);
+          })
+          .catch(() => {
+            this.errorMessage_ =
+                loadTimeData.getString('minimumFreeSpaceUnmetError');
+            this.state_ = State.ERROR_NO_RETRY;
+          })
+          .finally(() => {
+            this.onNextButtonClickIsRunning_ = false;
+          });
+    }
   },
 
   /** @private */
@@ -213,7 +255,11 @@ Polymer({
     assert(this.showInstallButton_(this.state_));
     var diskSize = 0;
     if (loadTimeData.getBoolean('diskResizingEnabled')) {
-      diskSize = this.diskSizeTicks_[this.$.diskSlider.value].value;
+      if (this.showDiskSlider_) {
+        diskSize = this.diskSizeTicks_[this.$$('#diskSlider').value].value;
+      } else {
+        diskSize = this.diskSizeTicks_[this.defaultDiskSizeTick_].value;
+      }
     }
     this.installerState_ = InstallerState.kStart;
     this.installerProgress_ = 0;
@@ -221,26 +267,41 @@ Polymer({
     BrowserProxy.getInstance().handler.install(diskSize, this.username_);
   },
 
-  /** @private */
+  /**
+   * This is used in app.html so that the event argument is not passed to
+   * cancelOrBack_().
+   *
+   * @private
+   */
   onCancelButtonClick_() {
+    this.cancelOrBack_();
+  },
+
+  /** @private */
+  cancelOrBack_(forceCancel = false) {
     switch (this.state_) {
       case State.PROMPT:
         BrowserProxy.getInstance().handler.cancelBeforeStart();
-        this.closeDialog_();
+        this.closePage_();
         break;
       case State.CONFIGURE:
-        this.state_ = State.PROMPT;
+        if (forceCancel) {
+          this.closePage_();
+        } else {
+          this.state_ = State.PROMPT;
+        }
         break;
       case State.INSTALLING:
         this.state_ = State.CANCELING;
         BrowserProxy.getInstance().handler.cancel();
         break;
       case State.ERROR:
-        this.closeDialog_();
+      case State.ERROR_NO_RETRY:
+        this.closePage_();
         break;
       case State.CANCELING:
         // Although cancel button has been disabled, we can reach here if users
-        // press <esc> key.
+        // press <esc> key or from mojom "RequestClose()".
         break;
       default:
         assertNotReached();
@@ -248,8 +309,8 @@ Polymer({
   },
 
   /** @private */
-  closeDialog_() {
-    BrowserProxy.getInstance().handler.close();
+  closePage_() {
+    BrowserProxy.getInstance().handler.onPageClosed();
   },
 
   /**
@@ -268,6 +329,7 @@ Polymer({
         titleId = 'installingTitle';
         break;
       case State.ERROR:
+      case State.ERROR_NO_RETRY:
         titleId = 'errorTitle';
         break;
       case State.CANCELING:
@@ -295,11 +357,7 @@ Polymer({
    * @private
    */
   showInstallButton_(state) {
-    if (this.configurePageAccessible_()) {
-      return state === State.CONFIGURE || state === State.ERROR;
-    } else {
-      return state === State.PROMPT || state === State.ERROR;
-    }
+    return state === State.CONFIGURE || state === State.ERROR;
   },
 
   /**
@@ -322,7 +380,7 @@ Polymer({
    * @private
    */
   showNextButton_(state) {
-    return this.configurePageAccessible_() && state === State.PROMPT;
+    return state === State.PROMPT;
   },
 
   /**
@@ -331,9 +389,6 @@ Polymer({
    * @private
    */
   getInstallButtonLabel_(state) {
-    if (!this.configurePageAccessible_() && state === State.PROMPT) {
-      return loadTimeData.getString('install');
-    }
     switch (state) {
       case State.CONFIGURE:
         return loadTimeData.getString('install');
@@ -357,14 +412,14 @@ Polymer({
       case InstallerState.kInstallImageLoader:
         messageId = 'loadTerminaMessage';
         break;
-      case InstallerState.kStartConcierge:
-        messageId = 'startConciergeMessage';
-        break;
       case InstallerState.kCreateDiskImage:
         messageId = 'createDiskImageMessage';
         break;
       case InstallerState.kStartTerminaVm:
         messageId = 'startTerminaVmMessage';
+        break;
+      case InstallerState.kStartLxd:
+        messageId = 'startLxdMessage';
         break;
       case InstallerState.kCreateContainer:
         // TODO(crbug.com/1015722): we are using the same message as for
@@ -406,14 +461,14 @@ Polymer({
       case InstallerError.kErrorLoadingTermina:
         messageId = 'loadTerminaError';
         break;
-      case InstallerError.kErrorStartingConcierge:
-        messageId = 'startConciergeError';
-        break;
       case InstallerError.kErrorCreatingDiskImage:
         messageId = 'createDiskImageError';
         break;
       case InstallerError.kErrorStartingTermina:
         messageId = 'startTerminaVmError';
+        break;
+      case InstallerError.kErrorStartingLxd:
+        messageId = 'startLxdError';
         break;
       case InstallerError.kErrorStartingContainer:
         messageId = 'startContainerError';
@@ -452,22 +507,8 @@ Polymer({
   /**
    * @private
    */
-  configurePageAccessible_() {
-    return this.showDiskResizing_() || this.showUsernameSelection_();
-  },
-
-  /**
-   * @private
-   */
   showDiskResizing_() {
     return loadTimeData.getBoolean('diskResizingEnabled');
-  },
-
-  /**
-   * @private
-   */
-  showUsernameSelection_() {
-    return loadTimeData.getBoolean('crostiniCustomUsername');
   },
 
   /**
@@ -476,7 +517,7 @@ Polymer({
   getConfigureMessageTitle_() {
     // If the flags only allow username config, then we show a username specific
     // subtitle instead of a generic configure subtitle.
-    if (this.showUsernameSelection_() && !this.showDiskResizing_())
+    if (!this.showDiskResizing_())
       return loadTimeData.getString('usernameMessage');
     return loadTimeData.getString('configureMessage');
   },
@@ -503,5 +544,16 @@ Polymer({
   getCancelButtonLabel_(state) {
     return loadTimeData.getString(
         state === State.CONFIGURE ? 'back' : 'cancel');
+  },
+
+  /** @private */
+  showErrorMessage_(state) {
+    return state === State.ERROR || state === State.ERROR_NO_RETRY;
+  },
+
+  /** @private */
+  onDiskSizeRadioChanged_(event) {
+    this.showDiskSlider_ =
+        (event.detail.value !== 'recommended' || !!this.isLowSpaceAvailable_);
   }
 });

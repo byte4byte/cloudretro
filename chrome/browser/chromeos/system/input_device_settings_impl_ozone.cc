@@ -46,10 +46,15 @@ class InputDeviceSettingsImplOzone : public InputDeviceSettings {
   void SetMouseReverseScroll(bool enabled) override;
   void SetMouseAcceleration(bool enabled) override;
   void SetMouseScrollAcceleration(bool enabled) override;
+  void PointingStickExists(DeviceExistsCallback callback) override;
+  void UpdatePointingStickSettings(
+      const PointingStickSettings& settings) override;
+  void SetPointingStickSensitivity(int value) override;
   void SetTouchpadAcceleration(bool enabled) override;
   void SetTouchpadScrollAcceleration(bool enabled) override;
   void ReapplyTouchpadSettings() override;
   void ReapplyMouseSettings() override;
+  void ReapplyPointingStickSettings() override;
   InputDeviceSettings::FakeInterface* GetFakeInterface() override;
   void SetInternalTouchpadEnabled(bool enabled) override;
   void SetTouchscreensEnabled(bool enabled) override;
@@ -61,6 +66,7 @@ class InputDeviceSettingsImplOzone : public InputDeviceSettings {
   // Respective device setting objects.
   TouchpadSettings current_touchpad_settings_;
   MouseSettings current_mouse_settings_;
+  PointingStickSettings current_pointing_stick_settings_;
 
   DISALLOW_COPY_AND_ASSIGN(InputDeviceSettingsImplOzone);
 };
@@ -157,6 +163,29 @@ void InputDeviceSettingsImplOzone::SetMouseAcceleration(bool enabled) {
 void InputDeviceSettingsImplOzone::SetMouseScrollAcceleration(bool enabled) {
   current_mouse_settings_.SetScrollAcceleration(enabled);
   input_controller()->SetMouseScrollAcceleration(enabled);
+}
+
+void InputDeviceSettingsImplOzone::PointingStickExists(
+    DeviceExistsCallback callback) {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  std::move(callback).Run(input_controller()->HasPointingStick());
+}
+
+void InputDeviceSettingsImplOzone::UpdatePointingStickSettings(
+    const PointingStickSettings& update) {
+  if (current_pointing_stick_settings_.Update(update))
+    ReapplyPointingStickSettings();
+}
+
+void InputDeviceSettingsImplOzone::SetPointingStickSensitivity(int value) {
+  DCHECK_GE(value, static_cast<int>(PointerSensitivity::kLowest));
+  DCHECK_LE(value, static_cast<int>(PointerSensitivity::kHighest));
+  current_pointing_stick_settings_.SetSensitivity(value);
+  input_controller()->SetPointingStickSensitivity(value);
+}
+
+void InputDeviceSettingsImplOzone::ReapplyPointingStickSettings() {
+  PointingStickSettings::Apply(current_pointing_stick_settings_, this);
 }
 
 void InputDeviceSettingsImplOzone::SetTouchpadAcceleration(bool enabled) {

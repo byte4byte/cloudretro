@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <utility>
 #include "base/auto_reset.h"
+#include "third_party/blink/public/common/features.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_context.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_loader.h"
@@ -19,8 +20,6 @@ constexpr size_t ResponseBodyLoader::kMaxNumConsumedBytesInTask;
 class ResponseBodyLoader::DelegatingBytesConsumer final
     : public BytesConsumer,
       public BytesConsumer::Client {
-  USING_GARBAGE_COLLECTED_MIXIN(DelegatingBytesConsumer);
-
  public:
   DelegatingBytesConsumer(
       BytesConsumer& bytes_consumer,
@@ -220,7 +219,7 @@ class ResponseBodyLoader::DelegatingBytesConsumer final
     }
   }
 
-  void Trace(Visitor* visitor) override {
+  void Trace(Visitor* visitor) const override {
     visitor->Trace(bytes_consumer_);
     visitor->Trace(loader_);
     visitor->Trace(bytes_consumer_client_);
@@ -279,14 +278,65 @@ class ResponseBodyLoader::DelegatingBytesConsumer final
   bool waiting_for_lookahead_bytes_ = false;
 };
 
+class ResponseBodyLoader::Buffer final
+    : public GarbageCollected<ResponseBodyLoader::Buffer> {
+ public:
+  explicit Buffer(ResponseBodyLoader* owner) : owner_(owner) {}
+
+  bool IsEmpty() const { return buffered_data_.IsEmpty(); }
+
+  void AddChunk(const char* buffer, size_t available) {
+    Vector<char> new_chunk;
+    new_chunk.Append(buffer, available);
+    buffered_data_.emplace_back(std::move(new_chunk));
+  }
+
+  // Dispatches the frontmost chunk in |buffered_data_|. Returns the size of
+  // the data that got dispatched.
+  size_t DispatchChunk(size_t max_chunk_size) {
+    // Dispatch the chunk at the front of the queue.
+    const Vector<char>& current_chunk = buffered_data_.front();
+    DCHECK_LT(offset_in_current_chunk_, current_chunk.size());
+    // Send as much of the chunk as possible without exceeding |max_chunk_size|.
+    base::span<const char> span(current_chunk);
+    span = span.subspan(offset_in_current_chunk_);
+    span = span.subspan(0, std::min(span.size(), max_chunk_size));
+    owner_->DidReceiveData(span);
+
+    size_t sent_size = span.size();
+    offset_in_current_chunk_ += sent_size;
+    if (offset_in_current_chunk_ == current_chunk.size()) {
+      // We've finished sending the chunk at the front of the queue, pop it so
+      // that we'll send the next chunk next time.
+      offset_in_current_chunk_ = 0;
+      buffered_data_.pop_front();
+    }
+
+    return sent_size;
+  }
+
+  void Trace(Visitor* visitor) const { visitor->Trace(owner_); }
+
+ private:
+  const Member<ResponseBodyLoader> owner_;
+  // We save the response body read when suspended as a queue of chunks so that
+  // we can free memory as soon as we finish sending a chunk completely.
+  Deque<Vector<char>> buffered_data_;
+  size_t offset_in_current_chunk_ = 0;
+};
+
 ResponseBodyLoader::ResponseBodyLoader(
     BytesConsumer& bytes_consumer,
     ResponseBodyLoaderClient& client,
     scoped_refptr<base::SingleThreadTaskRunner> task_runner)
     : bytes_consumer_(bytes_consumer),
       client_(client),
-      task_runner_(std::move(task_runner)) {
+      task_runner_(std::move(task_runner)),
+      buffer_data_while_suspended_(
+          base::FeatureList::IsEnabled(features::kLoadingTasksUnfreezable)) {
   bytes_consumer_->SetClient(this);
+  if (buffer_data_while_suspended_)
+    body_buffer_ = MakeGarbageCollected<Buffer>(this);
 }
 
 mojo::ScopedDataPipeConsumerHandle ResponseBodyLoader::DrainAsDataPipe(
@@ -435,7 +485,7 @@ void ResponseBodyLoader::OnStateChange() {
 
   size_t num_bytes_consumed = 0;
 
-  while (!aborted_ && !suspended_) {
+  while (!aborted_ && (!suspended_ || buffer_data_while_suspended_)) {
     if (kMaxNumConsumedBytesInTask == num_bytes_consumed) {
       // We've already consumed many bytes in this task. Defer the remaining
       // to the next task.
@@ -443,6 +493,15 @@ void ResponseBodyLoader::OnStateChange() {
                              base::BindOnce(&ResponseBodyLoader::OnStateChange,
                                             WrapPersistent(this)));
       return;
+    }
+
+    if (!suspended_ && body_buffer_ && !body_buffer_->IsEmpty()) {
+      DCHECK(buffer_data_while_suspended_);
+      // We need to empty |body_buffer_| first before reading more from
+      // |bytes_consumer_|.
+      num_bytes_consumed += body_buffer_->DispatchChunk(
+          kMaxNumConsumedBytesInTask - num_bytes_consumed);
+      continue;
     }
 
     const char* buffer = nullptr;
@@ -457,7 +516,13 @@ void ResponseBodyLoader::OnStateChange() {
 
       available =
           std::min(available, kMaxNumConsumedBytesInTask - num_bytes_consumed);
-      DidReceiveData(base::make_span(buffer, available));
+      if (suspended_) {
+        DCHECK(buffer_data_while_suspended_);
+        // When suspended, save the read data into |body_buffer_| instead.
+        body_buffer_->AddChunk(buffer, available);
+      } else {
+        DidReceiveData(base::make_span(buffer, available));
+      }
       result = bytes_consumer_->EndRead(available);
       in_two_phase_read_ = false;
       num_bytes_consumed += available;
@@ -468,6 +533,11 @@ void ResponseBodyLoader::OnStateChange() {
       }
     }
     DCHECK_NE(result, BytesConsumer::Result::kShouldWait);
+    if (suspended_ && result != BytesConsumer::Result::kOk) {
+      // Don't dispatch finish/failure messages when suspended. We'll dispatch
+      // them later when we call OnStateChange again after resuming.
+      return;
+    }
     if (result == BytesConsumer::Result::kDone) {
       DidFinishLoadingBody();
       return;
@@ -480,10 +550,11 @@ void ResponseBodyLoader::OnStateChange() {
   }
 }
 
-void ResponseBodyLoader::Trace(Visitor* visitor) {
+void ResponseBodyLoader::Trace(Visitor* visitor) const {
   visitor->Trace(bytes_consumer_);
   visitor->Trace(delegating_bytes_consumer_);
   visitor->Trace(client_);
+  visitor->Trace(body_buffer_);
   ResponseBodyLoaderDrainableInterface::Trace(visitor);
   ResponseBodyLoaderClient::Trace(visitor);
   BytesConsumer::Client::Trace(visitor);

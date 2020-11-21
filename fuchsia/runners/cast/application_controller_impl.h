@@ -5,6 +5,7 @@
 #ifndef FUCHSIA_RUNNERS_CAST_APPLICATION_CONTROLLER_IMPL_H_
 #define FUCHSIA_RUNNERS_CAST_APPLICATION_CONTROLLER_IMPL_H_
 
+#include <fuchsia/diagnostics/cpp/fidl.h>
 #include <fuchsia/media/sessions2/cpp/fidl.h>
 #include <fuchsia/web/cpp/fidl.h>
 #include <lib/fidl/cpp/binding.h>
@@ -15,9 +16,8 @@
 
 class ApplicationControllerImpl : public chromium::cast::ApplicationController {
  public:
-  ApplicationControllerImpl(
-      fuchsia::web::Frame* frame,
-      fidl::InterfaceHandle<chromium::cast::ApplicationContext> context);
+  ApplicationControllerImpl(fuchsia::web::Frame* frame,
+                            chromium::cast::ApplicationContext* context);
   ~ApplicationControllerImpl() final;
 
  protected:
@@ -27,6 +27,7 @@ class ApplicationControllerImpl : public chromium::cast::ApplicationController {
       ::fidl::InterfaceRequest<fuchsia::media::sessions2::Player> request)
       final;
   void SetBlockMediaLoading(bool blocked) override;
+  void GetPrivateMemorySize(GetPrivateMemorySizeCallback callback) override;
 
  private:
   fidl::Binding<chromium::cast::ApplicationController> binding_;

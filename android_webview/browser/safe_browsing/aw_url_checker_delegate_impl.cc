@@ -14,13 +14,12 @@
 #include "android_webview/browser/aw_contents_client_bridge.h"
 #include "android_webview/browser/aw_contents_io_thread_client.h"
 #include "android_webview/browser/network_service/aw_web_resource_request.h"
+#include "android_webview/browser/safe_browsing/aw_safe_browsing_allowlist_manager.h"
 #include "android_webview/browser/safe_browsing/aw_safe_browsing_ui_manager.h"
-#include "android_webview/browser/safe_browsing/aw_safe_browsing_whitelist_manager.h"
 #include "android_webview/browser_jni_headers/AwSafeBrowsingConfigHelper_jni.h"
 #include "base/android/jni_android.h"
 #include "base/bind.h"
 #include "base/feature_list.h"
-#include "base/task/post_task.h"
 #include "components/safe_browsing/core/db/database_manager.h"
 #include "components/safe_browsing/core/db/v4_protocol_manager_util.h"
 #include "components/safe_browsing/core/features.h"
@@ -60,7 +59,7 @@ void CallOnReceivedError(AwContentsClientBridge* client,
 AwUrlCheckerDelegateImpl::AwUrlCheckerDelegateImpl(
     scoped_refptr<safe_browsing::SafeBrowsingDatabaseManager> database_manager,
     scoped_refptr<AwSafeBrowsingUIManager> ui_manager,
-    AwSafeBrowsingWhitelistManager* whitelist_manager)
+    AwSafeBrowsingAllowlistManager* allowlist_manager)
     : database_manager_(std::move(database_manager)),
       ui_manager_(std::move(ui_manager)),
       threat_types_(safe_browsing::CreateSBThreatTypeSet(
@@ -68,7 +67,7 @@ AwUrlCheckerDelegateImpl::AwUrlCheckerDelegateImpl(
            safe_browsing::SB_THREAT_TYPE_URL_PHISHING,
            safe_browsing::SB_THREAT_TYPE_URL_UNWANTED,
            safe_browsing::SB_THREAT_TYPE_BILLING})),
-      whitelist_manager_(whitelist_manager) {}
+      allowlist_manager_(allowlist_manager) {}
 
 AwUrlCheckerDelegateImpl::~AwUrlCheckerDelegateImpl() = default;
 
@@ -84,8 +83,8 @@ void AwUrlCheckerDelegateImpl::StartDisplayingBlockingPageHelper(
   AwWebResourceRequest request(resource.url.spec(), method, is_main_frame,
                                has_user_gesture, headers);
 
-  base::PostTask(
-      FROM_HERE, {content::BrowserThread::UI},
+  content::GetUIThreadTaskRunner({})->PostTask(
+      FROM_HERE,
       base::BindOnce(&AwUrlCheckerDelegateImpl::StartApplicationResponse,
                      ui_manager_, resource, std::move(request)));
 }
@@ -97,8 +96,8 @@ void AwUrlCheckerDelegateImpl::
   NOTREACHED() << "Delayed warnings not implemented for WebView";
 }
 
-bool AwUrlCheckerDelegateImpl::IsUrlWhitelisted(const GURL& url) {
-  return whitelist_manager_->IsURLWhitelisted(url);
+bool AwUrlCheckerDelegateImpl::IsUrlAllowlisted(const GURL& url) {
+  return allowlist_manager_->IsUrlAllowed(url);
 }
 
 bool AwUrlCheckerDelegateImpl::ShouldSkipRequestCheck(
@@ -169,20 +168,17 @@ void AwUrlCheckerDelegateImpl::StartApplicationResponse(
     const AwWebResourceRequest& request) {
   content::WebContents* web_contents = resource.web_contents_getter.Run();
 
-  if (base::FeatureList::IsEnabled(safe_browsing::kCommittedSBInterstitials)) {
-    security_interstitials::SecurityInterstitialTabHelper*
-        security_interstitial_tab_helper = security_interstitials::
-            SecurityInterstitialTabHelper::FromWebContents(web_contents);
-    if (ui_manager->IsWhitelisted(resource) &&
-        security_interstitial_tab_helper &&
-        security_interstitial_tab_helper->IsDisplayingInterstitial()) {
-      // In this case we are about to leave an interstitial due to the user
-      // clicking proceed on it, we shouldn't call OnSafeBrowsingHit again.
-      resource.callback_thread->PostTask(
-          FROM_HERE, base::BindOnce(resource.callback, true /* proceed */,
-                                    false /* showed_interstitial */));
-      return;
-    }
+  security_interstitials::SecurityInterstitialTabHelper*
+      security_interstitial_tab_helper = security_interstitials::
+          SecurityInterstitialTabHelper::FromWebContents(web_contents);
+  if (ui_manager->IsWhitelisted(resource) && security_interstitial_tab_helper &&
+      security_interstitial_tab_helper->IsDisplayingInterstitial()) {
+    // In this case we are about to leave an interstitial due to the user
+    // clicking proceed on it, we shouldn't call OnSafeBrowsingHit again.
+    resource.callback_thread->PostTask(
+        FROM_HERE, base::BindOnce(resource.callback, true /* proceed */,
+                                  false /* showed_interstitial */));
+    return;
   }
 
   AwContentsClientBridge* client =
@@ -218,25 +214,23 @@ void AwUrlCheckerDelegateImpl::DoApplicationResponse(
   // TODO(ntfschr): fully handle reporting once we add support (crbug/688629)
   bool proceed;
   switch (action) {
-    case SafeBrowsingAction::SHOW_INTERSTITIAL:
-      base::PostTask(
-          FROM_HERE, {content::BrowserThread::UI},
+    case SafeBrowsingAction::SHOW_INTERSTITIAL: {
+      content::GetUIThreadTaskRunner({})->PostTask(
+          FROM_HERE,
           base::BindOnce(
               &AwUrlCheckerDelegateImpl::StartDisplayingDefaultBlockingPage,
               ui_manager, resource));
-      if (base::FeatureList::IsEnabled(
-              safe_browsing::kCommittedSBInterstitials)) {
-        AwContents* contents = AwContents::FromWebContents(web_contents);
-        if (!contents || !contents->CanShowInterstitial()) {
-          // With committed interstitials OnReceivedError for safe browsing
-          // blocked sites is generally called from the blocking page object.
-          // When CanShowInterstitial is false, no blocking page is created from
-          // StartDisplayingDefaultBlockingPage, so we handle the call here.
-          CallOnReceivedError(
-              AwContentsClientBridge::FromWebContents(web_contents), request,
-              entry);
-        }
+      AwContents* contents = AwContents::FromWebContents(web_contents);
+      if (!contents || !contents->CanShowInterstitial()) {
+        // With committed interstitials OnReceivedError for safe browsing
+        // blocked sites is generally called from the blocking page object.
+        // When CanShowInterstitial is false, no blocking page is created from
+        // StartDisplayingDefaultBlockingPage, so we handle the call here.
+        CallOnReceivedError(
+            AwContentsClientBridge::FromWebContents(web_contents), request,
+            entry);
       }
+    }
       return;
     case SafeBrowsingAction::PROCEED:
       proceed = true;
@@ -248,8 +242,7 @@ void AwUrlCheckerDelegateImpl::DoApplicationResponse(
       NOTREACHED();
   }
 
-  if (!proceed &&
-      base::FeatureList::IsEnabled(safe_browsing::kCommittedSBInterstitials)) {
+  if (!proceed) {
     // With committed interstitials OnReceivedError for safe browsing blocked
     // sites is generally called from the blocking page object. Since no
     // blocking page is created in this case, we manually call it here.
@@ -285,8 +278,8 @@ void AwUrlCheckerDelegateImpl::StartDisplayingDefaultBlockingPage(
   }
 
   // Reporting back that it is not okay to proceed with loading the URL.
-  base::PostTask(FROM_HERE, {content::BrowserThread::IO},
-                 base::BindOnce(resource.callback, false /* proceed */,
+  content::GetIOThreadTaskRunner({})->PostTask(
+      FROM_HERE, base::BindOnce(resource.callback, false /* proceed */,
                                 false /* showed_interstitial */));
 }
 

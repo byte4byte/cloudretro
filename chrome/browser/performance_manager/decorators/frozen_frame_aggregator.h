@@ -7,6 +7,7 @@
 
 #include "components/performance_manager/public/graph/frame_node.h"
 #include "components/performance_manager/public/graph/graph.h"
+#include "components/performance_manager/public/graph/node_data_describer.h"
 #include "components/performance_manager/public/graph/page_node.h"
 #include "components/performance_manager/public/graph/process_node.h"
 
@@ -22,6 +23,7 @@ class ProcessNodeImpl;
 // graph.
 class FrozenFrameAggregator : public FrameNode::ObserverDefaultImpl,
                               public GraphOwnedDefaultImpl,
+                              public NodeDataDescriberDefaultImpl,
                               public PageNode::ObserverDefaultImpl,
                               public ProcessNode::ObserverDefaultImpl {
  public:
@@ -45,8 +47,9 @@ class FrozenFrameAggregator : public FrameNode::ObserverDefaultImpl,
   // PageNodeObserver implementation:
   void OnPageNodeAdded(const PageNode* page_node) override;
 
-  // ProcessNodeObserver implementation:
-  void OnProcessNodeAdded(const ProcessNode* process_node) override;
+  // NodeDataDescriber implementation:
+  base::Value DescribePageNodeData(const PageNode* node) const override;
+  base::Value DescribeProcessNodeData(const ProcessNode* node) const override;
 
  protected:
   friend class FrozenFrameAggregatorTest;

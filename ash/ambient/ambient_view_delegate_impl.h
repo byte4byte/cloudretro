@@ -5,6 +5,7 @@
 #ifndef ASH_AMBIENT_AMBIENT_VIEW_DELEGATE_IMPL_H_
 #define ASH_AMBIENT_AMBIENT_VIEW_DELEGATE_IMPL_H_
 
+#include "ash/ambient/model/ambient_backend_model.h"
 #include "ash/ambient/ui/ambient_view_delegate.h"
 
 #include "base/memory/weak_ptr.h"
@@ -21,11 +22,16 @@ class AmbientViewDelegateImpl : public AmbientViewDelegate {
   ~AmbientViewDelegateImpl() override;
 
   // AmbientViewDelegate:
-  PhotoModel* GetPhotoModel() override;
-  void OnBackgroundPhotoEvents() override;
+  AmbientBackendModel* GetAmbientBackendModel() override;
+  void OnPhotoTransitionAnimationCompleted() override;
+
+  void AddObserver(AmbientViewDelegateObserver* observer);
+  void RemoveObserver(AmbientViewDelegateObserver* observer);
 
  private:
   AmbientController* const ambient_controller_;  // Owned by Shell.
+
+  base::ObserverList<AmbientViewDelegateObserver> view_delegate_observers_;
 
   base::WeakPtrFactory<AmbientViewDelegateImpl> weak_factory_{this};
 };

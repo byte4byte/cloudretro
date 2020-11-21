@@ -24,43 +24,12 @@ namespace {
 
 // Returns the frame owner node for the frame that contains the given child, if
 // one exists. Returns nullptr otherwise.
-const Node* GetFrameOwnerNode(const Node* child) {
+Node* GetFrameOwnerNode(const Node* child) {
   if (!child || !child->GetDocument().GetFrame() ||
       !child->GetDocument().GetFrame()->OwnerLayoutObject()) {
     return nullptr;
   }
   return child->GetDocument().GetFrame()->OwnerLayoutObject()->GetNode();
-}
-
-bool UpdateStyleAndLayoutForRangeIfNeeded(const EphemeralRangeInFlatTree& range,
-                                          DisplayLockActivationReason reason) {
-  if (range.IsNull() || range.IsCollapsed())
-    return false;
-  if (!RuntimeEnabledFeatures::CSSSubtreeVisibilityEnabled() ||
-      range.GetDocument()
-              .GetDisplayLockDocumentState()
-              .LockedDisplayLockCount() ==
-          range.GetDocument()
-              .GetDisplayLockDocumentState()
-              .DisplayLockBlockingAllActivationCount())
-    return false;
-  Vector<DisplayLockContext::ScopedForcedUpdate> scoped_forced_update_list_;
-  for (Node& node : range.Nodes()) {
-    for (Element* locked_activatable_ancestor :
-         DisplayLockUtilities::ActivatableLockedInclusiveAncestors(node,
-                                                                   reason)) {
-      DCHECK(locked_activatable_ancestor->GetDisplayLockContext());
-      DCHECK(locked_activatable_ancestor->GetDisplayLockContext()->IsLocked());
-      scoped_forced_update_list_.push_back(
-          locked_activatable_ancestor->GetDisplayLockContext()
-              ->GetScopedForcedUpdate());
-    }
-  }
-  if (!scoped_forced_update_list_.IsEmpty()) {
-    range.GetDocument().UpdateStyleAndLayout(
-        DocumentUpdateReason::kDisplayLock);
-  }
-  return !scoped_forced_update_list_.IsEmpty();
 }
 
 void PopulateAncestorContexts(Node* node,
@@ -75,11 +44,38 @@ void PopulateAncestorContexts(Node* node,
   }
 }
 
+template <typename Lambda>
+Element* LockedAncestorPreventingUpdate(const Node& node,
+                                        Lambda update_is_prevented) {
+  for (auto* ancestor =
+           DisplayLockUtilities::NearestLockedExclusiveAncestor(node);
+       ancestor;
+       ancestor =
+           DisplayLockUtilities::NearestLockedExclusiveAncestor(*ancestor)) {
+    DCHECK(ancestor->GetDisplayLockContext());
+    if (update_is_prevented(ancestor->GetDisplayLockContext()))
+      return ancestor;
+  }
+  return nullptr;
+}
+
+template <typename Lambda>
+Element* LockedAncestorPreventingUpdate(const LayoutObject& object,
+                                        Lambda update_is_prevented) {
+  if (auto* ancestor =
+          DisplayLockUtilities::NearestLockedExclusiveAncestor(object)) {
+    if (update_is_prevented(ancestor->GetDisplayLockContext()))
+      return ancestor;
+    return LockedAncestorPreventingUpdate(*ancestor, update_is_prevented);
+  }
+  return nullptr;
+}
+
 }  // namespace
 
 bool DisplayLockUtilities::ActivateFindInPageMatchRangeIfNeeded(
     const EphemeralRangeInFlatTree& range) {
-  if (!RuntimeEnabledFeatures::CSSSubtreeVisibilityEnabled())
+  if (!RuntimeEnabledFeatures::CSSContentVisibilityEnabled())
     return false;
   DCHECK(!range.IsNull());
   DCHECK(!range.IsCollapsed());
@@ -112,7 +108,7 @@ bool DisplayLockUtilities::ActivateSelectionRangeIfNeeded(
     const EphemeralRangeInFlatTree& range) {
   if (range.IsNull() || range.IsCollapsed())
     return false;
-  if (!RuntimeEnabledFeatures::CSSSubtreeVisibilityEnabled() ||
+  if (!RuntimeEnabledFeatures::CSSContentVisibilityEnabled() ||
       range.GetDocument()
               .GetDisplayLockDocumentState()
               .LockedDisplayLockCount() ==
@@ -144,7 +140,7 @@ DisplayLockUtilities::ActivatableLockedInclusiveAncestors(
     DisplayLockActivationReason reason) {
   HeapVector<Member<Element>> elements_to_activate;
   const_cast<Node*>(&node)->UpdateDistributionForFlatTreeTraversal();
-  if (!RuntimeEnabledFeatures::CSSSubtreeVisibilityEnabled() ||
+  if (!RuntimeEnabledFeatures::CSSContentVisibilityEnabled() ||
       node.GetDocument()
               .GetDisplayLockDocumentState()
               .LockedDisplayLockCount() ==
@@ -172,14 +168,15 @@ DisplayLockUtilities::ActivatableLockedInclusiveAncestors(
   return elements_to_activate;
 }
 
-DisplayLockUtilities::ScopedChainForcedUpdate::ScopedChainForcedUpdate(
-    const Node* node,
-    bool include_self)
+DisplayLockUtilities::ScopedForcedUpdate::Impl::Impl(const Node* node,
+                                                     bool include_self)
     : node_(node) {
-  if (!RuntimeEnabledFeatures::CSSSubtreeVisibilityEnabled())
+  if (!RuntimeEnabledFeatures::CSSContentVisibilityEnabled())
     return;
 
-  CreateParentFrameScopeIfNeeded(node);
+  auto* owner_node = GetFrameOwnerNode(node);
+  if (owner_node)
+    parent_frame_impl_ = MakeGarbageCollected<Impl>(owner_node, true);
 
   node->GetDocument().GetDisplayLockDocumentState().BeginNodeForcedScope(
       node, include_self, this);
@@ -197,10 +194,8 @@ DisplayLockUtilities::ScopedChainForcedUpdate::ScopedChainForcedUpdate(
   auto ancestor_view = [node, include_self] {
     if (auto* element = DynamicTo<Element>(node)) {
       auto* context = element->GetDisplayLockContext();
-      if (context && (include_self || !context->ShouldLayout(
-                                          DisplayLockLifecycleTarget::kSelf))) {
+      if (context && include_self)
         return FlatTreeTraversal::InclusiveAncestorsOf(*node);
-      }
     }
     return FlatTreeTraversal::AncestorsOf(*node);
   }();
@@ -214,30 +209,28 @@ DisplayLockUtilities::ScopedChainForcedUpdate::ScopedChainForcedUpdate(
     auto* ancestor_node = DynamicTo<Element>(ancestor);
     if (!ancestor_node)
       continue;
-    if (auto* context = ancestor_node->GetDisplayLockContext())
-      scoped_update_forced_map_.Set(context, context->GetScopedForcedUpdate());
+    if (auto* context = ancestor_node->GetDisplayLockContext()) {
+      context->NotifyForcedUpdateScopeStarted();
+      forced_context_set_.insert(context);
+    }
   }
 }
 
-DisplayLockUtilities::ScopedChainForcedUpdate::~ScopedChainForcedUpdate() {
-  if (!RuntimeEnabledFeatures::CSSSubtreeVisibilityEnabled())
-    return;
-  node_->GetDocument().GetDisplayLockDocumentState().EndNodeForcedScope(this);
+void DisplayLockUtilities::ScopedForcedUpdate::Impl::Destroy() {
+  if (RuntimeEnabledFeatures::CSSContentVisibilityEnabled())
+    node_->GetDocument().GetDisplayLockDocumentState().EndNodeForcedScope(this);
+  if (parent_frame_impl_)
+    parent_frame_impl_->Destroy();
+  for (auto context : forced_context_set_) {
+    context->NotifyForcedUpdateScopeEnded();
+  }
 }
 
-void DisplayLockUtilities::ScopedChainForcedUpdate::
-    CreateParentFrameScopeIfNeeded(const Node* node) {
-  auto* owner_node = GetFrameOwnerNode(node);
-  if (owner_node)
-    parent_frame_scope_.reset(new ScopedChainForcedUpdate(owner_node, true));
-}
-
-void DisplayLockUtilities::ScopedChainForcedUpdate::AddScopedForcedUpdate(
-    DisplayLockContext* context) {
-  auto it = scoped_update_forced_map_.find(context);
-  if (it != scoped_update_forced_map_.end())
-    return;
-  scoped_update_forced_map_.Set(context, context->GetScopedForcedUpdate());
+void DisplayLockUtilities::ScopedForcedUpdate::Impl::
+    AddForcedUpdateScopeForContext(DisplayLockContext* context) {
+  auto result = forced_context_set_.insert(context);
+  if (result.is_new_entry)
+    context->NotifyForcedUpdateScopeStarted();
 }
 
 const Element* DisplayLockUtilities::NearestLockedInclusiveAncestor(
@@ -246,7 +239,7 @@ const Element* DisplayLockUtilities::NearestLockedInclusiveAncestor(
   auto* element = DynamicTo<Element>(node);
   if (!element)
     return NearestLockedExclusiveAncestor(node);
-  if (!RuntimeEnabledFeatures::CSSSubtreeVisibilityEnabled() ||
+  if (!RuntimeEnabledFeatures::CSSContentVisibilityEnabled() ||
       !node.isConnected() ||
       node.GetDocument()
               .GetDisplayLockDocumentState()
@@ -266,9 +259,42 @@ Element* DisplayLockUtilities::NearestLockedInclusiveAncestor(Node& node) {
       NearestLockedInclusiveAncestor(static_cast<const Node&>(node)));
 }
 
+Element* DisplayLockUtilities::NearestHiddenMatchableInclusiveAncestor(
+    Element& element) {
+  if (!RuntimeEnabledFeatures::CSSContentVisibilityEnabled() ||
+      !element.isConnected() ||
+      element.GetDocument()
+              .GetDisplayLockDocumentState()
+              .LockedDisplayLockCount() == 0 ||
+      !element.CanParticipateInFlatTree()) {
+    return nullptr;
+  }
+
+  if (auto* context = element.GetDisplayLockContext()) {
+    if (context->GetState() == EContentVisibility::kHiddenMatchable) {
+      return &element;
+    }
+  }
+
+  element.UpdateDistributionForFlatTreeTraversal();
+  // TODO(crbug.com/924550): Once we figure out a more efficient way to
+  // determine whether we're inside a locked subtree or not, change this.
+  for (Node& ancestor : FlatTreeTraversal::AncestorsOf(element)) {
+    auto* ancestor_element = DynamicTo<Element>(ancestor);
+    if (!ancestor_element)
+      continue;
+    if (auto* context = ancestor_element->GetDisplayLockContext()) {
+      if (context->GetState() == EContentVisibility::kHiddenMatchable) {
+        return ancestor_element;
+      }
+    }
+  }
+  return nullptr;
+}
+
 Element* DisplayLockUtilities::NearestLockedExclusiveAncestor(
     const Node& node) {
-  if (!RuntimeEnabledFeatures::CSSSubtreeVisibilityEnabled() ||
+  if (!RuntimeEnabledFeatures::CSSContentVisibilityEnabled() ||
       !node.isConnected() ||
       node.GetDocument()
               .GetDisplayLockDocumentState()
@@ -293,41 +319,54 @@ Element* DisplayLockUtilities::NearestLockedExclusiveAncestor(
 
 Element* DisplayLockUtilities::HighestLockedInclusiveAncestor(
     const Node& node) {
-  if (!RuntimeEnabledFeatures::CSSSubtreeVisibilityEnabled() ||
-      node.GetDocument()
-              .GetDisplayLockDocumentState()
-              .LockedDisplayLockCount() == 0 ||
+  if (!RuntimeEnabledFeatures::CSSContentVisibilityEnabled() ||
       !node.CanParticipateInFlatTree()) {
     return nullptr;
   }
-  const_cast<Node*>(&node)->UpdateDistributionForFlatTreeTraversal();
-  Element* locked_ancestor = nullptr;
-  for (Node& ancestor : FlatTreeTraversal::InclusiveAncestorsOf(node)) {
-    auto* ancestor_node = DynamicTo<Element>(ancestor);
-    if (!ancestor_node)
-      continue;
-    if (auto* context = ancestor_node->GetDisplayLockContext()) {
-      if (context->IsLocked())
-        locked_ancestor = ancestor_node;
-    }
+  auto* node_ptr = const_cast<Node*>(&node);
+  node_ptr->UpdateDistributionForFlatTreeTraversal();
+  // If the exclusive result exists, then that's higher than this node, so
+  // return it.
+  if (auto* result = HighestLockedExclusiveAncestor(node))
+    return result;
+
+  // Otherwise, we know the node is not in a locked subtree, so the only
+  // other possibility is that the node itself is locked.
+  auto* element = DynamicTo<Element>(node_ptr);
+  if (element && element->GetDisplayLockContext() &&
+      element->GetDisplayLockContext()->IsLocked()) {
+    return element;
   }
-  return locked_ancestor;
+  return nullptr;
 }
 
 Element* DisplayLockUtilities::HighestLockedExclusiveAncestor(
     const Node& node) {
-  if (!RuntimeEnabledFeatures::CSSSubtreeVisibilityEnabled() ||
-      node.GetDocument()
-              .GetDisplayLockDocumentState()
-              .LockedDisplayLockCount() == 0 ||
+  if (!RuntimeEnabledFeatures::CSSContentVisibilityEnabled() ||
       !node.CanParticipateInFlatTree()) {
     return nullptr;
   }
   const_cast<Node*>(&node)->UpdateDistributionForFlatTreeTraversal();
 
-  if (Node* parent = FlatTreeTraversal::Parent(node))
-    return HighestLockedInclusiveAncestor(*parent);
-  return nullptr;
+  Node* parent = FlatTreeTraversal::Parent(node);
+  Element* locked_ancestor = nullptr;
+  while (parent) {
+    auto* locked_candidate = NearestLockedInclusiveAncestor(*parent);
+    auto* last_node = parent;
+    if (locked_candidate) {
+      locked_ancestor = locked_candidate;
+      parent = FlatTreeTraversal::Parent(*parent);
+    } else {
+      parent = nullptr;
+    }
+
+    if (!parent) {
+      parent = GetFrameOwnerNode(last_node);
+      if (parent)
+        parent->UpdateDistributionForFlatTreeTraversal();
+    }
+  }
+  return locked_ancestor;
 }
 
 Element* DisplayLockUtilities::NearestLockedInclusiveAncestor(
@@ -354,7 +393,7 @@ Element* DisplayLockUtilities::NearestLockedExclusiveAncestor(
 bool DisplayLockUtilities::IsInUnlockedOrActivatableSubtree(
     const Node& node,
     DisplayLockActivationReason activation_reason) {
-  if (!RuntimeEnabledFeatures::CSSSubtreeVisibilityEnabled(
+  if (!RuntimeEnabledFeatures::CSSContentVisibilityEnabled(
           node.GetExecutionContext()) ||
       node.GetDocument()
               .GetDisplayLockDocumentState()
@@ -377,19 +416,9 @@ bool DisplayLockUtilities::IsInUnlockedOrActivatableSubtree(
 
 bool DisplayLockUtilities::IsInLockedSubtreeCrossingFrames(
     const Node& source_node) {
-  if (!RuntimeEnabledFeatures::CSSSubtreeVisibilityEnabled())
+  if (!RuntimeEnabledFeatures::CSSContentVisibilityEnabled())
     return false;
   const Node* node = &source_node;
-
-  // Special case self-node checking.
-  auto* element = DynamicTo<Element>(node);
-  if (element && node->GetDocument()
-                     .GetDisplayLockDocumentState()
-                     .LockedDisplayLockCount()) {
-    auto* context = element->GetDisplayLockContext();
-    if (context && !context->ShouldLayout(DisplayLockLifecycleTarget::kSelf))
-      return true;
-  }
   const_cast<Node*>(node)->UpdateDistributionForFlatTreeTraversal();
 
   // Since we handled the self-check above, we need to do inclusive checks
@@ -409,7 +438,7 @@ bool DisplayLockUtilities::IsInLockedSubtreeCrossingFrames(
 }
 
 void DisplayLockUtilities::ElementLostFocus(Element* element) {
-  if (!RuntimeEnabledFeatures::CSSSubtreeVisibilityEnabled() ||
+  if (!RuntimeEnabledFeatures::CSSContentVisibilityEnabled() ||
       (element && element->GetDocument()
                           .GetDisplayLockDocumentState()
                           .DisplayLockCount() == 0))
@@ -421,7 +450,7 @@ void DisplayLockUtilities::ElementLostFocus(Element* element) {
   }
 }
 void DisplayLockUtilities::ElementGainedFocus(Element* element) {
-  if (!RuntimeEnabledFeatures::CSSSubtreeVisibilityEnabled() ||
+  if (!RuntimeEnabledFeatures::CSSContentVisibilityEnabled() ||
       (element && element->GetDocument()
                           .GetDisplayLockDocumentState()
                           .DisplayLockCount() == 0))
@@ -437,7 +466,7 @@ void DisplayLockUtilities::ElementGainedFocus(Element* element) {
 void DisplayLockUtilities::SelectionChanged(
     const EphemeralRangeInFlatTree& old_selection,
     const EphemeralRangeInFlatTree& new_selection) {
-  if (!RuntimeEnabledFeatures::CSSSubtreeVisibilityEnabled() ||
+  if (!RuntimeEnabledFeatures::CSSContentVisibilityEnabled() ||
       (!old_selection.IsNull() && old_selection.GetDocument()
                                           .GetDisplayLockDocumentState()
                                           .DisplayLockCount() == 0) ||
@@ -507,6 +536,87 @@ void DisplayLockUtilities::SelectionChanged(
 
 void DisplayLockUtilities::SelectionRemovedFromDocument(Document& document) {
   document.GetDisplayLockDocumentState().NotifySelectionRemoved();
+}
+
+Element* DisplayLockUtilities::LockedAncestorPreventingPrePaint(
+    const LayoutObject& object) {
+  return LockedAncestorPreventingUpdate(
+      object, [](DisplayLockContext* context) {
+        return !context->ShouldPrePaintChildren();
+      });
+}
+
+Element* DisplayLockUtilities::LockedAncestorPreventingLayout(
+    const LayoutObject& object) {
+  return LockedAncestorPreventingUpdate(
+      object, [](DisplayLockContext* context) {
+        return !context->ShouldLayoutChildren();
+      });
+}
+
+Element* DisplayLockUtilities::LockedAncestorPreventingStyle(const Node& node) {
+  return LockedAncestorPreventingUpdate(node, [](DisplayLockContext* context) {
+    return !context->ShouldStyleChildren();
+  });
+}
+
+bool DisplayLockUtilities::UpdateStyleAndLayoutForRangeIfNeeded(
+    const EphemeralRangeInFlatTree& range,
+    DisplayLockActivationReason reason) {
+  if (range.IsNull() || range.IsCollapsed())
+    return false;
+  if (!RuntimeEnabledFeatures::CSSContentVisibilityEnabled() ||
+      range.GetDocument()
+              .GetDisplayLockDocumentState()
+              .LockedDisplayLockCount() ==
+          range.GetDocument()
+              .GetDisplayLockDocumentState()
+              .DisplayLockBlockingAllActivationCount())
+    return false;
+  HeapVector<Member<DisplayLockContext>> forced_context_list_;
+  for (Node& node : range.Nodes()) {
+    for (Element* locked_activatable_ancestor :
+         DisplayLockUtilities::ActivatableLockedInclusiveAncestors(node,
+                                                                   reason)) {
+      DCHECK(locked_activatable_ancestor->GetDisplayLockContext());
+      DCHECK(locked_activatable_ancestor->GetDisplayLockContext()->IsLocked());
+      auto* context = locked_activatable_ancestor->GetDisplayLockContext();
+      // TODO(vmpstr): Clean this up not to call
+      // |NotifyForcedUpdateScopeStarted()| directly.
+      context->NotifyForcedUpdateScopeStarted();
+      forced_context_list_.push_back(context);
+    }
+  }
+  if (!forced_context_list_.IsEmpty()) {
+    range.GetDocument().UpdateStyleAndLayout(
+        DocumentUpdateReason::kDisplayLock);
+  }
+  for (auto context : forced_context_list_) {
+    context->NotifyForcedUpdateScopeEnded();
+  }
+  return !forced_context_list_.IsEmpty();
+}
+
+bool DisplayLockUtilities::PrePaintBlockedInParentFrame(LayoutView* view) {
+  auto* owner = view->GetFrameView()->GetFrame().OwnerLayoutObject();
+  if (!owner)
+    return false;
+
+  auto* element = NearestLockedInclusiveAncestor(*owner);
+  while (element) {
+    if (!element->GetDisplayLockContext()->ShouldPrePaintChildren())
+      return true;
+    element = NearestLockedExclusiveAncestor(*element);
+  }
+  return false;
+}
+
+bool DisplayLockUtilities::IsAutoWithoutLayout(const LayoutObject& object) {
+  auto* context = object.GetDisplayLockContext();
+  if (!context)
+    return false;
+  return !context->IsLocked() && context->IsAuto() &&
+         !context->HadLifecycleUpdateSinceLastUnlock();
 }
 
 }  // namespace blink

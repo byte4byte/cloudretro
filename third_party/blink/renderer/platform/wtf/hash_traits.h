@@ -98,11 +98,10 @@ struct GenericHashTraitsBase<false, T> {
 
   static constexpr bool kCanHaveDeletedValue = true;
 
-  // The kHasMovingCallback value is only used for HashTable backing stores.
-  // Currently it is needed for LinkedHashSet to register moving callback on
-  // write barrier. Users of this value have to provide RegisterMovingCallback
-  // function.
-  static constexpr bool kHasMovingCallback = false;
+  // The kCanTraceConcurrently value is used by Oilpan concurrent marking. Only
+  // type for which HashTraits<T>::kCanTraceConcurrently is true can be traced
+  // on a concurrent thread.
+  static constexpr bool kCanTraceConcurrently = false;
 };
 
 // Default integer traits disallow both 0 and -1 as keys (max value instead of
@@ -225,6 +224,12 @@ struct SimpleClassHashTraits : GenericHashTraits<T> {
     return value.IsHashTableDeletedValue();
   }
 };
+
+// Default traits disallow both 0 and max as keys -- use these traits to allow
+// all values as keys.
+template <typename T>
+struct HashTraits<IntegralWithAllKeys<T>>
+    : SimpleClassHashTraits<IntegralWithAllKeys<T>> {};
 
 template <typename P>
 struct HashTraits<scoped_refptr<P>> : SimpleClassHashTraits<scoped_refptr<P>> {
@@ -466,6 +471,11 @@ struct KeyValuePairHashTraits
   static bool IsDeletedValue(const TraitType& value) {
     return KeyTraits::IsDeletedValue(value.key);
   }
+
+  static constexpr bool kCanTraceConcurrently =
+      KeyTraitsArg::kCanTraceConcurrently &&
+      (ValueTraitsArg::kCanTraceConcurrently ||
+       !IsTraceable<typename ValueTraitsArg::TraitType>::value);
 };
 
 template <typename Key, typename Value>

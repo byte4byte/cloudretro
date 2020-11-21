@@ -9,6 +9,7 @@ import static org.chromium.chrome.browser.autofill_assistant.generic_ui.Assistan
 import android.content.Context;
 import android.text.TextUtils;
 import android.view.View;
+import android.view.ViewGroup;
 import android.widget.TextView;
 
 import androidx.annotation.Nullable;
@@ -22,6 +23,7 @@ import org.chromium.content.browser.input.PopupItemType;
 import org.chromium.content.browser.input.SelectPopupDialog;
 import org.chromium.content.browser.input.SelectPopupItem;
 import org.chromium.content.browser.picker.InputDialogContainer;
+import org.chromium.ui.UiUtils;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -132,6 +134,40 @@ public class AssistantViewInteractions {
             return false;
         }
         ((AssistantToggleButton) view).setChecked(checked.getBooleans()[0]);
+        return true;
+    }
+
+    @CalledByNative
+    private static void showGenericPopup(View contentView, Context context,
+            AssistantGenericUiDelegate delegate, String popupIdentifier) {
+        new UiUtils
+                .CompatibleAlertDialogBuilder(context,
+                        org.chromium.chrome.autofill_assistant.R.style.Theme_Chromium_AlertDialog)
+                .setView(contentView)
+                .setOnDismissListener(unused -> delegate.onGenericPopupDismissed(popupIdentifier))
+                .show();
+    }
+
+    @CalledByNative
+    private static boolean clearViewContainer(
+            View container, String viewIdentifier, AssistantGenericUiDelegate delegate) {
+        if (!(container instanceof ViewGroup)) {
+            return false;
+        }
+        ((ViewGroup) container).removeAllViews();
+        delegate.onViewContainerCleared(viewIdentifier);
+        return true;
+    }
+
+    @CalledByNative
+    private static boolean attachViewToParent(View parent, View view) {
+        if (view == null || !(parent instanceof ViewGroup)) {
+            return false;
+        }
+        if (view.getParent() != null) {
+            return false;
+        }
+        ((ViewGroup) parent).addView(view);
         return true;
     }
 }

@@ -14,9 +14,9 @@
 #include "chrome/browser/ui/webui/reset_password/reset_password.mojom.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/browser_resources.h"
-#include "components/safe_browsing/content/password_protection/metrics_util.h"
 #include "components/safe_browsing/content/password_protection/password_protection_service.h"
 #include "components/safe_browsing/core/common/safe_browsing_prefs.h"
+#include "components/safe_browsing/core/password_protection/metrics_util.h"
 #include "components/safe_browsing/core/proto/csd.pb.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/url_formatter/url_formatter.h"
@@ -113,6 +113,7 @@ ResetPasswordUI::ResetPasswordUI(content::WebUI* web_ui)
       password_type_(GetPasswordType(web_ui->GetWebContents())) {
   std::unique_ptr<content::WebUIDataSource> html_source(
       content::WebUIDataSource::Create(chrome::kChromeUIResetPasswordHost));
+  html_source->DisableTrustedTypesCSP();
   html_source->AddResourcePath("reset_password.js", IDR_RESET_PASSWORD_JS);
   html_source->AddResourcePath("reset_password.mojom-lite.js",
                                IDR_RESET_PASSWORD_MOJOM_LITE_JS);

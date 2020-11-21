@@ -4,14 +4,18 @@
 
 #include "chrome/browser/chromeos/smb_client/smbfs_share.h"
 
+#include <utility>
+
 #include "base/run_loop.h"
-#include "base/test/bind_test_util.h"
+#include "base/strings/string_split.h"
+#include "base/test/bind.h"
 #include "base/test/gmock_callback_support.h"
 #include "base/test/task_environment.h"
 #include "chrome/browser/chromeos/file_manager/fake_disk_mount_manager.h"
 #include "chrome/browser/chromeos/file_manager/volume_manager.h"
 #include "chrome/browser/chromeos/file_manager/volume_manager_factory.h"
 #include "chrome/browser/chromeos/file_manager/volume_manager_observer.h"
+#include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/chromeos/smb_client/smb_url.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chromeos/components/smbfs/smbfs_host.h"
@@ -33,9 +37,15 @@ namespace smb_client {
 namespace {
 
 constexpr char kSharePath[] = "smb://share/path";
+constexpr char kSharePath2[] = "smb://share/path2";
+constexpr char kShareUsername[] = "user";
+constexpr char kShareUsername2[] = "user2";
+constexpr char kShareWorkgroup[] = "workgroup";
+constexpr char kKerberosIdentity[] = "my-kerberos-identity";
 constexpr char kDisplayName[] = "Public";
 constexpr char kMountPath[] = "/share/mount/path";
 constexpr char kFileName[] = "file_name.ext";
+constexpr char kMountIdHashSeparator[] = "#";
 
 // Creates a new VolumeManager for tests.
 // By default, VolumeManager KeyedService is null for testing.
@@ -72,7 +82,20 @@ class MockSmbFsMounter : public smbfs::SmbFsMounter {
               (override));
 };
 
-class TestSmbFsImpl : public smbfs::mojom::SmbFs {};
+class TestSmbFsImpl : public smbfs::mojom::SmbFs {
+ public:
+  MOCK_METHOD(void,
+              RemoveSavedCredentials,
+              (RemoveSavedCredentialsCallback),
+              (override));
+
+  MOCK_METHOD(void,
+              DeleteRecursively,
+              (const base::FilePath&, DeleteRecursivelyCallback),
+              (override));
+};
+
+}  // namespace
 
 class SmbFsShareTest : public testing::Test {
  protected:
@@ -327,6 +350,150 @@ TEST_F(SmbFsShareTest, DisallowCredentialsDialogAfterTimeout) {
   run_loop.Run();
 }
 
-}  // namespace
+TEST_F(SmbFsShareTest, RemoveSavedCredentials) {
+  TestSmbFsImpl smbfs;
+  mojo::Receiver<smbfs::mojom::SmbFs> smbfs_receiver(&smbfs);
+  mojo::Remote<smbfs::mojom::SmbFsDelegate> delegate;
+
+  SmbFsShare share(&profile_, SmbUrl(kSharePath), kDisplayName, {});
+  share.SetMounterCreationCallbackForTest(mounter_creation_callback_);
+
+  EXPECT_CALL(*raw_mounter_, Mount(_))
+      .WillOnce([this, &share, &smbfs_receiver,
+                 &delegate](smbfs::SmbFsMounter::DoneCallback callback) {
+        std::move(callback).Run(
+            smbfs::mojom::MountError::kOk,
+            CreateSmbFsHost(&share, &smbfs_receiver, &delegate));
+      });
+  EXPECT_CALL(observer_, OnVolumeMounted(chromeos::MOUNT_ERROR_NONE, _))
+      .Times(1);
+  EXPECT_CALL(observer_, OnVolumeUnmounted(chromeos::MOUNT_ERROR_NONE, _))
+      .Times(1);
+
+  {
+    base::RunLoop run_loop;
+    share.Mount(base::BindLambdaForTesting([&run_loop](SmbMountResult result) {
+      EXPECT_EQ(result, SmbMountResult::kSuccess);
+      run_loop.Quit();
+    }));
+    run_loop.Run();
+  }
+
+  EXPECT_CALL(smbfs, RemoveSavedCredentials(_))
+      .WillOnce(base::test::RunOnceCallback<0>(true /* success */));
+  {
+    base::RunLoop run_loop;
+    share.RemoveSavedCredentials(
+        base::BindLambdaForTesting([&run_loop](bool success) {
+          EXPECT_TRUE(success);
+          run_loop.Quit();
+        }));
+    run_loop.Run();
+  }
+}
+
+TEST_F(SmbFsShareTest, RemoveSavedCredentials_Disconnect) {
+  TestSmbFsImpl smbfs;
+  mojo::Receiver<smbfs::mojom::SmbFs> smbfs_receiver(&smbfs);
+  mojo::Remote<smbfs::mojom::SmbFsDelegate> delegate;
+
+  SmbFsShare share(&profile_, SmbUrl(kSharePath), kDisplayName, {});
+  share.SetMounterCreationCallbackForTest(mounter_creation_callback_);
+
+  EXPECT_CALL(*raw_mounter_, Mount(_))
+      .WillOnce([this, &share, &smbfs_receiver,
+                 &delegate](smbfs::SmbFsMounter::DoneCallback callback) {
+        std::move(callback).Run(
+            smbfs::mojom::MountError::kOk,
+            CreateSmbFsHost(&share, &smbfs_receiver, &delegate));
+      });
+  EXPECT_CALL(observer_, OnVolumeMounted(chromeos::MOUNT_ERROR_NONE, _))
+      .Times(1);
+  EXPECT_CALL(observer_, OnVolumeUnmounted(chromeos::MOUNT_ERROR_NONE, _))
+      .Times(1);
+
+  {
+    base::RunLoop run_loop;
+    share.Mount(base::BindLambdaForTesting([&run_loop](SmbMountResult result) {
+      EXPECT_EQ(result, SmbMountResult::kSuccess);
+      run_loop.Quit();
+    }));
+    run_loop.Run();
+  }
+
+  EXPECT_CALL(smbfs, RemoveSavedCredentials(_))
+      .WillOnce([&smbfs_receiver](Unused) { smbfs_receiver.reset(); });
+  {
+    base::RunLoop run_loop;
+    share.RemoveSavedCredentials(
+        base::BindLambdaForTesting([&run_loop](bool success) {
+          EXPECT_FALSE(success);
+          run_loop.Quit();
+        }));
+    run_loop.Run();
+  }
+}
+
+TEST_F(SmbFsShareTest, GenerateStableMountIdInput) {
+  TestSmbFsImpl smbfs;
+
+  std::string profile_user_hash =
+      chromeos::ProfileHelper::Get()->GetUserIdHashFromProfile(&profile_);
+
+  smbfs::SmbFsMounter::MountOptions options1;
+  options1.username = kShareUsername;
+  options1.workgroup = kShareWorkgroup;
+  SmbFsShare share1(&profile_, SmbUrl(kSharePath), kDisplayName, options1);
+
+  std::string hash_input1 = share1.GenerateStableMountIdInput();
+  std::vector<std::string> tokens1 =
+      base::SplitString(hash_input1, kMountIdHashSeparator,
+                        base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL);
+  EXPECT_EQ(tokens1.size(), 5);
+  EXPECT_EQ(tokens1[0], profile_user_hash);
+  EXPECT_EQ(tokens1[1], SmbUrl(kSharePath).ToString());
+  EXPECT_EQ(tokens1[2], "0" /* kerberos */);
+  EXPECT_EQ(tokens1[3], kShareWorkgroup);
+  EXPECT_EQ(tokens1[4], kShareUsername);
+
+  smbfs::SmbFsMounter::MountOptions options2;
+  options2.kerberos_options =
+      base::make_optional<smbfs::SmbFsMounter::KerberosOptions>(
+          smbfs::SmbFsMounter::KerberosOptions::Source::kKerberos,
+          kKerberosIdentity);
+  SmbFsShare share2(&profile_, SmbUrl(kSharePath2), kDisplayName, options2);
+
+  std::string hash_input2 = share2.GenerateStableMountIdInput();
+  std::vector<std::string> tokens2 =
+      base::SplitString(hash_input2, kMountIdHashSeparator,
+                        base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL);
+  EXPECT_EQ(tokens2.size(), 5);
+  EXPECT_EQ(tokens2[0], profile_user_hash);
+  EXPECT_EQ(tokens2[1], SmbUrl(kSharePath2).ToString());
+  EXPECT_EQ(tokens2[2], "1" /* kerberos */);
+  EXPECT_EQ(tokens2[3], "");
+  EXPECT_EQ(tokens2[4], "");
+}
+
+TEST_F(SmbFsShareTest, GenerateStableMountId) {
+  TestSmbFsImpl smbfs;
+
+  smbfs::SmbFsMounter::MountOptions options1;
+  options1.username = kShareUsername;
+  SmbFsShare share1(&profile_, SmbUrl(kSharePath), kDisplayName, options1);
+  std::string mount_id1 = share1.GenerateStableMountId();
+
+  // Check: We get a different hash when options are varied.
+  smbfs::SmbFsMounter::MountOptions options2;
+  options2.username = kShareUsername2;
+  SmbFsShare share2(&profile_, SmbUrl(kSharePath), kDisplayName, options2);
+  std::string mount_id2 = share2.GenerateStableMountId();
+  EXPECT_TRUE(mount_id1.compare(mount_id2));
+
+  // Check: String is 64 characters long (SHA256 encoded as hex).
+  EXPECT_EQ(mount_id1.size(), 64);
+  EXPECT_EQ(mount_id2.size(), 64);
+}
+
 }  // namespace smb_client
 }  // namespace chromeos

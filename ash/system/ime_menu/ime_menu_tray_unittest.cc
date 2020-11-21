@@ -17,7 +17,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/accessibility/ax_node_data.h"
-#include "ui/base/ime/ime_bridge.h"
+#include "ui/base/ime/chromeos/ime_bridge.h"
 #include "ui/base/ime/text_input_flags.h"
 #include "ui/events/event.h"
 #include "ui/views/controls/label.h"
@@ -135,14 +135,12 @@ TEST_F(ImeMenuTrayTest, TrayLabelTest) {
   ImeInfo info1;
   info1.id = "ime1";
   info1.name = UTF8ToUTF16("English");
-  info1.medium_name = UTF8ToUTF16("English");
   info1.short_name = UTF8ToUTF16("US");
   info1.third_party = false;
 
   ImeInfo info2;
   info2.id = "ime2";
   info2.name = UTF8ToUTF16("English UK");
-  info2.medium_name = UTF8ToUTF16("English UK");
   info2.short_name = UTF8ToUTF16("UK");
   info2.third_party = true;
 
@@ -205,19 +203,16 @@ TEST_F(ImeMenuTrayTest, RefreshImeWithListViewCreated) {
   ImeInfo info1, info2, info3;
   info1.id = "ime1";
   info1.name = UTF8ToUTF16("English");
-  info1.medium_name = UTF8ToUTF16("English");
   info1.short_name = UTF8ToUTF16("US");
   info1.third_party = false;
 
   info2.id = "ime2";
   info2.name = UTF8ToUTF16("English UK");
-  info2.medium_name = UTF8ToUTF16("English UK");
   info2.short_name = UTF8ToUTF16("UK");
   info2.third_party = true;
 
   info3.id = "ime3";
   info3.name = UTF8ToUTF16("Pinyin");
-  info3.medium_name = UTF8ToUTF16("Chinese Pinyin");
   info3.short_name = UTF8ToUTF16("拼");
   info3.third_party = false;
 

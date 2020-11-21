@@ -75,17 +75,19 @@ class AvailabilityProber
   //
   // Please add the header file of the client when new items are added.
   enum class ClientName {
-    // chrome/browser/previews/previews_lite_page_redirect_decider.h
-    kLitepages = 0,
+    kLitepages_DEPRECATED = 0,
+    kLitepagesOriginCheck_DEPRECATED = 1,
 
-    // chrome/browser/previews/previews_lite_page_redirect_url_loader.h
-    kLitepagesOriginCheck = 1,
-
-    // chrome/browser/prerender/isolated/
-    // isolated_prerender_url_loader_interceptor.h
+    // chrome/browser/prefetch/prefetch_proxy/
+    // prefetch_proxy_url_loader_interceptor.h
     kIsolatedPrerenderOriginCheck = 2,
 
-    kMaxValue = kIsolatedPrerenderOriginCheck,
+    // chrome/browser/prefetch/prefetch_proxy/prefetch_proxy_origin_prober.h
+    kIsolatedPrerenderCanaryCheck_DEPRECATED = 3,
+    kIsolatedPrerenderTLSCanaryCheck = 4,
+    kIsolatedPrerenderDNSCanaryCheck = 5,
+
+    kMaxValue = kIsolatedPrerenderDNSCanaryCheck,
   };
 
   // This enum describes the different algorithms that can be used to calculate
@@ -162,6 +164,8 @@ class AvailabilityProber
 
   // Clears the prefs used in this class.
   static void ClearData(PrefService* pref_service);
+
+  base::WeakPtr<AvailabilityProber> AsWeakPtr() const;
 
   // Sends a probe now if the prober is currently inactive. If the probe is
   // active (i.e.: there are probes in flight), this is a no-op. If

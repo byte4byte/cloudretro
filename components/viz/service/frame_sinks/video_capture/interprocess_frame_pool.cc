@@ -7,7 +7,8 @@
 #include <algorithm>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
+#include "base/logging.h"
 
 using media::VideoFrame;
 using media::VideoPixelFormat;
@@ -37,6 +38,10 @@ scoped_refptr<VideoFrame> InterprocessFramePool::ReserveVideoFrame(
        ++it) {
     if (it->mapping.size() < bytes_required) {
       continue;
+    }
+    // The buffer will possibly be rewritten, so the marked frame may be lost.
+    if (it->mapping.memory() == marked_frame_buffer_) {
+      ClearFrameMarking();
     }
     PooledBuffer taken = std::move(*it);
     available_buffers_.erase(it.base() - 1);

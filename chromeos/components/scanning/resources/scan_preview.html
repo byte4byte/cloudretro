@@ -1,0 +1,84 @@
+<style include="scanning-shared scanning-fonts">
+  /* Styles part of the string returned by getHelperTextHtml_(). */
+  #boldHelperText {
+    font-weight: bold;
+  }
+
+  #helperText {
+    @apply --scanning-helper-text-font;
+    color: var(--scanning-helper-text-color);
+    margin: auto;
+    text-align: center;
+    width: 60%;
+  }
+
+  #helpOrProgress {
+    display: flex;
+    /* Calculate a height that results in a Letter aspect ratio (1:1.2941). */
+    height: calc(1.2941 * var(--left-panel-width));
+  }
+
+  #progressText {
+    @apply --scanning-progress-text-font;
+    color: var(--scanning-progress-text-color);
+  }
+
+  #scanProgress {
+    margin: auto;
+    text-align: center;
+    width: 60%;
+  }
+
+  .preview {
+    max-height: calc(100vh - var(--panel-container-margin-top));
+    overflow-y: scroll;
+  }
+
+  .preview::-webkit-scrollbar {
+    -webkit-appearance: none;
+    width: 4px;
+  }
+
+  .preview::-webkit-scrollbar-thumb {
+    background-color: rgba(0, 0, 0, 0.5);
+    border-radius: 4px;
+  }
+
+  .preview-item {
+    border: 1px solid var(--google-grey-200);
+    border-radius: 4px;
+    /* Subtract 2px for the border. */
+    width: calc(100% - 2px);
+  }
+
+  /* Add top margin to all but the first scanned image. */
+  .scanned-image:nth-of-type(n+2) {
+    margin-top: 8px;
+  }
+
+  paper-progress {
+    --paper-progress-active-color: var(--google-blue-600);
+    --paper-progress-container-color: var(--google-blue-200);
+    border-radius: 4px;
+    height: 4px;
+    margin-top: 12px;
+    width: 256px;
+  }
+</style>
+<div class="preview">
+  <div id="helpOrProgress" class="preview-item"
+      hidden$="[[shouldShowScannedImages_(appState)]]">
+    <div id="helperText" hidden$="[[shouldHideHelperText_(appState)]]">
+      <span inner-h-t-m-l="[[getHelperTextHtml_()]]"></span>
+    </div>
+    <div id="scanProgress" hidden$="[[shouldHideProgress_(appState)]]">
+      <span id="progressText">[[getProgressTextString_(pageNumber)]]</span>
+      <paper-progress value="[[progressPercent]]"></paper-progress>
+    </div>
+  </div>
+  <div id="scannedImages" hidden$="[[!shouldShowScannedImages_(appState)]]">
+    <template is="dom-repeat" items="[[objectUrls]]" as="url">
+      <img class="preview-item scanned-image" src="[[url]]">
+    </template>
+  </div>
+</div>

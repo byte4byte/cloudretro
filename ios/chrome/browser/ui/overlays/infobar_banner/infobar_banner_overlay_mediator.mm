@@ -6,7 +6,8 @@
 
 #import <UIKit/UIKit.h>
 
-#include "base/logging.h"
+#include "base/check.h"
+#include "base/notreached.h"
 #import "base/strings/sys_string_conversions.h"
 #include "ios/chrome/browser/overlays/public/infobar_banner/infobar_banner_overlay_responses.h"
 #include "ios/chrome/browser/overlays/public/overlay_callback_manager.h"
@@ -28,6 +29,10 @@
     DCHECK([self class].requestSupport->IsRequestSupported(request));
   }
   return self;
+}
+
+- (void)finishDismissal {
+  // No-op as default.
 }
 
 #pragma mark - Accessors

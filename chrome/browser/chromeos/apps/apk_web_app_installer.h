@@ -11,8 +11,9 @@
 #include "base/callback.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "base/optional.h"
 #include "chrome/browser/web_applications/components/web_app_id.h"
-#include "chrome/common/web_application_info.h"
+#include "chrome/browser/web_applications/components/web_application_info.h"
 #include "components/arc/mojom/app.mojom.h"
 
 class GURL;
@@ -28,9 +29,11 @@ namespace chromeos {
 // within it to install as a local web app.
 class ApkWebAppInstaller {
  public:
-  using InstallFinishCallback =
-      base::OnceCallback<void(const web_app::AppId&,
-                              web_app::InstallResultCode)>;
+  using InstallFinishCallback = base::OnceCallback<void(
+      const web_app::AppId&,
+      const bool is_web_only_twa,
+      const base::Optional<std::string> sha256_fingerprint,
+      web_app::InstallResultCode)>;
 
   // Do nothing class purely for the purpose of allowing us to specify
   // a WeakPtr<Owner> member as a proxy for a profile lifetime observer.
@@ -43,7 +46,7 @@ class ApkWebAppInstaller {
   // or an empty id if not.
   static void Install(Profile* profile,
                       arc::mojom::WebAppInfoPtr web_app_info,
-                      const std::vector<uint8_t>& icon_png_data,
+                      arc::mojom::RawIconPngDataPtr icon,
                       InstallFinishCallback callback,
                       base::WeakPtr<Owner> weak_owner);
 
@@ -56,14 +59,14 @@ class ApkWebAppInstaller {
 
   // Starts the installation flow by decoding icon data.
   void Start(arc::mojom::WebAppInfoPtr web_app_info,
-             const std::vector<uint8_t>& icon_png_data);
+             arc::mojom::RawIconPngDataPtr icon);
 
   // Calls |callback_| with |id|, and deletes this object. Virtual for testing.
   virtual void CompleteInstallation(const web_app::AppId& id,
                                     web_app::InstallResultCode code);
 
   // Callback method for installation completed response.
-  void OnWebAppCreated(const GURL& app_url,
+  void OnWebAppCreated(const GURL& start_url,
                        const web_app::AppId& app_id,
                        web_app::InstallResultCode code);
 
@@ -81,6 +84,8 @@ class ApkWebAppInstaller {
   // installation will be aborted. |weak_owner_|'s lifetime must be equal to or
   // shorter than that of |profile_|.
   Profile* profile_;
+  bool is_web_only_twa_;
+  base::Optional<std::string> sha256_fingerprint_;
   InstallFinishCallback callback_;
   base::WeakPtr<Owner> weak_owner_;
 

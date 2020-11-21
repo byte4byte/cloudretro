@@ -7,7 +7,6 @@
 #include <memory>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
 #include "base/callback_helpers.h"
 #include "base/run_loop.h"
 #include "base/stl_util.h"
@@ -20,9 +19,9 @@
 #include "components/policy/core/common/cloud/mock_device_management_service.h"
 #include "components/policy/test_support/local_policy_test_server.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/test/browser_test.h"
 #include "net/base/upload_bytes_element_reader.h"
 #include "net/base/upload_data_stream.h"
-#include "net/url_request/url_request.h"
 #include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
 #include "services/network/test/test_url_loader_factory.h"
 #include "services/network/test/test_utils.h"

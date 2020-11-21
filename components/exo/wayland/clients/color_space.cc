@@ -11,6 +11,7 @@
 
 #include "base/at_exit.h"
 #include "base/command_line.h"
+#include "base/logging.h"
 #include "base/message_loop/message_pump_type.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
@@ -29,7 +30,7 @@ void FrameCallback(void* data, wl_callback* callback, uint32_t time) {
 }
 
 void WriteMixedPrimaries(gbm_bo* bo, const gfx::Size& size) {
-  CHECK_EQ(gbm_bo_get_plane_count(bo), 1u);
+  CHECK_EQ(gbm_bo_get_plane_count(bo), 1);
   uint32_t stride;
   void* mapped_data;
   void* void_data = gbm_bo_map(bo, 0, 0, size.width(), size.height(),
@@ -229,6 +230,12 @@ int main(int argc, char* argv[]) {
       LOG(ERROR) << "Invalid value for range in cs2";
       return 1;
     }
+  }
+
+  if (!params.use_drm) {
+    LOG(ERROR) << "Missing --use-drm parameter which is required for gbm "
+                 "buffer allocation";
+    return 1;
   }
 
   params.drm_format = DRM_FORMAT_ARGB8888;

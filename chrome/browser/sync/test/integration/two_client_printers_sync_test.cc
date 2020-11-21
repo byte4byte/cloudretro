@@ -12,6 +12,7 @@
 #include "chrome/browser/sync/test/integration/printers_helper.h"
 #include "chrome/browser/sync/test/integration/profile_sync_service_harness.h"
 #include "chrome/browser/sync/test/integration/sync_test.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/test_utils.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
@@ -256,7 +257,6 @@ IN_PROC_BROWSER_TEST_F(TwoClientPrintersSyncTest, MakeAndModelMigration) {
 IN_PROC_BROWSER_TEST_F(TwoClientPrintersSyncTest,
                        InvalidPpdReferenceResolution) {
   ASSERT_TRUE(SetupClients());
-  base::HistogramTester histograms;
 
   // Initialize sync bridge with test printer.
   auto printer = CreateTestPrinterSpecifics(0);
@@ -287,6 +287,4 @@ IN_PROC_BROWSER_TEST_F(TwoClientPrintersSyncTest,
   spec_ppd_ref = spec_printer->ppd_reference();
   EXPECT_FALSE(spec_ppd_ref.autoconf());
   EXPECT_TRUE(spec_ppd_ref.has_user_supplied_ppd_url());
-  histograms.ExpectBucketCount("Printing.CUPS.InvalidPpdResolved",
-                               1 /* kResolved */, 1);
 }

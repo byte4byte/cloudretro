@@ -16,8 +16,8 @@
 #include "base/memory/ref_counted.h"
 #include "chrome/browser/android/vr/android_vsync_helper.h"
 #include "chrome/browser/android/vr/gvr_graphics_delegate.h"
-#include "chrome/browser/android/vr/web_xr_presentation_state.h"
 #include "chrome/browser/vr/base_scheduler_delegate.h"
+#include "device/vr/android/web_xr_presentation_state.h"
 #include "device/vr/public/mojom/vr_service.mojom.h"
 #include "device/vr/util/sliding_average.h"
 #include "mojo/public/cpp/bindings/pending_associated_receiver.h"
@@ -40,10 +40,13 @@ namespace gvr {
 class GvrApi;
 }
 
+namespace device {
+class MailboxToSurfaceBridge;
+}
+
 namespace vr {
 
 class GlBrowserInterface;
-class MailboxToSurfaceBridge;
 class SchedulerUiInterface;
 class ScopedGpuTrace;
 class SlidingTimeDeltaAverage;
@@ -63,7 +66,7 @@ class GvrSchedulerDelegate : public BaseSchedulerDelegate,
                        size_t sliding_time_size);
   ~GvrSchedulerDelegate() override;
 
-  WebXrPresentationState* webxr() { return &webxr_; }
+  device::WebXrPresentationState* webxr() { return &webxr_; }
 
  private:
   // SchedulerDelegate overrides.
@@ -106,7 +109,7 @@ class GvrSchedulerDelegate : public BaseSchedulerDelegate,
   device::mojom::VRPosePtr GetHeadPose(gfx::Transform* head_mat_out);
 
   void WebXrPrepareSharedBuffer();
-  void WebXrCreateOrResizeSharedBufferImage(WebXrSharedBuffer* buffer,
+  void WebXrCreateOrResizeSharedBufferImage(device::WebXrSharedBuffer* buffer,
                                             const gfx::Size& size);
 
   // Checks if we're in a valid state for starting animation of a new frame.
@@ -185,7 +188,7 @@ class GvrSchedulerDelegate : public BaseSchedulerDelegate,
 
   SchedulerBrowserRendererInterface* browser_renderer_ = nullptr;
 
-  WebXrPresentationState webxr_;
+  device::WebXrPresentationState webxr_;
   bool showing_vr_dialog_ = false;
   bool cardboard_gamepad_ = false;
 
@@ -204,7 +207,8 @@ class GvrSchedulerDelegate : public BaseSchedulerDelegate,
   mojo::Remote<device::mojom::XRPresentationClient> submit_client_;
   base::queue<uint16_t> pending_frames_;
 
-  base::queue<std::pair<WebXrPresentationState::FrameIndexType, WebVrBounds>>
+  base::queue<
+      std::pair<device::WebXrPresentationState::FrameIndexType, WebVrBounds>>
       pending_bounds_;
 
   int webvr_unstuff_ratelimit_frames_ = 0;
@@ -235,7 +239,7 @@ class GvrSchedulerDelegate : public BaseSchedulerDelegate,
       void(FrameType, const gfx::Transform&, std::unique_ptr<gl::GLFenceEGL>)>
       webxr_delayed_gvr_submit_;
 
-  std::unique_ptr<MailboxToSurfaceBridge> mailbox_bridge_;
+  std::unique_ptr<device::MailboxToSurfaceBridge> mailbox_bridge_;
   std::unique_ptr<ScopedGpuTrace> gpu_trace_;
 
   device::FPSMeter vr_ui_fps_meter_;

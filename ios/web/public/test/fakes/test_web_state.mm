@@ -41,7 +41,9 @@ void TestWebState::RemoveObserver(WebStateObserver* observer) {
   observers_.RemoveObserver(observer);
 }
 
-void TestWebState::CloseWebState() {}
+void TestWebState::CloseWebState() {
+  is_closed_ = true;
+}
 
 TestWebState::TestWebState()
     : browser_state_(nullptr),
@@ -52,6 +54,7 @@ TestWebState::TestWebState()
       is_evicted_(false),
       has_opener_(false),
       can_take_snapshot_(false),
+      is_closed_(false),
       trust_level_(kAbsolute),
       content_is_html_(true),
       web_view_proxy_(nil) {}
@@ -96,6 +99,10 @@ void TestWebState::SetWebUsageEnabled(bool enabled) {
 UIView* TestWebState::GetView() {
   return view_;
 }
+
+void TestWebState::DidCoverWebContent() {}
+
+void TestWebState::DidRevealWebContent() {}
 
 void TestWebState::WasShown() {
   is_visible_ = true;
@@ -251,6 +258,10 @@ void TestWebState::SetContentIsHTML(bool content_is_html) {
   content_is_html_ = content_is_html;
 }
 
+void TestWebState::SetContentsMimeType(const std::string& mime_type) {
+  mime_type_ = mime_type;
+}
+
 void TestWebState::SetTitle(const base::string16& title) {
   title_ = title;
 }
@@ -307,6 +318,12 @@ void TestWebState::OnPageLoaded(
 void TestWebState::OnNavigationStarted(NavigationContext* navigation_context) {
   for (auto& observer : observers_)
     observer.DidStartNavigation(this, navigation_context);
+}
+
+void TestWebState::OnNavigationRedirected(
+    NavigationContext* navigation_context) {
+  for (auto& observer : observers_)
+    observer.DidRedirectNavigation(this, navigation_context);
 }
 
 void TestWebState::OnNavigationFinished(NavigationContext* navigation_context) {
@@ -388,6 +405,10 @@ NSData* TestWebState::GetLastLoadedData() const {
   return last_loaded_data_;
 }
 
+bool TestWebState::IsClosed() const {
+  return is_closed_;
+}
+
 void TestWebState::SetCurrentURL(const GURL& url) {
   url_ = url;
 }
@@ -420,6 +441,10 @@ void TestWebState::RemovePolicyDecider(WebStatePolicyDecider* decider) {
   policy_deciders_.RemoveObserver(decider);
 }
 
+void TestWebState::DidChangeVisibleSecurityState() {
+  OnVisibleSecurityStateChanged();
+}
+
 bool TestWebState::HasOpener() const {
   return has_opener_;
 }
@@ -435,6 +460,11 @@ bool TestWebState::CanTakeSnapshot() const {
 void TestWebState::TakeSnapshot(const gfx::RectF& rect,
                                 SnapshotCallback callback) {
   std::move(callback).Run(gfx::Image([[UIImage alloc] init]));
+}
+
+void TestWebState::CreateFullPagePdf(
+    base::OnceCallback<void(NSData*)> callback) {
+  std::move(callback).Run([[NSData alloc] init]);
 }
 
 }  // namespace web

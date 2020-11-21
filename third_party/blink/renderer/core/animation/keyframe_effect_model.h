@@ -67,7 +67,7 @@ class CORE_EXPORT KeyframeEffectModelBase : public EffectModel {
       return keyframes_;
     }
 
-    void Trace(Visitor* visitor) { visitor->Trace(keyframes_); }
+    void Trace(Visitor* visitor) const { visitor->Trace(keyframes_); }
 
    private:
     void RemoveRedundantKeyframes();
@@ -89,6 +89,10 @@ class CORE_EXPORT KeyframeEffectModelBase : public EffectModel {
   bool HasFrames() const { return !keyframes_.IsEmpty(); }
   template <class K>
   void SetFrames(HeapVector<K>& keyframes);
+
+  // Keyframes for CSS animations require additional processing to lazy
+  // evaluate computed values.
+  virtual KeyframeVector GetComputedKeyframes(Element*) { return keyframes_; }
 
   CompositeOperation Composite() const { return composite_; }
   void SetComposite(CompositeOperation composite);
@@ -153,11 +157,18 @@ class CORE_EXPORT KeyframeEffectModelBase : public EffectModel {
     return has_revert_;
   }
 
+  bool HasNonVariableProperty() const;
+
   bool IsTransformRelatedEffect() const override;
+
+  // Update properties used in resolving logical properties. Returns true if
+  // one or more keyframes changed as a result of the update.
+  bool SetLogicalPropertyResolutionContext(TextDirection text_direction,
+                                           WritingMode writing_mode);
 
   virtual KeyframeEffectModelBase* Clone() = 0;
 
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
 
  protected:
   KeyframeEffectModelBase(CompositeOperation composite,
@@ -220,7 +231,7 @@ class CORE_EXPORT KeyframeEffectModelBase : public EffectModel {
 
 // Time independent representation of an Animation's keyframes.
 template <class K>
-class KeyframeEffectModel final : public KeyframeEffectModelBase {
+class KeyframeEffectModel : public KeyframeEffectModelBase {
  public:
   using KeyframeVector = HeapVector<Member<K>>;
   KeyframeEffectModel(

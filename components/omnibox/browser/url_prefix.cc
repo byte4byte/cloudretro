@@ -4,6 +4,7 @@
 
 #include "components/omnibox/browser/url_prefix.h"
 
+#include "base/check_op.h"
 #include "base/i18n/case_conversion.h"
 #include "base/logging.h"
 #include "base/no_destructor.h"

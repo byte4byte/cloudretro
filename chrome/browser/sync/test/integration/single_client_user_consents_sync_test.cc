@@ -14,6 +14,7 @@
 #include "components/consent_auditor/consent_auditor.h"
 #include "components/sync/driver/sync_driver_switches.h"
 #include "components/sync/protocol/user_consent_specifics.pb.h"
+#include "content/public/test/browser_test.h"
 
 using consent_auditor::ConsentStatus;
 using consent_auditor::Feature;
@@ -26,13 +27,7 @@ using SyncConsent = sync_pb::UserConsentTypes::SyncConsent;
 namespace {
 
 CoreAccountId GetAccountId() {
-#if defined(OS_CHROMEOS)
-  // TODO(vitaliii): Unify the two, because it takes ages to debug and
-  // impossible to discover otherwise.
-  return CoreAccountId("user@gmail.com");
-#else
   return CoreAccountId("gaia_id_for_user_gmail.com");
-#endif
 }
 
 class UserConsentEqualityChecker : public SingleClientStatusChangeChecker {
@@ -90,9 +85,8 @@ class UserConsentEqualityChecker : public SingleClientStatusChangeChecker {
 
 class SingleClientUserConsentsSyncTest : public SyncTest {
  public:
-  SingleClientUserConsentsSyncTest() : SyncTest(SINGLE_CLIENT) {
-    DisableVerifier();
-  }
+  SingleClientUserConsentsSyncTest() : SyncTest(SINGLE_CLIENT) {}
+  ~SingleClientUserConsentsSyncTest() override = default;
 
   bool ExpectUserConsents(
       std::vector<UserConsentSpecifics> expected_specifics) {
@@ -100,9 +94,6 @@ class SingleClientUserConsentsSyncTest : public SyncTest {
                                       expected_specifics)
         .Wait();
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(SingleClientUserConsentsSyncTest);
 };
 
 IN_PROC_BROWSER_TEST_F(SingleClientUserConsentsSyncTest, ShouldSubmit) {

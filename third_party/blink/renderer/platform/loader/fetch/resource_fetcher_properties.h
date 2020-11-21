@@ -40,7 +40,7 @@ class PLATFORM_EXPORT ResourceFetcherProperties
 
   ResourceFetcherProperties() = default;
   virtual ~ResourceFetcherProperties() = default;
-  virtual void Trace(Visitor*) {}
+  virtual void Trace(Visitor*) const {}
 
   // Returns the client settings object bound to this global context.
   virtual const FetchClientSettingsObject& GetFetchClientSettingsObject()
@@ -68,6 +68,11 @@ class PLATFORM_EXPORT ResourceFetcherProperties
   // the loading pipeline continues working after detached (e.g., for fetch()
   // operations with "keepalive" specified).
   virtual bool IsDetached() const = 0;
+
+  // Returns whether the loading is deferred. When true, loading tasks keep
+  // running but the data is queued in the loading pipeline on the renderer.
+  // Upon resume the data is given to client modules such as scripts.
+  virtual bool IsLoadDeferred() const = 0;
 
   // Returns whether the main resource for this global context is loaded.
   virtual bool IsLoadComplete() const = 0;
@@ -103,7 +108,7 @@ class PLATFORM_EXPORT DetachableResourceFetcherProperties final
 
   void Detach();
 
-  void Trace(Visitor* visitor) override;
+  void Trace(Visitor* visitor) const override;
 
   // ResourceFetcherProperties implementation
   // Add a test in resource_fetcher_test.cc when you change behaviors.
@@ -130,6 +135,9 @@ class PLATFORM_EXPORT DetachableResourceFetcherProperties final
   }
   bool IsDetached() const override {
     return properties_ ? properties_->IsDetached() : true;
+  }
+  bool IsLoadDeferred() const override {
+    return properties_ ? properties_->IsLoadDeferred() : false;
   }
   bool IsLoadComplete() const override {
     return properties_ ? properties_->IsLoadComplete() : load_complete_;

@@ -9,6 +9,7 @@
 
 #include "base/strings/string16.h"
 #include "chromeos/services/network_config/public/mojom/cros_network_config.mojom-forward.h"
+#include "chromeos/services/network_config/public/mojom/network_types.mojom-forward.h"
 #include "ui/gfx/image/image_skia.h"
 
 namespace gfx {
@@ -40,7 +41,6 @@ struct NetworkInfo {
   chromeos::network_config::mojom::OncSource source;
   int battery_percentage = 0;
   int signal_strength = 0;
-  std::string captive_portal_provider_name;
 };
 
 }  // namespace ash

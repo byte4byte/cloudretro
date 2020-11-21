@@ -4,7 +4,7 @@
 
 #import "ios/chrome/browser/infobars/overlays/browser_agent/interaction_handlers/passwords/password_infobar_banner_interaction_handler.h"
 
-#include "base/logging.h"
+#include "base/check.h"
 #include "ios/chrome/browser/infobars/infobar_ios.h"
 #import "ios/chrome/browser/infobars/overlays/infobar_overlay_request_cancel_handler.h"
 #import "ios/chrome/browser/infobars/overlays/infobar_overlay_request_inserter.h"
@@ -20,9 +20,9 @@
 #pragma mark - InfobarBannerInteractionHandler
 
 PasswordInfobarBannerInteractionHandler::
-    PasswordInfobarBannerInteractionHandler()
-    : InfobarBannerInteractionHandler(
-          SavePasswordInfobarBannerOverlayRequestConfig::RequestSupport()) {}
+    PasswordInfobarBannerInteractionHandler(
+        const OverlayRequestSupport* request_support)
+    : InfobarBannerInteractionHandler(request_support) {}
 
 PasswordInfobarBannerInteractionHandler::
     ~PasswordInfobarBannerInteractionHandler() = default;
@@ -41,25 +41,6 @@ void PasswordInfobarBannerInteractionHandler::MainButtonTapped(
     InfoBarIOS* infobar) {
   infobar->set_accepted(GetInfobarDelegate(infobar)->Accept());
 }
-
-void PasswordInfobarBannerInteractionHandler::ShowModalButtonTapped(
-    InfoBarIOS* infobar,
-    web::WebState* web_state) {
-  InfobarOverlayRequestInserter::FromWebState(web_state)->AddOverlayRequest(
-      infobar, InfobarOverlayType::kModal);
-}
-
-void PasswordInfobarBannerInteractionHandler::BannerDismissedByUser(
-    InfoBarIOS* infobar) {
-  // Notify the delegate that a user-initiated dismissal has been triggered.
-  // NOTE: InfoBarDismissed() (camel cased) is used to notify the delegate that
-  // the user initiated the upcoming dismissal (i.e. swiped to dismiss in the
-  // refresh UI).  InfobarDismissed() (not camel cased) is called in
-  // BannerVisibilityChanged() to notify the delegate of the dismissal of the
-  // UI.
-  GetInfobarDelegate(infobar)->InfoBarDismissed();
-}
-
 #pragma mark - Private
 
 IOSChromeSavePasswordInfoBarDelegate*

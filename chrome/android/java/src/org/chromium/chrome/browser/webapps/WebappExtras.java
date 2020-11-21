@@ -4,12 +4,9 @@
 
 package org.chromium.chrome.browser.webapps;
 
-import android.graphics.Color;
-
 import androidx.annotation.NonNull;
 
 import org.chromium.chrome.browser.ShortcutSource;
-import org.chromium.content_public.common.ScreenOrientationValues;
 
 /**
  * Stores webapp specific information on behalf of {@link BrowserServicesIntentDataProvider}.
@@ -48,7 +45,7 @@ public class WebappExtras {
     /**
      * The screen orientation to lock the webapp to.
      */
-    public final @ScreenOrientationValues int orientation;
+    public final int orientation;
 
     /**
      * If the webapp was launched from the home screen or the app list: source where the webapp was
@@ -81,14 +78,6 @@ public class WebappExtras {
      * Whether the webapp should be navigated to {@link #url} if the webapp is already open.
      */
     public final boolean shouldForceNavigation;
-
-    public static WebappExtras createEmpty() {
-        return new WebappExtras(null /* id */, null /* url */, null /* scopeUrl */,
-                new WebappIcon(), null /* name */, null /* shortName */, WebDisplayMode.UNDEFINED,
-                ScreenOrientationValues.DEFAULT, ShortcutSource.UNKNOWN, null /* backgroundColor */,
-                Color.WHITE /* defaultBackgroundColor */, false /* isIconGenerated */,
-                false /* isIconAdaptive */, false /* shouldForceNavigation */);
-    }
 
     public WebappExtras(String id, String url, String scopeUrl, @NonNull WebappIcon icon,
             String name, String shortName, @WebDisplayMode int displayMode, int orientation,

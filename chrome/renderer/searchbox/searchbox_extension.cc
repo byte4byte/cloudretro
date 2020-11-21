@@ -428,9 +428,9 @@ SearchBox* GetSearchBoxForCurrentContext() {
 }
 
 base::Value CreateAutocompleteMatches(
-    const std::vector<chrome::mojom::AutocompleteMatchPtr>& matches) {
+    const std::vector<search::mojom::AutocompleteMatchPtr>& matches) {
   base::Value list(base::Value::Type::LIST);
-  for (const chrome::mojom::AutocompleteMatchPtr& match : matches) {
+  for (const search::mojom::AutocompleteMatchPtr& match : matches) {
     base::Value dict(base::Value::Type::DICTIONARY);
     dict.SetBoolKey("allowedToBeDefaultMatch",
                     match->allowed_to_be_default_match);
@@ -452,7 +452,7 @@ base::Value CreateAutocompleteMatches(
       description_class.Append(std::move(entry));
     }
     dict.SetKey("descriptionClass", std::move(description_class));
-    dict.SetStringKey("destinationUrl", match->destination_url);
+    dict.SetStringKey("destinationUrl", match->destination_url.spec());
     dict.SetIntKey("suggestionGroupId", match->suggestion_group_id);
     dict.SetStringKey("inlineAutocompletion", match->inline_autocompletion);
     dict.SetBoolKey("isSearchType", match->is_search_type);
@@ -470,7 +470,7 @@ base::Value CreateAutocompleteMatches(
 }
 
 base::Value CreateSuggestionGroupsMap(
-    const base::flat_map<int32_t, chrome::mojom::SuggestionGroupPtr>&
+    const base::flat_map<int32_t, search::mojom::SuggestionGroupPtr>&
         suggestion_groups_map) {
   base::Value result_map(base::Value::Type::DICTIONARY);
   for (const auto& pair : suggestion_groups_map) {
@@ -1526,7 +1526,7 @@ void SearchBoxExtension::DispatchDeleteCustomLinkResult(
 // static
 void SearchBoxExtension::DispatchAutocompleteResultChanged(
     blink::WebLocalFrame* frame,
-    chrome::mojom::AutocompleteResultPtr result) {
+    search::mojom::AutocompleteResultPtr result) {
   base::Value dict(base::Value::Type::DICTIONARY);
   dict.SetStringKey("input", result->input);
   dict.SetKey("matches", CreateAutocompleteMatches(result->matches));

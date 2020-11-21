@@ -19,15 +19,16 @@
 #include "base/optional.h"
 #include "base/scoped_observer.h"
 
+namespace ui {
+class ThroughputTracker;
+}
+
 namespace ash {
 
-class FpsCounter;
-class HomeLauncherGestureHandler;
 class HomeScreenDelegate;
 
-// HomeScreenController handles the home launcher (e.g., tablet-mode app list)
-// and owns the HomeLauncherGestureHandler that transitions the launcher window
-// and other windows when the launcher is shown, hidden or animated.
+// HomeScreenController provides functionality to control the home launcher -
+// the tablet mode app list.
 class ASH_EXPORT HomeScreenController : public OverviewObserver,
                                         public SplitViewObserver,
                                         public WallpaperControllerObserver {
@@ -56,7 +57,7 @@ class ASH_EXPORT HomeScreenController : public OverviewObserver,
   // True if home screen is visible.
   bool IsHomeScreenVisible() const;
 
-  // Responsible to starting or stopping |fps_counter_|.
+  // Responsible to starting or stopping |smoothness_tracker_|.
   void StartTrackingAnimationSmoothness(int64_t display_id);
   void RecordAnimationSmoothness();
 
@@ -81,10 +82,6 @@ class ASH_EXPORT HomeScreenController : public OverviewObserver,
                                SplitViewController::State state) override;
 
   HomeScreenDelegate* delegate() { return delegate_; }
-
-  HomeLauncherGestureHandler* home_launcher_gesture_handler() {
-    return home_launcher_gesture_handler_.get();
-  }
 
  private:
   // OverviewObserver:
@@ -119,10 +116,6 @@ class ASH_EXPORT HomeScreenController : public OverviewObserver,
   // Not owned.
   HomeScreenDelegate* delegate_ = nullptr;
 
-  // Owned pointer to the object which handles gestures related to the home
-  // launcher.
-  std::unique_ptr<HomeLauncherGestureHandler> home_launcher_gesture_handler_;
-
   // Presenter that manages home screen animations.
   HomeScreenPresenter home_screen_presenter_{this};
 
@@ -134,7 +127,7 @@ class ASH_EXPORT HomeScreenController : public OverviewObserver,
 
   // Responsible for recording smoothness related UMA stats for homescreen
   // animations.
-  std::unique_ptr<FpsCounter> fps_counter_;
+  base::Optional<ui::ThroughputTracker> smoothness_tracker_;
 
   ScopedObserver<SplitViewController, SplitViewObserver> split_view_observer_{
       this};

@@ -10,6 +10,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/tracing_controller.h"
+#include "content/public/common/content_switches.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
@@ -37,9 +38,9 @@ MetricIntegrationTest::~MetricIntegrationTest() = default;
 void MetricIntegrationTest::SetUpOnMainThread() {
   host_resolver()->AddRule("*", "127.0.0.1");
   embedded_test_server()->ServeFilesFromSourceDirectory(
-      "third_party/blink/web_tests/external/wpt");
-  embedded_test_server()->ServeFilesFromSourceDirectory(
       "chrome/browser/page_load_metrics/integration_tests/data");
+  embedded_test_server()->ServeFilesFromSourceDirectory(
+      "third_party/blink/web_tests/external/wpt");
   content::SetupCrossSiteRedirector(embedded_test_server());
 
   ukm_recorder_.emplace();
@@ -110,6 +111,9 @@ WebContents* MetricIntegrationTest::web_contents() const {
 void MetricIntegrationTest::SetUpCommandLine(CommandLine* command_line) {
   // Set a default window size for consistency.
   command_line->AppendSwitchASCII(switches::kWindowSize, "800,600");
+  command_line->AppendSwitch(switches::kEnableExperimentalWebPlatformFeatures);
+
+  content::IsolateAllSitesForTesting(command_line);
 }
 
 std::unique_ptr<HttpResponse> MetricIntegrationTest::HandleRequest(

@@ -9,6 +9,7 @@
 #include "components/autofill/core/browser/autofill_test_utils.h"
 #include "components/autofill/core/browser/data_model/autofill_profile.h"
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/views/controls/label.h"
@@ -283,8 +284,9 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestShowPromiseTest, Timeout) {
   ExpectBodyContains({R"(AbortError)"});
 }
 
+// Disabled for being flaky. crbug.com/1116607
 IN_PROC_BROWSER_TEST_F(PaymentRequestShowPromiseTest,
-                       UnsupportedPaymentMethod) {
+                       DISABLED_UnsupportedPaymentMethod) {
   NavigateTo("/show_promise/unsupported.html");
   ResetEventWaiterForSequence(
       {DialogEvent::PROCESSING_SPINNER_SHOWN,

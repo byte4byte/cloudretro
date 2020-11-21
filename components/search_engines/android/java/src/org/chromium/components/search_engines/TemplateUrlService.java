@@ -186,7 +186,7 @@ public class TemplateUrlService {
      * @param url The url for the search result page.
      * @return Whether the search result page with the given url from the default search provider.
      */
-    public boolean isSearchResultsPageFromDefaultSearchProvider(String url) {
+    public boolean isSearchResultsPageFromDefaultSearchProvider(GURL url) {
         ThreadUtils.assertOnUiThread();
         return TemplateUrlServiceJni.get().isSearchResultsPageFromDefaultSearchProvider(
                 mNativeTemplateUrlServiceAndroid, TemplateUrlService.this, url);
@@ -247,8 +247,22 @@ public class TemplateUrlService {
      *              {@code query} inserted as the search parameter.
      */
     public String getUrlForSearchQuery(String query) {
-        return TemplateUrlServiceJni.get().getUrlForSearchQuery(
-                mNativeTemplateUrlServiceAndroid, TemplateUrlService.this, query);
+        return getUrlForSearchQuery(query, null);
+    }
+
+    /**
+     * Finds the default search engine for the default provider and returns the url query
+     * {@link String} for {@code query}.
+     * @param query The {@link String} that represents the text query the search url should
+     *              represent.
+     * @param searchParams A list of search params to be appended to the query.
+     * @return      A {@link String} that contains the url of the default search engine with
+     *              {@code query} inserted as the search parameter.
+     */
+    public String getUrlForSearchQuery(String query, List<String> searchParams) {
+        return TemplateUrlServiceJni.get().getUrlForSearchQuery(mNativeTemplateUrlServiceAndroid,
+                TemplateUrlService.this, query,
+                searchParams == null ? null : searchParams.toArray(new String[0]));
     }
 
     /**
@@ -360,13 +374,13 @@ public class TemplateUrlService {
         boolean isDefaultSearchManaged(
                 long nativeTemplateUrlServiceAndroid, TemplateUrlService caller);
         boolean isSearchResultsPageFromDefaultSearchProvider(
-                long nativeTemplateUrlServiceAndroid, TemplateUrlService caller, String url);
+                long nativeTemplateUrlServiceAndroid, TemplateUrlService caller, GURL url);
         boolean isSearchByImageAvailable(
                 long nativeTemplateUrlServiceAndroid, TemplateUrlService caller);
         boolean isDefaultSearchEngineGoogle(
                 long nativeTemplateUrlServiceAndroid, TemplateUrlService caller);
-        String getUrlForSearchQuery(
-                long nativeTemplateUrlServiceAndroid, TemplateUrlService caller, String query);
+        String getUrlForSearchQuery(long nativeTemplateUrlServiceAndroid, TemplateUrlService caller,
+                String query, String[] searchParams);
         String getSearchQueryForUrl(
                 long nativeTemplateUrlServiceAndroid, TemplateUrlService caller, GURL url);
         GURL getUrlForVoiceSearchQuery(

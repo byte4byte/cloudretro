@@ -17,8 +17,6 @@
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/net/proxy_test_utils.h"
-#include "chrome/browser/prerender/prerender_manager.h"
-#include "chrome/browser/prerender/prerender_origin.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
@@ -29,16 +27,17 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/no_state_prefetch/browser/prerender_manager.h"
+#include "components/no_state_prefetch/common/prerender_origin.h"
 #include "components/prefs/pref_service.h"
 #include "components/security_interstitials/content/security_interstitial_tab_helper.h"
 #include "components/security_interstitials/content/ssl_blocking_page.h"
-#include "content/public/browser/interstitial_page.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/content_features.h"
 #include "content/public/common/network_service_util.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/slow_http_response.h"
 #include "content/public/test/test_navigation_observer.h"
@@ -47,6 +46,7 @@
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/embedded_test_server/http_response.h"
 #include "services/network/public/cpp/features.h"
+#include "third_party/blink/public/common/features.h"
 #include "url/gurl.h"
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
@@ -147,8 +147,11 @@ void TestProxyAuth(Browser* browser, const GURL& test_page) {
     auth_cancelled_waiter.Wait();
     reload_observer.Wait();
     if (https) {
-      EXPECT_EQ(true, content::EvalJs(contents, "document.body === null"));
+      EXPECT_EQ(
+          "<head></head><body></body>",
+          content::EvalJs(contents, "document.documentElement.innerHTML"));
     }
+
     EXPECT_FALSE(browser->location_bar_model()->GetFormattedFullURL().empty());
   }
 
@@ -246,14 +249,14 @@ class LoginPromptBrowserTest
     if (GetParam() == SplitAuthCacheByNetworkIsolationKey::kFalse) {
       scoped_feature_list_.InitWithFeatures(
           // enabled_features
-          {features::kFtpProtocol},
+          {blink::features::kFtpProtocol},
           // disabled_features
           {network::features::kSplitAuthCacheByNetworkIsolationKey});
     } else {
       scoped_feature_list_.InitWithFeatures(
           // enabled_features
           {network::features::kSplitAuthCacheByNetworkIsolationKey,
-           features::kFtpProtocol},
+           blink::features::kFtpProtocol},
           // disabled_features
           {});
     }
@@ -344,21 +347,11 @@ IN_PROC_BROWSER_TEST_P(LoginPromptBrowserTest, PrefetchAuthCancels) {
 
   class SetPrefetchForTest {
    public:
-    explicit SetPrefetchForTest(bool prefetch)
-        : old_prerender_mode_(prerender::PrerenderManager::GetMode()) {
+    explicit SetPrefetchForTest(bool prefetch) {
       std::string exp_group = prefetch ? "ExperimentYes" : "ExperimentNo";
       base::FieldTrialList::CreateFieldTrial("Prefetch", exp_group);
-      // Disable prerender so this is just a prefetch of the top-level page.
-      prerender::PrerenderManager::SetMode(
-          prerender::PrerenderManager::PRERENDER_MODE_SIMPLE_LOAD_EXPERIMENT);
     }
-
-    ~SetPrefetchForTest() {
-      prerender::PrerenderManager::SetMode(old_prerender_mode_);
-    }
-
-   private:
-    prerender::PrerenderManager::PrerenderManagerMode old_prerender_mode_;
+    ~SetPrefetchForTest() = default;
   } set_prefetch_for_test(true);
 
   content::WebContents* contents =
@@ -1648,7 +1641,7 @@ IN_PROC_BROWSER_TEST_P(LoginPromptBrowserTest,
 // the omnibox.
 
 // Fails occasionally on Mac. http://crbug.com/852703
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
 #define MAYBE_CancelLoginInterstitialOnRedirect \
   DISABLED_CancelLoginInterstitialOnRedirect
 #else
@@ -1705,63 +1698,6 @@ IN_PROC_BROWSER_TEST_P(LoginPromptBrowserTest,
   LoginHandler* handler = *observer.handlers().begin();
   handler->CancelAuth();
   EXPECT_EQ("www.b.com", contents->GetVisibleURL().host());
-}
-
-// Test the scenario where proceeding through a different type of interstitial
-// that ends up with an auth URL works fine. This can happen if a URL that
-// triggers the auth dialog can also trigger an SSL interstitial (or any other
-// type of interstitial).
-IN_PROC_BROWSER_TEST_P(
-    LoginPromptBrowserTest,
-    DISABLED_LoginInterstitialShouldReplaceExistingInterstitial) {
-  net::EmbeddedTestServer https_server(net::EmbeddedTestServer::TYPE_HTTPS);
-  https_server.SetSSLConfig(net::EmbeddedTestServer::CERT_EXPIRED);
-  ASSERT_TRUE(https_server.Start());
-
-  content::WebContents* contents =
-      browser()->tab_strip_model()->GetActiveWebContents();
-  NavigationController* controller = &contents->GetController();
-  LoginPromptBrowserTestObserver observer;
-
-  observer.Register(content::Source<NavigationController>(controller));
-
-  // Load a page which triggers an SSL interstitial. Proceeding through it
-  // should show the login page with the blank interstitial.
-  {
-    GURL test_page = https_server.GetURL(kAuthBasicPage);
-    ASSERT_EQ("127.0.0.1", test_page.host());
-
-    WindowedAuthNeededObserver auth_needed_waiter(controller);
-    browser()->OpenURL(OpenURLParams(test_page, Referrer(),
-                                     WindowOpenDisposition::CURRENT_TAB,
-                                     ui::PAGE_TRANSITION_TYPED, false));
-    ASSERT_EQ("127.0.0.1", contents->GetURL().host());
-    content::WaitForInterstitialAttach(contents);
-
-    EXPECT_EQ(SSLBlockingPage::kTypeForTesting, contents->GetInterstitialPage()
-                                                    ->GetDelegateForTesting()
-                                                    ->GetTypeForTesting());
-    // An overrideable SSL interstitial is now being displayed. Proceed through
-    // the interstitial to see the login prompt.
-    contents->GetInterstitialPage()->Proceed();
-    auth_needed_waiter.Wait();
-    ASSERT_EQ(1u, observer.handlers().size());
-    content::WaitForInterstitialAttach(contents);
-
-    // The omnibox should show the correct origin while the login prompt is
-    // being displayed.
-    EXPECT_EQ("127.0.0.1", contents->GetVisibleURL().host());
-
-    // Cancelling the login prompt should detach the interstitial while keeping
-    // the correct origin.
-    LoginHandler* handler = *observer.handlers().begin();
-    content::RunTaskAndWaitForInterstitialDetach(
-        contents,
-        base::BindOnce(&LoginHandler::CancelAuth, base::Unretained(handler)));
-
-    EXPECT_EQ("127.0.0.1", contents->GetVisibleURL().host());
-    EXPECT_FALSE(contents->ShowingInterstitialPage());
-  }
 }
 
 // Test the scenario where an auth interstitial should replace a different type
@@ -2250,7 +2186,7 @@ IN_PROC_BROWSER_TEST_P(LoginPromptBrowserTest,
 }
 
 // Tests that basic proxy auth works as expected, for HTTPS pages.
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
 // TODO(https://crbug.com/1000446): Re-enable this test.
 #define MAYBE_ProxyAuthHTTPS DISABLED_ProxyAuthHTTPS
 #else
@@ -2376,6 +2312,28 @@ IN_PROC_BROWSER_TEST_P(LoginPromptExtensionBrowserTest,
   ASSERT_EQ(2u, console_observer.messages().size());
   EXPECT_EQ(base::ASCIIToUTF16("onAuthRequired " + second_test_page.spec()),
             console_observer.messages()[1].message);
+}
+
+// Tests that extensions can cancel authentication requests to suppress a
+// prompt. Regression test for https://crbug.com/1075442.
+IN_PROC_BROWSER_TEST_P(LoginPromptExtensionBrowserTest, OnAuthRequiredCancels) {
+  ASSERT_TRUE(embedded_test_server()->Start());
+
+  // Load an extension that cancels each auth request.
+  const extensions::Extension* extension =
+      LoadExtension(test_data_dir_.AppendASCII("cancel_auth_required"));
+  ASSERT_TRUE(extension);
+
+  // Navigate to a page that prompts for basic auth and test that the 401
+  // response body is rendered.
+  content::WebContents* contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  GURL test_page = embedded_test_server()->GetURL(kAuthBasicPage);
+  ui_test_utils::NavigateToURL(browser(), test_page);
+
+  base::string16 expected_title(
+      base::UTF8ToUTF16("Denied: Missing Authorization Header"));
+  EXPECT_EQ(expected_title, contents->GetTitle());
 }
 
 }  // namespace

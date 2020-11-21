@@ -7,8 +7,9 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/logging.h"
+#include "base/check.h"
 #include "base/memory/ptr_util.h"
+#include "base/notreached.h"
 #include "components/autofill/core/browser/form_data_importer.h"
 #include "components/autofill/core/browser/logging/log_router.h"
 #include "components/autofill/core/browser/payments/payments_client.h"
@@ -57,7 +58,7 @@ std::unique_ptr<WebViewAutofillClientIOS> WebViewAutofillClientIOS::Create(
       LogManager::Create(
           autofill::WebViewAutofillLogRouterFactory::GetForBrowserState(
               browser_state),
-          base::Closure()));
+          base::RepeatingClosure()));
 }
 
 WebViewAutofillClientIOS::WebViewAutofillClientIOS(
@@ -141,9 +142,17 @@ AddressNormalizer* WebViewAutofillClientIOS::GetAddressNormalizer() {
   return nullptr;
 }
 
+const GURL& WebViewAutofillClientIOS::GetLastCommittedURL() {
+  return web_state_->GetLastCommittedURL();
+}
+
 security_state::SecurityLevel
 WebViewAutofillClientIOS::GetSecurityLevelForUmaHistograms() {
   return security_state::GetSecurityLevelForWebState(web_state_);
+}
+
+const translate::LanguageState* WebViewAutofillClientIOS::GetLanguageState() {
+  return nullptr;
 }
 
 void WebViewAutofillClientIOS::ShowAutofillSettings(
@@ -161,37 +170,6 @@ void WebViewAutofillClientIOS::ShowUnmaskPrompt(
 void WebViewAutofillClientIOS::OnUnmaskVerificationResult(
     PaymentsRpcResult result) {
   [bridge_ didReceiveUnmaskVerificationResult:result];
-}
-
-void WebViewAutofillClientIOS::ShowLocalCardMigrationDialog(
-    base::OnceClosure show_migration_dialog_closure) {
-  NOTIMPLEMENTED();
-}
-
-void WebViewAutofillClientIOS::ConfirmMigrateLocalCardToCloud(
-    const LegalMessageLines& legal_message_lines,
-    const std::string& user_email,
-    const std::vector<MigratableCreditCard>& migratable_credit_cards,
-    LocalCardMigrationCallback start_migrating_cards_callback) {
-  NOTIMPLEMENTED();
-}
-
-void WebViewAutofillClientIOS::ShowLocalCardMigrationResults(
-    const bool has_server_error,
-    const base::string16& tip_message,
-    const std::vector<MigratableCreditCard>& migratable_credit_cards,
-    MigrationDeleteCardCallback delete_local_card_callback) {
-  NOTIMPLEMENTED();
-}
-
-void WebViewAutofillClientIOS::ConfirmSaveCreditCardLocally(
-    const CreditCard& card,
-    SaveCreditCardOptions options,
-    LocalSaveCardPromptCallback callback) {
-  DCHECK(options.show_prompt);
-  [bridge_ confirmSaveCreditCardLocally:card
-                  saveCreditCardOptions:options
-                               callback:std::move(callback)];
 }
 
 void WebViewAutofillClientIOS::ConfirmAccountNameFixFlow(
@@ -212,6 +190,13 @@ void WebViewAutofillClientIOS::ConfirmExpirationDateFixFlow(
         callback) {
   [bridge_ confirmCreditCardExpirationWithCard:card
                                       callback:std::move(callback)];
+}
+
+void WebViewAutofillClientIOS::ConfirmSaveCreditCardLocally(
+    const CreditCard& card,
+    SaveCreditCardOptions options,
+    LocalSaveCardPromptCallback callback) {
+  // No op. ios/web_view does not support local saves of autofill data.
 }
 
 void WebViewAutofillClientIOS::ConfirmSaveCreditCardToCloud(
@@ -243,34 +228,36 @@ void WebViewAutofillClientIOS::ScanCreditCard(CreditCardScanCallback callback) {
 }
 
 void WebViewAutofillClientIOS::ShowAutofillPopup(
-    const gfx::RectF& element_bounds,
-    base::i18n::TextDirection text_direction,
-    const std::vector<Suggestion>& suggestions,
-    bool /*unused_autoselect_first_suggestion*/,
-    PopupType popup_type,
+    const AutofillClient::PopupOpenArgs& open_args,
     base::WeakPtr<AutofillPopupDelegate> delegate) {
-  [bridge_ showAutofillPopup:suggestions popupDelegate:delegate];
+  [bridge_ showAutofillPopup:open_args.suggestions popupDelegate:delegate];
 }
 
 void WebViewAutofillClientIOS::UpdateAutofillPopupDataListValues(
     const std::vector<base::string16>& values,
     const std::vector<base::string16>& labels) {
-  NOTREACHED();
+  // No op. ios/web_view does not support display datalist.
 }
 
-base::span<const autofill::Suggestion>
-WebViewAutofillClientIOS::GetPopupSuggestions() const {
+base::span<const Suggestion> WebViewAutofillClientIOS::GetPopupSuggestions()
+    const {
   NOTIMPLEMENTED();
-  return base::span<const autofill::Suggestion>();
+  return base::span<const Suggestion>();
 }
 
 void WebViewAutofillClientIOS::PinPopupView() {
   NOTIMPLEMENTED();
 }
 
+AutofillClient::PopupOpenArgs WebViewAutofillClientIOS::GetReopenPopupArgs()
+    const {
+  NOTIMPLEMENTED();
+  return {};
+}
+
 void WebViewAutofillClientIOS::UpdatePopup(
-    const std::vector<autofill::Suggestion>& suggestions,
-    autofill::PopupType popup_type) {
+    const std::vector<Suggestion>& suggestions,
+    PopupType popup_type) {
   NOTIMPLEMENTED();
 }
 
@@ -315,6 +302,10 @@ void WebViewAutofillClientIOS::LoadRiskData(
 
 LogManager* WebViewAutofillClientIOS::GetLogManager() const {
   return log_manager_.get();
+}
+
+bool WebViewAutofillClientIOS::IsQueryIDRelevant(int query_id) {
+  return [bridge_ isQueryIDRelevant:query_id];
 }
 
 }  // namespace autofill

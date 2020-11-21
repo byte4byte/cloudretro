@@ -12,7 +12,7 @@ import '../controls/controlled_radio_button.m.js';
 import '../controls/extension_controlled_indicator.m.js';
 import '../controls/settings_radio_group.m.js';
 import './startup_urls_page.js';
-import '../i18n_setup.m.js';
+import '../i18n_setup.js';
 import '../settings_shared_css.m.js';
 
 import {WebUIListenerBehavior} from 'chrome://resources/js/web_ui_listener_behavior.m.js';
@@ -62,12 +62,21 @@ Polymer({
   },
 
   /**
+   * @param {number} value
+   * @return {string}
+   * @private
+   */
+  getName_(value) {
+    return value.toString();
+  },
+
+  /**
    * Determine whether to show the user defined startup pages.
    * @param {number} restoreOnStartup Enum value from prefValues_.
    * @return {boolean} Whether the open specific pages is selected.
    * @private
    */
   showStartupUrls_(restoreOnStartup) {
-    return restoreOnStartup == this.prefValues_.OPEN_SPECIFIC;
+    return restoreOnStartup === this.prefValues_.OPEN_SPECIFIC;
   },
 });

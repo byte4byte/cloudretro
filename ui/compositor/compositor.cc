@@ -27,6 +27,8 @@
 #include "cc/input/input_handler.h"
 #include "cc/layers/layer.h"
 #include "cc/metrics/begin_main_frame_metrics.h"
+#include "cc/metrics/frame_sequence_tracker.h"
+#include "cc/metrics/web_vital_metrics.h"
 #include "cc/trees/layer_tree_host.h"
 #include "cc/trees/layer_tree_settings.h"
 #include "components/viz/common/features.h"
@@ -46,7 +48,6 @@
 #include "ui/base/ui_base_switches.h"
 #include "ui/compositor/compositor_observer.h"
 #include "ui/compositor/compositor_switches.h"
-#include "ui/compositor/dip_util.h"
 #include "ui/compositor/layer.h"
 #include "ui/compositor/layer_animator_collection.h"
 #include "ui/compositor/overscroll/scroll_input_handler.h"
@@ -171,7 +172,7 @@ Compositor::Compositor(const viz::FrameSinkId& frame_sink_id,
   settings.use_rgba_4444 =
       command_line->HasSwitch(switches::kUIEnableRGBA4444Textures);
 
-#if defined(OS_MACOSX)
+#if defined(OS_APPLE)
   // Using CoreAnimation to composite requires using GpuMemoryBuffers, which
   // require zero copy.
   settings.resource_settings.use_gpu_memory_buffer_resources =
@@ -235,10 +236,12 @@ Compositor::Compositor(const viz::FrameSinkId& frame_sink_id,
   params.mutator_host = animation_host_.get();
   host_ = cc::LayerTreeHost::CreateSingleThreaded(this, std::move(params));
 
+  const base::WeakPtr<cc::CompositorDelegateForInput>& compositor_delegate =
+      host_->GetDelegateForInput();
   if (base::FeatureList::IsEnabled(features::kUiCompositorScrollWithLayers) &&
-      host_->GetInputHandler()) {
-    scroll_input_handler_.reset(
-        new ScrollInputHandler(host_->GetInputHandler()));
+      compositor_delegate) {
+    input_handler_weak_ = cc::InputHandler::Create(*compositor_delegate);
+    scroll_input_handler_.reset(new ScrollInputHandler(input_handler_weak_));
   }
 
   animation_timeline_ =
@@ -406,22 +409,18 @@ void Compositor::ReenableSwap() {
 }
 #endif
 
-void Compositor::SetScaleAndSize(
-    float scale,
-    const gfx::Size& size_in_pixel,
-    const viz::LocalSurfaceIdAllocation& local_surface_id_allocation) {
+void Compositor::SetScaleAndSize(float scale,
+                                 const gfx::Size& size_in_pixel,
+                                 const viz::LocalSurfaceId& local_surface_id) {
   DCHECK_GT(scale, 0);
   bool device_scale_factor_changed = device_scale_factor_ != scale;
   device_scale_factor_ = scale;
 
 #if DCHECK_IS_ON()
-  if (size_ != size_in_pixel && local_surface_id_allocation.IsValid()) {
+  if (size_ != size_in_pixel && local_surface_id.is_valid()) {
     // A new LocalSurfaceId must be set when the compositor size changes.
-    DCHECK_NE(
-        local_surface_id_allocation.local_surface_id(),
-        host_->local_surface_id_allocation_from_parent().local_surface_id());
-    DCHECK_NE(local_surface_id_allocation,
-              host_->local_surface_id_allocation_from_parent());
+    DCHECK_NE(local_surface_id, host_->local_surface_id_from_parent());
+    DCHECK_NE(local_surface_id, host_->local_surface_id_from_parent());
   }
 #endif  // DECHECK_IS_ON()
 
@@ -429,7 +428,7 @@ void Compositor::SetScaleAndSize(
     bool size_changed = size_ != size_in_pixel;
     size_ = size_in_pixel;
     host_->SetViewportRectAndScale(gfx::Rect(size_in_pixel), scale,
-                                   local_surface_id_allocation);
+                                   local_surface_id);
     root_web_layer_->SetBounds(size_in_pixel);
     if (display_private_ && (size_changed || disabled_swap_until_resize_)) {
       display_private_->Resize(size_in_pixel);
@@ -450,7 +449,8 @@ void Compositor::SetDisplayColorSpaces(
     return;
   display_color_spaces_ = display_color_spaces;
 
-  host_->SetRasterColorSpace(display_color_spaces_.GetRasterColorSpace());
+  host_->SetDisplayColorSpaces(display_color_spaces_);
+
   // Always force the ui::Compositor to re-draw all layers, because damage
   // tracking bugs result in black flashes.
   // https://crbug.com/804430
@@ -484,17 +484,19 @@ bool Compositor::IsVisible() {
   return host_->IsVisible();
 }
 
+// TODO(bokan): These calls should be delegated through the
+// scroll_input_handler_ so that we don't have to keep a pointer to the
+// cc::InputHandler in this class.
 bool Compositor::ScrollLayerTo(cc::ElementId element_id,
                                const gfx::ScrollOffset& offset) {
-  auto input_handler = host_->GetInputHandler();
-  return input_handler && input_handler->ScrollLayerTo(element_id, offset);
+  return input_handler_weak_ &&
+         input_handler_weak_->ScrollLayerTo(element_id, offset);
 }
 
 bool Compositor::GetScrollOffsetForLayer(cc::ElementId element_id,
                                          gfx::ScrollOffset* offset) const {
-  auto input_handler = host_->GetInputHandler();
-  return input_handler &&
-         input_handler->GetScrollOffsetForLayer(element_id, offset);
+  return input_handler_weak_ &&
+         input_handler_weak_->GetScrollOffsetForLayer(element_id, offset);
 }
 
 void Compositor::SetDisplayVSyncParameters(base::TimeTicks timebase,
@@ -603,6 +605,11 @@ void Compositor::IssueExternalBeginFrame(
       args, force, std::move(callback));
 }
 
+ThroughputTracker Compositor::RequestNewThroughputTracker() {
+  return ThroughputTracker(next_throughput_tracker_id_++,
+                           weak_ptr_factory_.GetWeakPtr());
+}
+
 void Compositor::DidUpdateLayers() {
   // Dump property trees and layers if run with:
   //   --vmodule=*ui/compositor*=3
@@ -665,6 +672,16 @@ Compositor::GetBeginMainFrameMetrics() {
   return nullptr;
 }
 
+std::unique_ptr<cc::WebVitalMetrics> Compositor::GetWebVitalMetrics() {
+  return nullptr;
+}
+
+void Compositor::NotifyThroughputTrackerResults(
+    cc::CustomTrackerResults results) {
+  for (auto& pair : results)
+    ReportMetricsForTracker(pair.first, std::move(pair.second));
+}
+
 void Compositor::DidReceiveCompositorFrameAck() {
   ++activated_frame_count_;
   for (auto& observer : observer_list_)
@@ -677,6 +694,8 @@ void Compositor::DidPresentCompositorFrame(
   TRACE_EVENT_MARK_WITH_TIMESTAMP1("cc,benchmark", "FramePresented",
                                    feedback.timestamp, "environment",
                                    "browser");
+  for (auto& observer : observer_list_)
+    observer.OnDidPresentCompositorFrame(frame_token, feedback);
 }
 
 void Compositor::DidSubmitCompositorFrame() {
@@ -686,8 +705,7 @@ void Compositor::DidSubmitCompositorFrame() {
 }
 
 void Compositor::FrameIntervalUpdated(base::TimeDelta interval) {
-  refresh_rate_ =
-      base::Time::kMicrosecondsPerSecond / interval.InMicrosecondsF();
+  refresh_rate_ = interval.ToHz();
 }
 
 void Compositor::OnFirstSurfaceActivation(
@@ -746,8 +764,21 @@ void Compositor::RequestPresentationTimeForNextFrame(
   host_->RequestPresentationTimeForNextFrame(std::move(callback));
 }
 
-ThroughputTracker Compositor::RequestNewThroughputTracker() {
-  return ThroughputTracker(next_throughput_tracker_id_++, this);
+void Compositor::ReportMetricsForTracker(
+    int tracker_id,
+    const cc::FrameSequenceMetrics::CustomReportData& data) {
+  auto it = throughput_tracker_map_.find(tracker_id);
+  if (it == throughput_tracker_map_.end())
+    return;
+
+  std::move(it->second).Run(data);
+  throughput_tracker_map_.erase(it);
+}
+
+void Compositor::SetDelegatedInkPointRenderer(
+    mojo::PendingReceiver<viz::mojom::DelegatedInkPointRenderer> receiver) {
+  if (display_private_)
+    display_private_->SetDelegatedInkPointRenderer(std::move(receiver));
 }
 
 }  // namespace ui

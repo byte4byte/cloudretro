@@ -12,7 +12,6 @@
 
 #include "base/macros.h"
 #include "components/sync/base/model_type.h"
-#include "components/sync/engine/model_safe_worker.h"
 #include "components/sync/engine_impl/commit.h"
 #include "components/sync/engine_impl/model_type_registry.h"
 
@@ -48,18 +47,41 @@ class CommitProcessor {
                                                     bool cookie_jar_empty);
 
  private:
+  // Gathering is split into phases for 2 reasons: 1) to provide prioritization,
+  // and 2) to avoid  infinite commit cycles when some data type generates
+  // updates at very high speed.
+  enum class GatheringPhase { kPriority, kRegular, kDone };
+
+  // Increments |phase| (in the order given above in GatheringPhase).
+  static GatheringPhase IncrementGatheringPhase(GatheringPhase phase);
+
+  // Returns user data types that should be gathered for committing in the
+  // current phase.
+  ModelTypeSet GetUserTypesForCurrentCommitPhase() const;
+
+  // Gathers commit contributions for an individual datatype and populates
+  // |*contributions|. Returns the number of entries added.
+  size_t GatherCommitContributionsForType(
+      ModelType type,
+      size_t max_entries,
+      bool cookie_jar_mismatch,
+      bool cookie_jar_empty,
+      Commit::ContributionMap* contributions);
+
+  // Gathers commit contributions for |types| and populates |*contributions|.
   // Returns the number of entries added.
-  int GatherCommitContributionsForType(ModelType type,
-                                       size_t max_entries,
-                                       bool cookie_jar_mismatch,
-                                       bool cookie_jar_empty,
-                                       Commit::ContributionMap* contributions);
+  size_t GatherCommitContributionsForTypes(
+      ModelTypeSet types,
+      size_t max_entries,
+      bool cookie_jar_mismatch,
+      bool cookie_jar_empty,
+      Commit::ContributionMap* contributions);
 
   const ModelTypeSet commit_types_;
 
   // A map of 'commit contributors', one for each enabled type.
   CommitContributorMap* commit_contributor_map_;
-  bool gathered_all_contributions_;
+  GatheringPhase phase_;
 
   DISALLOW_COPY_AND_ASSIGN(CommitProcessor);
 };

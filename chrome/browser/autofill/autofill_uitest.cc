@@ -10,6 +10,7 @@
 #include "chrome/browser/autofill/autofill_uitest.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/autofill/chrome_autofill_client.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/interactive_test_utils.h"
@@ -69,10 +70,11 @@ AutofillUiTest::AutofillUiTest()
 AutofillUiTest::~AutofillUiTest() {}
 
 void AutofillUiTest::SetUpOnMainThread() {
-  LOG(ERROR) << "crbug/967588: AutofillUiTest::SetUpOnMainThread() entered";
   // Don't want Keychain coming up on Mac.
   test::DisableSystemServices(browser()->profile()->GetPrefs());
-
+  // Make autofill popup stay open by ignoring external changes when possible.
+  ChromeAutofillClient::FromWebContents(GetWebContents())
+      ->KeepPopupOpenForTesting();
   // Inject the test delegate into the AutofillManager of the main frame.
   RenderFrameHostChanged(/* old_host = */ nullptr,
                          /* new_host = */ GetWebContents()->GetMainFrame());
@@ -87,7 +89,6 @@ void AutofillUiTest::SetUpOnMainThread() {
   gfx::Point reset_mouse(GetWebContents()->GetContainerBounds().origin());
   reset_mouse = gfx::Point(reset_mouse.x() + 5, reset_mouse.y() + 5);
   ASSERT_TRUE(ui_test_utils::SendMouseMoveSync(reset_mouse));
-  LOG(ERROR) << "crbug/967588: AutofillUiTest::SetUpOnMainThread() exited";
 }
 
 void AutofillUiTest::TearDownOnMainThread() {
@@ -222,7 +223,7 @@ content::WebContents* AutofillUiTest::GetWebContents() {
 }
 
 content::RenderViewHost* AutofillUiTest::GetRenderViewHost() {
-  return GetWebContents()->GetRenderViewHost();
+  return GetWebContents()->GetMainFrame()->GetRenderViewHost();
 }
 
 AutofillManager* AutofillUiTest::GetAutofillManager() {

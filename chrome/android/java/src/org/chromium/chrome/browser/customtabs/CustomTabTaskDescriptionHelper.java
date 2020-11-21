@@ -4,9 +4,9 @@
 
 package org.chromium.chrome.browser.customtabs;
 
+import android.app.ActivityManager;
 import android.content.Intent;
 import android.graphics.Bitmap;
-import android.os.Build;
 import android.text.TextUtils;
 
 import androidx.annotation.NonNull;
@@ -14,7 +14,7 @@ import androidx.annotation.Nullable;
 
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeActivity;
+import org.chromium.chrome.browser.app.ChromeActivity;
 import org.chromium.chrome.browser.browserservices.BrowserServicesIntentDataProvider;
 import org.chromium.chrome.browser.customtabs.content.CustomTabActivityTabProvider;
 import org.chromium.chrome.browser.customtabs.content.TabObserverRegistrar;
@@ -85,8 +85,7 @@ public class CustomTabTaskDescriptionHelper implements NativeInitObserver, Destr
     @Override
     public void onFinishNativeInitialization() {
         WebappExtras webappExtras = mIntentDataProvider.getWebappExtras();
-        boolean canUpdate = (webappExtras != null
-                || (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP && usesSeparateTask()));
+        boolean canUpdate = (webappExtras != null || usesSeparateTask());
         if (!canUpdate) return;
 
         mDefaultThemeColor = ApiCompatibilityUtils.getColor(
@@ -168,16 +167,6 @@ public class CustomTabTaskDescriptionHelper implements NativeInitObserver, Destr
                     if (hasSecurityWarningOrError(tab)) resetIcon();
                 }
 
-                @Override
-                public void onDidAttachInterstitialPage(Tab tab) {
-                    resetIcon();
-                }
-
-                @Override
-                public void onDidDetachInterstitialPage(Tab tab) {
-                    resetIcon();
-                }
-
                 private boolean hasSecurityWarningOrError(Tab tab) {
                     boolean isContentDangerous =
                             SecurityStateModel.isContentDangerous(tab.getWebContents());
@@ -215,8 +204,8 @@ public class CustomTabTaskDescriptionHelper implements NativeInitObserver, Destr
     }
 
     private void updateTaskDescription() {
-        ApiCompatibilityUtils.setTaskDescription(
-                mActivity, computeTitle(), computeIcon(), computeThemeColor());
+        mActivity.setTaskDescription(new ActivityManager.TaskDescription(
+                computeTitle(), computeIcon(), computeThemeColor()));
     }
 
     /**

@@ -18,7 +18,7 @@ FakeServiceContext::FakeServiceContext() = default;
 FakeServiceContext::~FakeServiceContext() = default;
 
 FakeServiceContext& FakeServiceContext::set_assistant_alarm_timer_controller(
-    ash::mojom::AssistantAlarmTimerController* value) {
+    ash::AssistantAlarmTimerController* value) {
   assistant_alarm_timer_controller_ = value;
   return *this;
 }
@@ -48,29 +48,29 @@ FakeServiceContext& FakeServiceContext::set_assistant_state(
 }
 
 FakeServiceContext& FakeServiceContext::set_assistant_notification_controller(
-    ash::mojom::AssistantNotificationController* value) {
+    ash::AssistantNotificationController* value) {
   assistant_notification_controller_ = value;
   return *this;
 }
 
-ash::mojom::AssistantAlarmTimerController*
+ash::AssistantAlarmTimerController*
 FakeServiceContext::assistant_alarm_timer_controller() {
   DCHECK(assistant_alarm_timer_controller_ != nullptr);
   return assistant_alarm_timer_controller_;
 }
 
-mojom::AssistantController* FakeServiceContext::assistant_controller() {
+ash::AssistantController* FakeServiceContext::assistant_controller() {
   NOTIMPLEMENTED();
   return nullptr;
 }
 
-ash::mojom::AssistantNotificationController*
+ash::AssistantNotificationController*
 FakeServiceContext::assistant_notification_controller() {
   DCHECK(assistant_notification_controller_ != nullptr);
   return assistant_notification_controller_;
 }
 
-ash::mojom::AssistantScreenContextController*
+ash::AssistantScreenContextController*
 FakeServiceContext::assistant_screen_context_controller() {
   NOTIMPLEMENTED();
   return nullptr;

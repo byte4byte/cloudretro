@@ -25,6 +25,7 @@
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
 #include "components/user_manager/user_type.h"
+#include "ui/base/user_activity/user_activity_detector.h"
 
 namespace extensions {
 
@@ -74,6 +75,8 @@ LoginLaunchManagedGuestSessionFunction::
 
 ExtensionFunction::ResponseAction
 LoginLaunchManagedGuestSessionFunction::Run() {
+  ui::UserActivityDetector::Get()->HandleExternalUserActivity();
+
   std::unique_ptr<api::login::LaunchManagedGuestSession::Params> parameters =
       api::login::LaunchManagedGuestSession::Params::Create(*args_);
   EXTENSION_FUNCTION_VALIDATE(parameters);
@@ -141,8 +144,7 @@ LoginFetchDataForNextLoginAttemptFunction::Run() {
       local_state->GetString(prefs::kLoginExtensionApiDataForNextLoginAttempt);
   local_state->ClearPref(prefs::kLoginExtensionApiDataForNextLoginAttempt);
 
-  return RespondNow(
-      OneArgument(std::make_unique<base::Value>(data_for_next_login_attempt)));
+  return RespondNow(OneArgument(base::Value(data_for_next_login_attempt)));
 }
 
 LoginLockManagedGuestSessionFunction::LoginLockManagedGuestSessionFunction() =
@@ -151,6 +153,8 @@ LoginLockManagedGuestSessionFunction::~LoginLockManagedGuestSessionFunction() =
     default;
 
 ExtensionFunction::ResponseAction LoginLockManagedGuestSessionFunction::Run() {
+  ui::UserActivityDetector::Get()->HandleExternalUserActivity();
+
   const user_manager::UserManager* user_manager =
       user_manager::UserManager::Get();
   const user_manager::User* active_user = user_manager->GetActiveUser();
@@ -176,6 +180,8 @@ LoginUnlockManagedGuestSessionFunction::
 
 ExtensionFunction::ResponseAction
 LoginUnlockManagedGuestSessionFunction::Run() {
+  ui::UserActivityDetector::Get()->HandleExternalUserActivity();
+
   std::unique_ptr<api::login::UnlockManagedGuestSession::Params> parameters =
       api::login::UnlockManagedGuestSession::Params::Create(*args_);
   EXTENSION_FUNCTION_VALIDATE(parameters);

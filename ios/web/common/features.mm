@@ -11,8 +11,8 @@
 namespace web {
 namespace features {
 
-const base::Feature kIgnoresViewportScaleLimits{
-    "IgnoresViewportScaleLimits", base::FEATURE_ENABLED_BY_DEFAULT};
+const base::Feature kReduceSessionSize{"ReduceSessionSize",
+                                       base::FEATURE_DISABLED_BY_DEFAULT};
 
 const base::Feature kCrashOnUnexpectedURLChange{
     "CrashOnUnexpectedURLChange", base::FEATURE_ENABLED_BY_DEFAULT};
@@ -29,9 +29,6 @@ const base::Feature kKeepsRenderProcessAlive{"KeepsRenderProcessAlive",
 const base::Feature kClearOldNavigationRecordsWorkaround{
     "ClearOldNavigationRecordsWorkaround", base::FEATURE_ENABLED_BY_DEFAULT};
 
-const base::Feature kSSLCommittedInterstitials{
-    "SSLCommittedInterstitials", base::FEATURE_DISABLED_BY_DEFAULT};
-
 const base::Feature kEnablePersistentDownloads{
     "EnablePersistentDownloads", base::FEATURE_DISABLED_BY_DEFAULT};
 
@@ -45,12 +42,29 @@ const base::Feature kPreserveScrollViewProperties{
     "PreserveScrollViewProperties", base::FEATURE_ENABLED_BY_DEFAULT};
 
 const base::Feature kIOSLookalikeUrlNavigationSuggestionsUI{
-    "IOSLookalikeUrlNavigationSuggestionsUI",
-    base::FEATURE_DISABLED_BY_DEFAULT};
+    "IOSLookalikeUrlNavigationSuggestionsUI", base::FEATURE_ENABLED_BY_DEFAULT};
+
+const base::Feature kAddWebContentDropInteraction{
+    "AddWebContentDropInteraction", base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kScrollToTextIOS{"ScrollToTextIOS",
+                                     base::FEATURE_DISABLED_BY_DEFAULT};
+const base::Feature kIOSLegacyTLSInterstitial{
+    "IOSLegacyTLSInterstitial", base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kWebViewNativeContextMenu{
+    "WebViewNativeContextMenu", base::FEATURE_DISABLED_BY_DEFAULT};
 
 bool UseWebClientDefaultUserAgent() {
   if (@available(iOS 13, *)) {
     return base::FeatureList::IsEnabled(kUseDefaultUserAgentInWebClient);
+  }
+  return false;
+}
+
+bool UseWebViewNativeContextMenu() {
+  if (@available(iOS 13, *)) {
+    return base::FeatureList::IsEnabled(kWebViewNativeContextMenu);
   }
   return false;
 }

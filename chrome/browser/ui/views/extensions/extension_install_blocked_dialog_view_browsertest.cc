@@ -4,13 +4,14 @@
 
 #include <string>
 
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/test/test_browser_dialog.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/test/browser_test.h"
 
 class ExtensionInstallBlockedDialogViewTest : public DialogBrowserTest {
  public:

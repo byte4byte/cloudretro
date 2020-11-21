@@ -6,7 +6,11 @@
 
 #include "ash/public/cpp/shelf_item_delegate.h"
 #include "ash/public/cpp/shelf_model.h"
+#include "base/system/sys_info.h"
+#include "base/test/scoped_running_on_chromeos.h"
+#include "base/time/time.h"
 #include "chrome/browser/chromeos/login/users/mock_user_manager.h"
+#include "chrome/browser/chromeos/plugin_vm/plugin_vm_features.h"
 #include "chrome/browser/chromeos/plugin_vm/plugin_vm_pref_names.h"
 #include "chrome/browser/chromeos/plugin_vm/plugin_vm_util.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
@@ -41,7 +45,7 @@ class FakeShelfItemDelegate : public ash::ShelfItemDelegate {
                       int64_t display_id) override {}
   void Close() override {
     ChromeLauncherController::instance()->CloseLauncherItem(
-        ash::ShelfID(kPluginVmAppId));
+        ash::ShelfID(kPluginVmShelfAppId));
   }
 };
 
@@ -99,6 +103,8 @@ PluginVmTestHelper::PluginVmTestHelper(TestingProfile* testing_profile)
 PluginVmTestHelper::~PluginVmTestHelper() = default;
 
 void PluginVmTestHelper::SetPolicyRequirementsToAllowPluginVm() {
+  testing_profile_->GetPrefs()->SetBoolean(plugin_vm::prefs::kPluginVmAllowed,
+                                           true);
   testing_profile_->ScopedCrosSettingsTestHelper()->SetBoolean(
       chromeos::kPluginVmAllowed, true);
   testing_profile_->ScopedCrosSettingsTestHelper()->SetString(
@@ -115,6 +121,8 @@ void PluginVmTestHelper::SetUserRequirementsToAllowPluginVm() {
       account_id, true, user_manager::USER_TYPE_REGULAR);
   scoped_user_manager_ = std::make_unique<user_manager::ScopedUserManager>(
       std::move(mock_user_manager));
+  running_on_chromeos_ =
+      std::make_unique<base::test::ScopedRunningOnChromeOS>();
 }
 
 void PluginVmTestHelper::EnablePluginVmFeature() {
@@ -128,22 +136,27 @@ void PluginVmTestHelper::EnterpriseEnrollDevice() {
 }
 
 void PluginVmTestHelper::AllowPluginVm() {
-  ASSERT_FALSE(IsPluginVmAllowedForProfile(testing_profile_));
+  ASSERT_FALSE(PluginVmFeatures::Get()->IsAllowed(testing_profile_));
   SetUserRequirementsToAllowPluginVm();
   EnablePluginVmFeature();
   EnterpriseEnrollDevice();
   SetPolicyRequirementsToAllowPluginVm();
-  ASSERT_TRUE(IsPluginVmAllowedForProfile(testing_profile_));
+  ASSERT_TRUE(PluginVmFeatures::Get()->IsAllowed(testing_profile_));
+}
+
+void PluginVmTestHelper::EnablePluginVm() {
+  testing_profile_->GetPrefs()->SetBoolean(
+      plugin_vm::prefs::kPluginVmImageExists, true);
 }
 
 void PluginVmTestHelper::OpenShelfItem() {
-  ash::ShelfID shelf_id(kPluginVmAppId);
+  ash::ShelfID shelf_id(kPluginVmShelfAppId);
   std::unique_ptr<ash::ShelfItemDelegate> delegate =
       std::make_unique<FakeShelfItemDelegate>(shelf_id);
   ChromeLauncherController* laucher_controller =
       ChromeLauncherController::instance();
-  // Similar logic to InternalAppWindowShelfController, for handling pins and
-  // spinners.
+  // Similar logic to AppServiceAppWindowLauncherController, for handling pins
+  // and spinners.
   if (laucher_controller->GetItem(shelf_id)) {
     laucher_controller->shelf_model()->SetShelfItemDelegate(
         shelf_id, std::move(delegate));
@@ -155,7 +168,8 @@ void PluginVmTestHelper::OpenShelfItem() {
 }
 
 void PluginVmTestHelper::CloseShelfItem() {
-  ChromeLauncherController::instance()->Close(ash::ShelfID(kPluginVmAppId));
+  ChromeLauncherController::instance()->Close(
+      ash::ShelfID(kPluginVmShelfAppId));
 }
 
 }  // namespace plugin_vm

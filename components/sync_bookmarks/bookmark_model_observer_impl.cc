@@ -13,7 +13,7 @@
 #include "components/sync/base/hash_util.h"
 #include "components/sync/base/unique_position.h"
 #include "components/sync/driver/sync_driver_switches.h"
-#include "components/sync/engine/non_blocking_sync_common.h"
+#include "components/sync/engine/commit_and_get_updates_types.h"
 #include "components/sync_bookmarks/bookmark_specifics_conversions.h"
 #include "components/sync_bookmarks/switches.h"
 
@@ -90,16 +90,13 @@ void BookmarkModelObserverImpl::BookmarkNodeAdded(
   // Should be removed after figuring out the reason for the crash.
   CHECK(parent_entity);
 
-  // Similar to the directory implementation here:
-  // https://cs.chromium.org/chromium/src/components/sync/syncable/mutable_entry.cc?l=237&gsn=CreateEntryKernel
   // Assign a temp server id for the entity. Will be overriden by the actual
   // server id upon receiving commit response.
-  DCHECK(base::IsValidGUIDOutputString(node->guid()));
-
   // Local bookmark creations should have used a random GUID so it's safe to
   // use it as originator client item ID, without the risk for collision.
   const sync_pb::UniquePosition unique_position =
-      ComputePosition(*parent, index, node->guid()).ToProto();
+      ComputePosition(*parent, index, node->guid().AsLowercaseString())
+          .ToProto();
 
   sync_pb::EntitySpecifics specifics =
       CreateSpecificsFromBookmarkNode(node, model, /*force_favicon_load=*/true,
@@ -111,15 +108,14 @@ void BookmarkModelObserverImpl::BookmarkNodeAdded(
   const SyncedBookmarkTracker::Entity* entity =
       bookmark_tracker_->GetTombstoneEntityForGuid(node->guid());
   const base::Time creation_time = base::Time::Now();
-  if (entity && base::FeatureList::IsEnabled(
-                    switches::kSyncProcessBookmarkRestoreAfterDeletion)) {
+  if (entity) {
     bookmark_tracker_->UndeleteTombstoneForBookmarkNode(entity, node);
     bookmark_tracker_->Update(entity, entity->metadata()->server_version(),
                               creation_time, unique_position, specifics);
   } else {
-    entity =
-        bookmark_tracker_->Add(node, node->guid(), syncer::kUncommittedVersion,
-                               creation_time, unique_position, specifics);
+    entity = bookmark_tracker_->Add(node, node->guid().AsLowercaseString(),
+                                    syncer::kUncommittedVersion, creation_time,
+                                    unique_position, specifics);
   }
 
   // Mark the entity that it needs to be committed.
@@ -239,13 +235,24 @@ void BookmarkModelObserverImpl::BookmarkNodeFaviconChanged(
   const sync_pb::EntitySpecifics specifics = CreateSpecificsFromBookmarkNode(
       node, model, /*force_favicon_load=*/false, entity->has_final_guid());
 
-  if (entity->MatchesFaviconHash(specifics.bookmark().favicon())) {
-    // The favicon content didn't actually change, which means this event is
-    // almost certainly the result of favicon loading having completed.
+  // TODO(crbug.com/1094825): implement |base_specifics_hash| similar to
+  // ClientTagBasedModelTypeProcessor.
+  if (!entity->MatchesFaviconHash(specifics.bookmark().favicon())) {
+    ProcessUpdate(entity, specifics);
     return;
   }
 
-  ProcessUpdate(entity, specifics);
+  // The favicon content didn't actually change, which means this event is
+  // almost certainly the result of favicon loading having completed.
+  if (entity->IsUnsynced() &&
+      base::FeatureList::IsEnabled(
+          switches::kSyncDoNotCommitBookmarksWithoutFavicon)) {
+    // When kSyncDoNotCommitBookmarksWithoutFavicon is enabled, nudge for
+    // commit once favicon is loaded. This is needed in case when unsynced
+    // entity was skipped while building commit requests (since favicon wasn't
+    // loaded).
+    nudge_for_commit_closure_.Run();
+  }
 }
 
 void BookmarkModelObserverImpl::BookmarkNodeChildrenReordered(

@@ -40,6 +40,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/common/isolated_world_ids.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "testing/gmock/include/gmock/gmock-matchers.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -52,6 +53,8 @@ using test::FakeDistiller;
 using test::MockDistillerFactory;
 using test::MockDistillerPage;
 using test::MockDistillerPageFactory;
+using testing::Eq;
+using testing::ExplainMatchResult;
 using testing::HasSubstr;
 using testing::Not;
 
@@ -92,6 +95,26 @@ void ExpectBodyHasThemeAndFont(content::WebContents* contents,
   EXPECT_THAT(result, HasSubstr(expected_theme));
   EXPECT_THAT(result, HasSubstr(expected_font));
 }
+
+class PrefChangeObserver : public DistilledPagePrefs::Observer {
+ public:
+  void WaitForChange(DistilledPagePrefs* prefs) {
+    prefs->AddObserver(this);
+    base::RunLoop run_loop;
+    callback_ = run_loop.QuitClosure();
+    run_loop.Run();
+    prefs->RemoveObserver(this);
+  }
+
+  void OnChangeFontFamily(mojom::FontFamily font_family) override {
+    callback_.Run();
+  }
+  void OnChangeTheme(mojom::Theme theme) override { callback_.Run(); }
+  void OnChangeFontScaling(float scaling) override { callback_.Run(); }
+
+ private:
+  base::RepeatingClosure callback_;
+};
 
 }  // namespace
 
@@ -613,7 +636,12 @@ IN_PROC_BROWSER_TEST_F(DomDistillerViewerSourceBrowserTest, UISetsPrefs) {
   view_url = url_utils::GetDistillerViewUrlFromUrl(kDomDistillerScheme,
                                                    original_url, "Title");
   ViewSingleDistilledPage(view_url, "text/html");
-  content::WaitForLoadStop(contents);
+  EXPECT_TRUE(content::WaitForLoadStop(contents));
+
+  // Wait for all currently executing scripts to finish. Otherwise, the
+  // distiller object used to send the prefs to the browser from the JavaScript
+  // may not exist, causing test flakiness.
+  base::RunLoop().RunUntilIdle();
 
   DistilledPagePrefs* distilled_page_prefs =
       DomDistillerServiceFactory::GetForBrowserContext(browser()->profile())
@@ -621,9 +649,14 @@ IN_PROC_BROWSER_TEST_F(DomDistillerViewerSourceBrowserTest, UISetsPrefs) {
 
   // Verify that the initial preferences aren't the same as those set below.
   ExpectBodyHasThemeAndFont(contents, "light", "sans-serif");
+  std::string initial_font_size;
+  EXPECT_TRUE(content::ExecuteScriptAndExtractString(contents, kGetFontSize,
+                                                     &initial_font_size));
+  EXPECT_EQ(initial_font_size, "16px");
   EXPECT_NE(mojom::Theme::kDark, distilled_page_prefs->GetTheme());
   EXPECT_NE(mojom::FontFamily::kMonospace,
             distilled_page_prefs->GetFontFamily());
+  EXPECT_NE(3.0, distilled_page_prefs->GetFontScaling());
 
   // 'Click' the associated UI elements for changing each preference.
   const std::string script = R"(
@@ -646,16 +679,24 @@ IN_PROC_BROWSER_TEST_F(DomDistillerViewerSourceBrowserTest, UISetsPrefs) {
         document.querySelector(
             '#font-family-selection option[value="monospace"]')
           .dispatchEvent(new Event("change", { bubbles: true }));
+        const slider = document.getElementById('font-size-selection');
+        slider.value = 9;
+        slider.dispatchEvent(new Event("input", {bubbles: true}));
       })();)";
   content::DOMMessageQueue queue(contents);
   std::string result;
   content::ExecuteScriptAsync(contents, script);
-  EXPECT_TRUE(queue.WaitForMessage(&result));
+  ASSERT_TRUE(queue.WaitForMessage(&result));
 
-  // Verify that the preferences changed in the browser-side DistilledPagePrefs.
-  EXPECT_EQ(mojom::Theme::kDark, distilled_page_prefs->GetTheme());
-  EXPECT_EQ(mojom::FontFamily::kMonospace,
-            distilled_page_prefs->GetFontFamily());
+  // Verify that the preferences changed in the browser-side
+  // DistilledPagePrefs.
+  PrefChangeObserver observer;
+  while (distilled_page_prefs->GetTheme() != mojom::Theme::kDark ||
+         mojom::FontFamily::kMonospace !=
+             distilled_page_prefs->GetFontFamily() ||
+         3.0f != distilled_page_prefs->GetFontScaling()) {
+    observer.WaitForChange(distilled_page_prefs);
+  }
 }
 
 }  // namespace dom_distiller

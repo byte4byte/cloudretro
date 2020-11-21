@@ -126,8 +126,8 @@ class EasyUnlockService : public KeyedService {
   EasyUnlockScreenlockStateHandler::HardlockState GetHardlockState() const;
 
   // Gets the persisted hardlock state. Return true if there is persisted
-  // hardlock state and the value would be set to |state|. Otherwise,
-  // returns false and |state| is unchanged.
+  // hardlock state and the value would be set to `state`. Otherwise,
+  // returns false and `state` is unchanged.
   bool GetPersistedHardlockState(
       EasyUnlockScreenlockStateHandler::HardlockState* state) const;
 
@@ -168,7 +168,7 @@ class EasyUnlockService : public KeyedService {
   // Does a service type specific initialization.
   virtual void InitializeInternal() = 0;
 
-  // Does a service type specific shutdown. Called from |Shutdown|.
+  // Does a service type specific shutdown. Called from `Shutdown`.
   virtual void ShutdownInternal() = 0;
 
   // Service type specific tests for whether the service is allowed. Returns
@@ -178,9 +178,6 @@ class EasyUnlockService : public KeyedService {
 
   // Called when the local device resumes after a suspend.
   virtual void OnSuspendDoneInternal() = 0;
-
-  // Called when the state of the Bluetooth adapter changes.
-  virtual void OnBluetoothAdapterPresentChanged();
 
   // Called when the user enters password before easy unlock succeeds or fails
   // definitively.
@@ -198,7 +195,7 @@ class EasyUnlockService : public KeyedService {
   // Resets the screenlock state set by this service.
   void ResetScreenlockState();
 
-  // Updates |screenlock_state_handler_|'s hardlocked state.
+  // Updates `screenlock_state_handler_`'s hardlocked state.
   void SetScreenlockHardlockedState(
       EasyUnlockScreenlockStateHandler::HardlockState state);
 
@@ -222,7 +219,7 @@ class EasyUnlockService : public KeyedService {
   GetSmartUnlockPasswordAuthEvent() const;
 
   // Called by subclasses when remote devices allowed to unlock the screen
-  // are loaded for |account_id|.
+  // are loaded for `account_id`.
   void SetProximityAuthDevices(
       const AccountId& account_id,
       const multidevice::RemoteDeviceRefList& remote_devices,
@@ -243,11 +240,8 @@ class EasyUnlockService : public KeyedService {
   // signins/unlocks from password-based unlocks for metrics.
   bool will_authenticate_using_easy_unlock_ = false;
 
-  // A class to detect whether a bluetooth adapter is present.
-  class BluetoothDetector;
-
-  // Gets |screenlock_state_handler_|. Returns NULL if Easy Unlock is not
-  // allowed. Otherwise, if |screenlock_state_handler_| is not set, an instance
+  // Gets `screenlock_state_handler_`. Returns NULL if Easy Unlock is not
+  // allowed. Otherwise, if `screenlock_state_handler_` is not set, an instance
   // is created. Do not cache the returned value, as it may go away if Easy
   // Unlock gets disabled.
   EasyUnlockScreenlockStateHandler* GetScreenlockStateHandler();
@@ -272,18 +266,15 @@ class EasyUnlockService : public KeyedService {
 
   ChromeProximityAuthClient proximity_auth_client_;
 
-  // Created lazily in |GetScreenlockStateHandler|.
+  // Created lazily in `GetScreenlockStateHandler`.
   std::unique_ptr<EasyUnlockScreenlockStateHandler> screenlock_state_handler_;
 
   // The handler for the current auth attempt. Set iff an auth attempt is in
   // progress.
   std::unique_ptr<EasyUnlockAuthAttempt> auth_attempt_;
 
-  // Detects when the system Bluetooth adapter status changes.
-  std::unique_ptr<BluetoothDetector> bluetooth_detector_;
-
   // Handles connecting, authenticating, and updating the UI on the lock/sign-in
-  // screen. After a |RemoteDeviceRef| instance is provided, this object will
+  // screen. After a `RemoteDeviceRef` instance is provided, this object will
   // handle the rest.
   std::unique_ptr<proximity_auth::ProximityAuthSystem> proximity_auth_system_;
 

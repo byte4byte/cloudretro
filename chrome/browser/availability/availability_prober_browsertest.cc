@@ -13,9 +13,9 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "content/public/browser/network_service_instance.h"
-#include "content/public/browser/system_connector.h"
 #include "content/public/common/network_service_util.h"
 #include "content/public/common/service_names.mojom.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/network_connection_change_simulator.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/embedded_test_server/http_request.h"
@@ -123,7 +123,7 @@ IN_PROC_BROWSER_TEST_F(AvailabilityProberBrowserTest, OK) {
   AvailabilityProber prober(
       &delegate, browser()->profile()->GetURLLoaderFactory(),
       browser()->profile()->GetPrefs(),
-      AvailabilityProber::ClientName::kLitepages, url,
+      AvailabilityProber::ClientName::kIsolatedPrerenderOriginCheck, url,
       AvailabilityProber::HttpMethod::kGet, headers, retry_policy,
       timeout_policy, TRAFFIC_ANNOTATION_FOR_TESTS, 1,
       base::TimeDelta::FromDays(1));
@@ -147,7 +147,7 @@ IN_PROC_BROWSER_TEST_F(AvailabilityProberBrowserTest, Timeout) {
   AvailabilityProber prober(
       &delegate, browser()->profile()->GetURLLoaderFactory(),
       browser()->profile()->GetPrefs(),
-      AvailabilityProber::ClientName::kLitepages, url,
+      AvailabilityProber::ClientName::kIsolatedPrerenderOriginCheck, url,
       AvailabilityProber::HttpMethod::kGet, headers, retry_policy,
       timeout_policy, TRAFFIC_ANNOTATION_FOR_TESTS, 1,
       base::TimeDelta::FromDays(1));
@@ -170,7 +170,7 @@ IN_PROC_BROWSER_TEST_F(AvailabilityProberBrowserTest, NetworkChange) {
   AvailabilityProber prober(
       &delegate, browser()->profile()->GetURLLoaderFactory(),
       browser()->profile()->GetPrefs(),
-      AvailabilityProber::ClientName::kLitepages, url,
+      AvailabilityProber::ClientName::kIsolatedPrerenderOriginCheck, url,
       AvailabilityProber::HttpMethod::kGet, headers, retry_policy,
       timeout_policy, TRAFFIC_ANNOTATION_FOR_TESTS, 1,
       base::TimeDelta::FromDays(1));
@@ -192,7 +192,7 @@ IN_PROC_BROWSER_TEST_F(AvailabilityProberBrowserTest, BadServer) {
   AvailabilityProber prober(
       &delegate, browser()->profile()->GetURLLoaderFactory(),
       browser()->profile()->GetPrefs(),
-      AvailabilityProber::ClientName::kLitepages, url,
+      AvailabilityProber::ClientName::kIsolatedPrerenderOriginCheck, url,
       AvailabilityProber::HttpMethod::kGet, headers, retry_policy,
       timeout_policy, TRAFFIC_ANNOTATION_FOR_TESTS, 1,
       base::TimeDelta::FromDays(1));

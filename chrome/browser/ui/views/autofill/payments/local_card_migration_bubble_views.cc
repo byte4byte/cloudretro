@@ -15,6 +15,7 @@
 #include "chrome/app/vector_icons/vector_icons.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/views/autofill/payments/dialog_view_ids.h"
+#include "chrome/browser/ui/views/autofill/payments/payments_view_util.h"
 #include "chrome/browser/ui/views/chrome_layout_provider.h"
 #include "chrome/browser/ui/views/chrome_typography.h"
 #include "components/autofill/core/browser/ui/payments/local_card_migration_bubble_controller.h"
@@ -49,17 +50,20 @@ LocalCardMigrationBubbleViews::LocalCardMigrationBubbleViews(
     : LocationBarBubbleDelegateView(anchor_view, web_contents),
       controller_(controller) {
   DCHECK(controller);
-  DialogDelegate::SetButtons(ui::DIALOG_BUTTON_OK);
-  DialogDelegate::SetButtonLabel(
-      ui::DIALOG_BUTTON_OK,
-      l10n_util::GetStringUTF16(
-          IDS_AUTOFILL_LOCAL_CARD_MIGRATION_BUBBLE_BUTTON_LABEL));
-  DialogDelegate::SetCancelCallback(
+  SetButtons(ui::DIALOG_BUTTON_OK);
+  SetButtonLabel(ui::DIALOG_BUTTON_OK,
+                 l10n_util::GetStringUTF16(
+                     IDS_AUTOFILL_LOCAL_CARD_MIGRATION_BUBBLE_BUTTON_LABEL));
+  SetCancelCallback(
       base::BindOnce(&LocalCardMigrationBubbleViews::OnDialogCancelled,
                      base::Unretained(this)));
-  DialogDelegate::SetAcceptCallback(
+  SetAcceptCallback(
       base::BindOnce(&LocalCardMigrationBubbleViews::OnDialogAccepted,
                      base::Unretained(this)));
+
+  SetShowCloseButton(true);
+  set_fixed_width(views::LayoutProvider::Get()->GetDistanceMetric(
+      views::DISTANCE_BUBBLE_PREFERRED_WIDTH));
 }
 
 void LocalCardMigrationBubbleViews::Show(DisplayReason reason) {
@@ -71,10 +75,12 @@ void LocalCardMigrationBubbleViews::Hide() {
   // do that here. This will clear out |controller_|'s reference to |this|. Note
   // that WindowClosing() happens only after the _asynchronous_ Close() task
   // posted in CloseBubble() completes, but we need to fix references sooner.
-  if (controller_)
-    controller_->OnBubbleClosed();
-  controller_ = nullptr;
   CloseBubble();
+
+  if (controller_)
+    controller_->OnBubbleClosed(closed_reason_);
+
+  controller_ = nullptr;
 }
 
 void LocalCardMigrationBubbleViews::OnDialogAccepted() {
@@ -87,13 +93,6 @@ void LocalCardMigrationBubbleViews::OnDialogCancelled() {
   // TODO(https://crbug.com/1046793): Maybe delete this.
   if (controller_)
     controller_->OnCancelButtonClicked();
-}
-
-gfx::Size LocalCardMigrationBubbleViews::CalculatePreferredSize() const {
-  const int width = ChromeLayoutProvider::Get()->GetDistanceMetric(
-                        DISTANCE_BUBBLE_PREFERRED_WIDTH) -
-                    margins().width();
-  return gfx::Size(width, GetHeightForWidth(width));
 }
 
 void LocalCardMigrationBubbleViews::AddedToWidget() {
@@ -137,10 +136,6 @@ void LocalCardMigrationBubbleViews::AddedToWidget() {
   GetBubbleFrameView()->SetTitleView(std::move(title_container));
 }
 
-bool LocalCardMigrationBubbleViews::ShouldShowCloseButton() const {
-  return true;
-}
-
 base::string16 LocalCardMigrationBubbleViews::GetWindowTitle() const {
   return controller_ ? l10n_util::GetStringUTF16(
                            IDS_AUTOFILL_LOCAL_CARD_MIGRATION_BUBBLE_TITLE)
@@ -149,19 +144,27 @@ base::string16 LocalCardMigrationBubbleViews::GetWindowTitle() const {
 
 void LocalCardMigrationBubbleViews::WindowClosing() {
   if (controller_) {
-    controller_->OnBubbleClosed();
+    controller_->OnBubbleClosed(closed_reason_);
     controller_ = nullptr;
   }
 }
 
-LocalCardMigrationBubbleViews::~LocalCardMigrationBubbleViews() {}
+void LocalCardMigrationBubbleViews::OnWidgetClosing(views::Widget* widget) {
+  LocationBarBubbleDelegateView::OnWidgetDestroying(widget);
+  DCHECK_NE(widget->closed_reason(),
+            views::Widget::ClosedReason::kCancelButtonClicked);
+  closed_reason_ = GetPaymentsBubbleClosedReasonFromWidgetClosedReason(
+      widget->closed_reason());
+}
+
+LocalCardMigrationBubbleViews::~LocalCardMigrationBubbleViews() = default;
 
 void LocalCardMigrationBubbleViews::Init() {
   SetLayoutManager(std::make_unique<views::FillLayout>());
-  auto* explanatory_message =
-      new views::Label(l10n_util::GetStringUTF16(
-                           IDS_AUTOFILL_LOCAL_CARD_MIGRATION_BUBBLE_BODY_TEXT),
-                       CONTEXT_BODY_TEXT_LARGE, views::style::STYLE_SECONDARY);
+  auto* explanatory_message = new views::Label(
+      l10n_util::GetStringUTF16(
+          IDS_AUTOFILL_LOCAL_CARD_MIGRATION_BUBBLE_BODY_TEXT),
+      views::style::CONTEXT_DIALOG_BODY_TEXT, views::style::STYLE_SECONDARY);
   explanatory_message->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   explanatory_message->SetMultiLine(true);
   AddChildView(explanatory_message);

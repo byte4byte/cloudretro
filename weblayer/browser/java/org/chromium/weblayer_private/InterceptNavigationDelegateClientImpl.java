@@ -12,7 +12,7 @@ import org.chromium.components.external_intents.AuthenticatorNavigationIntercept
 import org.chromium.components.external_intents.ExternalNavigationHandler;
 import org.chromium.components.external_intents.InterceptNavigationDelegateClient;
 import org.chromium.components.external_intents.InterceptNavigationDelegateImpl;
-import org.chromium.components.external_intents.RedirectHandlerImpl;
+import org.chromium.components.external_intents.RedirectHandler;
 import org.chromium.components.navigation_interception.NavigationParams;
 import org.chromium.content_public.browser.NavigationHandle;
 import org.chromium.content_public.browser.WebContents;
@@ -25,13 +25,14 @@ import org.chromium.content_public.browser.WebContentsObserver;
 public class InterceptNavigationDelegateClientImpl implements InterceptNavigationDelegateClient {
     private TabImpl mTab;
     private WebContentsObserver mWebContentsObserver;
-    private RedirectHandlerImpl mRedirectHandler;
+    private RedirectHandler mRedirectHandler;
     private InterceptNavigationDelegateImpl mInterceptNavigationDelegate;
-    private long mLastNavigationWithUserGestureTime = RedirectHandlerImpl.INVALID_TIME;
+    private long mLastNavigationWithUserGestureTime = RedirectHandler.INVALID_TIME;
+    private boolean mDestroyed;
 
     InterceptNavigationDelegateClientImpl(TabImpl tab) {
         mTab = tab;
-        mRedirectHandler = RedirectHandlerImpl.create();
+        mRedirectHandler = RedirectHandler.create();
         mWebContentsObserver = new WebContentsObserver() {
             @Override
             public void didFinishNavigation(NavigationHandle navigationHandle) {
@@ -53,6 +54,7 @@ public class InterceptNavigationDelegateClientImpl implements InterceptNavigatio
     }
 
     public void destroy() {
+        mDestroyed = true;
         getWebContents().removeObserver(mWebContentsObserver);
         mInterceptNavigationDelegate.associateWithWebContents(null);
     }
@@ -82,7 +84,7 @@ public class InterceptNavigationDelegateClientImpl implements InterceptNavigatio
     }
 
     @Override
-    public RedirectHandlerImpl getOrCreateRedirectHandler() {
+    public RedirectHandler getOrCreateRedirectHandler() {
         return mRedirectHandler;
     }
 
@@ -118,11 +120,12 @@ public class InterceptNavigationDelegateClientImpl implements InterceptNavigatio
 
     @Override
     public void closeTab() {
-        // Prior to 84 the client was not equipped to handle the case of WebLayer initiating the
-        // last tab being closed, so we simply short-circuit out here in that case.
-        if (WebLayerFactoryImpl.getClientMajorVersion() < 84) return;
+        // When InterceptNavigationDelegate determines that a tab needs to be closed, it posts a
+        // task invoking this method. It is possible that in the interim the tab was closed for
+        // another reason. In that case there is nothing more to do here.
+        if (mDestroyed) return;
 
-        mTab.getBrowser().destroyTab(mTab);
+        closeTab(mTab);
     }
 
     @Override
@@ -130,5 +133,13 @@ public class InterceptNavigationDelegateClientImpl implements InterceptNavigatio
         if (params.hasUserGesture || params.hasUserGestureCarryover) {
             mLastNavigationWithUserGestureTime = SystemClock.elapsedRealtime();
         }
+    }
+
+    static void closeTab(TabImpl tab) {
+        // Prior to 84 the client was not equipped to handle the case of WebLayer initiating the
+        // last tab being closed, so we simply short-circuit out here in that case.
+        if (WebLayerFactoryImpl.getClientMajorVersion() < 84) return;
+
+        tab.getBrowser().destroyTab(tab);
     }
 }

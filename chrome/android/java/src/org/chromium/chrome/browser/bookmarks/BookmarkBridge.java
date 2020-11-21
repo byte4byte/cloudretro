@@ -25,6 +25,7 @@ import org.chromium.components.bookmarks.BookmarkType;
 import org.chromium.components.url_formatter.SchemeDisplay;
 import org.chromium.components.url_formatter.UrlFormatter;
 import org.chromium.content_public.browser.WebContents;
+import org.chromium.url.GURL;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -42,27 +43,6 @@ public class BookmarkBridge {
             new ArrayList<DelayedBookmarkCallback>();
     private final ObserverList<BookmarkModelObserver> mObservers =
             new ObserverList<BookmarkModelObserver>();
-
-    /**
-     * @param tab Tab whose current URL is checked against.
-     * @return {@code true} if the current Tab URL has a bookmark associated with it.
-     */
-    public static boolean hasBookmarkIdForTab(Tab tab) {
-        ThreadUtils.assertOnUiThread();
-        if (tab.isFrozen()) return false;
-        return BookmarkBridgeJni.get().getBookmarkIdForWebContents(tab.getWebContents(), false)
-                != BookmarkId.INVALID_ID;
-    }
-
-    /**
-     * @param tab Tab whose current URL is checked against.
-     * @return ser-editable bookmark ID.
-     */
-    public static long getUserBookmarkIdForTab(Tab tab) {
-        ThreadUtils.assertOnUiThread();
-        if (tab.isFrozen()) return BookmarkId.INVALID_ID;
-        return BookmarkBridgeJni.get().getBookmarkIdForWebContents(tab.getWebContents(), true);
-    }
 
     /**
      * Interface for callback object for fetching bookmarks and folder hierarchy.
@@ -203,9 +183,13 @@ public class BookmarkBridge {
         private final boolean mIsEditable;
         private final boolean mIsManaged;
         private boolean mForceEditableForTesting;
+        private long mDateAdded;
+        private boolean mRead;
 
-        private BookmarkItem(BookmarkId id, String title, String url, boolean isFolder,
-                BookmarkId parentId, boolean isEditable, boolean isManaged) {
+        @VisibleForTesting
+        public BookmarkItem(BookmarkId id, String title, String url, boolean isFolder,
+                BookmarkId parentId, boolean isEditable, boolean isManaged, long dateAdded,
+                boolean read) {
             mId = id;
             mTitle = title;
             mUrl = url;
@@ -213,6 +197,8 @@ public class BookmarkBridge {
             mParentId = parentId;
             mIsEditable = isEditable;
             mIsManaged = isManaged;
+            mDateAdded = dateAdded;
+            mRead = read;
         }
 
         /** @return Title of the bookmark item. */
@@ -265,6 +251,21 @@ public class BookmarkBridge {
             return mId;
         }
 
+        /**
+         * @return The timestamp in milliseconds since epoch that the bookmark is added.
+         */
+        public long getDateAdded() {
+            return mDateAdded;
+        }
+
+        /**
+         * @return Whether the bookmark is read. Only valid for {@link BookmarkType#READING_LIST}.
+         *         Defaults to "false" for other types.
+         */
+        public boolean isRead() {
+            return mRead;
+        }
+
         // TODO(https://crbug.com/1019217): Remove when BookmarkModel is stubbed in tests instead.
         void forceEditableForTesting() {
             mForceEditableForTesting = true;
@@ -294,6 +295,29 @@ public class BookmarkBridge {
             mDelayedBookmarkCallbacks.clear();
         }
         mObservers.clear();
+    }
+
+    /**
+     * @param tab Tab whose current URL is checked against.
+     * @return {@code true} if the current Tab URL has a bookmark associated with it.
+     */
+    public boolean hasBookmarkIdForTab(Tab tab) {
+        ThreadUtils.assertOnUiThread();
+        if (tab.isFrozen() || mNativeBookmarkBridge == 0) return false;
+        return BookmarkBridgeJni.get().getBookmarkIdForWebContents(
+                       mNativeBookmarkBridge, this, tab.getWebContents(), false)
+                != BookmarkId.INVALID_ID;
+    }
+
+    /**
+     * @param tab Tab whose current URL is checked against.
+     * @return User-editable bookmark ID.
+     */
+    public long getUserBookmarkIdForTab(Tab tab) {
+        ThreadUtils.assertOnUiThread();
+        if (tab.isFrozen()) return BookmarkId.INVALID_ID;
+        return BookmarkBridgeJni.get().getBookmarkIdForWebContents(
+                mNativeBookmarkBridge, this, tab.getWebContents(), true);
     }
 
     /**
@@ -522,17 +546,14 @@ public class BookmarkBridge {
     /**
      * Reads sub-folder IDs, sub-bookmark IDs, or both of the given folder.
      *
-     * @param getFolders   Whether sub-folders should be returned.
-     * @param getBookmarks Whether sub-bookmarks should be returned.
      * @return Child IDs of the given folder, with the specified type.
      */
-    public List<BookmarkId> getChildIDs(BookmarkId id, boolean getFolders, boolean getBookmarks) {
+    public List<BookmarkId> getChildIDs(BookmarkId id) {
         ThreadUtils.assertOnUiThread();
-        // TODO(crbug.com/160194): Remove boolean parameters after bookmark reordering launches.
         assert mIsNativeBookmarkModelLoaded;
         List<BookmarkId> result = new ArrayList<BookmarkId>();
-        BookmarkBridgeJni.get().getChildIDs(mNativeBookmarkBridge, BookmarkBridge.this, id.getId(),
-                id.getType(), getFolders, getBookmarks, result);
+        BookmarkBridgeJni.get().getChildIDs(
+                mNativeBookmarkBridge, BookmarkBridge.this, id.getId(), id.getType(), result);
         return result;
     }
 
@@ -777,6 +798,7 @@ public class BookmarkBridge {
 
     public boolean isEditBookmarksEnabled() {
         ThreadUtils.assertOnUiThread();
+        if (mNativeBookmarkBridge == 0) return false;
         return BookmarkBridgeJni.get().isEditBookmarksEnabled(mNativeBookmarkBridge);
     }
 
@@ -811,6 +833,41 @@ public class BookmarkBridge {
                 mNativeBookmarkBridge, BookmarkBridge.this, parent, newOrder);
     }
 
+    /**
+     * Adds an article to the reading list. If the article was already bookmarked, the existing
+     * bookmark ID will be returned.
+     * @param title The title to be used for the reading list item.
+     * @param url The URL of the reading list item.
+     * @return The bookmark ID created after saving the article to the reading list.
+     */
+    public BookmarkId addToReadingList(String title, String url) {
+        ThreadUtils.assertOnUiThread();
+        assert title != null;
+        assert url != null;
+
+        return BookmarkBridgeJni.get().addToReadingList(
+                mNativeBookmarkBridge, BookmarkBridge.this, title, url);
+    }
+
+    /**
+     * Helper method to mark an article as read.
+     * @param url The URL of the reading list item.
+     * @param read Whether the article should be marked as read.
+     */
+    public void setReadStatusForReadingList(String url, boolean read) {
+        BookmarkBridgeJni.get().setReadStatus(
+                mNativeBookmarkBridge, BookmarkBridge.this, url, read);
+    }
+
+    /**
+     * Checks whether supplied URL has already been bookmarked.
+     * @param url The URL to check.
+     * @return Whether the URL has been bookmarked.
+     */
+    public boolean isBookmarked(GURL url) {
+        return BookmarkBridgeJni.get().isBookmarked(mNativeBookmarkBridge, url);
+    }
+
     @VisibleForTesting
     BookmarkId getPartnerFolderId() {
         ThreadUtils.assertOnUiThread();
@@ -834,7 +891,7 @@ public class BookmarkBridge {
     }
 
     @CalledByNative
-    private void bookmarkModelDeleted() {
+    private void destroyFromNative() {
         destroy();
     }
 
@@ -920,9 +977,9 @@ public class BookmarkBridge {
     @CalledByNative
     private static BookmarkItem createBookmarkItem(long id, int type, String title, String url,
             boolean isFolder, long parentId, int parentIdType, boolean isEditable,
-            boolean isManaged) {
+            boolean isManaged, long dateAdded, boolean read) {
         return new BookmarkItem(new BookmarkId(id, type), title, url, isFolder,
-                new BookmarkId(parentId, parentIdType), isEditable, isManaged);
+                new BookmarkId(parentId, parentIdType), isEditable, isManaged, dateAdded, read);
     }
 
     @CalledByNative
@@ -991,7 +1048,8 @@ public class BookmarkBridge {
 
     @NativeMethods
     interface Natives {
-        long getBookmarkIdForWebContents(WebContents webContents, boolean onlyEditable);
+        long getBookmarkIdForWebContents(long nativeBookmarkBridge, BookmarkBridge caller,
+                WebContents webContents, boolean onlyEditable);
         BookmarkItem getBookmarkByID(
                 long nativeBookmarkBridge, BookmarkBridge caller, long id, int type);
         void getTopLevelFolderParentIDs(
@@ -1007,7 +1065,7 @@ public class BookmarkBridge {
         BookmarkId getPartnerFolderId(long nativeBookmarkBridge, BookmarkBridge caller);
         int getChildCount(long nativeBookmarkBridge, BookmarkBridge caller, long id, int type);
         void getChildIDs(long nativeBookmarkBridge, BookmarkBridge caller, long id, int type,
-                boolean getFolders, boolean getBookmarks, List<BookmarkId> bookmarksList);
+                List<BookmarkId> bookmarksList);
         BookmarkId getChildAt(
                 long nativeBookmarkBridge, BookmarkBridge caller, long id, int type, int index);
         int getTotalBookmarkCount(
@@ -1033,6 +1091,10 @@ public class BookmarkBridge {
                 BookmarkId newParentId, int index);
         BookmarkId addBookmark(long nativeBookmarkBridge, BookmarkBridge caller, BookmarkId parent,
                 int index, String title, String url);
+        BookmarkId addToReadingList(
+                long nativeBookmarkBridge, BookmarkBridge caller, String title, String url);
+        void setReadStatus(
+                long nativeBookmarkBridge, BookmarkBridge caller, String url, boolean read);
         void undo(long nativeBookmarkBridge, BookmarkBridge caller);
         void startGroupingUndos(long nativeBookmarkBridge, BookmarkBridge caller);
         void endGroupingUndos(long nativeBookmarkBridge, BookmarkBridge caller);
@@ -1048,5 +1110,6 @@ public class BookmarkBridge {
         boolean isEditBookmarksEnabled(long nativeBookmarkBridge);
         void reorderChildren(long nativeBookmarkBridge, BookmarkBridge caller, BookmarkId parent,
                 long[] orderedNodes);
+        boolean isBookmarked(long nativeBookmarkBridge, GURL url);
     }
 }

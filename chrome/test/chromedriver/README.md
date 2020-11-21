@@ -10,10 +10,16 @@ which allows users to automate testing of their website across browsers.
 
 ## Getting Started
 
-Build ChromeDriver by building the `chromedriver` target, e.g.,
+ChromeDriver source code is located in the Chromium source repository,
+and shares the same build tools as Chromium.
+To build ChromeDriver, please first follow the instructions to
+[download and build Chromium](https://www.chromium.org/developers/how-tos/get-the-code).
+
+Once you have set up the build environment,
+build ChromeDriver by building the `chromedriver` target, e.g.,
 
 ```
-ninja -C out/Default chromedriver
+autoninja -C out/Default chromedriver
 ```
 
 This will create an executable binary in the build folder named
@@ -22,16 +28,22 @@ This will create an executable binary in the build folder named
 Once built, ChromeDriver can be used with various third-party libraries that
 support WebDriver protocol, including language bindings provided by Selenium.
 
+### Verifying the Build
+
 For testing purposes, ChromeDriver can be used interactively with python.
+The following is an example on Linux. It assumes that you downloaded Chromium
+repository at ~/chromium/src, and you used out/Default as the build location.
+You may need to adjust the paths if you used different locations.
 The following code uses our own testing API, not the commonly used Python
 binding provided by Selenium.
 
 ```python
-$ export PYTHONPATH=<THIS_DIR>/server:<THIS_DIR>/client
+$ cd ~/chromium/src/chrome/test/chromedriver
+$ export PYTHONPATH=$PWD:$PWD/server:$PWD/client
 $ python
 >>> import server
 >>> import chromedriver
->>> cd_server = server.Server('/path/to/chromedriver/executable')
+>>> cd_server = server.Server('../../../out/Default/chromedriver')
 >>> driver = chromedriver.ChromeDriver(cd_server.GetUrl())
 >>> driver.Load('http://www.google.com')
 >>> driver.Quit()
@@ -62,6 +74,10 @@ Additional information is available on the following pages:
 * [Threading](docs/threading.md): ChromeDriver threading model.
 * [Chrome Connection](docs/chrome_connection.md):
   How ChromeDriver connects to Chrome and controls it.
+* [DevTools Event Listener](docs/event_listener.md):
+  How ChromeDriver responds to events from Chrome DevTools.
+* [Run JavaScript Code](docs/run_javascript.md):
+  How ChromeDriver sends JavaScript code to Chrome for execution.
 
 ## Code structure (relative to this file)
 
@@ -93,35 +109,8 @@ Integration tests.
 
 ## Testing
 
-There are several test suites for verifying ChromeDriver's correctness:
-
-### chromedriver_unittests
-
-This is the unittest target, which runs on the commit queue on win/mac/linux.
-Tests should take a few milliseconds and be very stable.
-
-```
-ninja -C out/Default chromedriver_unittests
-out/Default/chromedriver_unittests
-```
-
-### python integration tests (`test/run_py_tests.py`)
-
-These tests are maintained by the ChromeDriver team, and are intended to verify
-that ChromeDriver works correctly with Chrome. Run test/run_py_tests.py --help
-for more info. These are run on the commit queue on win/mac/linux.
-
-```
-ninja -C out/Default chrome chromedriver
-<THIS_DIR>/test/run_py_tests.py --chromedriver=out/Default/chromedriver
-```
-
-### WebDriver Java acceptance tests (`test/run_java_tests.py`)
-
-These are integration tests from the WebDriver open source project which can
-be run via test/run_java_tests.py. They are not currently run on any bots, but
-will be included in the commit queue in the future. Run with --help for more
-info.
+There are several test suites for verifying ChromeDriver's correctness.
+For details, see the [testing page](docs/testing.md).
 
 ## Contributing
 

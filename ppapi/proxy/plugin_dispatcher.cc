@@ -7,9 +7,10 @@
 #include <map>
 #include <memory>
 
+#include "base/check.h"
 #include "base/compiler_specific.h"
-#include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/notreached.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
 #include "ipc/ipc_message.h"
@@ -17,9 +18,6 @@
 #include "ipc/ipc_sync_message_filter.h"
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/c/ppp_instance.h"
-#include "ppapi/proxy/flash_clipboard_resource.h"
-#include "ppapi/proxy/flash_file_resource.h"
-#include "ppapi/proxy/flash_resource.h"
 #include "ppapi/proxy/gamepad_resource.h"
 #include "ppapi/proxy/interface_list.h"
 #include "ppapi/proxy/interface_proxy.h"
@@ -29,7 +27,6 @@
 #include "ppapi/proxy/plugin_var_serialization_rules.h"
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/proxy/ppb_instance_proxy.h"
-#include "ppapi/proxy/ppp_class_proxy.h"
 #include "ppapi/proxy/resource_creation_proxy.h"
 #include "ppapi/proxy/resource_reply_thread_registrar.h"
 #include "ppapi/shared_impl/ppapi_globals.h"

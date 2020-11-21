@@ -7,9 +7,10 @@ package org.chromium.android_webview.test;
 import static org.chromium.android_webview.test.AwActivityTestRule.WAIT_TIMEOUT_MS;
 
 import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.SmallTest;
 import android.util.Base64;
 import android.util.Pair;
+
+import androidx.test.filters.SmallTest;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -21,9 +22,11 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.android_webview.AwContents;
+import org.chromium.android_webview.common.AwFeatures;
 import org.chromium.android_webview.test.util.CommonResources;
 import org.chromium.android_webview.test.util.JSUtils;
 import org.chromium.base.test.util.CallbackHelper;
+import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
 import org.chromium.content_public.browser.test.util.HistoryUtils;
 import org.chromium.net.test.util.TestWebServer;
@@ -403,6 +406,8 @@ public class LoadUrlTest {
     @Test
     @SmallTest
     @Feature({"AndroidWebView"})
+    @CommandLineFlags.Add("enable-features=" + AwFeatures.WEBVIEW_EXTRA_HEADERS_SAME_ORIGIN_ONLY)
+    // TODO(crbug.com/1038002) remove flag when enabled by default
     public void testCrossOriginRedirectWithExtraHeaders() throws Throwable {
         final TestAwContentsClient contentsClient = new TestAwContentsClient();
         final AwTestContainerView testContainerView =
@@ -433,6 +438,8 @@ public class LoadUrlTest {
     @Test
     @SmallTest
     @Feature({"AndroidWebView"})
+    @CommandLineFlags.Add("enable-features=" + AwFeatures.WEBVIEW_EXTRA_HEADERS_SAME_ORIGIN_ONLY)
+    // TODO(crbug.com/1038002) remove flag when enabled by default
     public void testRedirectToPreviousExtraHeaders() throws Throwable {
         final TestAwContentsClient contentsClient = new TestAwContentsClient();
         final AwTestContainerView testContainerView =

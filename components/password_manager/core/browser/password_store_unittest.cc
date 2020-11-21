@@ -8,7 +8,7 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/run_loop.h"
 #include "base/stl_util.h"
@@ -20,9 +20,10 @@
 #include "base/test/task_environment.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
+#include "components/autofill/core/common/signatures.h"
 #include "components/os_crypt/os_crypt_mocker.h"
 #include "components/password_manager/core/browser/android_affiliation/affiliated_match_helper.h"
-#include "components/password_manager/core/browser/android_affiliation/affiliation_service.h"
+#include "components/password_manager/core/browser/android_affiliation/android_affiliation_service.h"
 #include "components/password_manager/core/browser/android_affiliation/mock_affiliated_match_helper.h"
 #include "components/password_manager/core/browser/compromised_credentials_consumer.h"
 #include "components/password_manager/core/browser/form_parsing/form_parser.h"
@@ -39,10 +40,10 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-using autofill::PasswordForm;
 using base::WaitableEvent;
 using testing::_;
 using testing::DoAll;
+using testing::ElementsAre;
 using testing::ElementsAreArray;
 using testing::IsEmpty;
 using testing::UnorderedElementsAre;
@@ -121,8 +122,11 @@ struct MockDatabaseCompromisedCredentialsObserver
 
 class MockPasswordStoreSigninNotifier : public PasswordStoreSigninNotifier {
  public:
-  MOCK_METHOD1(SubscribeToSigninEvents, void(PasswordStore* store));
-  MOCK_METHOD0(UnsubscribeFromSigninEvents, void());
+  MOCK_METHOD(void,
+              SubscribeToSigninEvents,
+              (PasswordStore * store),
+              (override));
+  MOCK_METHOD(void, UnsubscribeFromSigninEvents, (), (override));
 };
 
 }  // namespace
@@ -136,6 +140,9 @@ class PasswordStoreTest : public testing::Test {
     // Mock OSCrypt. There is a call to OSCrypt on initializling
     // PasswordReuseDetector, so it should be mocked.
     OSCryptMocker::SetUp();
+
+    feature_list_.InitAndEnableFeature(
+        features::kPasswordReuseDetectionEnabled);
   }
 
   void TearDown() override { OSCryptMocker::TearDown(); }
@@ -155,6 +162,7 @@ class PasswordStoreTest : public testing::Test {
   base::ScopedTempDir temp_dir_;
   base::test::TaskEnvironment task_environment_{
       base::test::TaskEnvironment::MainThreadType::UI};
+  base::test::ScopedFeatureList feature_list_;
 
   DISALLOW_COPY_AND_ASSIGN(PasswordStoreTest);
 };
@@ -207,8 +215,8 @@ TEST_F(PasswordStoreTest, IgnoreOldWwwGoogleLogins) {
 
   // Build the forms vector and add the forms to the store.
   std::vector<std::unique_ptr<PasswordForm>> all_forms;
-  for (size_t i = 0; i < base::size(form_data); ++i) {
-    all_forms.push_back(FillPasswordFormWithData(form_data[i]));
+  for (const auto& data : form_data) {
+    all_forms.push_back(FillPasswordFormWithData(data));
     store->AddLogin(*all_forms.back());
   }
 
@@ -294,7 +302,7 @@ TEST_F(PasswordStoreTest, UpdateLoginPrimaryKeyFields) {
   EXPECT_CALL(mock_observer, OnLoginsChanged(testing::SizeIs(2u)));
   PasswordForm old_primary_key;
   old_primary_key.signon_realm = old_form->signon_realm;
-  old_primary_key.origin = old_form->origin;
+  old_primary_key.url = old_form->url;
   old_primary_key.username_element = old_form->username_element;
   old_primary_key.username_value = old_form->username_value;
   old_primary_key.password_element = old_form->password_element;
@@ -599,8 +607,8 @@ TEST_F(PasswordStoreTest, GetLoginsWithoutAffiliations) {
   store->Init(nullptr);
 
   std::vector<std::unique_ptr<PasswordForm>> all_credentials;
-  for (size_t i = 0; i < base::size(kTestCredentials); ++i) {
-    all_credentials.push_back(FillPasswordFormWithData(kTestCredentials[i]));
+  for (const auto& credential : kTestCredentials) {
+    all_credentials.push_back(FillPasswordFormWithData(credential));
     store->AddLogin(*all_credentials.back());
   }
 
@@ -867,8 +875,8 @@ TEST_F(PasswordStoreTest, UpdatePasswordsStoredForAffiliatedWebsites) {
 
     // Set up the initial test data set.
     std::vector<std::unique_ptr<PasswordForm>> all_credentials;
-    for (size_t i = 0; i < base::size(kTestCredentials); ++i) {
-      all_credentials.push_back(FillPasswordFormWithData(kTestCredentials[i]));
+    for (const auto& credential : kTestCredentials) {
+      all_credentials.push_back(FillPasswordFormWithData(credential));
       all_credentials.back()->date_synced =
           all_credentials.back()->date_created;
       store->AddLogin(*all_credentials.back());
@@ -1178,7 +1186,6 @@ TEST_F(PasswordStoreTest, Unblacklisting) {
   store->ShutdownOnUIThread();
 }
 
-#if defined(SYNC_PASSWORD_REUSE_DETECTION_ENABLED)
 TEST_F(PasswordStoreTest, CheckPasswordReuse) {
   static constexpr PasswordFormData kTestCredentials[] = {
       {PasswordForm::Scheme::kHtml, "https://www.google.com",
@@ -1211,13 +1218,14 @@ TEST_F(PasswordStoreTest, CheckPasswordReuse) {
     MockPasswordReuseDetectorConsumer mock_consumer;
     if (test_data.reused_password_len != 0) {
       const std::vector<MatchingReusedCredential> credentials = {
-          {"https://www.google.com", base::ASCIIToUTF16("username1")}};
-      EXPECT_CALL(
-          mock_consumer,
-          OnReuseFound(test_data.reused_password_len, Matches(base::nullopt),
-                       ElementsAreArray(credentials), 2));
+          {"https://www.google.com", base::ASCIIToUTF16("username1"),
+           PasswordForm::Store::kProfileStore}};
+      EXPECT_CALL(mock_consumer,
+                  OnReuseCheckDone(true, test_data.reused_password_len,
+                                   Matches(base::nullopt),
+                                   ElementsAreArray(credentials), 2));
     } else {
-      EXPECT_CALL(mock_consumer, OnReuseFound(_, _, _, _)).Times(0);
+      EXPECT_CALL(mock_consumer, OnReuseCheckDone(false, _, _, _, _));
     }
 
     store->CheckReuse(base::WideToUTF16(test_data.input), test_data.domain,
@@ -1252,8 +1260,8 @@ TEST_F(PasswordStoreTest, SavingClearingProtectedPassword) {
   // Check that sync password reuse is found.
   MockPasswordReuseDetectorConsumer mock_consumer;
   EXPECT_CALL(mock_consumer,
-              OnReuseFound(sync_password.size(), Matches(sync_password_hash),
-                           IsEmpty(), 0));
+              OnReuseCheckDone(true, sync_password.size(),
+                               Matches(sync_password_hash), IsEmpty(), 0));
   store->CheckReuse(input, "https://facebook.com", &mock_consumer);
   WaitForPasswordStore();
   testing::Mock::VerifyAndClearExpectations(&mock_consumer);
@@ -1269,8 +1277,8 @@ TEST_F(PasswordStoreTest, SavingClearingProtectedPassword) {
 
   // Check that Gaia password reuse is found.
   EXPECT_CALL(mock_consumer,
-              OnReuseFound(gaia_password.size(), Matches(gaia_password_hash),
-                           IsEmpty(), 0));
+              OnReuseCheckDone(true, gaia_password.size(),
+                               Matches(gaia_password_hash), IsEmpty(), 0));
   store->CheckReuse(input, "https://example.com", &mock_consumer);
   WaitForPasswordStore();
   testing::Mock::VerifyAndClearExpectations(&mock_consumer);
@@ -1279,7 +1287,7 @@ TEST_F(PasswordStoreTest, SavingClearingProtectedPassword) {
   // hash.
   store->ClearGaiaPasswordHash("sync_username");
   EXPECT_EQ(1u, prefs.GetList(prefs::kPasswordHashDataList)->GetList().size());
-  EXPECT_CALL(mock_consumer, OnReuseFound(_, _, _, _)).Times(1);
+  EXPECT_CALL(mock_consumer, OnReuseCheckDone(true, _, _, _, _)).Times(1);
   store->CheckReuse(input, "https://facebook.com", &mock_consumer);
   WaitForPasswordStore();
   testing::Mock::VerifyAndClearExpectations(&mock_consumer);
@@ -1288,7 +1296,7 @@ TEST_F(PasswordStoreTest, SavingClearingProtectedPassword) {
   // password hash.
   store->ClearAllGaiaPasswordHash();
   EXPECT_EQ(0u, prefs.GetList(prefs::kPasswordHashDataList)->GetList().size());
-  EXPECT_CALL(mock_consumer, OnReuseFound(_, _, _, _)).Times(0);
+  EXPECT_CALL(mock_consumer, OnReuseCheckDone(false, _, _, _, _));
   store->CheckReuse(input, "https://example.com", &mock_consumer);
   WaitForPasswordStore();
   testing::Mock::VerifyAndClearExpectations(&mock_consumer);
@@ -1302,9 +1310,9 @@ TEST_F(PasswordStoreTest, SavingClearingProtectedPassword) {
   ASSERT_TRUE(enterprise_password_hash.has_value());
 
   // Check that enterprise password reuse is found.
-  EXPECT_CALL(mock_consumer,
-              OnReuseFound(enterprise_password.size(),
-                           Matches(enterprise_password_hash), IsEmpty(), 0));
+  EXPECT_CALL(mock_consumer, OnReuseCheckDone(true, enterprise_password.size(),
+                                              Matches(enterprise_password_hash),
+                                              IsEmpty(), 0));
   store->CheckReuse(input, "https://example.com", &mock_consumer);
   WaitForPasswordStore();
   testing::Mock::VerifyAndClearExpectations(&mock_consumer);
@@ -1313,7 +1321,7 @@ TEST_F(PasswordStoreTest, SavingClearingProtectedPassword) {
   // password hash.
   store->ClearAllEnterprisePasswordHash();
   EXPECT_EQ(0u, prefs.GetList(prefs::kPasswordHashDataList)->GetList().size());
-  EXPECT_CALL(mock_consumer, OnReuseFound(_, _, _, _)).Times(0);
+  EXPECT_CALL(mock_consumer, OnReuseCheckDone(false, _, _, _, _));
   store->CheckReuse(input, "https://example.com", &mock_consumer);
   WaitForPasswordStore();
   testing::Mock::VerifyAndClearExpectations(&mock_consumer);
@@ -1331,8 +1339,8 @@ TEST_F(PasswordStoreTest, SavingClearingProtectedPassword) {
 
   // Check that gmail password reuse is found.
   EXPECT_CALL(mock_consumer,
-              OnReuseFound(gmail_password.size(), Matches(gmail_password_hash),
-                           IsEmpty(), 0));
+              OnReuseCheckDone(true, gmail_password.size(),
+                               Matches(gmail_password_hash), IsEmpty(), 0));
   store->CheckReuse(gmail_password, "https://example.com", &mock_consumer);
   WaitForPasswordStore();
   testing::Mock::VerifyAndClearExpectations(&mock_consumer);
@@ -1353,14 +1361,14 @@ TEST_F(PasswordStoreTest, SavingClearingProtectedPassword) {
   // password hash.
   store->ClearAllNonGmailPasswordHash();
   EXPECT_EQ(1u, prefs.GetList(prefs::kPasswordHashDataList)->GetList().size());
-  EXPECT_CALL(mock_consumer, OnReuseFound(_, _, _, _)).Times(0);
+  EXPECT_CALL(mock_consumer, OnReuseCheckDone(false, _, _, _, _));
   store->CheckReuse(non_sync_gaia_password, "https://example.com",
                     &mock_consumer);
   WaitForPasswordStore();
   testing::Mock::VerifyAndClearExpectations(&mock_consumer);
   EXPECT_CALL(mock_consumer,
-              OnReuseFound(gmail_password.size(), Matches(gmail_password_hash),
-                           IsEmpty(), 0))
+              OnReuseCheckDone(true, gmail_password.size(),
+                               Matches(gmail_password_hash), IsEmpty(), 0))
       .Times(1);
   store->CheckReuse(gmail_password, "https://example.com", &mock_consumer);
   WaitForPasswordStore();
@@ -1458,7 +1466,6 @@ TEST_F(PasswordStoreTest, ReportMetricsForNonSyncPassword) {
       GaiaPasswordHashChange::NOT_SYNC_PASSWORD_CHANGE, 1);
   store->ShutdownOnUIThread();
 }
-#endif
 
 TEST_F(PasswordStoreTest, GetAllCompromisedCredentials) {
   base::test::ScopedFeatureList feature_list;
@@ -1488,6 +1495,142 @@ TEST_F(PasswordStoreTest, GetAllCompromisedCredentials) {
       RemoveCompromisedCredentialsReason::kRemove);
   EXPECT_CALL(consumer, OnGetCompromisedCredentials(
                             UnorderedElementsAre(compromised_credentials2)));
+  store->GetAllCompromisedCredentials(&consumer);
+  WaitForPasswordStore();
+
+  store->ShutdownOnUIThread();
+}
+
+// Test GetMatchingCompromisedCredentials when affiliation service isn't
+// available.
+TEST_F(PasswordStoreTest, GetMatchingCompromisedWithoutAffiliations) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeature(password_manager::features::kPasswordCheck);
+  scoped_refptr<PasswordStoreDefault> store = CreatePasswordStore();
+  store->Init(nullptr);
+
+  CompromisedCredentials credentials1 = {
+      kTestWebRealm1, base::ASCIIToUTF16("username_value"),
+      base::Time::FromTimeT(1), CompromiseType::kLeaked};
+  CompromisedCredentials credentials2 = {
+      kTestWebRealm2, base::ASCIIToUTF16("username_value"),
+      base::Time::FromTimeT(2), CompromiseType::kLeaked};
+  for (const auto& credentials : {credentials1, credentials2})
+    store->AddCompromisedCredentials(credentials);
+
+  MockCompromisedCredentialsConsumer consumer;
+  EXPECT_CALL(consumer,
+              OnGetCompromisedCredentials(UnorderedElementsAre(credentials1)));
+  store->GetMatchingCompromisedCredentials(kTestWebRealm1, &consumer);
+  WaitForPasswordStore();
+
+  store->ShutdownOnUIThread();
+}
+
+// Test GetMatchingCompromisedCredentials with some matching Android
+// credentials.
+TEST_F(PasswordStoreTest, GetMatchingCompromisedWithAffiliations) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeature(password_manager::features::kPasswordCheck);
+  scoped_refptr<PasswordStoreDefault> store = CreatePasswordStore();
+  store->Init(nullptr);
+
+  CompromisedCredentials credentials1 = {
+      kTestWebRealm1, base::ASCIIToUTF16("username_value"),
+      base::Time::FromTimeT(1), CompromiseType::kLeaked};
+  CompromisedCredentials credentials2 = {
+      kTestAndroidRealm1, base::ASCIIToUTF16("username_value_1"),
+      base::Time::FromTimeT(2), CompromiseType::kPhished};
+  CompromisedCredentials credentials3 = {
+      kTestWebRealm2, base::ASCIIToUTF16("username_value_2"),
+      base::Time::FromTimeT(3), CompromiseType::kLeaked};
+  for (const auto& credentials : {credentials1, credentials2, credentials3})
+    store->AddCompromisedCredentials(credentials);
+
+  PasswordStore::FormDigest observed_form = {
+      PasswordForm::Scheme::kHtml, kTestWebRealm1, GURL(kTestWebRealm1)};
+  std::vector<std::string> affiliated_android_realms = {kTestAndroidRealm1};
+  auto mock_helper = std::make_unique<MockAffiliatedMatchHelper>();
+  mock_helper->ExpectCallToGetAffiliatedAndroidRealms(
+      observed_form, affiliated_android_realms);
+  store->SetAffiliatedMatchHelper(std::move(mock_helper));
+
+  MockCompromisedCredentialsConsumer consumer;
+  EXPECT_CALL(consumer, OnGetCompromisedCredentials(
+                            UnorderedElementsAre(credentials1, credentials2)));
+  store->GetMatchingCompromisedCredentials(kTestWebRealm1, &consumer);
+  WaitForPasswordStore();
+
+  store->ShutdownOnUIThread();
+}
+
+TEST_F(PasswordStoreTest, RemovePhishedCredentialsByCompromiseType) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeature(password_manager::features::kPasswordCheck);
+  CompromisedCredentials leaked_credentials = {
+      "https://example.com/", base::ASCIIToUTF16("username"),
+      base::Time::FromTimeT(100), CompromiseType::kLeaked};
+  CompromisedCredentials phished_credentials = {
+      "https://example.com/", base::ASCIIToUTF16("username"),
+      base::Time::FromTimeT(200), CompromiseType::kPhished};
+
+  scoped_refptr<PasswordStoreDefault> store = CreatePasswordStore();
+  store->Init(nullptr);
+
+  store->AddCompromisedCredentials(leaked_credentials);
+  store->AddCompromisedCredentials(phished_credentials);
+
+  MockCompromisedCredentialsConsumer consumer;
+  EXPECT_CALL(consumer, OnGetCompromisedCredentials(UnorderedElementsAre(
+                            leaked_credentials, phished_credentials)));
+  store->GetAllCompromisedCredentials(&consumer);
+  WaitForPasswordStore();
+  testing::Mock::VerifyAndClearExpectations(&consumer);
+
+  store->RemoveCompromisedCredentialsByCompromiseType(
+      "https://example.com/", base::ASCIIToUTF16("username"),
+      CompromiseType::kPhished,
+      RemoveCompromisedCredentialsReason::kMarkSiteAsLegitimate);
+  WaitForPasswordStore();
+
+  EXPECT_CALL(consumer,
+              OnGetCompromisedCredentials(ElementsAre(leaked_credentials)));
+  store->GetAllCompromisedCredentials(&consumer);
+  WaitForPasswordStore();
+
+  store->ShutdownOnUIThread();
+}
+
+TEST_F(PasswordStoreTest, RemoveLeakedCredentialsByCompromiseType) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeature(password_manager::features::kPasswordCheck);
+  CompromisedCredentials leaked_credentials = {
+      "https://example.com/", base::ASCIIToUTF16("username"),
+      base::Time::FromTimeT(100), CompromiseType::kLeaked};
+  CompromisedCredentials phished_credentials = {
+      "https://example.com/", base::ASCIIToUTF16("username"),
+      base::Time::FromTimeT(200), CompromiseType::kPhished};
+
+  scoped_refptr<PasswordStoreDefault> store = CreatePasswordStore();
+  store->Init(nullptr);
+
+  store->AddCompromisedCredentials(leaked_credentials);
+  store->AddCompromisedCredentials(phished_credentials);
+
+  MockCompromisedCredentialsConsumer consumer;
+  EXPECT_CALL(consumer, OnGetCompromisedCredentials(UnorderedElementsAre(
+                            leaked_credentials, phished_credentials)));
+  store->GetAllCompromisedCredentials(&consumer);
+  WaitForPasswordStore();
+  testing::Mock::VerifyAndClearExpectations(&consumer);
+
+  store->RemoveCompromisedCredentialsByCompromiseType(
+      "https://example.com/", base::ASCIIToUTF16("username"),
+      CompromiseType::kLeaked,
+      RemoveCompromisedCredentialsReason::kMarkSiteAsLegitimate);
+
+  EXPECT_CALL(consumer,
+              OnGetCompromisedCredentials(ElementsAre(phished_credentials)));
   store->GetAllCompromisedCredentials(&consumer);
   WaitForPasswordStore();
 
@@ -1618,10 +1761,12 @@ TEST_F(PasswordStoreTest, RemoveCompromisedCredentialsSyncOnDelete) {
 // TODO(https://crbug.com/1051914): Enable on Android after making local
 // heuristics reliable.
 TEST_F(PasswordStoreTest, GetAllFieldInfo) {
-  FieldInfo field_info1{1001 /*form_signature*/, 1 /* field_signature */,
-                        autofill::USERNAME, base::Time::FromTimeT(1)};
-  FieldInfo field_info2{1002 /*form_signature*/, 10 /* field_signature */,
-                        autofill::PASSWORD, base::Time::FromTimeT(2)};
+  FieldInfo field_info1{autofill::FormSignature(1001),
+                        autofill::FieldSignature(1), autofill::USERNAME,
+                        base::Time::FromTimeT(1)};
+  FieldInfo field_info2{autofill::FormSignature(1002),
+                        autofill::FieldSignature(10), autofill::PASSWORD,
+                        base::Time::FromTimeT(2)};
   scoped_refptr<PasswordStoreDefault> store = CreatePasswordStore();
   store->Init(nullptr);
 
@@ -1637,13 +1782,16 @@ TEST_F(PasswordStoreTest, GetAllFieldInfo) {
 }
 
 TEST_F(PasswordStoreTest, RemoveFieldInfo) {
-  FieldInfo field_info1{1001 /*form_signature*/, 1 /* field_signature */,
-                        autofill::USERNAME, base::Time::FromTimeT(100)};
-  FieldInfo field_info2{1002 /*form_signature*/, 10 /* field_signature */,
-                        autofill::PASSWORD, base::Time::FromTimeT(200)};
+  FieldInfo field_info1{autofill::FormSignature(1001),
+                        autofill::FieldSignature(1), autofill::USERNAME,
+                        base::Time::FromTimeT(100)};
+  FieldInfo field_info2{autofill::FormSignature(1002),
+                        autofill::FieldSignature(10), autofill::PASSWORD,
+                        base::Time::FromTimeT(200)};
 
-  FieldInfo field_info3{1003 /*form_signature*/, 11 /* field_signature */,
-                        autofill::PASSWORD, base::Time::FromTimeT(300)};
+  FieldInfo field_info3{autofill::FormSignature(1003),
+                        autofill::FieldSignature(11), autofill::PASSWORD,
+                        base::Time::FromTimeT(300)};
 
   scoped_refptr<PasswordStoreDefault> store = CreatePasswordStore();
   store->Init(nullptr);

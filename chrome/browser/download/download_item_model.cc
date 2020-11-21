@@ -24,6 +24,8 @@
 #include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/download/download_stats.h"
 #include "chrome/browser/download/offline_item_utils.h"
+#include "chrome/browser/enterprise/connectors/common.h"
+#include "chrome/browser/enterprise/connectors/connectors_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/safe_browsing/download_protection/deep_scanning_request.h"
 #include "chrome/browser/safe_browsing/download_protection/download_feedback_service.h"
@@ -220,38 +222,8 @@ bool DownloadItemModel::IsDangerous() const {
 }
 
 bool DownloadItemModel::MightBeMalicious() const {
-  if (!IsDangerous())
-    return false;
-  switch (download_->GetDangerType()) {
-    case download::DOWNLOAD_DANGER_TYPE_DANGEROUS_URL:
-    case download::DOWNLOAD_DANGER_TYPE_DANGEROUS_CONTENT:
-    case download::DOWNLOAD_DANGER_TYPE_UNCOMMON_CONTENT:
-    case download::DOWNLOAD_DANGER_TYPE_DANGEROUS_HOST:
-    case download::DOWNLOAD_DANGER_TYPE_POTENTIALLY_UNWANTED:
-    case download::DOWNLOAD_DANGER_TYPE_ASYNC_SCANNING:
-    case download::DOWNLOAD_DANGER_TYPE_BLOCKED_PASSWORD_PROTECTED:
-    case download::DOWNLOAD_DANGER_TYPE_BLOCKED_TOO_LARGE:
-    case download::DOWNLOAD_DANGER_TYPE_DEEP_SCANNED_OPENED_DANGEROUS:
-    case download::DOWNLOAD_DANGER_TYPE_SENSITIVE_CONTENT_WARNING:
-    case download::DOWNLOAD_DANGER_TYPE_SENSITIVE_CONTENT_BLOCK:
-    case download::DOWNLOAD_DANGER_TYPE_PROMPT_FOR_SCANNING:
-    case download::DOWNLOAD_DANGER_TYPE_BLOCKED_UNSUPPORTED_FILETYPE:
-      return true;
-
-    case download::DOWNLOAD_DANGER_TYPE_DEEP_SCANNED_SAFE:
-    case download::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS:
-    case download::DOWNLOAD_DANGER_TYPE_MAYBE_DANGEROUS_CONTENT:
-    case download::DOWNLOAD_DANGER_TYPE_USER_VALIDATED:
-    case download::DOWNLOAD_DANGER_TYPE_WHITELISTED_BY_POLICY:
-    case download::DOWNLOAD_DANGER_TYPE_MAX:
-      // We shouldn't get any of these due to the IsDangerous() test above.
-      NOTREACHED();
-      FALLTHROUGH;
-    case download::DOWNLOAD_DANGER_TYPE_DANGEROUS_FILE:
-      return false;
-  }
-  NOTREACHED();
-  return false;
+  return IsDangerous() && (download_->GetDangerType() !=
+                           download::DOWNLOAD_DANGER_TYPE_DANGEROUS_FILE);
 }
 
 // If you change this definition of malicious, also update
@@ -316,8 +288,8 @@ bool DownloadItemModel::ShouldRemoveFromShelfWhenComplete() const {
 
       // If the download is a trusted extension, temporary, or will be opened
       // automatically, then it should be removed from the shelf on completion.
-      // TODO(asanka): The logic for deciding opening behavior should be in a
-      //               central location. http://crbug.com/167702
+      // TODO(crbug.com/1077929): The logic for deciding opening behavior should
+      //                          be in a central location.
       return (download_crx_util::IsTrustedExtensionDownload(profile(),
                                                             *download_) ||
               download_->IsTemporary() || download_->GetOpenWhenComplete() ||
@@ -458,6 +430,10 @@ bool DownloadItemModel::GetOpenWhenComplete() const {
   return download_->GetOpenWhenComplete();
 }
 
+bool DownloadItemModel::IsOpenWhenCompleteByPolicy() const {
+  return download_->ShouldOpenFileByPolicyBasedOnExtension();
+}
+
 bool DownloadItemModel::TimeRemaining(base::TimeDelta* remaining) const {
   return download_->TimeRemaining(remaining);
 }
@@ -595,7 +571,8 @@ bool DownloadItemModel::IsCommandChecked(
       return download_->GetOpenWhenComplete() ||
              download_crx_util::IsExtensionDownload(*download_);
     case DownloadCommands::ALWAYS_OPEN_TYPE:
-#if defined(OS_WIN) || defined(OS_LINUX) || defined(OS_MACOSX)
+#if defined(OS_WIN) || defined(OS_LINUX) || defined(OS_CHROMEOS) || \
+    defined(OS_MAC)
       if (download_commands->CanOpenPdfInSystemViewer()) {
         DownloadPrefs* prefs = DownloadPrefs::FromBrowserContext(profile());
         return prefs->ShouldOpenPdfInSystemReader();
@@ -635,7 +612,8 @@ void DownloadItemModel::ExecuteCommand(DownloadCommands* download_commands,
       bool is_checked = IsCommandChecked(download_commands,
                                          DownloadCommands::ALWAYS_OPEN_TYPE);
       DownloadPrefs* prefs = DownloadPrefs::FromBrowserContext(profile());
-#if defined(OS_WIN) || defined(OS_LINUX) || defined(OS_MACOSX)
+#if defined(OS_WIN) || defined(OS_LINUX) || defined(OS_CHROMEOS) || \
+    defined(OS_MAC)
       if (download_commands->CanOpenPdfInSystemViewer()) {
         prefs->SetShouldOpenPdfInSystemReader(!is_checked);
         SetShouldPreferOpeningInBrowser(is_checked);
@@ -644,9 +622,9 @@ void DownloadItemModel::ExecuteCommand(DownloadCommands* download_commands,
 #endif
       base::FilePath path = download_->GetTargetFilePath();
       if (is_checked)
-        prefs->DisableAutoOpenBasedOnExtension(path);
+        prefs->DisableAutoOpenByUserBasedOnExtension(path);
       else
-        prefs->EnableAutoOpenBasedOnExtension(path);
+        prefs->EnableAutoOpenByUserBasedOnExtension(path);
       break;
     }
     case DownloadCommands::BYPASS_DEEP_SCANNING:
@@ -685,7 +663,8 @@ void DownloadItemModel::ExecuteCommand(DownloadCommands* download_commands,
           report.set_token(token);
         std::string serialized_report;
         if (report.SerializeToString(&serialized_report)) {
-          sb_service->SendSerializedDownloadReport(serialized_report);
+          sb_service->SendSerializedDownloadReport(profile(),
+                                                   serialized_report);
         } else {
           DCHECK(false)
               << "Unable to serialize the uncommon download warning report.";
@@ -738,6 +717,8 @@ void DownloadItemModel::ExecuteCommand(DownloadCommands* download_commands,
       ChromeDownloadManagerDelegate* delegate =
           download_core_service->GetDownloadManagerDelegate();
       DCHECK(delegate);
+      enterprise_connectors::AnalysisSettings settings;
+      settings.tags = {"malware"};
       protection_service->UploadForDeepScanning(
           download_,
           base::BindRepeating(
@@ -745,7 +726,7 @@ void DownloadItemModel::ExecuteCommand(DownloadCommands* download_commands,
               delegate->GetWeakPtr(), download_->GetId()),
           safe_browsing::DeepScanningRequest::DeepScanTrigger::
               TRIGGER_APP_PROMPT,
-          {safe_browsing::DeepScanningRequest::DeepScanType::SCAN_MALWARE});
+          std::move(settings));
       break;
   }
 }
@@ -775,3 +756,24 @@ void DownloadItemModel::CompleteSafeBrowsingScan() {
   state->CompleteDownload();
 }
 #endif
+
+bool DownloadItemModel::ShouldShowDropdown() const {
+  // We don't show the dropdown for dangerous file types or for files
+  // blocked by enterprise policy.
+  if (IsDangerous() && GetState() != DownloadItem::CANCELLED &&
+      !MightBeMalicious()) {
+    return false;
+  }
+
+  if (GetDangerType() ==
+          download::DOWNLOAD_DANGER_TYPE_SENSITIVE_CONTENT_BLOCK ||
+      GetDangerType() ==
+          download::DOWNLOAD_DANGER_TYPE_BLOCKED_PASSWORD_PROTECTED ||
+      GetDangerType() == download::DOWNLOAD_DANGER_TYPE_BLOCKED_TOO_LARGE ||
+      GetDangerType() ==
+          download::DOWNLOAD_DANGER_TYPE_BLOCKED_UNSUPPORTED_FILETYPE) {
+    return false;
+  }
+
+  return true;
+}

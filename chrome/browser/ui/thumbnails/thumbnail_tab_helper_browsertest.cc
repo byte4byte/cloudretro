@@ -2,8 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/optional.h"
 #include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
+#include "chrome/browser/resource_coordinator/session_restore_policy.h"
 #include "chrome/browser/sessions/tab_loader_tester.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
@@ -18,6 +20,7 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/test/browser_test.h"
 #include "url/gurl.h"
 
 #if BUILDFLAG(ENABLE_SESSION_SERVICE)
@@ -31,7 +34,7 @@ class ThumbnailWaiter : public ThumbnailImage::Observer {
   ThumbnailWaiter() = default;
   ~ThumbnailWaiter() override = default;
 
-  gfx::ImageSkia WaitForThumbnail(ThumbnailImage* thumbnail) {
+  base::Optional<gfx::ImageSkia> WaitForThumbnail(ThumbnailImage* thumbnail) {
     DCHECK(!thumbnail_);
     thumbnail_ = thumbnail;
     scoped_observer_.Add(thumbnail);
@@ -47,15 +50,14 @@ class ThumbnailWaiter : public ThumbnailImage::Observer {
       scoped_observer_.Remove(thumbnail_);
       thumbnail_ = nullptr;
       image_ = thumbnail_image;
-      base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
-                                                    run_loop_.QuitClosure());
+      run_loop_.Quit();
     }
   }
 
  private:
   base::RunLoop run_loop_;
   ThumbnailImage* thumbnail_ = nullptr;
-  gfx::ImageSkia image_;
+  base::Optional<gfx::ImageSkia> image_;
   ScopedObserver<ThumbnailImage, ThumbnailImage::Observer> scoped_observer_{
       this};
 };
@@ -76,9 +78,10 @@ class ThumbnailTabHelperBrowserTest : public InProcessBrowserTest {
   }
 
 #if BUILDFLAG(ENABLE_SESSION_SERVICE)
-  void SetMaxSimultaneousLoadsForTesting(TabLoader* tab_loader) {
+  void ConfigureTabLoader(TabLoader* tab_loader) {
     TabLoaderTester tester(tab_loader);
     tester.SetMaxSimultaneousLoadsForTesting(1);
+    tester.SetMaxLoadedTabCountForTesting(1);
   }
 #endif
 
@@ -136,11 +139,14 @@ class ThumbnailTabHelperBrowserTest : public InProcessBrowserTest {
         << " tab at index " << tab_index << " already has data.";
 
     ThumbnailWaiter waiter;
-    const gfx::ImageSkia data = waiter.WaitForThumbnail(thumbnail.get());
-    EXPECT_FALSE(data.isNull())
-        << " tab at index " << tab_index << " generated empty thumbnail.";
+    const base::Optional<gfx::ImageSkia> data =
+        waiter.WaitForThumbnail(thumbnail.get());
     EXPECT_TRUE(thumbnail->has_data())
         << " tab at index " << tab_index << " thumbnail has no data.";
+    ASSERT_TRUE(data) << " observer for tab at index " << tab_index
+                      << " received no thumbnail.";
+    EXPECT_FALSE(data->isNull())
+        << " tab at index " << tab_index << " generated empty thumbnail.";
   }
 
   GURL url1_;
@@ -168,14 +174,10 @@ IN_PROC_BROWSER_TEST_F(ThumbnailTabHelperBrowserTest,
 // with ENABLE_SESSION_SERVICE.
 #if BUILDFLAG(ENABLE_SESSION_SERVICE)
 
-// Note that this code is mostly cribbed from the test:
-//   TabRestoreTest.TabsFromRestoredWindowsAreLoadedGradually
-// because we need to simulate a browser restore that doesn't reload all of the
-// tabs - and then ensure that we do get thumbnails when we watch the tabs that
-// didn't load.
-IN_PROC_BROWSER_TEST_F(
-    ThumbnailTabHelperBrowserTest,
-    WatchingThumbnailAfterBrowserRestoreCausesPageLoadAndProducesThumbnail) {
+// On browser restore, some tabs may not be loaded. Requesting a
+// thumbnail for one of these tabs should trigger load and capture.
+IN_PROC_BROWSER_TEST_F(ThumbnailTabHelperBrowserTest,
+                       CapturesRestoredTabWhenRequested) {
   ui_test_utils::NavigateToURLWithDisposition(
       browser(), url2_, WindowOpenDisposition::NEW_WINDOW,
       ui_test_utils::BROWSER_TEST_WAIT_FOR_BROWSER);
@@ -187,11 +189,10 @@ IN_PROC_BROWSER_TEST_F(
   EXPECT_EQ(kTabCount, browser2->tab_strip_model()->count());
   CloseBrowserSynchronously(browser2);
 
-  // When the tab loader is created configure it for this test. This ensures
-  // that no more than 1 loading slot is used for the test.
-  base::RepeatingCallback<void(TabLoader*)> callback = base::BindRepeating(
-      &ThumbnailTabHelperBrowserTest::SetMaxSimultaneousLoadsForTesting,
-      base::Unretained(this));
+  // Set up the tab loader to ensure tabs are left unloaded.
+  base::RepeatingCallback<void(TabLoader*)> callback =
+      base::BindRepeating(&ThumbnailTabHelperBrowserTest::ConfigureTabLoader,
+                          base::Unretained(this));
   TabLoaderTester::SetConstructionCallbackForTesting(&callback);
 
   // Restore recently closed window.
@@ -201,18 +202,6 @@ IN_PROC_BROWSER_TEST_F(
 
   EXPECT_EQ(kTabCount, browser2->tab_strip_model()->count());
   EXPECT_EQ(kTabCount - 1, browser2->tab_strip_model()->active_index());
-  // These two tabs should be loaded by TabLoader.
-  EnsureTabLoaded(browser2->tab_strip_model()->GetWebContentsAt(kTabCount - 1));
-  EnsureTabLoaded(browser2->tab_strip_model()->GetWebContentsAt(0));
-
-  // The following isn't necessary but just to be sure there is no any async
-  // task that could have an impact on the expectations below. Note that because
-  // we're on the browser main thread, tasks are executed in order, so this
-  // effectively flushes the queue.
-  base::RunLoop run_loop;
-  base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
-                                                run_loop.QuitClosure());
-  run_loop.Run();
 
   // These tabs shouldn't want to be loaded.
   for (int tab_idx = 1; tab_idx < kTabCount - 1; ++tab_idx) {

@@ -23,6 +23,7 @@
 class AutocompleteController;
 struct AutocompleteMatch;
 class AutocompleteResult;
+class ChromeAutocompleteProviderClient;
 class Profile;
 
 // The native part of the Java AutocompleteController class.
@@ -42,7 +43,9 @@ class AutocompleteControllerAndroid : public AutocompleteController::Observer,
              bool prevent_inline_autocomplete,
              bool prefer_keyword,
              bool allow_exact_keyword_match,
-             bool want_asynchronous_matches);
+             bool want_asynchronous_matches,
+             const base::android::JavaRef<jstring>& j_query_tile_id,
+             bool is_query_started_from_tiles);
   base::android::ScopedJavaLocalRef<jobject> Classify(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj,
@@ -64,6 +67,7 @@ class AutocompleteControllerAndroid : public AutocompleteController::Observer,
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj,
       jint selected_index,
+      const jint j_window_open_disposition,
       jint hash_code,
       const base::android::JavaParamRef<jstring>& j_current_url,
       jint j_page_classification,
@@ -80,7 +84,23 @@ class AutocompleteControllerAndroid : public AutocompleteController::Observer,
       const base::android::JavaParamRef<jobject>& obj,
       jint selected_index,
       jint hash_code,
-      jlong elapsed_time_since_input_change);
+      jlong elapsed_time_since_input_change,
+      const base::android::JavaParamRef<jstring>& jnew_query_text,
+      const base::android::JavaParamRef<jobjectArray>& jnew_query_params);
+  base::android::ScopedJavaLocalRef<jobject> FindMatchingTabWithUrl(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj,
+      const base::android::JavaParamRef<jobject>& j_gurl);
+
+  // Perform group by search vs url operation on a range of suggestions.
+  // Grouping is performed in place.
+  // The range is half-open [first_index, last_index), meaning the last element
+  // is not included in grouping.
+  // TODO(crbug.com/1138587): delete this once java- and native
+  // AutocompleteResult class are reconciled.
+  void GroupSuggestionsBySearchVsURL(JNIEnv* env,
+                                     int first_index,
+                                     int last_index);
 
   // KeyedService:
   void Shutdown() override;
@@ -121,24 +141,6 @@ class AutocompleteControllerAndroid : public AutocompleteController::Observer,
   void NotifySuggestionsReceived(
       const AutocompleteResult& autocomplete_result);
 
-  base::android::ScopedJavaLocalRef<jobject> BuildOmniboxSuggestion(
-      JNIEnv* env, const AutocompleteMatch& match);
-
-  // Construct Java Group Headers map from supplied HeadersMap.
-  base::android::ScopedJavaLocalRef<jobject> BuildOmniboxGroupHeaders(
-      JNIEnv* env,
-      const SearchSuggestionParser::HeadersMap& header_map);
-
-  // A helper method for fetching the top synchronous autocomplete result.
-  // The |prevent_inline_autocomplete| flag is passed to the AutocompleteInput
-  // object, see documentation there for its description.
-  base::android::ScopedJavaLocalRef<jobject> GetTopSynchronousResult(
-      JNIEnv* env,
-      const base::android::JavaRef<jobject>& obj,
-      const base::android::JavaRef<jstring>& j_text,
-      bool prevent_inline_autocomplete,
-      bool focused_from_fakebox);
-
   bool IsValidMatch(JNIEnv* env, jint selected_index, jint hash_code);
 
   std::unique_ptr<AutocompleteController> autocomplete_controller_;
@@ -147,11 +149,16 @@ class AutocompleteControllerAndroid : public AutocompleteController::Observer,
   AutocompleteInput input_;
 
   // Whether we're currently inside a call to Start() that's called
-  // from GetTopSynchronousResult().
+  // from Classify().
   bool inside_synchronous_start_;
 
   JavaObjectWeakGlobalRef weak_java_autocomplete_controller_android_;
   Profile* profile_;
+  ChromeAutocompleteProviderClient* provider_client_;
+
+  // Whether the omnibox input is a query that starts building
+  // by clicking on an image tile.
+  bool is_query_started_from_tiles_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(AutocompleteControllerAndroid);
 };

@@ -16,7 +16,7 @@
 <translation id="2009755455353575666">Veza nije uspjela</translation>
 <translation id="2038229918502634450">Host računar se ponovo pokreće zbog izmjene pravila.</translation>
 <translation id="2078880767960296260">Obrada host računara</translation>
-<translation id="20876857123010370">Način rada dodirne podloge</translation>
+<translation id="20876857123010370">Način rada dodirne table</translation>
 <translation id="2198363917176605566">Da koristite <ph name="PRODUCT_NAME" />, morate dati odobrenje za "Snimanje ekrana" kako bi se sadržaj ekrana na ovom Mac računaru mogao slati na udaljeni računar.
 
 Za davanje odobrenja, kliknite '<ph name="BUTTON_NAME" />' ispod da otvorite okno s postavkama za "Snimanje ekrana" i zatim označite polje pored skripte "<ph name="SERVICE_SCRIPT_NAME" />".
@@ -102,7 +102,7 @@ Ako je skripta "<ph name="SERVICE_SCRIPT_NAME" />" već označena, uklonite ozna
 <translation id="5708869785009007625">Trenutno dijelite svoju radnu površinu s korisnikom <ph name="USER" />.</translation>
 <translation id="5750083143895808682">Prijavljeni ste s računom <ph name="EMAIL_ADDRESS" />.</translation>
 <translation id="579702532610384533">Poveži ponovo</translation>
-<translation id="5810269635982033450">Ekran služi kao dodirna podloga</translation>
+<translation id="5810269635982033450">Ekran služi kao dodirna tabla</translation>
 <translation id="5823658491130719298">Na računaru kojem želite daljinski pristupiti, otvorite Chrome i posjetite <ph name="INSTALLATION_LINK" /></translation>
 <translation id="5841343754884244200">Opcije prikaza</translation>
 <translation id="6033507038939587647">Opcije tastature</translation>
@@ -129,7 +129,7 @@ Ako je skripta "<ph name="SERVICE_SCRIPT_NAME" />" već označena, uklonite ozna
 <translation id="7026930240735156896">Slijedite uputstva za postavljanje računara za daljinski pristup</translation>
 <translation id="7067321367069083429">Ekran se ponaša kao ekran na dodir</translation>
 <translation id="7116737094673640201">Dobro došli u Chrome udaljeni računar</translation>
-<translation id="7144878232160441200">Pokušaj ponovo</translation>
+<translation id="7144878232160441200">Pokušajte ponovo.</translation>
 <translation id="7312846573060934304">Host računar je van mreže.</translation>
 <translation id="7319983568955948908">Prestani dijeliti</translation>
 <translation id="7401733114166276557">Chrome udaljeni računar</translation>
@@ -173,7 +173,7 @@ Ako je stavka "<ph name="SERVICE_SCRIPT_NAME" />" već označena, uklonite oznak
 <translation id="858006550102277544">Komentar</translation>
 <translation id="8743328882720071828">Želite li dopustiti da <ph name="CLIENT_USERNAME" /> vidi ovo računalo i upravlja njime?</translation>
 <translation id="8747048596626351634">Sesija je pala ili njeno pokretanje nije uspjelo. Ako ~/.chrome-remote-desktop-session postoji na udaljenom računaru, provjerite je li pokrenuo dugotrajan postupak u prednjem planu kao što je okruženje radne površine ili upravitelj prozora.</translation>
-<translation id="8804164990146287819">Pravila o privatnosti</translation>
+<translation id="8804164990146287819">Pravila privatnosti</translation>
 <translation id="9111855907838866522">Povezani ste sa svojim uređajem za daljinsko upravljanje. Da otvorite meni, dodirnite ekran s četiri prsta.</translation>
 <translation id="9126115402994542723">Nemoj ponovo tražiti PIN prilikom povezivanja na host računar s ovog uređaja.</translation>
 <translation id="916856682307586697">Pokreni zadani XSession</translation>

@@ -20,6 +20,8 @@ WebDialogView::WebDialogView(
         handler)
     : views::WebDialogView(context, delegate, std::move(handler)),
       delegate_(delegate) {
+  views::WidgetDelegate::SetShowTitle(!delegate_ ||
+                                      delegate_->ShouldCenterDialogTitleText());
   if (LoginScreenClient::HasInstance()) {
     LoginScreenClient::Get()->AddSystemTrayFocusObserver(this);
   }
@@ -31,17 +33,9 @@ WebDialogView::~WebDialogView() {
   }
 }
 
-bool WebDialogView::ShouldShowCloseButton() const {
-  return !delegate_ || delegate_->CanCloseDialog();
-}
-
 bool WebDialogView::TakeFocus(content::WebContents* source, bool reverse) {
   ash::LoginScreen::Get()->FocusLoginShelf(reverse);
   return true;
-}
-
-bool WebDialogView::ShouldCenterWindowTitleText() const {
-  return !delegate_ || delegate_->ShouldCenterDialogTitleText();
 }
 
 void WebDialogView::OnFocusLeavingSystemTray(bool reverse) {

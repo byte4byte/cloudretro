@@ -6,7 +6,7 @@
 
 #include <utility>
 
-#include "base/logging.h"
+#include "base/check.h"
 #include "components/policy/core/browser/policy_conversions_client.h"
 #include "components/strings/grit/components_strings.h"
 #include "extensions/buildflags/buildflags.h"
@@ -18,6 +18,7 @@ namespace policy {
 
 const webui::LocalizedString kPolicySources[POLICY_SOURCE_COUNT] = {
     {"sourceEnterpriseDefault", IDS_POLICY_SOURCE_ENTERPRISE_DEFAULT},
+    {"commandLine", IDS_POLICY_SOURCE_COMMAND_LINE},
     {"cloud", IDS_POLICY_SOURCE_CLOUD},
     {"sourceActiveDirectory", IDS_POLICY_SOURCE_ACTIVE_DIRECTORY},
     {"sourceDeviceLocalAccountOverride",

@@ -4,17 +4,18 @@
 
 #import "ios/chrome/browser/ui/toolbar/primary_toolbar_view.h"
 
+#include "base/check.h"
 #import "base/ios/ios_util.h"
-#include "base/logging.h"
+#import "ios/chrome/browser/ui/thumb_strip/thumb_strip_feature.h"
 #import "ios/chrome/browser/ui/toolbar/buttons/toolbar_button.h"
 #import "ios/chrome/browser/ui/toolbar/buttons/toolbar_button_factory.h"
 #import "ios/chrome/browser/ui/toolbar/buttons/toolbar_configuration.h"
 #import "ios/chrome/browser/ui/toolbar/buttons/toolbar_tab_grid_button.h"
 #import "ios/chrome/browser/ui/toolbar/buttons/toolbar_tools_menu_button.h"
-#import "ios/chrome/browser/ui/toolbar/public/features.h"
 #import "ios/chrome/browser/ui/toolbar/public/toolbar_constants.h"
 #import "ios/chrome/browser/ui/toolbar/public/toolbar_utils.h"
 #import "ios/chrome/browser/ui/toolbar/toolbar_progress_bar.h"
+#include "ios/chrome/browser/ui/ui_feature_flags.h"
 #import "ios/chrome/browser/ui/util/dynamic_type_util.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
 #import "ios/chrome/common/ui/colors/semantic_color_names.h"
@@ -162,6 +163,11 @@
   self.fakeOmniboxTarget = nil;
 }
 
+- (void)setTopCornersRounded:(BOOL)rounded {
+  _topCornersRounded = rounded;
+  self.layer.cornerRadius = rounded ? kTopCornerRadius : 0;
+}
+
 #pragma mark - UIView
 
 - (CGSize)intrinsicContentSize {
@@ -174,12 +180,16 @@
   [super willMoveToWindow:newWindow];
   [NamedGuide guideWithName:kPrimaryToolbarGuide view:self].constrainedView =
       nil;
+  [NamedGuide guideWithName:kPrimaryToolbarLocationViewGuide view:self]
+      .constrainedView = nil;
 }
 
 - (void)didMoveToWindow {
   [super didMoveToWindow];
   [NamedGuide guideWithName:kPrimaryToolbarGuide view:self].constrainedView =
       self;
+  [NamedGuide guideWithName:kPrimaryToolbarLocationViewGuide view:self]
+      .constrainedView = self.locationBarContainer;
 }
 
 #pragma mark - Setup
@@ -188,6 +198,9 @@
 - (void)setUpToolbarBackground {
   self.backgroundColor =
       self.buttonFactory.toolbarConfiguration.backgroundColor;
+  if (base::FeatureList::IsEnabled(kExpandedTabStrip)) {
+    self.layer.maskedCorners = kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner;
+  }
 
   self.contentView = self;
 }
@@ -243,15 +256,8 @@
   self.tabGridButton = [self.buttonFactory tabGridButton];
   self.toolsMenuButton = [self.buttonFactory toolsMenuButton];
 
-  if (base::FeatureList::IsEnabled(kChangeTabSwitcherPosition)) {
-    self.trailingStackViewButtons =
-        @[ self.shareButton, self.tabGridButton, self.toolsMenuButton ];
-  } else {
-    self.trailingStackViewButtons = @[
-      self.bookmarkButton, self.shareButton, self.tabGridButton,
-      self.toolsMenuButton
-    ];
-  }
+  self.trailingStackViewButtons =
+      @[ self.shareButton, self.tabGridButton, self.toolsMenuButton ];
 
   self.trailingStackView = [[UIStackView alloc]
       initWithArrangedSubviews:self.trailingStackViewButtons];
@@ -305,7 +311,7 @@
                                       kToolbarSeparatorHeight)],
   ]];
 
-  // Leading StackView constraints
+  // Leading StackView constraints.
   [NSLayoutConstraint activateConstraints:@[
     [self.leadingStackView.leadingAnchor
         constraintEqualToAnchor:safeArea.leadingAnchor

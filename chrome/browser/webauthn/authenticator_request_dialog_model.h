@@ -20,7 +20,7 @@
 #include "chrome/browser/webauthn/authenticator_reference.h"
 #include "chrome/browser/webauthn/authenticator_transport.h"
 #include "chrome/browser/webauthn/observable_authenticator_list.h"
-#include "device/fido/cable/cable_discovery_data.h"
+#include "device/fido/fido_constants.h"
 #include "device/fido/fido_request_handler_base.h"
 #include "device/fido/fido_transport_protocol.h"
 
@@ -78,6 +78,8 @@ class AuthenticatorRequestDialogModel {
 
     // Phone as a security key.
     kCableActivate,
+    kCableV2Activate,
+    kCableV2QRCode,
 
     // Authenticator Client PIN.
     kClientPinEntry,
@@ -101,9 +103,6 @@ class AuthenticatorRequestDialogModel {
 
     // Attestation permission request.
     kAttestationPermissionRequest,
-
-    // Display QR code for phone pairing.
-    kQRCode,
   };
 
   // Implemented by the dialog to observe this model and show the UI panels
@@ -219,7 +218,7 @@ class AuthenticatorRequestDialogModel {
   // Valid action when at step: kNotStarted, kTransportSelection, and steps
   // where the other transports menu is shown, namely, kUsbInsertAndActivate,
   // kCableActivate.
-  void EnsureBleAdapterIsPoweredBeforeContinuingWithStep(Step step);
+  void EnsureBleAdapterIsPoweredAndContinueWithCable();
 
   // Continues with the BLE/caBLE flow now that the Bluetooth adapter is
   // powered.
@@ -297,6 +296,14 @@ class AuthenticatorRequestDialogModel {
   // user verification capability.
   void OnAuthenticatorMissingUserVerification();
 
+  // To be called when the selected authenticator doesn't have the requested
+  // large blob capability.
+  void OnAuthenticatorMissingLargeBlob();
+
+  // To be called when the selected authenticator doesn't support any of the
+  // COSEAlgorithmIdentifiers requested by the RP.
+  void OnNoCommonAlgorithms();
+
   // To be called when the selected authenticator cannot create a resident
   // credential because of insufficient storage.
   void OnAuthenticatorStorageFull();
@@ -316,8 +323,6 @@ class AuthenticatorRequestDialogModel {
 
   void SetBluetoothAdapterPowerOnCallback(
       base::RepeatingClosure bluetooth_adapter_power_on_callback);
-
-  void SetPINCallback(base::OnceCallback<void(std::string)> pin_callback);
 
   // OnHavePIN is called when the user enters a PIN in the UI.
   void OnHavePIN(const std::string& pin);
@@ -354,19 +359,19 @@ class AuthenticatorRequestDialogModel {
     return ephemeral_state_.saved_authenticators_;
   }
 
-  const std::vector<AuthenticatorTransport>& available_transports() {
-    return available_transports_;
+  const base::flat_set<AuthenticatorTransport>& available_transports() {
+    return transport_availability_.available_transports;
   }
 
-  base::span<const uint8_t, 32> qr_generator_key() const {
-    return *qr_generator_key_;
-  }
+  const std::string& cable_qr_string() const { return *cable_qr_string_; }
 
-  void CollectPIN(base::Optional<int> attempts,
+  void CollectPIN(uint32_t min_pin_length,
+                  base::Optional<int> attempts,
                   base::OnceCallback<void(std::string)> provide_pin_cb);
   bool has_attempted_pin_entry() const {
     return ephemeral_state_.has_attempted_pin_entry_;
   }
+  uint32_t min_pin_length() const { return min_pin_length_; }
   base::Optional<int> pin_attempts() const { return pin_attempts_; }
 
   void StartInlineBioEnrollment(base::OnceClosure next_callback);
@@ -404,7 +409,7 @@ class AuthenticatorRequestDialogModel {
   void set_cable_transport_info(
       bool cable_extension_provided,
       bool has_paired_phones,
-      base::Optional<device::QRGeneratorKey> qr_generator_key);
+      const base::Optional<std::string>& cable_qr_string);
 
   bool win_native_api_enabled() const {
     return transport_availability_.has_win_native_api_authenticator;
@@ -415,6 +420,8 @@ class AuthenticatorRequestDialogModel {
   const std::string& relying_party_id() const { return relying_party_id_; }
 
   bool offer_try_again_in_ui() const { return offer_try_again_in_ui_; }
+
+  base::WeakPtr<AuthenticatorRequestDialogModel> GetWeakPtr();
 
  private:
   // Contains the state that will be reset when calling StartOver(). StartOver()
@@ -460,7 +467,6 @@ class AuthenticatorRequestDialogModel {
 
   // These fields are only filled out when the UX flow is started.
   TransportAvailabilityInfo transport_availability_;
-  std::vector<AuthenticatorTransport> available_transports_;
   base::Optional<device::FidoTransportProtocol> last_used_transport_;
 
   RequestCallback request_callback_;
@@ -471,6 +477,7 @@ class AuthenticatorRequestDialogModel {
   base::OnceClosure bio_enrollment_callback_;
 
   base::OnceCallback<void(std::string)> pin_callback_;
+  uint32_t min_pin_length_ = device::kMinPinLength;
   base::Optional<int> pin_attempts_;
   base::Optional<int> uv_attempts_;
 
@@ -498,7 +505,7 @@ class AuthenticatorRequestDialogModel {
   // have_paired_phones_ indicates whether this profile knows of any paired
   // phones.
   bool have_paired_phones_ = false;
-  base::Optional<device::QRGeneratorKey> qr_generator_key_;
+  base::Optional<std::string> cable_qr_string_;
   // win_native_api_already_tried_ is true if the Windows-native UI has been
   // displayed already and the user cancelled it. In this case, we shouldn't
   // jump straight to showing it again.

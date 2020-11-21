@@ -178,6 +178,22 @@ public class AutofillAssistantCollectUserDataTestHelper {
 
         @Override
         public void onTextFocusLost() {}
+
+        @Override
+        public boolean isContactComplete(@Nullable AutofillContact contact) {
+            return contact != null && contact.isComplete();
+        }
+
+        @Override
+        public boolean isShippingAddressComplete(@Nullable AutofillAddress address) {
+            return address != null && address.isComplete();
+        }
+
+        @Override
+        public boolean isPaymentInstrumentComplete(
+                @Nullable AutofillPaymentInstrument paymentInstrument) {
+            return paymentInstrument != null && paymentInstrument.isComplete();
+        }
     }
 
     public AutofillAssistantCollectUserDataTestHelper() throws TimeoutException {
@@ -258,7 +274,8 @@ public class AutofillAssistantCollectUserDataTestHelper {
     public PersonalDataManager.AutofillProfile createDummyProfile(
             String fullName, String email, String postcode) {
         return new PersonalDataManager.AutofillProfile(/* guid= */ "", "https://www.example.com",
-                fullName, "Acme Inc.", "123 Main", "California", "Los Angeles",
+                /* honorificPrefix= */ "", fullName, "Acme Inc.", "123 Main", "California",
+                "Los Angeles",
                 /* dependentLocality= */ "", postcode, /* sortingCode= */ "", "UZ", "555 123-4567",
                 email, /* languageCode= */ "");
     }
@@ -275,17 +292,31 @@ public class AutofillAssistantCollectUserDataTestHelper {
     }
 
     /**
-     * Add a new credit card to the PersonalDataManager.
+     * Add a new local credit card to the PersonalDataManager.
      *
      * @param card The credit card to add.
      * @return the GUID of the created credit card.
      */
     public String setCreditCard(final CreditCard card) throws TimeoutException {
+        assert card.getIsLocal();
         int callCount = mOnPersonalDataChangedHelper.getCallCount();
         String guid = TestThreadUtils.runOnUiThreadBlockingNoException(
                 () -> PersonalDataManager.getInstance().setCreditCard(card));
         mOnPersonalDataChangedHelper.waitForCallback(callCount);
         return guid;
+    }
+
+    /**
+     * Add a new server credit card to the PersonalDataManager.
+     *
+     * @param card The credit card to add.
+     */
+    public void addServerCreditCard(CreditCard card) throws TimeoutException {
+        assert !card.getIsLocal();
+        int callCount = mOnPersonalDataChangedHelper.getCallCount();
+        TestThreadUtils.runOnUiThreadBlocking(
+                () -> PersonalDataManager.getInstance().addServerCreditCardForTest(card));
+        mOnPersonalDataChangedHelper.waitForCallback(callCount);
     }
 
     /**
@@ -327,16 +358,29 @@ public class AutofillAssistantCollectUserDataTestHelper {
      *
      * @param billingAddressId The billing address profile GUID.
      * @param cardNumber The card number.
+     * @param isLocal Whether the card is local or not.
      * @return the card.
      */
-    public CreditCard createDummyCreditCard(String billingAddressId, String cardNumber) {
+    public CreditCard createDummyCreditCard(
+            String billingAddressId, String cardNumber, boolean isLocal) {
         String profileName = TestThreadUtils.runOnUiThreadBlockingNoException(
                 () -> PersonalDataManager.getInstance().getProfile(billingAddressId).getFullName());
 
-        return new CreditCard("", "https://example.com", true, true, profileName, cardNumber,
-                "1111", "12", "2050", "visa",
+        return new CreditCard("", "https://example.com", /* isLocal = */ isLocal, true, profileName,
+                cardNumber, "1111", "12", "2050", "visa",
                 org.chromium.chrome.autofill_assistant.R.drawable.visa_card, billingAddressId,
                 /* serverId= */ "");
+    }
+
+    /**
+     * Create a credit card with dummy data.
+     *
+     * @param billingAddressId The billing address profile GUID.
+     * @param cardNumber The card number.
+     * @return the card.
+     */
+    public CreditCard createDummyCreditCard(String billingAddressId, String cardNumber) {
+        return createDummyCreditCard(billingAddressId, cardNumber, /* isLocal = */ true);
     }
 
     /**

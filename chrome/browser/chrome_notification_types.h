@@ -70,7 +70,7 @@ enum NotificationType {
   // are passed.
   NOTIFICATION_APP_TERMINATING,
 
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
   // This notification is sent when the app has no key window, such as when
   // all windows are closed but the app is still active. No source or details
   // are provided.
@@ -170,18 +170,6 @@ enum NotificationType {
   // 4. Boot into retail mode
   //    NOTIFICATION_LOGIN_OR_LOCK_WEBUI_VISIBLE
   NOTIFICATION_LOGIN_OR_LOCK_WEBUI_VISIBLE,
-
-  // Send when kiosk auto-launch warning screen is visible.
-  NOTIFICATION_KIOSK_AUTOLAUNCH_WARNING_VISIBLE,
-
-  // Send when kiosk auto-launch warning screen had completed.
-  NOTIFICATION_KIOSK_AUTOLAUNCH_WARNING_COMPLETED,
-
-  // Send when consumer kiosk has been enabled.
-  NOTIFICATION_KIOSK_ENABLED,
-
-  // Sent when kiosk app list is loaded in UI.
-  NOTIFICATION_KIOSK_APPS_LOADED,
 
   // Sent when the screen lock state has changed. The source is
   // ScreenLocker and the details is a bool specifing that the

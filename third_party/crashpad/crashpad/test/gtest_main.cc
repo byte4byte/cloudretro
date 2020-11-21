@@ -12,14 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "base/logging.h"
 #include "build/build_config.h"
 #include "gtest/gtest.h"
 #include "test/main_arguments.h"
 #include "test/multiprocess_exec.h"
 
-#if defined(CRASHPAD_TEST_LAUNCHER_GMOCK)
+#if defined(CRASHPAD_TEST_LAUNCHER_GOOGLEMOCK)
 #include "gmock/gmock.h"
-#endif  // CRASHPAD_TEST_LAUNCHER_GMOCK
+#endif  // CRASHPAD_TEST_LAUNCHER_GOOGLEMOCK
 
 #if defined(OS_ANDROID)
 #include "util/linux/initial_signal_dispositions.h"
@@ -77,7 +78,7 @@ int main(int argc, char* argv[]) {
 
 #if defined(OS_WIN)
   // Chromium’s test launcher interferes with WinMultiprocess-based tests. Allow
-  // their child processes to be launched by the standard gtest-based test
+  // their child processes to be launched by the standard Google Test-based test
   // runner.
   const bool use_chromium_test_launcher =
       !crashpad::test::WinChildProcess::IsChildProcess();
@@ -99,13 +100,20 @@ int main(int argc, char* argv[]) {
 
 #endif  // CRASHPAD_IS_IN_CHROMIUM
 
-#if defined(CRASHPAD_TEST_LAUNCHER_GMOCK)
+  // base::TestSuite initializes logging when using Chromium's test launcher.
+  logging::LoggingSettings settings;
+  settings.logging_dest =
+      logging::LOG_TO_STDERR | logging::LOG_TO_SYSTEM_DEBUG_LOG;
+  logging::InitLogging(settings);
+
+#if defined(CRASHPAD_TEST_LAUNCHER_GOOGLEMOCK)
   testing::InitGoogleMock(&argc, argv);
-#elif defined(CRASHPAD_TEST_LAUNCHER_GTEST)
+#elif defined(CRASHPAD_TEST_LAUNCHER_GOOGLETEST)
   testing::InitGoogleTest(&argc, argv);
-#else  // CRASHPAD_TEST_LAUNCHER_GMOCK
-#error #define CRASHPAD_TEST_LAUNCHER_GTEST or CRASHPAD_TEST_LAUNCHER_GMOCK
-#endif  // CRASHPAD_TEST_LAUNCHER_GMOCK
+#else  // CRASHPAD_TEST_LAUNCHER_GOOGLEMOCK
+#error #define CRASHPAD_TEST_LAUNCHER_GOOGLETEST or \
+    CRASHPAD_TEST_LAUNCHER_GOOGLEMOCK
+#endif  // CRASHPAD_TEST_LAUNCHER_GOOGLEMOCK
 
 #if defined(OS_IOS)
   // iOS needs to run tests within the context of an app, so call a helper that

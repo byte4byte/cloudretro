@@ -39,9 +39,12 @@ static const int kMaxTokenSize = 4;
 static const int kMaxTokenSize = 3;
 #endif  // OS_CHROMEOS
 
+// TODO(devlin): Expose this on Command, since many places implicitly check
+// this.
 bool IsNamedCommand(const std::string& command_name) {
   return command_name != values::kPageActionCommandEvent &&
-         command_name != values::kBrowserActionCommandEvent;
+         command_name != values::kBrowserActionCommandEvent &&
+         command_name != values::kActionCommandEvent;
 }
 
 bool DoesRequireModifier(const std::string& accelerator) {
@@ -100,7 +103,7 @@ ui::Accelerator ParseImpl(const std::string& accelerator,
         // Mac the developer has to specify MacCtrl). Therefore we treat this
         // as Command.
         modifiers |= ui::EF_COMMAND_DOWN;
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
       } else if (platform_key == values::kKeybindingPlatformDefault) {
         // If we see "Command+foo" in the Default section it can mean two
         // things, depending on the platform:
@@ -245,7 +248,7 @@ std::string NormalizeShortcutSuggestion(const std::string& suggestion,
   if (platform == values::kKeybindingPlatformMac) {
     normalize = true;
   } else if (platform == values::kKeybindingPlatformDefault) {
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
     normalize = true;
 #endif
   }
@@ -286,7 +289,7 @@ Command::~Command() {}
 std::string Command::CommandPlatform() {
 #if defined(OS_WIN)
   return values::kKeybindingPlatformWin;
-#elif defined(OS_MACOSX)
+#elif defined(OS_MAC)
   return values::kKeybindingPlatformMac;
 #elif defined(OS_CHROMEOS)
   return values::kKeybindingPlatformChromeOs;

@@ -5,7 +5,8 @@
 #include "chrome/browser/chromeos/login/marketing_backend_connector.h"
 #include <cstddef>
 
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
+#include "base/command_line.h"
 #include "base/json/json_writer.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -49,8 +50,12 @@ const GURL GetChromebookServiceEndpoint() {
 }
 
 // UMA Metrics
-void RecordUMAHistogram(
-    MarketingBackendConnector::BackendConnectorEvent event) {
+void RecordUMAHistogram(MarketingBackendConnector::BackendConnectorEvent event,
+                        const std::string& country) {
+  base::UmaHistogramEnumeration(
+      "OOBE.MarketingOptInScreen.BackendConnector." + country, event);
+
+  // Generic event aggregating data from all countries.
   base::UmaHistogramEnumeration("OOBE.MarketingOptInScreen.BackendConnector",
                                 event);
 }
@@ -107,7 +112,7 @@ void MarketingBackendConnector::StartTokenFetch() {
   signin::IdentityManager* identity_manager =
       IdentityManagerFactory::GetForProfile(profile_);
   if (!identity_manager) {
-    RecordUMAHistogram(BackendConnectorEvent::kErrorOther);
+    RecordUMAHistogram(BackendConnectorEvent::kErrorOther, country_code_);
     return;
   }
 
@@ -131,7 +136,7 @@ void MarketingBackendConnector::OnAccessTokenRequestCompleted(
     SetTokenAndStartRequest();
   } else {
     VLOG(1) << "Auth Error: " << error.ToString();
-    RecordUMAHistogram(BackendConnectorEvent::kErrorAuth);
+    RecordUMAHistogram(BackendConnectorEvent::kErrorAuth, country_code_);
   }
 }
 
@@ -205,24 +210,27 @@ void MarketingBackendConnector::OnSimpleLoaderCompleteInternal(
   switch (response_code) {
     case net::HTTP_OK: {
       VLOG(1) << "Successfully set the user preferences on the server.";
-      RecordUMAHistogram(BackendConnectorEvent::kSuccess);
+      RecordUMAHistogram(BackendConnectorEvent::kSuccess, country_code_);
       return;
     }
-
     case net::HTTP_INTERNAL_SERVER_ERROR: {
       VLOG(1) << "Internal server error occurred.";
-      RecordUMAHistogram(BackendConnectorEvent::kErrorServerInternal);
+      RecordUMAHistogram(BackendConnectorEvent::kErrorServerInternal,
+                         country_code_);
       return;
     }
-
-    // Retry once in case of a timeout.
     case net::HTTP_REQUEST_TIMEOUT: {
-      RecordUMAHistogram(BackendConnectorEvent::kErrorRequestTimeout);
+      RecordUMAHistogram(BackendConnectorEvent::kErrorRequestTimeout,
+                         country_code_);
+      return;
+    }
+    case net::HTTP_UNAUTHORIZED: {
+      RecordUMAHistogram(BackendConnectorEvent::kErrorAuth, country_code_);
       return;
     }
   }
   // Failure. There is nothing we can do at this point.
-  RecordUMAHistogram(BackendConnectorEvent::kErrorOther);
+  RecordUMAHistogram(BackendConnectorEvent::kErrorOther, country_code_);
 }
 
 std::string MarketingBackendConnector::GetRequestContent() {

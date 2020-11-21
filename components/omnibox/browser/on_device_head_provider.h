@@ -52,9 +52,10 @@ class OnDeviceHeadProvider : public AutocompleteProvider {
   OnDeviceHeadProvider(AutocompleteProviderClient* client,
                        AutocompleteProviderListener* listener);
   ~OnDeviceHeadProvider() override;
+  OnDeviceHeadProvider(const OnDeviceHeadProvider&) = delete;
+  OnDeviceHeadProvider& operator=(const OnDeviceHeadProvider&) = delete;
 
-  bool IsOnDeviceHeadProviderAllowed(const AutocompleteInput& input,
-                                     const std::string& incognito_serve_mode);
+  bool IsOnDeviceHeadProviderAllowed(const AutocompleteInput& input);
 
   // Helper functions used for asynchronous search to the on device head model.
   // The Autocomplete input and output from the model will be passed from
@@ -103,8 +104,6 @@ class OnDeviceHeadProvider : public AutocompleteProvider {
       model_update_subscription_;
 
   base::WeakPtrFactory<OnDeviceHeadProvider> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(OnDeviceHeadProvider);
 };
 
 #endif  // COMPONENTS_OMNIBOX_BROWSER_ON_DEVICE_HEAD_PROVIDER_H_

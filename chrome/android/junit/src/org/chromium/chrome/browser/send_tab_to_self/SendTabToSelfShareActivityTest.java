@@ -11,7 +11,6 @@ import static org.mockito.Mockito.when;
 
 import android.support.test.filters.SmallTest;
 
-import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Rule;
@@ -21,16 +20,19 @@ import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.robolectric.annotation.Config;
 
-import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.base.test.util.JniMocker;
 import org.chromium.chrome.browser.ActivityTabProvider;
-import org.chromium.chrome.browser.ChromeActivity;
+import org.chromium.chrome.browser.app.ChromeActivity;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.profiles.ProfileJni;
+import org.chromium.chrome.browser.share.send_tab_to_self.SendTabToSelfAndroidBridge;
+import org.chromium.chrome.browser.share.send_tab_to_self.SendTabToSelfAndroidBridgeJni;
+import org.chromium.chrome.browser.share.send_tab_to_self.SendTabToSelfCoordinator;
+import org.chromium.chrome.browser.sync.AndroidSyncSettings;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.widget.bottomsheet.BottomSheetContent;
-import org.chromium.chrome.browser.widget.bottomsheet.BottomSheetController;
+import org.chromium.components.browser_ui.bottomsheet.BottomSheetContent;
+import org.chromium.components.browser_ui.bottomsheet.BottomSheetController;
 import org.chromium.content_public.browser.NavigationController;
 import org.chromium.content_public.browser.NavigationEntry;
 import org.chromium.content_public.browser.WebContents;
@@ -63,6 +65,9 @@ public class SendTabToSelfShareActivityTest {
     @Mock
     private BottomSheetController mBottomSheetController;
 
+    @Mock
+    private AndroidSyncSettings mSyncSettings;
+
     private Profile mProfile;
 
     @Before
@@ -70,12 +75,6 @@ public class SendTabToSelfShareActivityTest {
         MockitoAnnotations.initMocks(this);
         mocker.mock(SendTabToSelfAndroidBridgeJni.TEST_HOOKS, mNativeMock);
         mocker.mock(ProfileJni.TEST_HOOKS, mMockProfileNatives);
-        RecordHistogram.setDisabledForTests(true);
-    }
-
-    @After
-    public void tearDown() {
-        RecordHistogram.setDisabledForTests(false);
     }
 
     @Test
@@ -102,12 +101,15 @@ public class SendTabToSelfShareActivityTest {
         when(mWebContents.getNavigationController()).thenReturn(mNavigationController);
         when(mNavigationController.getVisibleEntry()).thenReturn(mNavigationEntry);
 
-        // Setup the mocked object chain to get the bottom controller.
-        when(mChromeActivity.getBottomSheetController()).thenReturn(mBottomSheetController);
+        // Setup the mocked object for sync settings.
+        when(mSyncSettings.isSyncEnabled()).thenReturn(true);
+        SendTabToSelfShareActivity.setAndroidSyncSettingsForTesting(mSyncSettings);
 
+        // Setup the mocked object chain to get the bottom controller.
         SendTabToSelfShareActivity shareActivity = new SendTabToSelfShareActivity();
-        SendTabToSelfShareActivity.setBottomSheetContentForTesting(mBottomSheetContent);
-        shareActivity.handleShareAction(mChromeActivity);
+        SendTabToSelfCoordinator.setBottomSheetContentForTesting(mBottomSheetContent);
+        SendTabToSelfShareActivity.setBottomSheetControllerForTesting(mBottomSheetController);
+        shareActivity.handleAction(mChromeActivity);
         verify(mBottomSheetController).requestShowContent(any(BottomSheetContent.class), eq(true));
     }
 }

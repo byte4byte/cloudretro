@@ -6,7 +6,7 @@
 
 #import <NotificationCenter/NotificationCenter.h>
 
-#include "base/logging.h"
+#include "base/check.h"
 #import "ios/chrome/common/ui/util/constraints_ui_util.h"
 #import "ios/chrome/search_widget_extension/search_widget_constants.h"
 
@@ -32,12 +32,9 @@ const CGFloat kIconSize = 35;
   if (self) {
     self.translatesAutoresizingMaskIntoConstraints = NO;
 
-    UIVibrancyEffect* primaryEffect =
-        [UIVibrancyEffect widgetPrimaryVibrancyEffect];
-    UIVibrancyEffect* secondaryEffect =
-        [UIVibrancyEffect widgetSecondaryVibrancyEffect];
-    UIVibrancyEffect* iconBackgroundEffect =
-        [UIVibrancyEffect widgetSecondaryVibrancyEffect];
+    UIVibrancyEffect* primaryEffect = nil;
+    UIVibrancyEffect* secondaryEffect = nil;
+    UIVibrancyEffect* iconBackgroundEffect = nil;
     if (@available(iOS 13, *)) {
       primaryEffect = [UIVibrancyEffect
           widgetEffectForVibrancyStyle:UIVibrancyEffectStyleLabel];
@@ -46,6 +43,16 @@ const CGFloat kIconSize = 35;
       iconBackgroundEffect = [UIVibrancyEffect
           widgetEffectForVibrancyStyle:UIVibrancyEffectStyleTertiaryFill];
     }
+#if !defined(__IPHONE_13_0) || __IPHONE_OS_VERSION_MIN_REQUIRED < __IPHONE_13_0
+    else {
+      primaryEffect = [UIVibrancyEffect widgetPrimaryVibrancyEffect];
+      secondaryEffect = [UIVibrancyEffect widgetSecondaryVibrancyEffect];
+      iconBackgroundEffect = [UIVibrancyEffect widgetSecondaryVibrancyEffect];
+    }
+#endif
+    DCHECK(primaryEffect);
+    DCHECK(secondaryEffect);
+    DCHECK(iconBackgroundEffect);
 
     UIVisualEffectView* primaryEffectView =
         [[UIVisualEffectView alloc] initWithEffect:primaryEffect];

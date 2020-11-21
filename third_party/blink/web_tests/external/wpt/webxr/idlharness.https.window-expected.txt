@@ -1,5 +1,5 @@
 This is a testharness.js-based test.
-Found 277 tests; 259 PASS, 18 FAIL, 0 TIMEOUT, 0 NOTRUN.
+Found 279 tests; 270 PASS, 9 FAIL, 0 TIMEOUT, 0 NOTRUN.
 PASS idl_test setup
 PASS idl_test validation
 PASS Partial interface Navigator: original interface defined
@@ -40,7 +40,7 @@ PASS XRSession interface: attribute inputSources
 PASS XRSession interface: operation updateRenderState(optional XRRenderStateInit)
 PASS XRSession interface: operation requestReferenceSpace(XRReferenceSpaceType)
 PASS XRSession interface: operation requestAnimationFrame(XRFrameRequestCallback)
-PASS XRSession interface: operation cancelAnimationFrame(long)
+PASS XRSession interface: operation cancelAnimationFrame(unsigned long)
 PASS XRSession interface: operation end()
 PASS XRSession interface: attribute onend
 PASS XRSession interface: attribute oninputsourceschange
@@ -62,8 +62,8 @@ PASS XRSession interface: xrSession must inherit property "requestReferenceSpace
 PASS XRSession interface: calling requestReferenceSpace(XRReferenceSpaceType) on xrSession with too few arguments must throw TypeError
 PASS XRSession interface: xrSession must inherit property "requestAnimationFrame(XRFrameRequestCallback)" with the proper type
 PASS XRSession interface: calling requestAnimationFrame(XRFrameRequestCallback) on xrSession with too few arguments must throw TypeError
-PASS XRSession interface: xrSession must inherit property "cancelAnimationFrame(long)" with the proper type
-PASS XRSession interface: calling cancelAnimationFrame(long) on xrSession with too few arguments must throw TypeError
+PASS XRSession interface: xrSession must inherit property "cancelAnimationFrame(unsigned long)" with the proper type
+PASS XRSession interface: calling cancelAnimationFrame(unsigned long) on xrSession with too few arguments must throw TypeError
 PASS XRSession interface: xrSession must inherit property "end()" with the proper type
 PASS XRSession interface: xrSession must inherit property "onend" with the proper type
 PASS XRSession interface: xrSession must inherit property "oninputsourceschange" with the proper type
@@ -134,6 +134,8 @@ PASS XRView interface: existence and properties of interface prototype object's 
 PASS XRView interface: attribute eye
 PASS XRView interface: attribute projectionMatrix
 PASS XRView interface: attribute transform
+PASS XRView interface: attribute recommendedViewportScale
+PASS XRView interface: operation requestViewportScale(double?)
 PASS XRViewport interface: existence and properties of interface object
 PASS XRViewport interface object length
 PASS XRViewport interface object name
@@ -158,7 +160,7 @@ PASS XRRigidTransform must be primary interface of new XRRigidTransform()
 PASS Stringification of new XRRigidTransform()
 PASS XRRigidTransform interface: new XRRigidTransform() must inherit property "position" with the proper type
 PASS XRRigidTransform interface: new XRRigidTransform() must inherit property "orientation" with the proper type
-FAIL XRRigidTransform interface: new XRRigidTransform() must inherit property "matrix" with the proper type Unrecognized type Float32Array
+PASS XRRigidTransform interface: new XRRigidTransform() must inherit property "matrix" with the proper type
 PASS XRRigidTransform interface: new XRRigidTransform() must inherit property "inverse" with the proper type
 PASS XRPose interface: existence and properties of interface object
 PASS XRPose interface object length
@@ -197,16 +199,16 @@ PASS XRInputSourceArray interface: attribute length
 PASS XRInputSourceArray must be primary interface of xrInputSourceArray
 PASS Stringification of xrInputSourceArray
 PASS XRInputSourceArray interface: xrInputSourceArray must inherit property "length" with the proper type
-FAIL XRLayer interface: existence and properties of interface object assert_own_property: self does not have own property "XRLayer" expected property "XRLayer" missing
-FAIL XRLayer interface object length assert_own_property: self does not have own property "XRLayer" expected property "XRLayer" missing
-FAIL XRLayer interface object name assert_own_property: self does not have own property "XRLayer" expected property "XRLayer" missing
-FAIL XRLayer interface: existence and properties of interface prototype object assert_own_property: self does not have own property "XRLayer" expected property "XRLayer" missing
-FAIL XRLayer interface: existence and properties of interface prototype object's "constructor" property assert_own_property: self does not have own property "XRLayer" expected property "XRLayer" missing
-FAIL XRLayer interface: existence and properties of interface prototype object's @@unscopables property assert_own_property: self does not have own property "XRLayer" expected property "XRLayer" missing
-FAIL XRWebGLLayer interface: existence and properties of interface object assert_own_property: self does not have own property "XRLayer" expected property "XRLayer" missing
+PASS XRLayer interface: existence and properties of interface object
+PASS XRLayer interface object length
+PASS XRLayer interface object name
+PASS XRLayer interface: existence and properties of interface prototype object
+PASS XRLayer interface: existence and properties of interface prototype object's "constructor" property
+PASS XRLayer interface: existence and properties of interface prototype object's @@unscopables property
+PASS XRWebGLLayer interface: existence and properties of interface object
 PASS XRWebGLLayer interface object length
 PASS XRWebGLLayer interface object name
-FAIL XRWebGLLayer interface: existence and properties of interface prototype object assert_own_property: self does not have own property "XRLayer" expected property "XRLayer" missing
+PASS XRWebGLLayer interface: existence and properties of interface prototype object
 PASS XRWebGLLayer interface: existence and properties of interface prototype object's "constructor" property
 PASS XRWebGLLayer interface: existence and properties of interface prototype object's @@unscopables property
 PASS XRWebGLLayer interface: attribute antialias

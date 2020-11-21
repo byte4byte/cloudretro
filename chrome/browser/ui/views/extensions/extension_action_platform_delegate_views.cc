@@ -8,7 +8,6 @@
 
 #include "base/check.h"
 #include "base/memory/ptr_util.h"
-#include "chrome/browser/extensions/extension_action.h"
 #include "chrome/browser/extensions/extension_view_host.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -19,6 +18,7 @@
 #include "chrome/browser/ui/views/toolbar/toolbar_action_view_delegate_views.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
 #include "chrome/common/extensions/command.h"
+#include "extensions/browser/extension_action.h"
 #include "extensions/common/api/extension_action/action_info.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/manifest_constants.h"
@@ -30,7 +30,7 @@ using extensions::ActionInfo;
 std::unique_ptr<ExtensionActionPlatformDelegate>
 ExtensionActionPlatformDelegate::Create(
     ExtensionActionViewController* controller) {
-  return base::WrapUnique(new ExtensionActionPlatformDelegateViews(controller));
+  return std::make_unique<ExtensionActionPlatformDelegateViews>(controller);
 }
 
 ExtensionActionPlatformDelegateViews::ExtensionActionPlatformDelegateViews(
@@ -41,22 +41,36 @@ ExtensionActionPlatformDelegateViews::ExtensionActionPlatformDelegateViews(
 }
 
 ExtensionActionPlatformDelegateViews::~ExtensionActionPlatformDelegateViews() {
-  UnregisterCommand(false);
+  // Should have already unregistered.
+  DCHECK(!action_keybinding_);
 }
 
 void ExtensionActionPlatformDelegateViews::RegisterCommand() {
   // If we've already registered, do nothing.
-  if (action_keybinding_.get())
+  if (action_keybinding_)
     return;
 
   extensions::Command extension_command;
   views::FocusManager* focus_manager =
       GetDelegateViews()->GetFocusManagerForAccelerator();
   if (focus_manager && controller_->GetExtensionCommand(&extension_command)) {
-    action_keybinding_.reset(
-        new ui::Accelerator(extension_command.accelerator()));
+    action_keybinding_ =
+        std::make_unique<ui::Accelerator>(extension_command.accelerator());
     focus_manager->RegisterAccelerator(*action_keybinding_,
                                        kExtensionAcceleratorPriority, this);
+  }
+}
+
+void ExtensionActionPlatformDelegateViews::UnregisterCommand() {
+  // If we've already unregistered, do nothing.
+  if (!action_keybinding_)
+    return;
+
+  views::FocusManager* focus_manager =
+      GetDelegateViews()->GetFocusManagerForAccelerator();
+  if (focus_manager) {
+    focus_manager->UnregisterAccelerator(*action_keybinding_, this);
+    action_keybinding_.reset();
   }
 }
 
@@ -108,12 +122,14 @@ void ExtensionActionPlatformDelegateViews::OnExtensionCommandRemoved(
   if (command.command_name() !=
           extensions::manifest_values::kBrowserActionCommandEvent &&
       command.command_name() !=
-          extensions::manifest_values::kPageActionCommandEvent) {
-    // Not an action-related command.
-    return;
-  }
+          extensions::manifest_values::kPageActionCommandEvent)
+    return;  // Not an action-related command.
 
-  UnregisterCommand(/*only_if_removed=*/true);
+  extensions::Command extension_command;
+  if (controller_->GetExtensionCommand(&extension_command))
+    return;  // Command has not been removed.
+
+  UnregisterCommand();
 }
 
 void ExtensionActionPlatformDelegateViews::OnCommandServiceDestroying() {
@@ -136,25 +152,6 @@ bool ExtensionActionPlatformDelegateViews::AcceleratorPressed(
 
 bool ExtensionActionPlatformDelegateViews::CanHandleAccelerators() const {
   return controller_->CanHandleAccelerators();
-}
-
-void ExtensionActionPlatformDelegateViews::UnregisterCommand(
-    bool only_if_removed) {
-  views::FocusManager* focus_manager =
-      GetDelegateViews()->GetFocusManagerForAccelerator();
-  if (!focus_manager || !action_keybinding_.get())
-    return;
-
-  // If |only_if_removed| is true, it means that we only need to unregister
-  // ourselves as an accelerator if the command was removed. Otherwise, we need
-  // to unregister ourselves no matter what (likely because we are shutting
-  // down).
-  extensions::Command extension_command;
-  if (!only_if_removed ||
-      !controller_->GetExtensionCommand(&extension_command)) {
-    focus_manager->UnregisterAccelerator(*action_keybinding_, this);
-    action_keybinding_.reset();
-  }
 }
 
 ToolbarActionViewDelegateViews*

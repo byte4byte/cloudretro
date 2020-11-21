@@ -9,6 +9,7 @@ import android.net.Uri;
 
 import org.chromium.base.Log;
 import org.chromium.base.PackageManagerUtils;
+import org.chromium.chrome.browser.ChromeApplication;
 import org.chromium.chrome.browser.browserservices.BrowserServicesMetrics;
 import org.chromium.components.embedder_support.util.Origin;
 
@@ -38,6 +39,10 @@ public class PermissionUpdater {
         mLocationPermissionUpdater = locationPermissionUpdater;
     }
 
+    public static PermissionUpdater get() {
+        return ChromeApplication.getComponent().resolveTwaPermissionUpdater();
+    }
+
     /**
      * To be called when an origin is verified with a package. It add the delegate app and update
      * the Notification and Location delegation state for that origin if the package handles
@@ -54,12 +59,11 @@ public class PermissionUpdater {
         mPermissionManager.addDelegateApp(origin, packageName);
 
         mNotificationPermissionUpdater.onOriginVerified(origin, packageName);
-        mLocationPermissionUpdater.onOriginVerified(origin, packageName);
     }
 
     public void onClientAppUninstalled(Origin origin) {
         mNotificationPermissionUpdater.onClientAppUninstalled(origin);
-        // TODO(crbug.com/1069506): Add update location permission on uninstalled.
+        mLocationPermissionUpdater.onClientAppUninstalled(origin);
     }
 
     private boolean appHandlesBrowsableIntent(String packageName, Uri uri) {
@@ -73,5 +77,9 @@ public class PermissionUpdater {
                         BrowserServicesMetrics.getBrowsableIntentResolutionTimingContext()) {
             return PackageManagerUtils.resolveActivity(browsableIntent, 0) != null;
         }
+    }
+
+    void getLocationPermission(Origin origin, long callback) {
+        mLocationPermissionUpdater.checkPermission(origin, callback);
     }
 }

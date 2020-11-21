@@ -19,8 +19,10 @@ namespace blink {
 
 class ExceptionState;
 class XRAnchorSet;
+class XRDepthInformation;
 class XRHitTestResult;
 class XRHitTestSource;
+class XRImageTrackingResult;
 class XRInputSource;
 class XRLightEstimate;
 class XRLightProbe;
@@ -31,6 +33,7 @@ class XRSession;
 class XRSpace;
 class XRTransientInputHitTestResult;
 class XRTransientInputHitTestSource;
+class XRView;
 class XRViewerPose;
 class XRWorldInformation;
 
@@ -42,15 +45,20 @@ class XRFrame final : public ScriptWrappable {
 
   XRSession* session() const { return session_; }
 
-  XRViewerPose* getViewerPose(XRReferenceSpace*, ExceptionState&) const;
+  XRViewerPose* getViewerPose(XRReferenceSpace*, ExceptionState&);
   XRPose* getPose(XRSpace*, XRSpace*, ExceptionState&);
   XRWorldInformation* worldInformation() const { return world_information_; }
   XRAnchorSet* trackedAnchors() const;
   XRLightEstimate* getLightEstimate(XRLightProbe*, ExceptionState&) const;
+  XRDepthInformation* getDepthInformation(
+      XRView* view,
+      ExceptionState& exception_state) const;
 
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
 
   void Deactivate();
+
+  bool IsActive() const;
 
   void SetAnimationFrame(bool is_animation_frame) {
     is_animation_frame_ = is_animation_frame;
@@ -70,10 +78,24 @@ class XRFrame final : public ScriptWrappable {
                              XRSpace* space,
                              ExceptionState& exception_state);
 
+  HeapVector<Member<XRImageTrackingResult>> getImageTrackingResults(
+      ExceptionState&);
+
  private:
   std::unique_ptr<TransformationMatrix> GetAdjustedPoseMatrix(XRSpace*) const;
   XRPose* GetTargetRayPose(XRInputSource*, XRSpace*) const;
   XRPose* GetGripPose(XRInputSource*, XRSpace*) const;
+
+  // Helper that creates an anchor with the assumption that the conversion from
+  // passed in space to a stationary space is required.
+  // |native_origin_from_anchor| is a transform from |space|'s native origin to
+  // the desired anchor position (i.e. the origin-offset of the |space| is
+  // already taken into account).
+  ScriptPromise CreateAnchorFromNonStationarySpace(
+      ScriptState* script_state,
+      const blink::TransformationMatrix& native_origin_from_anchor,
+      XRSpace* space,
+      ExceptionState& exception_state);
 
   Member<XRWorldInformation> world_information_;
 

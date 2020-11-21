@@ -4,15 +4,16 @@
 
 #include "chrome/browser/ui/views/crostini/crostini_ansible_software_config_view.h"
 
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "chrome/browser/chromeos/crostini/ansible/ansible_management_service.h"
 #include "chrome/browser/chromeos/crostini/ansible/ansible_management_test_helper.h"
 #include "chrome/browser/chromeos/crostini/crostini_util.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/views/crostini/crostini_browser_test_util.h"
+#include "chrome/browser/ui/views/crostini/crostini_dialogue_browser_test_util.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/grit/generated_resources.h"
 #include "content/public/browser/network_service_instance.h"
+#include "content/public/test/browser_test.h"
 #include "services/network/test/test_network_connection_tracker.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/chromeos/devicetype_utils.h"
@@ -56,7 +57,7 @@ class CrostiniAnsibleSoftwareConfigViewBrowserTest
   }
 
   // A new Widget was created in ShowUi() or since the last VerifyUi().
-  bool HasView() { return VerifyUi() && ActiveView() != nullptr; }
+  bool HasView() { return VerifyUi() && ActiveView(); }
 
   // No new Widget was created in ShowUi() or since last VerifyUi().
   bool HasNoView() {

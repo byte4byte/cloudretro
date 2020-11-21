@@ -209,8 +209,8 @@ struct ParamTraits<unsigned int> {
 //   3) Android 64 bit and Fuchsia also have int64_t typedef'd to long.
 // Since we want to support Android 32<>64 bit IPC, as long as we don't have
 // these traits for 32 bit ARM then that'll catch any errors.
-#if defined(OS_WIN) || defined(OS_LINUX) || defined(OS_FUCHSIA) || \
-    (defined(OS_ANDROID) && defined(ARCH_CPU_64_BITS))
+#if defined(OS_WIN) || defined(OS_LINUX) || defined(OS_CHROMEOS) || \
+    defined(OS_FUCHSIA) || (defined(OS_ANDROID) && defined(ARCH_CPU_64_BITS))
 template <>
 struct ParamTraits<long> {
   typedef long param_type;
@@ -1072,8 +1072,8 @@ struct ParamTraits<util::IdType<TypeMarker, WrappedType, kInvalidValue>> {
 };
 
 template <typename TagType, typename UnderlyingType>
-struct ParamTraits<util::StrongAlias<TagType, UnderlyingType>> {
-  using param_type = util::StrongAlias<TagType, UnderlyingType>;
+struct ParamTraits<base::StrongAlias<TagType, UnderlyingType>> {
+  using param_type = base::StrongAlias<TagType, UnderlyingType>;
   static void Write(base::Pickle* m, const param_type& p) {
     WriteParam(m, p.value());
   }

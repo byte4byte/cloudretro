@@ -25,7 +25,7 @@ class SVGComputedStyle;
 
 class CORE_EXPORT CSSProperty : public CSSUnresolvedProperty {
  public:
-  using Flags = uint16_t;
+  using Flags = uint32_t;
 
   static const CSSProperty& Get(CSSPropertyID);
 
@@ -50,14 +50,18 @@ class CORE_EXPORT CSSProperty : public CSSUnresolvedProperty {
   bool IsInherited() const { return flags_ & kInherited; }
   bool IsVisited() const { return flags_ & kVisited; }
   bool IsInternal() const { return flags_ & kInternal; }
-  bool IsAffectedByForcedColors() const {
-    return flags_ & kIsAffectedByForcedColors;
-  }
   bool IsValidForFirstLetter() const { return flags_ & kValidForFirstLetter; }
   bool IsValidForCue() const { return flags_ & kValidForCue; }
   bool IsValidForMarker() const { return flags_ & kValidForMarker; }
+  bool IsValidForHighlight() const { return flags_ & kValidForHighlight; }
   bool IsSurrogate() const { return flags_ & kSurrogate; }
   bool AffectsFont() const { return flags_ & kAffectsFont; }
+  bool IsBackground() const { return flags_ & kBackground; }
+  bool IsBorder() const { return flags_ & kBorder; }
+  bool IsComputedValueComparable() const {
+    return flags_ & kComputedValueComparable;
+  }
+  bool TakesTreeScopedValue() const { return flags_ & kTreeScopedValue; }
 
   bool IsRepeated() const { return repetition_separator_ != '\0'; }
   char RepetitionSeparator() const { return repetition_separator_; }
@@ -68,6 +72,13 @@ class CORE_EXPORT CSSProperty : public CSSUnresolvedProperty {
   virtual bool IsLayoutDependentProperty() const { return false; }
   virtual bool IsLayoutDependent(const ComputedStyle* style,
                                  LayoutObject* layout_object) const {
+    return false;
+  }
+
+  virtual bool ComputedValuesEqual(const ComputedStyle&,
+                                   const ComputedStyle&) const {
+    // May only be called if IsComputedValueComparable() is true.
+    NOTREACHED();
     return false;
   }
 
@@ -116,21 +127,30 @@ class CORE_EXPORT CSSProperty : public CSSUnresolvedProperty {
     // seen by CSSOM, which is represented by the unvisited property).
     kVisited = 1 << 7,
     kInternal = 1 << 8,
-    kIsAffectedByForcedColors = 1 << 9,
     // Animation properties have this flag set. (I.e. longhands of the
     // 'animation' and 'transition' shorthands).
-    kAnimation = 1 << 10,
+    kAnimation = 1 << 9,
     // https://drafts.csswg.org/css-pseudo-4/#first-letter-styling
-    kValidForFirstLetter = 1 << 11,
+    kValidForFirstLetter = 1 << 10,
     // https://w3c.github.io/webvtt/#the-cue-pseudo-element
-    kValidForCue = 1 << 12,
+    kValidForCue = 1 << 11,
     // https://drafts.csswg.org/css-pseudo-4/#marker-pseudo
-    kValidForMarker = 1 << 13,
+    kValidForMarker = 1 << 12,
     // A surrogate is a (non-alias) property which acts like another property,
     // for example -webkit-writing-mode is a surrogate for writing-mode, and
     // inline-size is a surrogate for either width or height.
-    kSurrogate = 1 << 14,
-    kAffectsFont = 1 << 15,
+    kSurrogate = 1 << 13,
+    kAffectsFont = 1 << 14,
+    // If the author specifies any background or border property on an UI
+    // element, the native appearance must be disabled.
+    kBackground = 1 << 15,
+    kBorder = 1 << 16,
+    // Set if ComputedValuesEqual is implemented for the given CSSProperty.
+    kComputedValueComparable = 1 << 17,
+    // Set if the property values are tree-scoped references.
+    kTreeScopedValue = 1 << 18,
+    // https://drafts.csswg.org/css-pseudo-4/#highlight-styling
+    kValidForHighlight = 1 << 19,
   };
 
   constexpr CSSProperty(CSSPropertyID property_id,

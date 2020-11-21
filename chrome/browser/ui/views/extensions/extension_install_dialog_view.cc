@@ -22,6 +22,7 @@
 #include "chrome/browser/ui/views/chrome_typography.h"
 #include "chrome/browser/ui/views/extensions/expandable_container_view.h"
 #include "chrome/browser/ui/views/extensions/extension_permissions_view.h"
+#include "chrome/common/buildflags.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/constrained_window/constrained_window_views.h"
@@ -220,30 +221,33 @@ ExtensionInstallDialogView::ExtensionInstallDialogView(
     default_button = ui::DIALOG_BUTTON_OK;
 #endif
 
-  DialogDelegate::SetDefaultButton(default_button);
-  DialogDelegate::SetButtons(buttons);
-  DialogDelegate::SetAcceptCallback(base::BindOnce(
+  SetModalType(ui::MODAL_TYPE_WINDOW);
+  set_fixed_width(views::LayoutProvider::Get()->GetDistanceMetric(
+      views::DISTANCE_MODAL_DIALOG_PREFERRED_WIDTH));
+
+  SetDefaultButton(default_button);
+  SetButtons(buttons);
+  SetAcceptCallback(base::BindOnce(
       &ExtensionInstallDialogView::OnDialogAccepted, base::Unretained(this)));
-  DialogDelegate::SetCancelCallback(base::BindOnce(
+  SetCancelCallback(base::BindOnce(
       &ExtensionInstallDialogView::OnDialogCanceled, base::Unretained(this)));
-  DialogDelegate::set_draggable(true);
+  set_draggable(true);
   if (prompt_->has_webstore_data()) {
     auto store_link = std::make_unique<views::Link>(
         l10n_util::GetStringUTF16(IDS_EXTENSION_PROMPT_STORE_LINK));
-    store_link->set_callback(base::BindRepeating(
+    store_link->SetCallback(base::BindRepeating(
         &ExtensionInstallDialogView::LinkClicked, base::Unretained(this)));
-    DialogDelegate::SetExtraView(std::move(store_link));
+    SetExtraView(std::move(store_link));
   } else if (prompt_->ShouldDisplayWithholdingUI()) {
     withhold_permissions_checkbox_ =
-        DialogDelegate::SetExtraView(std::make_unique<views::Checkbox>(
+        SetExtraView(std::make_unique<views::Checkbox>(
             l10n_util::GetStringUTF16(IDS_EXTENSION_WITHHOLD_PERMISSIONS)));
   }
 
-  DialogDelegate::SetButtonLabel(ui::DIALOG_BUTTON_OK,
-                                   prompt_->GetAcceptButtonLabel());
-  DialogDelegate::SetButtonLabel(ui::DIALOG_BUTTON_CANCEL,
-                                   prompt_->GetAbortButtonLabel());
+  SetButtonLabel(ui::DIALOG_BUTTON_OK, prompt_->GetAcceptButtonLabel());
+  SetButtonLabel(ui::DIALOG_BUTTON_CANCEL, prompt_->GetAbortButtonLabel());
   set_close_on_deactivate(false);
+  SetShowCloseButton(false);
   CreateContents();
 
   UMA_HISTOGRAM_ENUMERATION("Extensions.InstallPrompt.Type2", prompt_->type(),
@@ -263,13 +267,6 @@ void ExtensionInstallDialogView::SetInstallButtonDelayForTesting(
 
 void ExtensionInstallDialogView::ResizeWidget() {
   GetWidget()->SetSize(GetWidget()->non_client_view()->GetPreferredSize());
-}
-
-gfx::Size ExtensionInstallDialogView::CalculatePreferredSize() const {
-  const int width = ChromeLayoutProvider::Get()->GetDistanceMetric(
-                        DISTANCE_MODAL_DIALOG_PREFERRED_WIDTH) -
-                    margins().width();
-  return gfx::Size(width, GetHeightForWidth(width));
 }
 
 void ExtensionInstallDialogView::VisibilityChanged(views::View* starting_from,
@@ -299,8 +296,8 @@ void ExtensionInstallDialogView::AddedToWidget() {
   views::ColumnSet* column_set = layout->AddColumnSet(kTitleColumnSetId);
   constexpr int icon_size = extension_misc::EXTENSION_ICON_SMALL;
   column_set->AddColumn(views::GridLayout::CENTER, views::GridLayout::LEADING,
-                        views::GridLayout::kFixedSize, views::GridLayout::FIXED,
-                        icon_size, 0);
+                        views::GridLayout::kFixedSize,
+                        views::GridLayout::ColumnSize::kFixed, icon_size, 0);
 
   // Equalize padding on the left and the right of the icon.
   column_set->AddPaddingColumn(
@@ -309,7 +306,8 @@ void ExtensionInstallDialogView::AddedToWidget() {
   // Set a resize weight so that the title label will be expanded to the
   // available width.
   column_set->AddColumn(views::GridLayout::FILL, views::GridLayout::LEADING,
-                        1.0, views::GridLayout::USE_PREF, 0, 0);
+                        1.0, views::GridLayout::ColumnSize::kUsePreferred, 0,
+                        0);
 
   // Scale down to icon size, but allow smaller icons (don't scale up).
   const gfx::ImageSkia* image = prompt_->icon().ToImageSkia();
@@ -345,14 +343,14 @@ void ExtensionInstallDialogView::AddedToWidget() {
                                                 prompt_->rating_count());
     prompt_->AppendRatingStars(AddResourceIcon, rating.get());
     rating_container->AddChildView(std::move(rating));
-    auto rating_count = std::make_unique<RatingLabel>(prompt_->GetRatingCount(),
-                                                      CONTEXT_BODY_TEXT_LARGE);
+    auto rating_count = std::make_unique<RatingLabel>(
+        prompt_->GetRatingCount(), views::style::CONTEXT_DIALOG_BODY_TEXT);
     rating_count->SetHorizontalAlignment(gfx::ALIGN_LEFT);
     rating_container->AddChildView(std::move(rating_count));
     webstore_data_container->AddChildView(std::move(rating_container));
 
     auto user_count = std::make_unique<views::Label>(
-        prompt_->GetUserCount(), CONTEXT_BODY_TEXT_SMALL,
+        prompt_->GetUserCount(), CONTEXT_DIALOG_BODY_TEXT_SMALL,
         views::style::STYLE_SECONDARY);
     user_count->SetAutoColorReadabilityEnabled(false);
     user_count->SetEnabledColor(SK_ColorGRAY);
@@ -371,6 +369,7 @@ void ExtensionInstallDialogView::OnDialogCanceled() {
   DCHECK(done_callback_);
 
   UpdateInstallResultHistogram(false);
+  prompt_->OnDialogCanceled();
   std::move(done_callback_).Run(ExtensionInstallPrompt::Result::USER_CANCELED);
 }
 
@@ -378,6 +377,7 @@ void ExtensionInstallDialogView::OnDialogAccepted() {
   DCHECK(done_callback_);
 
   UpdateInstallResultHistogram(true);
+  prompt_->OnDialogAccepted();
   // If the prompt had a checkbox element and it was checked we send that along
   // as the result, otherwise we just send a normal accepted result.
   auto result =
@@ -395,8 +395,8 @@ bool ExtensionInstallDialogView::IsDialogButtonEnabled(
   return true;
 }
 
-bool ExtensionInstallDialogView::ShouldShowCloseButton() const {
-  return true;
+base::string16 ExtensionInstallDialogView::GetAccessibleWindowTitle() const {
+  return title_;
 }
 
 void ExtensionInstallDialogView::CloseDialog() {
@@ -420,18 +420,6 @@ void ExtensionInstallDialogView::OnShutdown(
   DCHECK_EQ(extension_registry, registry);
   extension_registry_observer_.Remove(extension_registry);
   CloseDialog();
-}
-
-ax::mojom::Role ExtensionInstallDialogView::GetAccessibleWindowRole() {
-  return ax::mojom::Role::kAlertDialog;
-}
-
-base::string16 ExtensionInstallDialogView::GetAccessibleWindowTitle() const {
-  return title_;
-}
-
-ui::ModalType ExtensionInstallDialogView::GetModalType() const {
-  return ui::MODAL_TYPE_WINDOW;
 }
 
 void ExtensionInstallDialogView::LinkClicked() {
@@ -509,8 +497,8 @@ void ExtensionInstallDialogView::CreateContents() {
   set_margins(gfx::Insets(content_insets.top(), 0, content_insets.bottom(), 0));
 
   for (ExtensionInfoSection& section : sections) {
-    views::Label* header_label =
-        new views::Label(section.header, CONTEXT_BODY_TEXT_LARGE);
+    views::Label* header_label = new views::Label(
+        section.header, views::style::CONTEXT_DIALOG_BODY_TEXT);
     header_label->SetMultiLine(true);
     header_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
     header_label->SizeToFit(content_width);
@@ -521,7 +509,8 @@ void ExtensionInstallDialogView::CreateContents() {
   }
 
   scroll_view_ = new views::ScrollView();
-  scroll_view_->SetHideHorizontalScrollBar(true);
+  scroll_view_->SetHorizontalScrollBarMode(
+      views::ScrollView::ScrollBarMode::kDisabled);
   scroll_view_->SetContents(std::move(extension_info_container));
   scroll_view_->ClipHeightTo(
       0, provider->GetDistanceMetric(

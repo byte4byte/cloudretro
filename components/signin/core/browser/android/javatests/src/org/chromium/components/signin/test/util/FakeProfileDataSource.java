@@ -19,7 +19,7 @@ import java.util.Map;
  * returned by {@link #getProfileDataForAccount}.
  */
 public class FakeProfileDataSource implements ProfileDataSource {
-    private final ObserverList<Observer> mObservers = new ObserverList<>();
+    protected final ObserverList<Observer> mObservers = new ObserverList<>();
     private final Map<String, ProfileData> mProfileDataMap = new HashMap<>();
 
     public FakeProfileDataSource() {}
@@ -58,7 +58,7 @@ public class FakeProfileDataSource implements ProfileDataSource {
         if (profileData == null) {
             mProfileDataMap.remove(accountId);
         } else {
-            assert accountId.equals(profileData.getAccountName());
+            assert accountId.equals(profileData.getAccountEmail());
             mProfileDataMap.put(accountId, profileData);
         }
         fireOnProfileDataUpdatedNotification(accountId);

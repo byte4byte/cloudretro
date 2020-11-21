@@ -3,12 +3,12 @@
     {
       "name": "Scrolling background of LayoutView #document",
       "bounds": [800, 600],
-      "contentsOpaque": true
+      "contentsOpaque": true,
+      "backgroundColor": "#FFFFFF"
     },
     {
       "name": "Scrolling background of LayoutView #document",
-      "bounds": [800, 600],
-      "backgroundColor": "#008000"
+      "bounds": [800, 600]
     },
     {
       "name": "LayoutNGBlockFlow DIV",

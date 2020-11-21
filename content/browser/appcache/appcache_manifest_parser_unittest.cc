@@ -28,6 +28,9 @@ class AppCacheManifestParserTest : public testing::Test {
     blink::TrialTokenValidator::SetOriginTrialPolicyGetter(base::BindRepeating(
         []() -> blink::OriginTrialPolicy* { return &g_origin_trial_policy; }));
   }
+  void TearDown() override {
+    blink::TrialTokenValidator::ResetOriginTrialPolicyGetter();
+  }
 };
 
 TEST_F(AppCacheManifestParserTest, NoData) {
@@ -157,17 +160,9 @@ TEST_F(AppCacheManifestParserTest, NoManifestUrl) {
                              manifest));
   EXPECT_TRUE(manifest.explicit_urls.empty());
   EXPECT_TRUE(manifest.fallback_namespaces.empty());
-  EXPECT_TRUE(manifest.online_whitelist_namespaces.empty());
-  EXPECT_FALSE(manifest.online_whitelist_all);
+  EXPECT_TRUE(manifest.online_safelist_namespaces.empty());
+  EXPECT_FALSE(manifest.online_safelist_all);
   EXPECT_EQ(manifest.parser_version, -1);
-
-  // Verify UMA values show the invalid manifest URL.
-  int invalid_count = 1;
-  int valid_count = 0;
-  tester.ExpectBucketCount("appcache.Manifest.ValidManifestURL", 0,
-                           invalid_count);
-  tester.ExpectBucketCount("appcache.Manifest.ValidManifestURL", 1,
-                           valid_count);
 }
 
 TEST_F(AppCacheManifestParserTest, NoManifestScope) {
@@ -184,18 +179,9 @@ TEST_F(AppCacheManifestParserTest, NoManifestScope) {
                              manifest));
   EXPECT_TRUE(manifest.explicit_urls.empty());
   EXPECT_TRUE(manifest.fallback_namespaces.empty());
-  EXPECT_TRUE(manifest.online_whitelist_namespaces.empty());
-  EXPECT_FALSE(manifest.online_whitelist_all);
+  EXPECT_TRUE(manifest.online_safelist_namespaces.empty());
+  EXPECT_FALSE(manifest.online_safelist_all);
   EXPECT_EQ(manifest.parser_version, -1);
-
-  // Verify UMA values show neither a valid nor invalid manifest URL since
-  // metrics weren't recorded.
-  int invalid_count = 0;
-  int valid_count = 0;
-  tester.ExpectBucketCount("appcache.Manifest.ValidManifestURL", 0,
-                           invalid_count);
-  tester.ExpectBucketCount("appcache.Manifest.ValidManifestURL", 1,
-                           valid_count);
 }
 
 TEST_F(AppCacheManifestParserTest, NoManifestUrlAndScope) {
@@ -212,17 +198,9 @@ TEST_F(AppCacheManifestParserTest, NoManifestUrlAndScope) {
                              manifest));
   EXPECT_TRUE(manifest.explicit_urls.empty());
   EXPECT_TRUE(manifest.fallback_namespaces.empty());
-  EXPECT_TRUE(manifest.online_whitelist_namespaces.empty());
-  EXPECT_FALSE(manifest.online_whitelist_all);
+  EXPECT_TRUE(manifest.online_safelist_namespaces.empty());
+  EXPECT_FALSE(manifest.online_safelist_all);
   EXPECT_EQ(manifest.parser_version, -1);
-
-  // Verify UMA values show the invalid manifest URL.
-  int invalid_count = 1;
-  int valid_count = 0;
-  tester.ExpectBucketCount("appcache.Manifest.ValidManifestURL", 0,
-                           invalid_count);
-  tester.ExpectBucketCount("appcache.Manifest.ValidManifestURL", 1,
-                           valid_count);
 }
 
 TEST_F(AppCacheManifestParserTest, SimpleManifest) {
@@ -240,18 +218,9 @@ TEST_F(AppCacheManifestParserTest, SimpleManifest) {
   const size_t kExpected = 2;
   EXPECT_EQ(manifest.explicit_urls.size(), kExpected);
   EXPECT_TRUE(manifest.fallback_namespaces.empty());
-  EXPECT_TRUE(manifest.online_whitelist_namespaces.empty());
-  EXPECT_FALSE(manifest.online_whitelist_all);
-  EXPECT_EQ(manifest.parser_version, 1);
-
-  // Verify UMA values show neither the valid or invalid manifest URL since
-  // metrics weren't recorded.
-  int invalid_count = 0;
-  int valid_count = 1;
-  tester.ExpectBucketCount("appcache.Manifest.ValidManifestURL", 0,
-                           invalid_count);
-  tester.ExpectBucketCount("appcache.Manifest.ValidManifestURL", 1,
-                           valid_count);
+  EXPECT_TRUE(manifest.online_safelist_namespaces.empty());
+  EXPECT_FALSE(manifest.online_safelist_all);
+  EXPECT_EQ(manifest.parser_version, 2);
 }
 
 TEST_F(AppCacheManifestParserTest, ExplicitUrls) {
@@ -279,11 +248,11 @@ TEST_F(AppCacheManifestParserTest, ExplicitUrls) {
                             PARSE_MANIFEST_ALLOWING_DANGEROUS_FEATURES,
                             manifest));
   EXPECT_TRUE(manifest.fallback_namespaces.empty());
-  EXPECT_TRUE(manifest.online_whitelist_namespaces.empty());
-  EXPECT_FALSE(manifest.online_whitelist_all);
+  EXPECT_TRUE(manifest.online_safelist_namespaces.empty());
+  EXPECT_FALSE(manifest.online_safelist_all);
   EXPECT_FALSE(manifest.did_ignore_intercept_namespaces);
   EXPECT_FALSE(manifest.did_ignore_fallback_namespaces);
-  EXPECT_EQ(manifest.parser_version, 1);
+  EXPECT_EQ(manifest.parser_version, 2);
 
   std::unordered_set<std::string> urls = manifest.explicit_urls;
   const size_t kExpected = 5;
@@ -301,8 +270,8 @@ TEST_F(AppCacheManifestParserTest, ExplicitUrls) {
   EXPECT_TRUE(ParseManifest(kUrl, kScope, kData.c_str(), kData.length(),
                             PARSE_MANIFEST_PER_STANDARD, manifest));
   EXPECT_TRUE(manifest.fallback_namespaces.empty());
-  EXPECT_TRUE(manifest.online_whitelist_namespaces.empty());
-  EXPECT_FALSE(manifest.online_whitelist_all);
+  EXPECT_TRUE(manifest.online_safelist_namespaces.empty());
+  EXPECT_FALSE(manifest.online_safelist_all);
   EXPECT_FALSE(manifest.did_ignore_intercept_namespaces);
   EXPECT_FALSE(manifest.did_ignore_fallback_namespaces);
 
@@ -317,7 +286,7 @@ TEST_F(AppCacheManifestParserTest, ExplicitUrls) {
   EXPECT_TRUE(urls.find("http://www.foo.com/*") != urls.end());
 }
 
-TEST_F(AppCacheManifestParserTest, WhitelistUrls) {
+TEST_F(AppCacheManifestParserTest, SafelistUrls) {
   AppCacheManifest manifest;
   const GURL kUrl("http://www.bar.com");
   const std::string kScope = kUrl.GetWithoutFilename().path();
@@ -344,12 +313,12 @@ TEST_F(AppCacheManifestParserTest, WhitelistUrls) {
   EXPECT_TRUE(manifest.explicit_urls.empty());
   EXPECT_TRUE(manifest.fallback_namespaces.empty());
   EXPECT_TRUE(manifest.intercept_namespaces.empty());
-  EXPECT_FALSE(manifest.online_whitelist_all);
+  EXPECT_FALSE(manifest.online_safelist_all);
   EXPECT_FALSE(manifest.did_ignore_intercept_namespaces);
   EXPECT_FALSE(manifest.did_ignore_fallback_namespaces);
 
   const std::vector<AppCacheNamespace>& online =
-      manifest.online_whitelist_namespaces;
+      manifest.online_safelist_namespaces;
   const size_t kExpected = 6;
   ASSERT_EQ(kExpected, online.size());
   EXPECT_EQ(APPCACHE_NETWORK_NAMESPACE, online[0].type);
@@ -393,8 +362,8 @@ TEST_F(AppCacheManifestParserTest, FallbackUrls) {
                             PARSE_MANIFEST_ALLOWING_DANGEROUS_FEATURES,
                             manifest));
   EXPECT_TRUE(manifest.explicit_urls.empty());
-  EXPECT_TRUE(manifest.online_whitelist_namespaces.empty());
-  EXPECT_FALSE(manifest.online_whitelist_all);
+  EXPECT_TRUE(manifest.online_safelist_namespaces.empty());
+  EXPECT_FALSE(manifest.online_safelist_all);
   EXPECT_FALSE(manifest.did_ignore_intercept_namespaces);
   EXPECT_FALSE(manifest.did_ignore_fallback_namespaces);
 
@@ -455,8 +424,8 @@ TEST_F(AppCacheManifestParserTest, FallbackUrlsWithPort) {
                             PARSE_MANIFEST_ALLOWING_DANGEROUS_FEATURES,
                             manifest));
   EXPECT_TRUE(manifest.explicit_urls.empty());
-  EXPECT_TRUE(manifest.online_whitelist_namespaces.empty());
-  EXPECT_FALSE(manifest.online_whitelist_all);
+  EXPECT_TRUE(manifest.online_safelist_namespaces.empty());
+  EXPECT_FALSE(manifest.online_safelist_all);
 
   const std::vector<AppCacheNamespace>& fallbacks =
       manifest.fallback_namespaces;
@@ -508,8 +477,8 @@ TEST_F(AppCacheManifestParserTest, InterceptUrls) {
                             manifest));
   EXPECT_TRUE(manifest.fallback_namespaces.empty());
   EXPECT_TRUE(manifest.explicit_urls.empty());
-  EXPECT_TRUE(manifest.online_whitelist_namespaces.empty());
-  EXPECT_FALSE(manifest.online_whitelist_all);
+  EXPECT_TRUE(manifest.online_safelist_namespaces.empty());
+  EXPECT_FALSE(manifest.online_safelist_all);
   EXPECT_FALSE(manifest.did_ignore_intercept_namespaces);
   EXPECT_FALSE(manifest.did_ignore_fallback_namespaces);
 
@@ -539,9 +508,9 @@ TEST_F(AppCacheManifestParserTest, InterceptUrls) {
                             PARSE_MANIFEST_PER_STANDARD, manifest));
   EXPECT_TRUE(manifest.fallback_namespaces.empty());
   EXPECT_TRUE(manifest.explicit_urls.empty());
-  EXPECT_TRUE(manifest.online_whitelist_namespaces.empty());
+  EXPECT_TRUE(manifest.online_safelist_namespaces.empty());
   EXPECT_TRUE(manifest.intercept_namespaces.empty());
-  EXPECT_FALSE(manifest.online_whitelist_all);
+  EXPECT_FALSE(manifest.online_safelist_all);
   EXPECT_TRUE(manifest.did_ignore_intercept_namespaces);
   EXPECT_FALSE(manifest.did_ignore_fallback_namespaces);
 }
@@ -550,29 +519,30 @@ TEST_F(AppCacheManifestParserTest, ComboUrls) {
   AppCacheManifest manifest;
   const GURL kUrl("http://combo.com:42");
   const std::string kScope = kUrl.GetWithoutFilename().path();
-  const std::string kData("CACHE MANIFEST\r"
-    "relative/explicit-1\r"
-    "# some comment\r"
-    "http://combo.com:99/explicit-2#strip\r"
-    "NETWORK:\r"
-    "http://combo.com/whitelist-1\r"
-    "HTTP://www.diff.com/whitelist-2#strip\r"
-    "*\r"
-    "CACHE:\n\r"
-    "http://www.diff.com/explicit-3\r"
-    "FALLBACK:\r"
-    "http://combo.com:42/fallback-1 http://combo.com:42/fallback-1b\r"
-    "relative/fallback-2 relative/fallback-2b\r"
-    "UNKNOWN:\r\n"
-    "http://combo.com/ignoreme\r"
-    "relative/still-ignored\r"
-    "NETWORK:\r\n"
-    "relative/whitelist-3#strip\r"
-    "http://combo.com:99/whitelist-4\r");
+  const std::string kData(
+      "CACHE MANIFEST\r"
+      "relative/explicit-1\r"
+      "# some comment\r"
+      "http://combo.com:99/explicit-2#strip\r"
+      "NETWORK:\r"
+      "http://combo.com/safelist-1\r"
+      "HTTP://www.diff.com/safelist-2#strip\r"
+      "*\r"
+      "CACHE:\n\r"
+      "http://www.diff.com/explicit-3\r"
+      "FALLBACK:\r"
+      "http://combo.com:42/fallback-1 http://combo.com:42/fallback-1b\r"
+      "relative/fallback-2 relative/fallback-2b\r"
+      "UNKNOWN:\r\n"
+      "http://combo.com/ignoreme\r"
+      "relative/still-ignored\r"
+      "NETWORK:\r\n"
+      "relative/safelist-3#strip\r"
+      "http://combo.com:99/safelist-4\r");
   EXPECT_TRUE(ParseManifest(kUrl, kScope, kData.c_str(), kData.length(),
                             PARSE_MANIFEST_ALLOWING_DANGEROUS_FEATURES,
                             manifest));
-  EXPECT_TRUE(manifest.online_whitelist_all);
+  EXPECT_TRUE(manifest.online_safelist_all);
 
   std::unordered_set<std::string> urls = manifest.explicit_urls;
   size_t expected = 3;
@@ -583,17 +553,14 @@ TEST_F(AppCacheManifestParserTest, ComboUrls) {
   EXPECT_TRUE(urls.find("http://www.diff.com/explicit-3") != urls.end());
 
   const std::vector<AppCacheNamespace>& online =
-      manifest.online_whitelist_namespaces;
+      manifest.online_safelist_namespaces;
   expected = 4;
   ASSERT_EQ(expected, online.size());
-  EXPECT_EQ(GURL("http://combo.com/whitelist-1"),
-                 online[0].namespace_url);
-  EXPECT_EQ(GURL("http://www.diff.com/whitelist-2"),
-                 online[1].namespace_url);
-  EXPECT_EQ(GURL("http://combo.com:42/relative/whitelist-3"),
-                 online[2].namespace_url);
-  EXPECT_EQ(GURL("http://combo.com:99/whitelist-4"),
-                 online[3].namespace_url);
+  EXPECT_EQ(GURL("http://combo.com/safelist-1"), online[0].namespace_url);
+  EXPECT_EQ(GURL("http://www.diff.com/safelist-2"), online[1].namespace_url);
+  EXPECT_EQ(GURL("http://combo.com:42/relative/safelist-3"),
+            online[2].namespace_url);
+  EXPECT_EQ(GURL("http://combo.com:99/safelist-4"), online[3].namespace_url);
 
   const std::vector<AppCacheNamespace>& fallbacks =
       manifest.fallback_namespaces;
@@ -659,7 +626,7 @@ TEST_F(AppCacheManifestParserTest, DifferentOriginUrlWithSecureScheme) {
                             PARSE_MANIFEST_ALLOWING_DANGEROUS_FEATURES,
                             manifest));
   EXPECT_TRUE(manifest.fallback_namespaces.empty());
-  EXPECT_TRUE(manifest.online_whitelist_namespaces.empty());
+  EXPECT_TRUE(manifest.online_safelist_namespaces.empty());
 
   std::unordered_set<std::string> urls = manifest.explicit_urls;
   const size_t kExpected = 3;
@@ -721,7 +688,7 @@ TEST_F(AppCacheManifestParserTest, IgnoreDangerousFallbacksWithDefaultScope) {
   EXPECT_TRUE(ParseManifest(kUrl, kScope, kData.c_str(), kData.length(),
                             PARSE_MANIFEST_ALLOWING_DANGEROUS_FEATURES,
                             manifest));
-  EXPECT_EQ(manifest.parser_version, 1);
+  EXPECT_EQ(manifest.parser_version, 2);
   EXPECT_FALSE(manifest.did_ignore_fallback_namespaces);
   EXPECT_EQ(1u, manifest.fallback_namespaces.size());
 
@@ -821,11 +788,13 @@ TEST_F(AppCacheManifestParserTest, OriginTrial) {
   const GURL kUrl("http://mockhost");
   const std::string kScope = kUrl.GetWithoutFilename().path();
 
+// tools/origin_trials/generate_token.py http://mockhost AppCache
+// --expire-days=2000
 #define APPCACHE_ORIGIN_TRIAL_TOKEN                                            \
-  "AnIRfMbu5xrUEIBGno19QnlNiW7gZgKrkLaCysH+/"                                  \
-  "XU2FEpF+"                                                                   \
-  "TLisekclfG9xOkjQgTEllip14FPATbapHAH5ggAAABNeyJvcmlnaW4iOiAiaHR0cDovL21vY2t" \
-  "ob3N0OjgwIiwgImZlYXR1cmUiOiAiQXBwQ2FjaGUiLCAiZXhwaXJ5IjogMTU4ODM1OTM5NH0="
+  "AhiiB7vi3JiEO1/"                                                            \
+  "RQIytQslLSN3WYVu3Xd32abYhTia+91ladjnXSClfU981x+"                            \
+  "aoPimEqYVy6tWoeMZZYTpqlggAAABNeyJvcmlnaW4iOiAiaHR0cDovL21vY2tob3N0OjgwIiwg" \
+  "ImZlYXR1cmUiOiAiQXBwQ2FjaGUiLCAiZXhwaXJ5IjogMTc2MTE2NjQxOH0="
 
   const std::string kData(
       "CACHE MANIFEST\r"
@@ -847,13 +816,15 @@ TEST_F(AppCacheManifestParserTest, OriginTrial) {
   base::Time expect_token_expires;
   {
     blink::TrialTokenValidator validator;
-    std::string token_feature;
     url::Origin origin = url::Origin::Create(kUrl);
     const char* token = APPCACHE_ORIGIN_TRIAL_TOKEN;
-    ASSERT_EQ(validator.ValidateToken(token, origin, base::Time::Now(),
-                                      &token_feature, &expect_token_expires),
+    blink::TrialTokenResult expect_token_result =
+        validator.ValidateToken(token, origin, base::Time::Now());
+    expect_token_expires = expect_token_result.expiry_time;
+    ASSERT_EQ(expect_token_result.status,
               blink::OriginTrialTokenStatus::kSuccess);
-    EXPECT_EQ(GetAppCacheOriginTrialNameForTesting(), token_feature);
+    EXPECT_EQ(GetAppCacheOriginTrialNameForTesting(),
+              expect_token_result.feature_name);
     EXPECT_NE(base::Time(), expect_token_expires);
   }
 

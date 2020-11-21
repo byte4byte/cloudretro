@@ -9,6 +9,7 @@ import android.view.View;
 
 import org.chromium.base.Callback;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -17,15 +18,14 @@ import java.util.List;
 class TileCoordinatorImpl implements ImageTileCoordinator {
     private final TileListModel mModel;
     private final TileListView mView;
+    private final TileMediator mMediator;
 
     /** Constructor. */
     public TileCoordinatorImpl(Context context, TileConfig config,
             Callback<ImageTile> tileClickCallback, TileVisualsProvider visualsProvider) {
         mModel = new TileListModel();
         mView = new TileListView(context, config, mModel);
-
-        mModel.getProperties().set(TileListProperties.CLICK_CALLBACK, tileClickCallback);
-        mModel.getProperties().set(TileListProperties.VISUALS_CALLBACK, visualsProvider);
+        mMediator = new TileMediator(config, mModel, tileClickCallback, visualsProvider);
     }
 
     @Override
@@ -35,7 +35,15 @@ class TileCoordinatorImpl implements ImageTileCoordinator {
 
     @Override
     public void setTiles(List<ImageTile> tiles) {
+        // Determine if the old set of tiles have changed. If yes, show animation.
+        List<ImageTile> oldTiles = new ArrayList<>();
+        for (int i = 0; i < mModel.size(); i++) {
+            oldTiles.add(mModel.get(i));
+        }
+        boolean shouldAnimate = !oldTiles.isEmpty() && !tiles.isEmpty() && !oldTiles.equals(tiles);
+
         mModel.set(tiles);
-        mView.scrollToPosition(0);
+        mView.scrollToBeginning();
+        mView.showAnimation(shouldAnimate);
     }
 }

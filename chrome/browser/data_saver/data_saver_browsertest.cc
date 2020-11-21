@@ -20,6 +20,7 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_service.h"
 #include "components/prefs/pref_service.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_base.h"
 #include "content/public/test/browser_test_utils.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
@@ -220,9 +221,9 @@ class DataSaverWithServerBrowserTest : public InProcessBrowserTest {
  protected:
   void Init() {
     test_server_.reset(new net::EmbeddedTestServer());
-    test_server_->RegisterRequestHandler(
-        base::Bind(&DataSaverWithServerBrowserTest::VerifySaveDataHeader,
-                   base::Unretained(this)));
+    test_server_->RegisterRequestHandler(base::BindRepeating(
+        &DataSaverWithServerBrowserTest::VerifySaveDataHeader,
+        base::Unretained(this)));
     test_server_->ServeFilesFromSourceDirectory(GetChromeTestDataDir());
   }
 

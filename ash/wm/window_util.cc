@@ -7,7 +7,6 @@
 #include <memory>
 
 #include "ash/public/cpp/app_types.h"
-#include "ash/public/cpp/ash_constants.h"
 #include "ash/public/cpp/ash_features.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/public/cpp/tablet_mode_observer.h"
@@ -27,6 +26,8 @@
 #include "ash/wm/window_positioning_utils.h"
 #include "ash/wm/window_state.h"
 #include "ash/wm/wm_event.h"
+#include "chromeos/ui/base/chromeos_ui_constants.h"
+#include "chromeos/ui/frame/interior_resize_handler_targeter.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/client/capture_client.h"
 #include "ui/aura/client/focus_client.h"
@@ -35,12 +36,12 @@
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/aura/window_targeter.h"
 #include "ui/base/hit_test.h"
-#include "ui/compositor/dip_util.h"
 #include "ui/compositor/layer_tree_owner.h"
 #include "ui/display/display.h"
 #include "ui/display/screen.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
+#include "ui/gfx/transform_util.h"
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
 #include "ui/wm/core/coordinate_conversion.h"
@@ -54,42 +55,25 @@ namespace {
 
 // This window targeter reserves space for the portion of the resize handles
 // that extend within a top level window.
-class InteriorResizeHandleTargeter : public aura::WindowTargeter {
+class InteriorResizeHandleTargeterAsh
+    : public chromeos::InteriorResizeHandleTargeter {
  public:
-  InteriorResizeHandleTargeter() {
-    SetInsets(gfx::Insets(kResizeInsideBoundsSize));
-  }
-
-  ~InteriorResizeHandleTargeter() override = default;
-
-  bool GetHitTestRects(aura::Window* target,
-                       gfx::Rect* hit_test_rect_mouse,
-                       gfx::Rect* hit_test_rect_touch) const override {
-    if (target == window() && window()->parent() &&
-        window()->parent()->targeter()) {
-      // Defer to the parent's targeter on whether |window_| should be able to
-      // receive the event. This should be EasyResizeWindowTargeter, which is
-      // installed on the container window, and is necessary for
-      // kResizeOutsideBoundsSize to work.
-      return window()->parent()->targeter()->GetHitTestRects(
-          target, hit_test_rect_mouse, hit_test_rect_touch);
-    }
-
-    return WindowTargeter::GetHitTestRects(target, hit_test_rect_mouse,
-                                           hit_test_rect_touch);
-  }
+  InteriorResizeHandleTargeterAsh() = default;
+  InteriorResizeHandleTargeterAsh(const InteriorResizeHandleTargeterAsh&) =
+      delete;
+  InteriorResizeHandleTargeterAsh& operator=(
+      const InteriorResizeHandleTargeterAsh&) = delete;
+  ~InteriorResizeHandleTargeterAsh() override = default;
 
   bool ShouldUseExtendedBounds(const aura::Window* target) const override {
     // Fullscreen/maximized windows can't be drag-resized.
     const WindowState* window_state = WindowState::Get(window());
     if (window_state && window_state->IsMaximizedOrFullscreenOrPinned())
       return false;
-    // The shrunken hit region only applies to children of |window()|.
-    return target->parent() == window();
-  }
 
- private:
-  DISALLOW_COPY_AND_ASSIGN(InteriorResizeHandleTargeter);
+    // The shrunken hit region only applies to children of |window()|.
+    return InteriorResizeHandleTargeter::ShouldUseExtendedBounds(target);
+  }
 };
 
 }  // namespace
@@ -187,11 +171,11 @@ int GetNonClientComponent(aura::Window* window, const gfx::Point& location) {
 }
 
 void SetChildrenUseExtendedHitRegionForWindow(aura::Window* window) {
-  gfx::Insets mouse_extend(-kResizeOutsideBoundsSize, -kResizeOutsideBoundsSize,
-                           -kResizeOutsideBoundsSize,
-                           -kResizeOutsideBoundsSize);
-  gfx::Insets touch_extend =
-      mouse_extend.Scale(kResizeOutsideBoundsScaleForTouch);
+  gfx::Insets mouse_extend(
+      -chromeos::kResizeOutsideBoundsSize, -chromeos::kResizeOutsideBoundsSize,
+      -chromeos::kResizeOutsideBoundsSize, -chromeos::kResizeOutsideBoundsSize);
+  gfx::Insets touch_extend = gfx::ScaleToFlooredInsets(
+      mouse_extend, chromeos::kResizeOutsideBoundsScaleForTouch);
   window->SetEventTargeter(std::make_unique<::wm::EasyResizeWindowTargeter>(
       mouse_extend, touch_extend));
 }
@@ -203,7 +187,7 @@ void CloseWidgetForWindow(aura::Window* window) {
 }
 
 void InstallResizeHandleWindowTargeterForWindow(aura::Window* window) {
-  window->SetEventTargeter(std::make_unique<InteriorResizeHandleTargeter>());
+  window->SetEventTargeter(std::make_unique<InteriorResizeHandleTargeterAsh>());
 }
 
 bool IsDraggingTabs(const aura::Window* window) {
@@ -251,12 +235,16 @@ bool ShouldExcludeForOverview(const aura::Window* window) {
   return ShouldExcludeForCycleList(window);
 }
 
-void RemoveTransientDescendants(std::vector<aura::Window*>* out_window_list) {
+void EnsureTransientRoots(std::vector<aura::Window*>* out_window_list) {
   for (auto it = out_window_list->begin(); it != out_window_list->end();) {
     aura::Window* transient_root = ::wm::GetTransientRoot(*it);
-    if (*it != transient_root &&
-        base::Contains(*out_window_list, transient_root)) {
-      it = out_window_list->erase(it);
+    if (*it != transient_root) {
+      if (base::Contains(*out_window_list, transient_root)) {
+        it = out_window_list->erase(it);
+      } else {
+        *it = transient_root;
+        ++it;
+      }
     } else {
       ++it;
     }
@@ -356,9 +344,6 @@ aura::Window* GetTopWindow() {
 }
 
 bool ShouldMinimizeTopWindowOnBack() {
-  if (!features::IsSwipingFromLeftEdgeToGoBackEnabled())
-    return false;
-
   Shell* shell = Shell::Get();
   if (!shell->tablet_mode_controller()->InTabletMode())
     return false;
@@ -403,6 +388,45 @@ void SendBackKeyEvent(aura::Window* root_window) {
   ui::KeyEvent release_key_event(ui::ET_KEY_RELEASED, ui::VKEY_BROWSER_BACK,
                                  ui::EF_NONE);
   ignore_result(root_window->GetHost()->SendEventToSink(&release_key_event));
+}
+
+WindowTransientDescendantIteratorRange GetVisibleTransientTreeIterator(
+    aura::Window* window) {
+  auto hide_predicate = [](aura::Window* window) {
+    return window->GetProperty(kHideInOverviewKey);
+  };
+  return GetTransientTreeIterator(window, base::BindRepeating(hide_predicate));
+}
+
+gfx::RectF GetTransformedBounds(aura::Window* transformed_window,
+                                int top_inset) {
+  gfx::RectF bounds;
+  for (auto* window : GetVisibleTransientTreeIterator(transformed_window)) {
+    // Ignore other window types when computing bounding box of overview target
+    // item.
+    if (window != transformed_window &&
+        window->type() != aura::client::WINDOW_TYPE_NORMAL) {
+      continue;
+    }
+    gfx::RectF window_bounds(window->GetTargetBounds());
+    gfx::Transform new_transform =
+        TransformAboutPivot(gfx::ToRoundedPoint(window_bounds.origin()),
+                            window->layer()->GetTargetTransform());
+    new_transform.TransformRect(&window_bounds);
+
+    // The preview title is shown above the preview window. Hide the window
+    // header for apps or browser windows with no tabs (web apps) to avoid
+    // showing both the window header and the preview title.
+    if (top_inset > 0) {
+      gfx::RectF header_bounds(window_bounds);
+      header_bounds.set_height(top_inset);
+      new_transform.TransformRect(&header_bounds);
+      window_bounds.Inset(0, header_bounds.height(), 0, 0);
+    }
+    ::wm::TranslateRectToScreen(window->parent(), &window_bounds);
+    bounds.Union(window_bounds);
+  }
+  return bounds;
 }
 
 }  // namespace window_util

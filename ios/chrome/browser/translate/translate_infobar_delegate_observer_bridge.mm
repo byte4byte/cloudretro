@@ -4,7 +4,7 @@
 
 #import "ios/chrome/browser/translate/translate_infobar_delegate_observer_bridge.h"
 
-#include "base/logging.h"
+#include "base/check_op.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -30,6 +30,14 @@ void TranslateInfobarDelegateObserverBridge::OnTranslateStepChanged(
   [owner_ translateInfoBarDelegate:translate_infobar_delegate_
             didChangeTranslateStep:step
                      withErrorType:error_type];
+}
+
+void TranslateInfobarDelegateObserverBridge::OnTargetLanguageChanged(
+    const std::string& target_language_code) {
+  // Unimplemented on iOS as target language changes are initiated solely by the
+  // UI. This method should always be a no-op.
+  DCHECK_EQ(translate_infobar_delegate_->target_language_code(),
+            target_language_code);
 }
 
 bool TranslateInfobarDelegateObserverBridge::IsDeclinedByUser() {

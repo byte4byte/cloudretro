@@ -15,9 +15,9 @@ namespace {
 
 CGFloat kTooltipTailHeight = 8;
 CGFloat kTooltipTailWidth = 16;
-CGFloat kTooltipHorizontalPadding = 10.0f;
-CGFloat kTooltipVerticalPadding = 4.0f;
-CGFloat kTooltipCornerRadius = 3.0f;
+CGFloat kTooltipHorizontalPadding = 16.0f;
+CGFloat kTooltipVerticalPadding = 10.0f;
+CGFloat kTooltipCornerRadius = 8.0f;
 CGFloat kTooltipFadeInTime = 0.2f;
 
 }  // namespace
@@ -29,7 +29,7 @@ CGFloat kTooltipFadeInTime = 0.2f;
   UITapGestureRecognizer* _tapBehindGesture;
 }
 
-static TooltipView* _active;
+static __weak TooltipView* _active;
 
 - (instancetype)initWithKeyWindow:(UIView*)keyWindow
                            target:(NSObject*)target
@@ -59,7 +59,7 @@ static TooltipView* _active;
 
   CGSize labelSize = [message sizeWithAttributes:@{
     NSFontAttributeName :
-        [UIFont preferredFontForTextStyle:UIFontTextStyleCallout]
+        [UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline]
   }];
 
   UILabel* label = [[UILabel alloc]
@@ -68,7 +68,7 @@ static TooltipView* _active;
                                labelSize.width, labelSize.height)];
   label.textAlignment = NSTextAlignmentLeft;
   label.text = message;
-  label.font = [UIFont preferredFontForTextStyle:UIFontTextStyleCallout];
+  label.font = [UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];
   label.textColor = [UIColor colorNamed:kBackgroundColor];
 
   CGFloat width = labelSize.width + 2 * kTooltipHorizontalPadding;
@@ -79,8 +79,10 @@ static TooltipView* _active;
   anchor = [_keyWindow convertPoint:anchor fromView:view];
 
   self.frame = CGRectMake(0.0, 0.0, width, kTooltipTailHeight + height);
-  self.center = CGPointMake(MAX(width / 2, anchor.x),
-                            anchor.y + kTooltipTailHeight + height / 2.0);
+  self.center = CGPointMake(
+      MIN(_keyWindow.frame.size.width - width / 2 - kTooltipHorizontalPadding,
+          MAX(kTooltipHorizontalPadding + width / 2, anchor.x)),
+      anchor.y + kTooltipTailHeight + height / 2.0);
   self.translatesAutoresizingMaskIntoConstraints = NO;
 
   CGRect tooltipRect = CGRectMake(0.0, kTooltipTailHeight, width, height);

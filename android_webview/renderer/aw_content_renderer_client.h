@@ -37,15 +37,13 @@ class AwContentRendererClient : public content::ContentRendererClient,
   void ExposeInterfacesToBrowser(mojo::BinderMap* binders) override;
   void RenderFrameCreated(content::RenderFrame* render_frame) override;
   void RenderViewCreated(content::RenderView* render_view) override;
-  bool HasErrorPage(int http_status_code) override;
-  bool ShouldSuppressErrorPage(content::RenderFrame* render_frame,
-                               const GURL& url) override;
   void PrepareErrorPage(content::RenderFrame* render_frame,
                         const blink::WebURLError& error,
                         const std::string& http_method,
                         std::string* error_html) override;
   uint64_t VisitedLinkHash(const char* canonical_url, size_t length) override;
   bool IsLinkVisited(uint64_t link_hash) override;
+  void RunScriptsAtDocumentStart(content::RenderFrame* render_frame) override;
   void AddSupportedKeySystems(
       std::vector<std::unique_ptr<::media::KeySystemProperties>>* key_systems)
       override;

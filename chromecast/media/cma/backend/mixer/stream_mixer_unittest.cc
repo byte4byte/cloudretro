@@ -8,6 +8,7 @@
 #include <memory>
 #include <utility>
 
+#include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/numerics/ranges.h"
 #include "base/run_loop.h"
@@ -377,8 +378,8 @@ class StreamMixerTest : public testing::Test {
   StreamMixerTest() {
     auto output = std::make_unique<NiceMock<MockMixerOutput>>();
     mock_output_ = output.get();
-    mixer_ = std::make_unique<StreamMixer>(std::move(output), nullptr,
-                                           base::ThreadTaskRunnerHandle::Get());
+    mixer_ = std::make_unique<StreamMixer>(
+        std::move(output), nullptr, base::ThreadTaskRunnerHandle::Get(), "{}");
     mixer_->SetVolume(AudioContentType::kMedia, 1.0f);
     mixer_->SetVolume(AudioContentType::kAlarm, 1.0f);
     std::string test_pipeline_json = base::StringPrintf(
@@ -1051,7 +1052,7 @@ TEST_F(StreamMixerTest, TwoUnscaledStreamsMixProperlyWithEdgeCases) {
   do {                                                                    \
     auto itr = map->find(name);                                           \
     CHECK(itr != map->end()) << "Could not find processor for " << name;  \
-    EXPECT_CALL(*(itr->second), ProcessFrames(_, frames, _, silence))     \
+    EXPECT_CALL(*(itr->second), ProcessFrames(_, frames, _, _, silence))  \
         .Times(times);                                                    \
   } while (0);
 
@@ -1394,9 +1395,12 @@ TEST_F(StreamMixerTest, OneStreamOutputRedirection) {
   const int kNumFrames = 32;
   input.SetData(GetTestData(0));
 
-  EXPECT_CALL(*redirected_output,
-              OnRedirectedAudio(_, kTestSamplesPerSecond, _, kOutputFrames))
-      .Times(2);
+  testing::Expectation set_sample_rate_is_called =
+      EXPECT_CALL(*redirected_output, SetSampleRate(kTestSamplesPerSecond))
+          .Times(testing::AtLeast(1));
+  EXPECT_CALL(*redirected_output, OnRedirectedAudio(_, _, kOutputFrames))
+      .Times(2)
+      .After(set_sample_rate_is_called);
   PlaybackOnce();  // First buffer is faded in, so don't try to compare it.
   input.SetData(GetTestData(0));
   PlaybackOnce();
@@ -1430,9 +1434,9 @@ TEST_F(StreamMixerTest, OutputRedirectionOrder) {
   const int kNumFrames = 32;
   input.SetData(GetTestData(0));
 
-  EXPECT_CALL(*redirected_output1, OnRedirectedAudio(_, _, _, kOutputFrames))
+  EXPECT_CALL(*redirected_output1, OnRedirectedAudio(_, _, kOutputFrames))
       .Times(2);
-  EXPECT_CALL(*redirected_output2, OnRedirectedAudio(_, _, _, kOutputFrames))
+  EXPECT_CALL(*redirected_output2, OnRedirectedAudio(_, _, kOutputFrames))
       .Times(0);
   PlaybackOnce();  // First buffer is faded in, so don't try to compare it.
   input.SetData(GetTestData(0));

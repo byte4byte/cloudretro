@@ -8,13 +8,13 @@
 #include <sstream>
 #include <utility>
 
+#include "base/check.h"
 #include "base/json/string_escape.h"
-#include "base/logging.h"
 #include "base/strings/strcat.h"
 #include "base/strings/string_number_conversions.h"
 #include "components/feed/core/proto/v2/store.pb.h"
 #include "components/feed/core/proto/v2/wire/content_id.pb.h"
-#include "components/feed/core/v2/stream_model_update_request.h"
+#include "components/feed/core/v2/protocol_translator.h"
 
 namespace feed {
 namespace {
@@ -48,10 +48,12 @@ void StreamModel::SetStoreObserver(StoreObserver* store_observer) {
   store_observer_ = store_observer;
 }
 
-void StreamModel::SetObserver(Observer* observer) {
-  DCHECK(!observer || !observer_)
-      << "Attempting to set the observer multiple times";
-  observer_ = observer;
+void StreamModel::AddObserver(Observer* observer) {
+  observers_.AddObserver(observer);
+}
+
+void StreamModel::RemoveObserver(Observer* observer) {
+  observers_.RemoveObserver(observer);
 }
 
 const feedstore::Content* StreamModel::FindContent(
@@ -116,9 +118,6 @@ void StreamModel::Update(
   }
 
   // Update non-tree data.
-  // TODO(harringtond): Once we start using StreamData.next_action_id, this line
-  // would be problematic. We should probably move next_action_id into a
-  // different record in FeedStore.
   stream_data_ = update_request->stream_data;
 
   if (has_clear_all) {
@@ -142,11 +141,7 @@ void StreamModel::Update(
     }
   }
 
-  // TODO(harringtond): Some StreamData fields not yet used.
-  //    next_action_id - do we need to load the model before uploading
-  //         actions? If not, we probably will want to move this out of
-  //         StreamData.
-  //    content_id - probably just ignore for now
+  // TODO(harringtond): We're not using StreamData's content_id for anything.
 
   UpdateFlattenedTree();
 }
@@ -229,8 +224,8 @@ void StreamModel::UpdateFlattenedTree() {
     shared_state.updated = false;
   }
 
-  if (observer_)
-    observer_->OnUiUpdate(update);
+  for (Observer& observer : observers_)
+    observer.OnUiUpdate(update);
 }
 
 stream_model::FeatureTree* StreamModel::GetFinalFeatureTree() {
@@ -245,15 +240,10 @@ const std::string& StreamModel::GetNextPageToken() const {
   return stream_data_.next_page_token();
 }
 
-const std::string& StreamModel::GetConsistencyToken() const {
-  return stream_data_.consistency_token();
-}
-
 std::string StreamModel::DumpStateForTesting() {
   std::stringstream ss;
   ss << "StreamModel{\n";
   ss << "next_page_token='" << GetNextPageToken() << "'\n";
-  ss << "consistency_token='" << GetConsistencyToken() << "'\n";
   for (auto& entry : shared_states_) {
     ss << "shared_state[" << entry.first
        << "]=" << base::GetQuotedJSONString(entry.second.data.substr(0, 100))

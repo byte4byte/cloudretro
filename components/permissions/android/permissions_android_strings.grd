@@ -69,6 +69,7 @@
     <output filename="values-sl/permissions_android_strings.xml" lang="sl" type="android" />
     <output filename="values-sq/permissions_android_strings.xml" lang="sq" type="android" />
     <output filename="values-sr/permissions_android_strings.xml" lang="sr" type="android" />
+    <output filename="values-b+sr+Latn/permissions_android_strings.xml" lang="sr-Latn" type="android" />
     <output filename="values-sv/permissions_android_strings.xml" lang="sv" type="android" />
     <output filename="values-sw/permissions_android_strings.xml" lang="sw" type="android" />
     <output filename="values-ta/permissions_android_strings.xml" lang="ta" type="android" />
@@ -193,6 +194,14 @@
       </message>
       <message name="IDS_NFC_PROMPT_TURN_ON" desc="Text on the positive button of the nfc prompt">
         Turn on
+      </message>
+
+      <!-- Overlay detected dialog -->
+      <message name="IDS_OVERLAY_DETECTED_DIALOG_TITLE" desc="Title of the dialog that informs the user about detected overlay window that prevents interaction with permissions.">
+        This site can’t ask for your permission
+      </message>
+      <message name="IDS_OVERLAY_DETECTED_DIALOG_MESSAGE" desc="Dialog message that informs the user about detected overlay window that prevents interaction with permissions.">
+        Close any bubbles or overlays from other apps. Then, try again.
       </message>
     </messages>
   </release>

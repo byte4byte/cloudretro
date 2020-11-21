@@ -17,6 +17,7 @@ import org.chromium.components.background_task_scheduler.TaskParameters;
  * This class currently just starts the {@link DownloadNotificationService} or calls
  * {@link DownloadNotificationService}, which handles the actual resumption.
  */
+// Deprecated after native auto-resumption handler.
 public class DownloadResumptionBackgroundTask extends NativeBackgroundTask {
     // NativeBackgroundTask implementation.
     @Override
@@ -45,7 +46,7 @@ public class DownloadResumptionBackgroundTask extends NativeBackgroundTask {
     }
 
     @Override
-    protected boolean supportsServiceManagerOnly() {
+    protected boolean supportsMinimalBrowser() {
         return CachedFeatureFlags.isEnabled(ChromeFeatureList.SERVICE_MANAGER_FOR_DOWNLOAD);
     }
 

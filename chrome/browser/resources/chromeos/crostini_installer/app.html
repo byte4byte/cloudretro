@@ -72,13 +72,26 @@
     margin-bottom: 41px;
   }
 
-  #username {
-    width: 264px;
+  #configure-message {
+    width: 350px;
+  }
+
+  #disk-size-section {
+    margin-top: 30px;
+  }
+
+  #disk-size-section > div {
+    margin-bottom: 15px;
   }
 
   a[href] {
     color: var(--cr-link-color);
     text-decoration: none;
+  }
+
+  #low-free-space-warning {
+    --iron-icon-fill-color: var(--google-yellow-500);
+    display: flex;
   }
 </style>
 
@@ -99,24 +112,47 @@
     </div>
     <div id="configure-message" hidden="[[!eq_(state_, State.CONFIGURE)]]">
       <div id="configure-message-title">[[getConfigureMessageTitle_()]]</div>
-      <div hidden="[[!showUsernameSelection_()]]">
-        <cr-input label="Username" id="username" type="text"
-            value="{{username_}}" maxlength="[[MAX_USERNAME_LENGTH]]"
-            invalid="[[!eq_(usernameError_, '')]]"
-            error-message="[[usernameError_]]">
-        </cr-input>
-      </div>
-      <div hidden="[[!showDiskResizing_()]]">
-        <div id="disk-size-message">$i18n{diskSizeMessage}</div>
-        <div class="outer">
-          <cr-slider id="diskSlider" pin="true" value="[[defaultDiskSizeTick_]]"
-              aria-describedby="disk-size-message" ticks="[[diskSizeTicks_]]">
-          </cr-slider>
-          <div id="labels">
-            <div id="label-begin">[[minDisk_]]</div>
-            <div id="label-end">[[maxDisk_]]</div>
+      <cr-input label="Username" id="username" type="text"
+          value="{{username_}}" maxlength="[[MAX_USERNAME_LENGTH]]"
+          invalid="[[!eq_(usernameError_, '')]]"
+          error-message="[[usernameError_]]">
+      </cr-input>
+      <div id='disk-size-section' hidden="[[!showDiskResizing_()]]">
+        <div id="disk-size-message">
+          <div style="color:var(--cr-primary-text-color)">
+            $i18n{diskSizeSubtitle}
           </div>
+          <div>$i18n{diskSizeHint}</div>
         </div>
+        <template is="dom-if" if="[[!isLowSpaceAvailable_]]">
+          <cr-radio-group selected="recommended"
+              on-selected-changed="onDiskSizeRadioChanged_">
+            <cr-radio-button name="recommended" id="recommended-size">
+              $i18n{recommendedDiskSizeLabel}
+            </cr-radio-button>
+            <cr-radio-button name="custom" id="custom-size">
+              $i18n{customDiskSizeLabel}
+            </cr-radio-button>
+          </cr-radio-group>
+        </template>
+        <template is="dom-if" if="[[isLowSpaceAvailable_]]">
+          <div id='low-free-space-warning'>
+            <iron-icon icon="cr:warning" class="warning"></iron-icon>
+            $i18n{lowSpaceAvailableWarning}
+          </div>
+        </template>
+        <template is="dom-if" if="[[showDiskSlider_]]">
+          <div class="outer">
+            <cr-slider id="diskSlider" pin="true"
+                value="[[defaultDiskSizeTick_]]"
+                aria-describedby="disk-size-message" ticks="[[diskSizeTicks_]]">
+            </cr-slider>
+            <div id="labels">
+              <div id="label-begin">[[minDisk_]]</div>
+              <div id="label-end">[[maxDisk_]]</div>
+            </div>
+          </div>
+        </template>
       </div>
     </div>
     <div id="installing-message" hidden="[[!eq_(state_, State.INSTALLING)]]">
@@ -124,8 +160,8 @@
       <paper-progress class="progress-bar" value="[[installerProgress_]]">
       </paper-progress>
     </div>
-    <div id="error-message" hidden="[[!eq_(state_, State.ERROR)]]">
-      <div>[[getErrorMessage_(error_)]]</div>
+    <div id="error-message" hidden="[[!showErrorMessage_(state_)]]">
+      <div>[[errorMessage_]]</div>
     </div>
     <div id="canceling-message" hidden="[[!eq_(state_, State.CANCELING)]]">
       <div>$i18n{cancelingMessage}</div>

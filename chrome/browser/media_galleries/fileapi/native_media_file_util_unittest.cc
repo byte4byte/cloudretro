@@ -17,7 +17,6 @@
 #include "base/memory/scoped_refptr.h"
 #include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
-#include "base/task/post_task.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "base/time/time.h"
 #include "chrome/browser/media_galleries/fileapi/media_file_system_backend.h"
@@ -110,9 +109,8 @@ void PopulateDirectoryWithTestCases(const base::FilePath& dir,
     if (test_cases[i].is_directory) {
       ASSERT_TRUE(base::CreateDirectory(path));
     } else {
-      ASSERT_TRUE(test_cases[i].content != nullptr);
-      int len = strlen(test_cases[i].content);
-      ASSERT_EQ(len, base::WriteFile(path, test_cases[i].content, len));
+      ASSERT_TRUE(test_cases[i].content);
+      ASSERT_TRUE(base::WriteFile(path, test_cases[i].content));
     }
   }
 }
@@ -136,7 +134,7 @@ class NativeMediaFileUtilTest : public testing::Test {
         std::make_unique<MediaFileSystemBackend>(data_dir_.GetPath()));
 
     file_system_context_ = base::MakeRefCounted<storage::FileSystemContext>(
-        base::CreateSingleThreadTaskRunner({content::BrowserThread::IO}).get(),
+        content::GetIOThreadTaskRunner({}).get(),
         base::SequencedTaskRunnerHandle::Get().get(),
         storage::ExternalMountPoints::CreateRefCounted().get(),
         storage_policy.get(), nullptr, std::move(additional_providers),
@@ -279,7 +277,7 @@ TEST_F(NativeMediaFileUtilTest, CopySourceFiltering) {
     for (size_t i = 0; i < base::size(kFilteringTestCases); ++i) {
       // Always start with an empty destination directory.
       // Copying to a non-empty destination directory is an invalid operation.
-      ASSERT_TRUE(base::DeleteFileRecursively(dest_path));
+      ASSERT_TRUE(base::DeletePathRecursively(dest_path));
       ASSERT_TRUE(base::CreateDirectory(dest_path));
 
       FileSystemURL root_url = CreateURL(FPL(""));
@@ -312,7 +310,7 @@ TEST_F(NativeMediaFileUtilTest, CopyDestFiltering) {
     if (loop_count == 1) {
       // Reset the test directory between the two loops to remove old
       // directories and create new ones that should pre-exist.
-      ASSERT_TRUE(base::DeleteFileRecursively(root_path()));
+      ASSERT_TRUE(base::DeletePathRecursively(root_path()));
       ASSERT_TRUE(base::CreateDirectory(root_path()));
       PopulateDirectoryWithTestCases(root_path(), kFilteringTestCases,
                                      base::size(kFilteringTestCases));
@@ -322,8 +320,7 @@ TEST_F(NativeMediaFileUtilTest, CopyDestFiltering) {
     base::FilePath src_path = root_path().AppendASCII("foo.jpg");
     FileSystemURL src_url = CreateURL(FPL("foo.jpg"));
     static const char kDummyData[] = "dummy";
-    ASSERT_EQ(static_cast<int>(strlen(kDummyData)),
-              base::WriteFile(src_path, kDummyData, strlen(kDummyData)));
+    ASSERT_TRUE(base::WriteFile(src_path, kDummyData));
 
     for (size_t i = 0; i < base::size(kFilteringTestCases); ++i) {
       if (loop_count == 0 && kFilteringTestCases[i].is_directory) {
@@ -382,7 +379,7 @@ TEST_F(NativeMediaFileUtilTest, MoveSourceFiltering) {
     for (size_t i = 0; i < base::size(kFilteringTestCases); ++i) {
       // Always start with an empty destination directory.
       // Moving to a non-empty destination directory is an invalid operation.
-      ASSERT_TRUE(base::DeleteFileRecursively(dest_path));
+      ASSERT_TRUE(base::DeletePathRecursively(dest_path));
       ASSERT_TRUE(base::CreateDirectory(dest_path));
 
       FileSystemURL root_url = CreateURL(FPL(""));
@@ -413,7 +410,7 @@ TEST_F(NativeMediaFileUtilTest, MoveDestFiltering) {
     if (loop_count == 1) {
       // Reset the test directory between the two loops to remove old
       // directories and create new ones that should pre-exist.
-      ASSERT_TRUE(base::DeleteFileRecursively(root_path()));
+      ASSERT_TRUE(base::DeletePathRecursively(root_path()));
       ASSERT_TRUE(base::CreateDirectory(root_path()));
       PopulateDirectoryWithTestCases(root_path(), kFilteringTestCases,
                                      base::size(kFilteringTestCases));
@@ -430,8 +427,7 @@ TEST_F(NativeMediaFileUtilTest, MoveDestFiltering) {
       base::FilePath src_path = root_path().AppendASCII("foo.jpg");
       FileSystemURL src_url = CreateURL(FPL("foo.jpg"));
       static const char kDummyData[] = "dummy";
-      ASSERT_EQ(static_cast<int>(strlen(kDummyData)),
-                base::WriteFile(src_path, kDummyData, strlen(kDummyData)));
+      ASSERT_TRUE(base::WriteFile(src_path, kDummyData));
 
       FileSystemURL root_url = CreateURL(FPL(""));
       FileSystemURL url = CreateURL(kFilteringTestCases[i].path);

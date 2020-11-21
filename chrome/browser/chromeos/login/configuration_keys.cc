@@ -11,7 +11,8 @@ namespace configuration {
 // Configuration keys that are used to automate OOBE screens go here.
 // Please keep keys grouped by screens and ordered according to OOBE flow.
 // All keys should be listed here, even if they are used in JS code only.
-// These keys are used in chrome/browser/resources/chromeos/login/oobe_types.js
+// These keys are used in
+// chrome/browser/resources/chromeos/login/components/oobe_types.js
 
 // == HID Detection screen:
 
@@ -140,7 +141,8 @@ constexpr struct {
      ConfigurationHandlerSide::HANDLER_CPP},
     {kEnrollmentLocation, ValueType::BOOLEAN,
      ConfigurationHandlerSide::HANDLER_CPP},
-    {kEnableDemoMode, ValueType::BOOLEAN, ConfigurationHandlerSide::HANDLER_JS},
+    {kEnableDemoMode, ValueType::BOOLEAN,
+     ConfigurationHandlerSide::HANDLER_BOTH},
     {kDemoModePreferencesNext, ValueType::BOOLEAN,
      ConfigurationHandlerSide::HANDLER_JS},
     {kNetworkOfflineDemo, ValueType::BOOLEAN,

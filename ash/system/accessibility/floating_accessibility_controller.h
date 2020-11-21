@@ -26,7 +26,8 @@ class ASH_EXPORT FloatingAccessibilityController
       public LocaleChangeObserver,
       public AccessibilityObserver {
  public:
-  FloatingAccessibilityController(AccessibilityControllerImpl* accessibility_controller);
+  explicit FloatingAccessibilityController(
+      AccessibilityControllerImpl* accessibility_controller);
   FloatingAccessibilityController(const FloatingAccessibilityController&) =
       delete;
   FloatingAccessibilityController& operator=(
@@ -40,14 +41,20 @@ class ASH_EXPORT FloatingAccessibilityController
   // AccessibilityObserver:
   void OnAccessibilityStatusChanged() override;
 
+  // Focuses on the first element in the floating menu.
+  void FocusOnMenu();
+
  private:
   friend class FloatingAccessibilityControllerTest;
   // FloatingAccessibilityView::Delegate:
   void OnDetailedMenuEnabled(bool enabled) override;
+  void OnLayoutChanged() override;
   // FloatingAccessibilityDetailedController::Delegate:
   void OnDetailedMenuClosed() override;
+  views::Widget* GetBubbleWidget() override;
   // TrayBubbleView::Delegate:
   void BubbleViewDestroyed() override;
+  base::string16 GetAccessibleNameForBubble() override;
   // LocaleChangeObserver:
   void OnLocaleChanged() override;
 
@@ -63,7 +70,10 @@ class ASH_EXPORT FloatingAccessibilityController
 
   FloatingMenuPosition position_ = kDefaultFloatingMenuPosition;
 
-  AccessibilityControllerImpl* const accessibility_controller_; // Owns us.
+  // Used in tests to notify on the menu layout change events.
+  base::RepeatingClosure on_layout_change_;
+
+  AccessibilityControllerImpl* const accessibility_controller_;  // Owns us.
 };
 
 }  // namespace ash

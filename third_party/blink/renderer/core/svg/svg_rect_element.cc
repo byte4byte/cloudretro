@@ -20,7 +20,9 @@
 
 #include "third_party/blink/renderer/core/svg/svg_rect_element.h"
 
+#include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/layout/svg/layout_svg_rect.h"
+#include "third_party/blink/renderer/core/svg/svg_animated_length.h"
 #include "third_party/blink/renderer/core/svg/svg_length.h"
 #include "third_party/blink/renderer/platform/heap/heap.h"
 
@@ -72,7 +74,7 @@ SVGRectElement::SVGRectElement(Document& document)
   AddToPropertyMap(ry_);
 }
 
-void SVGRectElement::Trace(Visitor* visitor) {
+void SVGRectElement::Trace(Visitor* visitor) const {
   visitor->Trace(x_);
   visitor->Trace(y_);
   visitor->Trace(width_);
@@ -86,8 +88,7 @@ Path SVGRectElement::AsPath() const {
   Path path;
 
   SVGLengthContext length_context(this);
-  DCHECK(GetLayoutObject());
-  const ComputedStyle& style = GetLayoutObject()->StyleRef();
+  const ComputedStyle& style = ComputedStyleRef();
 
   FloatSize size(ToFloatSize(
       length_context.ResolveLengthPair(style.Width(), style.Height(), style)));
@@ -143,7 +144,9 @@ void SVGRectElement::CollectStyleForPresentationAttribute(
   }
 }
 
-void SVGRectElement::SvgAttributeChanged(const QualifiedName& attr_name) {
+void SVGRectElement::SvgAttributeChanged(
+    const SvgAttributeChangedParams& params) {
+  const QualifiedName& attr_name = params.name;
   if (attr_name == svg_names::kXAttr || attr_name == svg_names::kYAttr ||
       attr_name == svg_names::kWidthAttr ||
       attr_name == svg_names::kHeightAttr || attr_name == svg_names::kRxAttr ||
@@ -153,7 +156,7 @@ void SVGRectElement::SvgAttributeChanged(const QualifiedName& attr_name) {
     return;
   }
 
-  SVGGeometryElement::SvgAttributeChanged(attr_name);
+  SVGGeometryElement::SvgAttributeChanged(params);
 }
 
 bool SVGRectElement::SelfHasRelativeLengths() const {

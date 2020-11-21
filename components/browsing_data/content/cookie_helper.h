@@ -11,6 +11,7 @@
 #include <string>
 
 #include "base/callback.h"
+#include "base/callback_forward.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "components/browsing_data/content/canonical_cookie_hash.h"
@@ -22,6 +23,7 @@ namespace net {
 class CanonicalCookie;
 }
 namespace content {
+struct CookieAccessDetails;
 class StoragePartition;
 }
 
@@ -35,7 +37,9 @@ namespace browsing_data {
 class CookieHelper : public base::RefCountedThreadSafe<CookieHelper> {
  public:
   using FetchCallback = base::OnceCallback<void(const net::CookieList&)>;
-  explicit CookieHelper(content::StoragePartition* storage_partition);
+  using IsDeletionDisabledCallback = base::RepeatingCallback<bool(const GURL&)>;
+  explicit CookieHelper(content::StoragePartition* storage_partition,
+                        IsDeletionDisabledCallback callback);
 
   // Starts the fetching process, which will notify its completion via
   // callback.
@@ -52,6 +56,7 @@ class CookieHelper : public base::RefCountedThreadSafe<CookieHelper> {
 
  private:
   content::StoragePartition* storage_partition_;
+  IsDeletionDisabledCallback delete_disabled_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(CookieHelper);
 };
@@ -73,20 +78,13 @@ class CannedCookieHelper : public CookieHelper {
   typedef std::map<GURL, std::unique_ptr<canonical_cookie::CookieHashSet>>
       OriginCookieSetMap;
 
-  explicit CannedCookieHelper(content::StoragePartition* storage_partition);
+  explicit CannedCookieHelper(content::StoragePartition* storage_partition,
+                              IsDeletionDisabledCallback callback);
 
-  // Adds the cookies from |cookie_list|. Current cookies that have the same
-  // cookie name, cookie domain, cookie path, host-only-flag tuple as passed
-  // cookies are replaced by the passed cookies.
-  void AddReadCookies(const GURL& frame_url,
-                      const GURL& request_url,
-                      const net::CookieList& cookie_list);
-
-  // Adds a CanonicalCookie.
-  // TODO(markusheintz): Remove the dublicated logic.
-  void AddChangedCookie(const GURL& frame_url,
-                        const GURL& request_url,
-                        const net::CanonicalCookie& cookie);
+  // Adds the cookies from |details.cookie_list|. Current cookies that have the
+  // same cookie name, cookie domain, cookie path, host-only-flag tuple as
+  // passed cookies are replaced by the passed cookies.
+  void AddCookies(const content::CookieAccessDetails& details);
 
   // Clears the list of canned cookies.
   void Reset();
@@ -100,6 +98,9 @@ class CannedCookieHelper : public CookieHelper {
 
   // Returns the number of stored cookies.
   size_t GetCookieCount() const;
+
+  // Directly returns stored cookies.
+  net::CookieList GetCookieList();
 
   // Returns the map that contains the cookie lists for all frame urls.
   const OriginCookieSetMap& origin_cookie_set_map() {

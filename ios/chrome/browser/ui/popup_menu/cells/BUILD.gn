@@ -7,12 +7,13 @@ source_set("cells") {
   sources = [
     "popup_menu_navigation_item.h",
     "popup_menu_navigation_item.mm",
+    "popup_menu_text_item.h",
+    "popup_menu_text_item.mm",
     "popup_menu_tools_item.h",
     "popup_menu_tools_item.mm",
   ]
   deps = [
     "//base",
-    "//ios/chrome/browser/ui:feature_flags",
     "//ios/chrome/browser/ui/favicon/resources:default_favicon",
     "//ios/chrome/browser/ui/popup_menu/public:ui_constants",
     "//ios/chrome/browser/ui/popup_menu/public/cells",
@@ -22,5 +23,5 @@ source_set("cells") {
     "//ios/chrome/common",
     "//ios/chrome/common/ui/util",
   ]
-  libs = [ "UIKit.framework" ]
+  frameworks = [ "UIKit.framework" ]
 }

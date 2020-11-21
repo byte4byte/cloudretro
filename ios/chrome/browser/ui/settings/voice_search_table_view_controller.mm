@@ -4,8 +4,10 @@
 
 #import "ios/chrome/browser/ui/settings/voice_search_table_view_controller.h"
 
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "base/mac/foundation_util.h"
+#include "base/metrics/user_metrics.h"
+#include "base/metrics/user_metrics_action.h"
 #include "base/strings/sys_string_conversions.h"
 #include "components/prefs/pref_member.h"
 #include "components/prefs/pref_service.h"
@@ -125,6 +127,16 @@ typedef NS_ENUM(NSInteger, ItemType) {
     [model addItem:languageItem
         toSectionWithIdentifier:SectionIdentifierLanguages];
   }
+}
+
+#pragma mark - SettingsControllerProtocol
+
+- (void)reportDismissalUserAction {
+  base::RecordAction(base::UserMetricsAction("MobileVoiceSearchSettingsClose"));
+}
+
+- (void)reportBackUserAction {
+  base::RecordAction(base::UserMetricsAction("MobileVoiceSearchSettingsBack"));
 }
 
 #pragma mark - UITableViewDelegate

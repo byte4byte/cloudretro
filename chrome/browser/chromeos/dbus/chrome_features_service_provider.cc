@@ -14,7 +14,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/crostini/crostini_features.h"
 #include "chrome/browser/chromeos/crostini/crostini_pref_names.h"
-#include "chrome/browser/chromeos/plugin_vm/plugin_vm_util.h"
+#include "chrome/browser/chromeos/plugin_vm/plugin_vm_features.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_features.h"
@@ -77,13 +77,6 @@ void ChromeFeaturesServiceProvider::Start(
                      weak_ptr_factory_.GetWeakPtr()));
   exported_object->ExportMethod(
       kChromeFeaturesServiceInterface,
-      kChromeFeaturesServiceIsCrostiniEnabledMethod,
-      base::BindRepeating(&ChromeFeaturesServiceProvider::IsCrostiniEnabled,
-                          weak_ptr_factory_.GetWeakPtr()),
-      base::BindOnce(&ChromeFeaturesServiceProvider::OnExported,
-                     weak_ptr_factory_.GetWeakPtr()));
-  exported_object->ExportMethod(
-      kChromeFeaturesServiceInterface,
       kChromeFeaturesServiceIsPluginVmEnabledMethod,
       base::BindRepeating(&ChromeFeaturesServiceProvider::IsPluginVmEnabled,
                           weak_ptr_factory_.GetWeakPtr()),
@@ -102,6 +95,22 @@ void ChromeFeaturesServiceProvider::Start(
       base::BindRepeating(
           &ChromeFeaturesServiceProvider::IsCryptohomeDistributedModelEnabled,
           weak_ptr_factory_.GetWeakPtr()),
+      base::BindRepeating(&ChromeFeaturesServiceProvider::OnExported,
+                          weak_ptr_factory_.GetWeakPtr()));
+  exported_object->ExportMethod(
+      kChromeFeaturesServiceInterface,
+      kChromeFeaturesServiceIsCryptohomeUserDataAuthEnabledMethod,
+      base::BindRepeating(
+          &ChromeFeaturesServiceProvider::IsCryptohomeUserDataAuthEnabled,
+          weak_ptr_factory_.GetWeakPtr()),
+      base::BindRepeating(&ChromeFeaturesServiceProvider::OnExported,
+                          weak_ptr_factory_.GetWeakPtr()));
+  exported_object->ExportMethod(
+      kChromeFeaturesServiceInterface,
+      kChromeFeaturesServiceIsCryptohomeUserDataAuthKillswitchEnabledMethod,
+      base::BindRepeating(&ChromeFeaturesServiceProvider::
+                              IsCryptohomeUserDataAuthKillswitchEnabled,
+                          weak_ptr_factory_.GetWeakPtr()),
       base::BindRepeating(&ChromeFeaturesServiceProvider::OnExported,
                           weak_ptr_factory_.GetWeakPtr()));
   exported_object->ExportMethod(
@@ -133,7 +142,6 @@ void ChromeFeaturesServiceProvider::IsFeatureEnabled(
       &arc::kCustomTabsExperimentFeature,
       &arc::kFilePickerExperimentFeature,
       &arc::kNativeBridgeToggleFeature,
-      &arc::kPrintSpoolerExperimentFeature,
       &features::kSessionManagerLongKillTimeout,
   };
 
@@ -165,24 +173,28 @@ void ChromeFeaturesServiceProvider::IsFeatureEnabled(
                base::FeatureList::IsEnabled(**it));
 }
 
-void ChromeFeaturesServiceProvider::IsCrostiniEnabled(
-    dbus::MethodCall* method_call,
-    dbus::ExportedObject::ResponseSender response_sender) {
-  Profile* profile = GetSenderProfile(method_call, &response_sender);
-  if (!profile)
-    return;
-
-  SendResponse(
-      method_call, std::move(response_sender),
-      profile ? crostini::CrostiniFeatures::Get()->IsAllowed(profile) : false);
-}
-
 void ChromeFeaturesServiceProvider::IsCryptohomeDistributedModelEnabled(
     dbus::MethodCall* method_call,
     dbus::ExportedObject::ResponseSender response_sender) {
   SendResponse(
       method_call, std::move(response_sender),
       base::FeatureList::IsEnabled(::features::kCryptohomeDistributedModel));
+}
+
+void ChromeFeaturesServiceProvider::IsCryptohomeUserDataAuthEnabled(
+    dbus::MethodCall* method_call,
+    dbus::ExportedObject::ResponseSender response_sender) {
+  SendResponse(
+      method_call, std::move(response_sender),
+      base::FeatureList::IsEnabled(::features::kCryptohomeUserDataAuth));
+}
+
+void ChromeFeaturesServiceProvider::IsCryptohomeUserDataAuthKillswitchEnabled(
+    dbus::MethodCall* method_call,
+    dbus::ExportedObject::ResponseSender response_sender) {
+  SendResponse(method_call, std::move(response_sender),
+               base::FeatureList::IsEnabled(
+                   ::features::kCryptohomeUserDataAuthKillswitch));
 }
 
 void ChromeFeaturesServiceProvider::IsPluginVmEnabled(
@@ -194,7 +206,7 @@ void ChromeFeaturesServiceProvider::IsPluginVmEnabled(
 
   SendResponse(
       method_call, std::move(response_sender),
-      profile ? plugin_vm::IsPluginVmAllowedForProfile(profile) : false);
+      profile ? plugin_vm::PluginVmFeatures::Get()->IsAllowed(profile) : false);
 }
 
 void ChromeFeaturesServiceProvider::IsUsbguardEnabled(

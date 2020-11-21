@@ -10,8 +10,10 @@
 #include "base/callback.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "base/scoped_observer.h"
 #include "build/build_config.h"
 #include "chrome/browser/ui/profile_chooser_constants.h"
+#include "chrome/browser/ui/signin_view_controller_delegate.h"
 #include "components/signin/public/base/signin_buildflags.h"
 #include "url/gurl.h"
 
@@ -24,7 +26,6 @@
 #endif
 
 class Browser;
-class SigninViewControllerDelegate;
 struct CoreAccountId;
 
 namespace content {
@@ -39,6 +40,7 @@ namespace signin_metrics {
 enum class AccessPoint;
 enum class PromoAction;
 enum class Reason;
+enum class ReauthAccessPoint;
 enum class SourceForRefreshTokenOperation;
 }  // namespace signin_metrics
 
@@ -51,7 +53,7 @@ enum class ReauthResult;
 // error dialog, reauth prompt). Sync confirmation is used on
 // Win/Mac/Linux/Chrome OS. Sign-in is only used on Win/Mac/Linux because
 // Chrome OS has its own sign-in flow and doesn't use DICE.
-class SigninViewController {
+class SigninViewController : public SigninViewControllerDelegate::Observer {
  public:
   // Handle that will stop ongoing reauths upon destruction.
   class ReauthAbortHandle {
@@ -60,7 +62,7 @@ class SigninViewController {
   };
 
   explicit SigninViewController(Browser* browser);
-  virtual ~SigninViewController();
+  ~SigninViewController() override;
 
   // Returns true if the signin flow should be shown for |mode|.
   static bool ShouldShowSigninForMode(profiles::BubbleViewMode mode);
@@ -101,6 +103,21 @@ class SigninViewController {
       const std::string& last_email,
       const std::string& email,
       base::OnceCallback<void(SigninEmailConfirmationDialog::Action)> callback);
+
+  // Shows the reauth prompt for |account_id| as either:
+  // - a tab-modal dialog on top of the currently active tab, or
+  // - a new tab
+  // |account_id| should be signed into the content area. Otherwise, the method
+  // fails with |kAccountNotSignedIn| error.
+  // |access_point| indicates a call site of this method.
+  // Calls |reauth_callback| on completion of the reauth flow, or on error. The
+  // callback may be called synchronously. The user may also ignore the reauth
+  // indefinitely.
+  // Returns a handle that aborts the ongoing reauth on destruction.
+  virtual std::unique_ptr<ReauthAbortHandle> ShowReauthPrompt(
+      const CoreAccountId& account_id,
+      signin_metrics::ReauthAccessPoint access_point,
+      base::OnceCallback<void(signin::ReauthResult)> reauth_callback);
 #endif  // BUILDFLAG(ENABLE_DICE_SUPPORT)
 
   // Shows the modal sync confirmation dialog as a browser-modal dialog on top
@@ -110,19 +127,6 @@ class SigninViewController {
   // Shows the modal sign-in error dialog as a browser-modal dialog on top of
   // the |browser_|'s window.
   void ShowModalSigninErrorDialog();
-
-  // Shows the reauth prompt for |account_id| as either:
-  // - a browser-modal dialog on top of the |browser_|'s window, or
-  // - a popup window
-  // |account_id| should be signed into the content area. Otherwise, the method
-  // fails with |kAccountNotSignedIn| error.
-  // Calls |reauth_callback| on completion of the reauth flow, or on error. The
-  // callback may be called synchronously. The user may also ignore the reauth
-  // indefinitely.
-  // Returns a handle that aborts the ongoing reauth on destruction.
-  virtual std::unique_ptr<ReauthAbortHandle> ShowReauthPrompt(
-      const CoreAccountId& account_id,
-      base::OnceCallback<void(signin::ReauthResult)> reauth_callback);
 
   // Returns true if the modal dialog is shown.
   bool ShowsModalDialog();
@@ -134,11 +138,14 @@ class SigninViewController {
   // Sets the height of the modal signin dialog.
   void SetModalSigninHeight(int height);
 
-  // Notifies this object that it's |delegate_| member has become invalid.
-  void ResetModalSigninDelegate();
+  // SigninViewControllerDelegate::Observer:
+  void OnModalSigninClosed() override;
 
  private:
+  FRIEND_TEST_ALL_PREFIXES(SignInViewControllerBrowserTest,
+                           ErrorDialogDefaultFocus);
   friend class login_ui_test_utils::SigninViewControllerTestUtil;
+  friend class SigninReauthViewControllerBrowserTest;
 
 #if BUILDFLAG(ENABLE_DICE_SUPPORT)
   // Shows the DICE-specific sign-in flow: opens a Gaia sign-in webpage in a new
@@ -153,10 +160,18 @@ class SigninViewController {
   // Returns the web contents of the modal dialog.
   content::WebContents* GetModalDialogWebContentsForTesting();
 
+  // Returns the modal dialog delegate.
+  SigninViewControllerDelegate* GetModalDialogDelegateForTesting();
+
   // Browser owning this controller.
   Browser* browser_;
 
-  SigninViewControllerDelegate* delegate_;
+  // |delegate_| owns itself and calls OnModalSigninClosed() before being
+  // destroyed.
+  SigninViewControllerDelegate* delegate_ = nullptr;
+  ScopedObserver<SigninViewControllerDelegate,
+                 SigninViewControllerDelegate::Observer>
+      delegate_observer_{this};
 
   base::WeakPtrFactory<SigninViewController> weak_ptr_factory_{this};
 

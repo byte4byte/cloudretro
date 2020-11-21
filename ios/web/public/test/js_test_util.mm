@@ -6,7 +6,6 @@
 
 #import <WebKit/WebKit.h>
 
-#include "base/logging.h"
 #include "base/mac/bundle_locations.h"
 #include "base/strings/sys_string_conversions.h"
 #import "base/test/ios/wait_util.h"
@@ -77,9 +76,11 @@ id ExecuteJavaScript(WKWebView* web_view,
     return completed;
   });
   // Log stack trace to provide some context.
-  EXPECT_TRUE(success) << "WKWebView failed to complete javascript execution.\n"
-                       << base::SysNSStringToUTF8([[NSThread callStackSymbols]
-                              componentsJoinedByString:@"\n"]);
+  EXPECT_TRUE(success)
+      << base::SysNSStringToUTF8(block_error.description)
+      << "\nWKWebView failed to complete javascript execution.\n"
+      << base::SysNSStringToUTF8(
+             [[NSThread callStackSymbols] componentsJoinedByString:@"\n"]);
   if (error) {
     *error = block_error;
   }

@@ -7,8 +7,8 @@
 
 #include <stddef.h>
 
-#include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -20,10 +20,9 @@
 #include "base/strings/string16.h"
 #include "build/build_config.h"
 #include "chrome/browser/net/file_downloader.h"
-#include "chrome/browser/supervised_user/supervised_user_blacklist.h"
+#include "chrome/browser/supervised_user/supervised_user_denylist.h"
 #include "chrome/browser/supervised_user/supervised_user_url_filter.h"
 #include "chrome/browser/supervised_user/supervised_users.h"
-#include "chrome/browser/ui/browser_list_observer.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/prefs/pref_change_registrar.h"
 #include "components/sync/driver/sync_type_preference_provider.h"
@@ -37,7 +36,10 @@
 #include "extensions/browser/management_policy.h"
 #endif
 
-class Browser;
+#if !defined(OS_ANDROID)
+#include "chrome/browser/ui/browser_list_observer.h"
+#endif  // !defined(OS_ANDROID)
+
 class PermissionRequestCreator;
 class PrefService;
 class Profile;
@@ -45,7 +47,7 @@ class SupervisedUserServiceObserver;
 class SupervisedUserSettingsService;
 class SupervisedUserSiteList;
 class SupervisedUserURLFilter;
-class SupervisedUserWhitelistService;
+class SupervisedUserAllowlistService;
 
 namespace base {
 class FilePath;
@@ -62,9 +64,13 @@ namespace user_prefs {
 class PrefRegistrySyncable;
 }
 
+#if !defined(OS_ANDROID)
+class Browser;
+#endif  // !defined(OS_ANDROID)
+
 // This class handles all the information related to a given supervised profile
 // (e.g. the installed content packs, the default URL filtering behavior, or
-// manual whitelist/blacklist overrides).
+// manual allowlist/denylist overrides).
 class SupervisedUserService : public KeyedService,
 #if BUILDFLAG(ENABLE_EXTENSIONS)
                               public extensions::ExtensionRegistryObserver,
@@ -88,13 +94,11 @@ class SupervisedUserService : public KeyedService,
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
   // These enum values represent operations to manage the
-  // kSupervisedUserApprovedExtensions user pref, which maps extension ids to
-  // approved versions.
+  // kSupervisedUserApprovedExtensions user pref, which stores parent approved
+  // extension ids.
   enum class ApprovedExtensionChange {
     // Adds a new approved extension to the pref.
-    kNew,
-    // Updates the version of an already-approved extension.
-    kUpdate,
+    kAdd,
     // Removes extension approval.
     kRemove
   };
@@ -114,11 +118,11 @@ class SupervisedUserService : public KeyedService,
   // on the UI thread.
   SupervisedUserURLFilter* GetURLFilter();
 
-  // Returns the whitelist service.
-  SupervisedUserWhitelistService* GetWhitelistService();
+  // Returns the allowlist service.
+  SupervisedUserAllowlistService* GetAllowlistService();
 
-  const std::vector<scoped_refptr<SupervisedUserSiteList>>& whitelists() const {
-    return whitelists_;
+  const std::vector<scoped_refptr<SupervisedUserSiteList>>& allowlists() const {
+    return allowlists_;
   }
 
   // Whether the user can request to get access to blocked URLs or to new
@@ -160,6 +164,8 @@ class SupervisedUserService : public KeyedService,
   base::string16 GetExtensionsLockedMessage() const;
 
   bool IsSupervisedUserIframeFilterEnabled() const;
+
+  static std::string GetEduCoexistenceLoginUrl();
 
   // Returns true if the user is a type of Family Link Child account,
   // but will not return true for a Legacy Supervised user (or non child users).
@@ -204,19 +210,15 @@ class SupervisedUserService : public KeyedService,
       std::unique_ptr<PermissionRequestCreator> permission_creator);
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
-  // Updates the map of approved extensions to add approval for |extension|.
-  void AddOrUpdateExtensionApproval(const extensions::Extension& extension);
+  // Updates the set of approved extensions to add approval for |extension|.
+  void AddExtensionApproval(const extensions::Extension& extension);
 
-  // Updates the map of approved extensions to remove approval for |extension|.
+  // Updates the set of approved extensions to remove approval for |extension|.
   void RemoveExtensionApproval(const extensions::Extension& extension);
 
-  // Simulates a custodian or child approval for enabling the extension coming
-  // in through Sync by adding the approved version to the map of approved
-  // extensions. Removes approval by passing in
-  // ApprovedExtensionChange::kRemove. It doesn't simulate a change in the
-  // disable reasons.
+  // Wraps UpdateApprovedExtension() for testing. Use this to simulate adding or
+  // removing custodian approval for an extension via sync.
   void UpdateApprovedExtensionForTesting(const std::string& extension_id,
-                                         const std::string& version,
                                          ApprovedExtensionChange type);
 
   bool GetSupervisedUserExtensionsMayRequestPermissionsPref() const;
@@ -227,6 +229,8 @@ class SupervisedUserService : public KeyedService,
   bool CanInstallExtensions() const;
 
   bool IsExtensionAllowed(const extensions::Extension& extension) const;
+
+  void RecordExtensionEnablementUmaMetrics(bool enabled) const;
 #endif  // BUILDFLAG(ENABLE_EXTENSIONS)
 
  private:
@@ -289,26 +293,26 @@ class SupervisedUserService : public KeyedService,
   // "Permissions for sites, apps and extensions" toggle.
   bool ShouldBlockExtension(const std::string& extension_id) const;
 
-  // Enables/Disables extensions upon change in approved version of the
-  // extension_id. This function is idempotent.
+  // Enables/Disables extensions upon change in approvals. This function is
+  // idempotent.
   void ChangeExtensionStateIfNecessary(const std::string& extension_id);
 
-  // Updates the map of approved extensions.
-  // Use AddOrUpdateExtensionApproval() or RemoveExtensionApproval() for public
-  // access.
-  // If |type| is kNew, then adds custodian approval for enabling the extension
-  // by adding the approved version to the map of approved extensions.
-  // If |type| is kUpdate, then updates the approved version for the extension
-  // in the map.
-  // If |type| is kRemove, then removes the extension from the map of approved
-  // extensions.
+  // Updates the synced set of approved extension ids.
+  // Use AddExtensionApproval() or RemoveExtensionApproval() for public access.
+  // If |type| is kAdd, then add approval.
+  // If |type| is kRemove, then remove approval.
+  // Triggers a call to RefreshApprovedExtensionsFromPrefs() via a listener.
+  // TODO(crbug/1072857): We don't need the extension version information. It's
+  // only included for backwards compatibility with previous versions of Chrome.
+  // Remove the version information once a sufficient number of users have
+  // migrated away from M83.
   void UpdateApprovedExtension(const std::string& extension_id,
                                const std::string& version,
                                ApprovedExtensionChange type);
 
-  // Updates the map of approved extensions when the corresponding preference is
+  // Updates the set of approved extensions when the corresponding preference is
   // changed.
-  void UpdateApprovedExtensions();
+  void RefreshApprovedExtensionsFromPrefs();
 
   // Extensions helper to SetActive().
   void SetExtensionsActive();
@@ -337,28 +341,30 @@ class SupervisedUserService : public KeyedService,
 
   void OnSafeSitesSettingChanged();
 
+  void UpdateAsyncUrlChecker();
+
   void OnSiteListsChanged(
       const std::vector<scoped_refptr<SupervisedUserSiteList>>& site_lists);
 
-  // Asynchronously loads a blacklist from a binary file at |path| and applies
+  // Asynchronously loads a denylist from a binary file at |path| and applies
   // it to the URL filters. If no file exists at |path| yet, downloads a file
   // from |url| and stores it at |path| first.
-  void LoadBlacklist(const base::FilePath& path, const GURL& url);
+  void LoadDenylist(const base::FilePath& path, const GURL& url);
 
-  void OnBlacklistFileChecked(const base::FilePath& path,
-                              const GURL& url,
-                              bool file_exists);
+  void OnDenylistFileChecked(const base::FilePath& path,
+                             const GURL& url,
+                             bool file_exists);
 
-  // Asynchronously loads a blacklist from a binary file at |path| and applies
+  // Asynchronously loads a denylist from a binary file at |path| and applies
   // it to the URL filters.
-  void LoadBlacklistFromFile(const base::FilePath& path);
+  void LoadDenylistFromFile(const base::FilePath& path);
 
-  void OnBlacklistDownloadDone(const base::FilePath& path,
-                               FileDownloader::Result result);
+  void OnDenylistDownloadDone(const base::FilePath& path,
+                              FileDownloader::Result result);
 
-  void OnBlacklistLoaded();
+  void OnDenylistLoaded();
 
-  void UpdateBlacklist();
+  void UpdateDenylist();
 
   // Updates the manual overrides for hosts in the URL filters when the
   // corresponding preference is changed.
@@ -387,22 +393,22 @@ class SupervisedUserService : public KeyedService,
 
   SupervisedUserURLFilter url_filter_;
 
-  // Stores a map from extension_id -> approved version by the custodian.
+  // Store a set of extension ids approved by the custodian.
   // It is only relevant for SU-initiated installs.
-  std::map<std::string, base::Version> approved_extensions_map_;
+  std::set<std::string> approved_extensions_set_;
 
-  enum class BlacklistLoadState {
+  enum class DenylistLoadState {
     NOT_LOADED,
     LOAD_STARTED,
     LOADED
-  } blacklist_state_;
+  } denylist_state_;
 
-  SupervisedUserBlacklist blacklist_;
-  std::unique_ptr<FileDownloader> blacklist_downloader_;
+  SupervisedUserDenylist denylist_;
+  std::unique_ptr<FileDownloader> denylist_downloader_;
 
-  std::unique_ptr<SupervisedUserWhitelistService> whitelist_service_;
+  std::unique_ptr<SupervisedUserAllowlistService> allowlist_service_;
 
-  std::vector<scoped_refptr<SupervisedUserSiteList>> whitelists_;
+  std::vector<scoped_refptr<SupervisedUserSiteList>> allowlists_;
 
   // Used to create permission requests.
   std::vector<std::unique_ptr<PermissionRequestCreator>> permissions_creators_;

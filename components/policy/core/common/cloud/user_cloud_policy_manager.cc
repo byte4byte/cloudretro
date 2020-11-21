@@ -8,7 +8,7 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/sequenced_task_runner.h"
 #include "build/build_config.h"
 #include "components/account_id/account_id.h"
@@ -52,6 +52,11 @@ void UserCloudPolicyManager::SetSigninAccountId(const AccountId& account_id) {
   store_->SetSigninAccountId(account_id);
 }
 
+void UserCloudPolicyManager::SetPoliciesRequired(bool required) {
+  policies_required_ = required;
+  RefreshPolicies();
+}
+
 void UserCloudPolicyManager::Connect(
     PrefService* local_state,
     std::unique_ptr<CloudPolicyClient> client) {
@@ -77,11 +82,7 @@ UserCloudPolicyManager::CreateCloudPolicyClient(
     DeviceManagementService* device_management_service,
     scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory) {
   return std::make_unique<CloudPolicyClient>(
-      std::string() /* machine_id */, std::string() /* machine_model */,
-      std::string() /* brand_code */, std::string() /* ethernet_mac_address */,
-      std::string() /* dock_mac_address */,
-      std::string() /* manufacture_date */, device_management_service,
-      std::move(url_loader_factory), nullptr /* signing_service */,
+      device_management_service, std::move(url_loader_factory),
       CloudPolicyClient::DeviceDMTokenCallback());
 }
 
@@ -99,6 +100,7 @@ void UserCloudPolicyManager::DisconnectAndRemovePolicy() {
   // all external data references have been removed, causing the
   // |external_data_manager_| to clear its cache as well.
   store_->Clear();
+  SetPoliciesRequired(false);
 }
 
 bool UserCloudPolicyManager::IsClientRegistered() const {
@@ -118,10 +120,15 @@ void UserCloudPolicyManager::GetChromePolicy(PolicyMap* policy_map) {
       !policy_map->Get(key::kNTPContentSuggestionsEnabled)) {
     policy_map->Set(key::kNTPContentSuggestionsEnabled, POLICY_LEVEL_MANDATORY,
                     POLICY_SCOPE_USER, POLICY_SOURCE_ENTERPRISE_DEFAULT,
-                    std::make_unique<base::Value>(false),
-                    nullptr /* external_data_fetcher */);
+                    base::Value(false), nullptr /* external_data_fetcher */);
   }
 #endif
+}
+
+bool UserCloudPolicyManager::IsFirstPolicyLoadComplete(
+    PolicyDomain domain) const {
+  return !policies_required_ ||
+         CloudPolicyManager::IsFirstPolicyLoadComplete(domain);
 }
 
 }  // namespace policy

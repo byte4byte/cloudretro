@@ -6,18 +6,18 @@ package org.chromium.chrome.browser.download;
 
 import android.graphics.Bitmap;
 import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.LargeTest;
 
-import org.junit.After;
+import androidx.test.filters.LargeTest;
+
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
-import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.test.util.CommandLineFlags;
+import org.chromium.base.test.util.CriteriaHelper;
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
-import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.base.test.util.TestFileUtil;
 import org.chromium.chrome.browser.download.items.OfflineContentAggregatorFactory;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
@@ -28,18 +28,15 @@ import org.chromium.components.offline_items_collection.OfflineContentProvider;
 import org.chromium.components.offline_items_collection.OfflineItem;
 import org.chromium.components.offline_items_collection.OfflineItemState;
 import org.chromium.components.offline_items_collection.UpdateDelta;
-import org.chromium.content_public.browser.test.util.Criteria;
-import org.chromium.content_public.browser.test.util.CriteriaHelper;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 import org.chromium.net.test.EmbeddedTestServerRule;
 
-import java.util.ArrayList;
+import java.util.List;
 
 /**
- * Tests interrupted download can be resumed with Service Manager only mode.
+ * Tests interrupted download can be resumed with minimal browser mode.
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
-@RetryOnFailure
 public final class ServicificationDownloadTest {
     @Rule
     public EmbeddedTestServerRule mEmbeddedTestServerRule = new EmbeddedTestServerRule();
@@ -65,12 +62,7 @@ public final class ServicificationDownloadTest {
 
         public void waitForDownloadCompletion() {
             CriteriaHelper.pollUiThread(
-                    new Criteria("Failed waiting for the download to complete.") {
-                        @Override
-                        public boolean isSatisfied() {
-                            return mDownloadCompleted;
-                        }
-                    });
+                    () -> mDownloadCompleted, "Failed waiting for the download to complete.");
         }
     }
 
@@ -78,7 +70,7 @@ public final class ServicificationDownloadTest {
         private boolean mDownloadCompleted;
 
         @Override
-        public void onItemsAdded(ArrayList<OfflineItem> items) {}
+        public void onItemsAdded(List<OfflineItem> items) {}
 
         @Override
         public void onItemRemoved(ContentId id) {}
@@ -90,27 +82,16 @@ public final class ServicificationDownloadTest {
 
         public void waitForDownloadCompletion() {
             CriteriaHelper.pollUiThread(
-                    new Criteria("Failed waiting for the download to complete.") {
-                        @Override
-                        public boolean isSatisfied() {
-                            return mDownloadCompleted;
-                        }
-                    });
+                    () -> mDownloadCompleted, "Failed waiting for the download to complete.");
         }
     }
 
     @Before
     public void setUp() {
-        RecordHistogram.setDisabledForTests(true);
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             mNotificationService = new MockDownloadNotificationService();
             mDownloadUpdateObserver = new DownloadUpdateObserver();
         });
-    }
-
-    @After
-    public void tearDown() {
-        RecordHistogram.setDisabledForTests(false);
     }
 
     private static boolean useDownloadOfflineContentProvider() {
@@ -119,10 +100,11 @@ public final class ServicificationDownloadTest {
 
     @Test
     @LargeTest
+    @DisabledTest(message = "Noop since UseDownloadOfflineContentProvider is enabled in debug.")
     @Feature({"Download"})
     public void testResumeInterruptedDownload() {
         if (useDownloadOfflineContentProvider()) return;
-        mNativeTestRule.assertOnlyServiceManagerStarted();
+        mNativeTestRule.assertMinimalBrowserStarted();
 
         String tempFile = InstrumentationRegistry.getInstrumentation()
                                   .getTargetContext()
@@ -155,7 +137,7 @@ public final class ServicificationDownloadTest {
     @CommandLineFlags.Add({"enable-features=UseDownloadOfflineContentProvider"})
     public void testResumeInterruptedDownloadUsingDownloadOfflineContentProvider() {
         if (!useDownloadOfflineContentProvider()) return;
-        mNativeTestRule.assertOnlyServiceManagerStarted();
+        mNativeTestRule.assertMinimalBrowserStarted();
 
         String tempFile = InstrumentationRegistry.getInstrumentation()
                                   .getTargetContext()

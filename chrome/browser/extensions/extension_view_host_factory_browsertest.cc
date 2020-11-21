@@ -8,6 +8,7 @@
 #include "chrome/browser/extensions/extension_view_host.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
+#include "content/public/test/browser_test.h"
 #include "extensions/common/view_type.h"
 
 namespace extensions {
@@ -31,7 +32,6 @@ IN_PROC_BROWSER_TEST_F(ExtensionViewHostFactoryTest, CreateExtensionHosts) {
     EXPECT_EQ(extension.get(), host->extension());
     EXPECT_EQ(browser_context, host->browser_context());
     EXPECT_EQ(VIEW_TYPE_EXTENSION_POPUP, host->extension_host_type());
-    EXPECT_TRUE(host->view());
   }
 
   {
@@ -42,7 +42,6 @@ IN_PROC_BROWSER_TEST_F(ExtensionViewHostFactoryTest, CreateExtensionHosts) {
     EXPECT_EQ(extension.get(), host->extension());
     EXPECT_EQ(browser_context, host->browser_context());
     EXPECT_EQ(VIEW_TYPE_EXTENSION_DIALOG, host->extension_host_type());
-    EXPECT_TRUE(host->view());
   }
 }
 

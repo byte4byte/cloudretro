@@ -4,12 +4,13 @@
 
 #include "ios/chrome/browser/ui/first_run/welcome_to_chrome_view_controller.h"
 
+#include "base/check.h"
 #include "base/i18n/rtl.h"
-#include "base/logging.h"
 #include "base/mac/bundle_locations.h"
 #include "base/mac/foundation_util.h"
 #include "base/metrics/user_metrics.h"
 #include "base/metrics/user_metrics_action.h"
+#include "base/notreached.h"
 #include "base/strings/sys_string_conversions.h"
 #include "components/metrics/metrics_pref_names.h"
 #include "components/metrics/metrics_reporting_default_state.h"
@@ -22,9 +23,9 @@
 #import "ios/chrome/browser/ui/authentication/signin/signin_coordinator.h"
 #include "ios/chrome/browser/ui/commands/application_commands.h"
 #include "ios/chrome/browser/ui/fancy_ui/primary_action_button.h"
-#import "ios/chrome/browser/ui/first_run/first_run_chrome_signin_view_controller.h"
 #import "ios/chrome/browser/ui/first_run/first_run_constants.h"
 #include "ios/chrome/browser/ui/first_run/first_run_util.h"
+#import "ios/chrome/browser/ui/first_run/location_permissions_field_trial.h"
 #include "ios/chrome/browser/ui/first_run/static_file_view_controller.h"
 #import "ios/chrome/browser/ui/first_run/welcome_to_chrome_view.h"
 #import "ios/chrome/browser/ui/ui_feature_flags.h"
@@ -43,8 +44,6 @@
 #endif
 
 namespace {
-
-const CGFloat kFadeOutAnimationDuration = 0.16f;
 
 // Default value for metrics reporting state. "YES" corresponding to "opt-out"
 // state.
@@ -186,47 +185,30 @@ const BOOL kDefaultStatsCheckboxValue = YES;
   }
 
   self.firstRunConfig = [[FirstRunConfiguration alloc] init];
-  self.firstRunConfig.hasSSOAccount = ios::GetChromeBrowserProvider()
-                                          ->GetChromeIdentityService()
-                                          ->HasIdentities();
+  ios::ChromeIdentityService* identityService =
+      ios::GetChromeBrowserProvider()->GetChromeIdentityService();
+  identityService->WaitUntilCacheIsPopulated();
+  self.firstRunConfig.hasSSOAccount = identityService->HasIdentities();
 
-  if (base::FeatureList::IsEnabled(kNewSigninArchitecture)) {
-    self.coordinator = [SigninCoordinator
-        firstRunCoordinatorWithBaseNavigationController:
-            self.navigationController
-                                                browser:_browser];
-    [[NSNotificationCenter defaultCenter]
-        addObserver:self
-           selector:@selector(markSigninAttempted:)
-               name:kUserSigninAttemptedNotification
-             object:self.coordinator];
-    __weak WelcomeToChromeViewController* weakSelf = self;
-    self.coordinator.signinCompletion =
-        ^(SigninCoordinatorResult signinResult,
-          SigninCompletionInfo* signinCompletionInfo) {
-          [weakSelf.coordinator stop];
-          weakSelf.coordinator = nil;
-          [weakSelf finishFirstRunWithSigninResult:signinResult
-                              signinCompletionInfo:signinCompletionInfo];
-        };
+  self.coordinator = [SigninCoordinator
+      firstRunCoordinatorWithBaseNavigationController:self.navigationController
+                                              browser:_browser];
+  [[NSNotificationCenter defaultCenter]
+      addObserver:self
+         selector:@selector(markSigninAttempted:)
+             name:kUserSigninAttemptedNotification
+           object:self.coordinator];
+  __weak WelcomeToChromeViewController* weakSelf = self;
+  self.coordinator.signinCompletion =
+      ^(SigninCoordinatorResult signinResult,
+        SigninCompletionInfo* signinCompletionInfo) {
+        [weakSelf.coordinator stop];
+        weakSelf.coordinator = nil;
+        [weakSelf finishFirstRunWithSigninResult:signinResult
+                            signinCompletionInfo:signinCompletionInfo];
+      };
 
-    [self.coordinator start];
-  } else {
-    FirstRunChromeSigninViewController* signInController =
-        [[FirstRunChromeSigninViewController alloc]
-            initWithBrowser:_browser
-             firstRunConfig:self.firstRunConfig
-             signInIdentity:nil
-                  presenter:self.presenter
-                 dispatcher:self.dispatcher];
-
-    CATransition* transition = [CATransition animation];
-    transition.duration = kFadeOutAnimationDuration;
-    transition.type = kCATransitionFade;
-    [self.navigationController.view.layer addAnimation:transition
-                                                forKey:kCATransition];
-    [self.navigationController pushViewController:signInController animated:NO];
-  }
+  [self.coordinator start];
 }
 
 // Completes the first run operation depending on the |signinResult| state.
@@ -268,6 +250,11 @@ const BOOL kDefaultStatsCheckboxValue = YES;
                            if (needsAvancedSettingsSignin) {
                              [self.dispatcher
                                  showAdvancedSigninSettingsFromViewController:
+                                     presentingViewController];
+                           } else if (location_permissions_field_trial::
+                                          IsInFirstRunModalGroup()) {
+                             [self.dispatcher
+                                 showLocationPermissionsFromViewController:
                                      presentingViewController];
                            }
                          }];

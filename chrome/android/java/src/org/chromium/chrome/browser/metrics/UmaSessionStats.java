@@ -18,8 +18,7 @@ import org.chromium.base.task.PostTask;
 import org.chromium.base.task.TaskTraits;
 import org.chromium.chrome.browser.DefaultBrowserInfo;
 import org.chromium.chrome.browser.instantapps.InstantAppsHandler;
-import org.chromium.chrome.browser.policy.EnterpriseInfo;
-import org.chromium.chrome.browser.privacy.settings.PrivacyPreferencesManager;
+import org.chromium.chrome.browser.privacy.settings.PrivacyPreferencesManagerImpl;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.TabModel;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
@@ -121,7 +120,6 @@ public class UmaSessionStats {
         updatePreferences();
         updateMetricsServiceState();
         DefaultBrowserInfo.logDefaultBrowserStats();
-        EnterpriseInfo.logDeviceEnterpriseInfo();
     }
 
     private static void ensureNativeInitialized() {
@@ -150,7 +148,7 @@ public class UmaSessionStats {
      * flow, and when the user changes their preferences.
      */
     public static void changeMetricsReportingConsent(boolean consent) {
-        PrivacyPreferencesManager privacyManager = PrivacyPreferencesManager.getInstance();
+        PrivacyPreferencesManagerImpl privacyManager = PrivacyPreferencesManagerImpl.getInstance();
         // Update the metrics reporting preference.
         privacyManager.setUsageAndCrashReporting(consent);
 
@@ -185,7 +183,7 @@ public class UmaSessionStats {
      * Updates the state of MetricsService to account for the user's preferences.
      */
     public static void updateMetricsServiceState() {
-        PrivacyPreferencesManager privacyManager = PrivacyPreferencesManager.getInstance();
+        PrivacyPreferencesManagerImpl privacyManager = PrivacyPreferencesManagerImpl.getInstance();
 
         // Ensure Android and Chrome local state prefs are in sync.
         privacyManager.syncUsageAndCrashReportingPrefs();
@@ -200,7 +198,7 @@ public class UmaSessionStats {
      * Updates relevant Android and native preferences.
      */
     private void updatePreferences() {
-        PrivacyPreferencesManager prefManager = PrivacyPreferencesManager.getInstance();
+        PrivacyPreferencesManagerImpl prefManager = PrivacyPreferencesManagerImpl.getInstance();
 
         // Update the metrics sampling state so it's available before the native feature list is
         // available.
@@ -210,9 +208,17 @@ public class UmaSessionStats {
         prefManager.syncUsageAndCrashReportingPrefs();
     }
 
-    public static void registerExternalExperiment(String studyName, int[] experimentIds) {
+    public static void registerExternalExperiment(String fallbackStudyName, int[] experimentIds) {
+        // TODO(https://crbug.com/1111941): Remove this method once all callers have moved onto
+        // the overload below.
+        registerExternalExperiment(fallbackStudyName, experimentIds, true);
+    }
+
+    public static void registerExternalExperiment(
+            String fallbackStudyName, int[] experimentIds, boolean overrideExistingIds) {
         assert isMetricsServiceAvailable();
-        UmaSessionStatsJni.get().registerExternalExperiment(studyName, experimentIds);
+        UmaSessionStatsJni.get().registerExternalExperiment(
+                fallbackStudyName, experimentIds, overrideExistingIds);
     }
 
     public static void registerSyntheticFieldTrial(String trialName, String groupName) {
@@ -248,7 +254,8 @@ public class UmaSessionStats {
         void updateMetricsServiceState(boolean mayUpload);
         void umaResumeSession(long nativeUmaSessionStats, UmaSessionStats caller);
         void umaEndSession(long nativeUmaSessionStats, UmaSessionStats caller);
-        void registerExternalExperiment(String studyName, int[] experimentIds);
+        void registerExternalExperiment(
+                String studyName, int[] experimentIds, boolean overrideExistingIds);
         void registerSyntheticFieldTrial(String trialName, String groupName);
         void recordTabCountPerLoad(int numTabsOpen);
         void recordPageLoaded(boolean isDesktopUserAgent);

@@ -11,6 +11,7 @@
 #include "chrome/browser/sync/test/integration/profile_sync_service_harness.h"
 #include "chrome/browser/sync/test/integration/sync_datatype_helper.h"
 #include "chrome/browser/sync/test/integration/sync_test.h"
+#include "content/public/test/browser_test.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/sync/test/integration/os_sync_test.h"
@@ -66,11 +67,12 @@ void MutateSomeSettings(
 class TwoClientExtensionSettingsAndAppSettingsSyncTest : public SyncTest {
  public:
   TwoClientExtensionSettingsAndAppSettingsSyncTest() : SyncTest(TWO_CLIENT) {}
+  ~TwoClientExtensionSettingsAndAppSettingsSyncTest() override = default;
 
-  ~TwoClientExtensionSettingsAndAppSettingsSyncTest() override {}
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(TwoClientExtensionSettingsAndAppSettingsSyncTest);
+  bool UseVerifier() override {
+    // TODO(crbug.com/1137735): rewrite tests to not use verifier.
+    return true;
+  }
 };
 
 // For three independent extensions:
@@ -224,6 +226,11 @@ class TwoClientAppSettingsOsSyncTest : public OsSyncTest {
  public:
   TwoClientAppSettingsOsSyncTest() : OsSyncTest(TWO_CLIENT) {}
   ~TwoClientAppSettingsOsSyncTest() override = default;
+
+  bool UseVerifier() override {
+    // TODO(crbug.com/1137735): rewrite tests to not use verifier.
+    return true;
+  }
 };
 
 IN_PROC_BROWSER_TEST_F(TwoClientAppSettingsOsSyncTest,

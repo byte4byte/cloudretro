@@ -3,15 +3,15 @@
 // found in the LICENSE file.
 
 #include "chrome/browser/extensions/extension_apitest.h"
+#include "content/public/test/browser_test.h"
 
 namespace extensions {
 
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, DISABLED_FileAPI) {
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, FileAPI) {
   ASSERT_TRUE(RunExtensionTest("fileapi")) << message_;
 }
 
-// crbug.com/671144
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, DISABLED_XHROnPersistentFileSystem) {
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, XHROnPersistentFileSystem) {
   ASSERT_TRUE(RunPlatformAppTest("xhr_persistent_fs")) << message_;
 }
 

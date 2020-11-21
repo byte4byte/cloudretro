@@ -19,9 +19,11 @@
 #include "base/bind.h"
 #include "base/memory/scoped_refptr.h"
 #include "chromeos/services/assistant/public/cpp/assistant_prefs.h"
+#include "chromeos/services/assistant/public/cpp/assistant_service.h"
 #include "chromeos/services/assistant/public/cpp/features.h"
-#include "chromeos/services/assistant/public/mojom/assistant.mojom.h"
 #include "components/prefs/pref_registry_simple.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
+#include "url/gurl.h"
 
 namespace ash {
 
@@ -29,6 +31,11 @@ AssistantControllerImpl::AssistantControllerImpl() {
   assistant_state_controller_.AddObserver(this);
   chromeos::CrasAudioHandler::Get()->AddAudioObserver(this);
   AddObserver(this);
+
+  // The Assistant service needs to have accessibility state synced with ash
+  // and be notified of any accessibility status changes in the future to
+  // provide an opportunity to turn on/off A11Y features.
+  Shell::Get()->accessibility_controller()->AddObserver(this);
 
   NotifyConstructed();
 }
@@ -45,13 +52,8 @@ AssistantControllerImpl::~AssistantControllerImpl() {
 // static
 void AssistantControllerImpl::RegisterProfilePrefs(
     PrefRegistrySimple* registry) {
-  registry->RegisterIntegerPref(prefs::kAssistantNumWarmerWelcomeTriggered, 0);
-}
-
-void AssistantControllerImpl::BindReceiver(
-    mojo::PendingReceiver<chromeos::assistant::mojom::AssistantController>
-        receiver) {
-  assistant_controller_receivers_.Add(this, std::move(receiver));
+  AssistantInteractionControllerImpl::RegisterProfilePrefs(registry);
+  AssistantUiControllerImpl::RegisterProfilePrefs(registry);
 }
 
 void AssistantControllerImpl::BindReceiver(
@@ -60,76 +62,67 @@ void AssistantControllerImpl::BindReceiver(
 }
 
 void AssistantControllerImpl::SetAssistant(
-    mojo::PendingRemote<chromeos::assistant::mojom::Assistant> assistant) {
-  assistant_.Bind(std::move(assistant));
+    chromeos::assistant::Assistant* assistant) {
+  assistant_ = assistant;
 
   // Provide reference to sub-controllers.
-  assistant_alarm_timer_controller_.SetAssistant(assistant_.get());
-  assistant_interaction_controller_.SetAssistant(assistant_.get());
-  assistant_notification_controller_.SetAssistant(assistant_.get());
-  assistant_screen_context_controller_.SetAssistant(assistant_.get());
-  assistant_ui_controller_.SetAssistant(assistant_.get());
+  assistant_alarm_timer_controller_.SetAssistant(assistant);
+  assistant_interaction_controller_.SetAssistant(assistant);
+  assistant_notification_controller_.SetAssistant(assistant);
+  assistant_screen_context_controller_.SetAssistant(assistant);
+  assistant_ui_controller_.SetAssistant(assistant);
 
-  // The Assistant service needs to have accessibility state synced with ash
-  // and be notified of any accessibility status changes in the future to
-  // provide an opportunity to turn on/off A11Y features.
-  Shell::Get()->accessibility_controller()->AddObserver(this);
   OnAccessibilityStatusChanged();
 
-  for (AssistantControllerObserver& observer : observers_)
-    observer.OnAssistantReady();
+  if (assistant) {
+    for (AssistantControllerObserver& observer : observers_)
+      observer.OnAssistantReady();
+  }
 }
 
 void AssistantControllerImpl::SendAssistantFeedback(
     bool assistant_debug_info_allowed,
     const std::string& feedback_description,
     const std::string& screenshot_png) {
-  chromeos::assistant::mojom::AssistantFeedbackPtr assistant_feedback =
-      chromeos::assistant::mojom::AssistantFeedback::New();
-  assistant_feedback->assistant_debug_info_allowed =
+  chromeos::assistant::AssistantFeedback assistant_feedback;
+  assistant_feedback.assistant_debug_info_allowed =
       assistant_debug_info_allowed;
-  assistant_feedback->description = feedback_description;
-  assistant_feedback->screenshot_png = screenshot_png;
+  assistant_feedback.description = feedback_description;
+  assistant_feedback.screenshot_png = screenshot_png;
   assistant_->SendAssistantFeedback(std::move(assistant_feedback));
 }
 
-void AssistantControllerImpl::StartTextInteraction(
-    const std::string& query,
-    bool allow_tts,
-    chromeos::assistant::mojom::AssistantQuerySource source) {
-  assistant_interaction_controller_.StartTextInteraction(query, allow_tts,
-                                                         source);
-}
-
 void AssistantControllerImpl::StartSpeakerIdEnrollmentFlow() {
-  if (assistant_state_controller_.consent_status().value_or(
-          chromeos::assistant::prefs::ConsentStatus::kUnknown) ==
-      chromeos::assistant::prefs::ConsentStatus::kActivityControlAccepted) {
-    // If activity control has been accepted, launch the enrollment flow.
-    setup_controller()->StartOnboarding(false /* relaunch */,
-                                        FlowType::kSpeakerIdEnrollment);
-  } else {
-    // If activity control has not been accepted, launch the opt-in flow.
-    setup_controller()->StartOnboarding(false /* relaunch */,
-                                        FlowType::kConsentFlow);
-  }
+  setup_controller()->StartOnboarding(false /* relaunch */,
+                                      FlowType::kSpeakerIdEnrollment);
 }
 
 void AssistantControllerImpl::DownloadImage(
     const GURL& url,
-    AssistantImageDownloader::DownloadCallback callback) {
-  const UserSession* user_session =
-      Shell::Get()->session_controller()->GetUserSession(0);
+    ImageDownloader::DownloadCallback callback) {
+  constexpr net::NetworkTrafficAnnotationTag kNetworkTrafficAnnotationTag =
+      net::DefineNetworkTrafficAnnotation("image_downloader", R"(
+            "semantics: {
+              sender: "Google Assistant"
+              description:
+                "The Google Assistant requires dynamic loading of images to "
+                "provide a media rich user experience. Images are downloaded "
+                "on an as needed basis."
+              trigger:
+                "Generally triggered in direct response to a user issued "
+                "query. A single query may necessitate the downloading of "
+                "multiple images."
+              destination: GOOGLE_OWNED_SERVICE
+            }
+            "policy": {
+              cookies_allowed: NO
+              setting:
+                "The Google Assistant can be enabled/disabled in Chrome "
+                "Settings and is subject to eligibility requirements."
+            })");
 
-  if (!user_session) {
-    LOG(WARNING) << "Unable to retrieve active user session.";
-    std::move(callback).Run(gfx::ImageSkia());
-    return;
-  }
-
-  AccountId account_id = user_session->user_info.account_id;
-  AssistantImageDownloader::GetInstance()->Download(account_id, url,
-                                                    std::move(callback));
+  ImageDownloader::Get()->Download(url, kNetworkTrafficAnnotationTag,
+                                   std::move(callback));
 }
 
 void AssistantControllerImpl::AddObserver(
@@ -175,6 +168,12 @@ void AssistantControllerImpl::OpenUrl(const GURL& url,
   NotifyUrlOpened(url, from_server);
 }
 
+void AssistantControllerImpl::OpenAssistantSettings() {
+  // Launch Assistant settings via deeplink.
+  OpenUrl(assistant::util::CreateAssistantSettingsDeepLink(),
+          /*in_background=*/false, /*from_server=*/false);
+}
+
 base::WeakPtr<ash::AssistantController> AssistantControllerImpl::GetWeakPtr() {
   return weak_factory_.GetWeakPtr();
 }
@@ -197,12 +196,16 @@ void AssistantControllerImpl::OnDeepLinkReceived(
     case DeepLinkType::kFeedback:
       NewWindowDelegate::GetInstance()->OpenFeedbackPage(
           /*from_assistant=*/true);
+
+      // Close the assistant UI so that the feedback page is visible.
+      assistant_ui_controller_.CloseUi(
+          chromeos::assistant::AssistantExitPoint::kUnspecified);
       break;
     case DeepLinkType::kScreenshot:
       // We close the UI before taking the screenshot as it's probably not the
       // user's intention to include the Assistant in the picture.
       assistant_ui_controller_.CloseUi(
-          chromeos::assistant::mojom::AssistantExitPoint::kScreenshot);
+          chromeos::assistant::AssistantExitPoint::kScreenshot);
       Shell::Get()->screenshot_controller()->TakeScreenshotForAllRootWindows();
       break;
     case DeepLinkType::kTaskManager:
@@ -258,10 +261,13 @@ void AssistantControllerImpl::OnOutputNodeVolumeChanged(uint64_t node,
 }
 
 void AssistantControllerImpl::OnAccessibilityStatusChanged() {
+  if (!assistant_)
+    return;
+
   // The Assistant service needs to be informed of changes to accessibility
   // state so that it can turn on/off A11Y features appropriately.
   assistant_->OnAccessibilityStatusChanged(
-      Shell::Get()->accessibility_controller()->spoken_feedback_enabled());
+      Shell::Get()->accessibility_controller()->spoken_feedback().enabled());
 }
 
 bool AssistantControllerImpl::IsAssistantReady() const {
@@ -304,47 +310,16 @@ void AssistantControllerImpl::NotifyUrlOpened(const GURL& url,
 }
 
 void AssistantControllerImpl::OnAssistantStatusChanged(
-    mojom::AssistantState state) {
-  if (state == mojom::AssistantState::NOT_READY)
+    chromeos::assistant::AssistantStatus status) {
+  if (status == chromeos::assistant::AssistantStatus::NOT_READY)
     assistant_ui_controller_.CloseUi(
-        chromeos::assistant::mojom::AssistantExitPoint::kUnspecified);
+        chromeos::assistant::AssistantExitPoint::kUnspecified);
 }
 
 void AssistantControllerImpl::OnLockedFullScreenStateChanged(bool enabled) {
   if (enabled)
     assistant_ui_controller_.CloseUi(
-        chromeos::assistant::mojom::AssistantExitPoint::kUnspecified);
-}
-
-void AssistantControllerImpl::BindController(
-    mojo::PendingReceiver<chromeos::assistant::mojom::AssistantController>
-        receiver) {
-  BindReceiver(std::move(receiver));
-}
-
-void AssistantControllerImpl::BindAlarmTimerController(
-    mojo::PendingReceiver<mojom::AssistantAlarmTimerController> receiver) {
-  Shell::Get()->assistant_controller()->alarm_timer_controller()->BindReceiver(
-      std::move(receiver));
-}
-
-void AssistantControllerImpl::BindNotificationController(
-    mojo::PendingReceiver<mojom::AssistantNotificationController> receiver) {
-  Shell::Get()->assistant_controller()->notification_controller()->BindReceiver(
-      std::move(receiver));
-}
-
-void AssistantControllerImpl::BindScreenContextController(
-    mojo::PendingReceiver<mojom::AssistantScreenContextController> receiver) {
-  Shell::Get()
-      ->assistant_controller()
-      ->screen_context_controller()
-      ->BindReceiver(std::move(receiver));
-}
-
-void AssistantControllerImpl::BindStateController(
-    mojo::PendingReceiver<mojom::AssistantStateController> receiver) {
-  assistant_state_controller_.BindReceiver(std::move(receiver));
+        chromeos::assistant::AssistantExitPoint::kUnspecified);
 }
 
 void AssistantControllerImpl::BindVolumeControl(

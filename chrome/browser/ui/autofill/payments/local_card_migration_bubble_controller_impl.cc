@@ -100,12 +100,41 @@ void LocalCardMigrationBubbleControllerImpl::OnCancelButtonClicked() {
       AutofillMetrics::LOCAL_CARD_MIGRATION_BUBBLE_CLOSED_DENIED, is_reshow_);
 }
 
-void LocalCardMigrationBubbleControllerImpl::OnBubbleClosed() {
+void LocalCardMigrationBubbleControllerImpl::OnBubbleClosed(
+    PaymentsBubbleClosedReason closed_reason) {
   local_card_migration_bubble_ = nullptr;
   UpdateLocalCardMigrationIcon();
   if (should_add_strikes_on_bubble_close_) {
     should_add_strikes_on_bubble_close_ = false;
     AddStrikesForBubbleClose();
+  }
+
+  // Log local card migration bubble result according to the closed reason.
+  if (base::FeatureList::IsEnabled(
+          features::kAutofillEnableFixedPaymentsBubbleLogging)) {
+    AutofillMetrics::LocalCardMigrationBubbleResultMetric metric;
+    switch (closed_reason) {
+      case PaymentsBubbleClosedReason::kAccepted:
+        metric = AutofillMetrics::LOCAL_CARD_MIGRATION_BUBBLE_ACCEPTED;
+        break;
+      case PaymentsBubbleClosedReason::kClosed:
+        metric = AutofillMetrics::LOCAL_CARD_MIGRATION_BUBBLE_CLOSED;
+        break;
+      case PaymentsBubbleClosedReason::kNotInteracted:
+        metric = AutofillMetrics::LOCAL_CARD_MIGRATION_BUBBLE_NOT_INTERACTED;
+        break;
+      case PaymentsBubbleClosedReason::kLostFocus:
+        metric = AutofillMetrics::LOCAL_CARD_MIGRATION_BUBBLE_LOST_FOCUS;
+        break;
+      case PaymentsBubbleClosedReason::kUnknown:
+        metric = AutofillMetrics::LOCAL_CARD_MIGRATION_BUBBLE_RESULT_UNKNOWN;
+        break;
+      case PaymentsBubbleClosedReason::kCancelled:
+        NOTREACHED();
+        return;
+    }
+    AutofillMetrics::LogLocalCardMigrationBubbleResultMetric(metric,
+                                                             is_reshow_);
   }
 }
 
@@ -144,7 +173,6 @@ void LocalCardMigrationBubbleControllerImpl::DidFinishNavigation(
   }
   if (bubble_was_visible) {
     local_card_migration_bubble_->Hide();
-    OnBubbleClosed();
   } else {
     UpdateLocalCardMigrationIcon();
   }

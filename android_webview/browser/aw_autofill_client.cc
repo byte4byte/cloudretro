@@ -98,11 +98,19 @@ autofill::AddressNormalizer* AwAutofillClient::GetAddressNormalizer() {
   return nullptr;
 }
 
+const GURL& AwAutofillClient::GetLastCommittedURL() {
+  return web_contents_->GetLastCommittedURL();
+}
+
 security_state::SecurityLevel
 AwAutofillClient::GetSecurityLevelForUmaHistograms() {
   // The metrics are not recorded for Android webview, so return the count value
   // which will not be recorded.
   return security_state::SecurityLevel::SECURITY_LEVEL_COUNT;
+}
+
+const translate::LanguageState* AwAutofillClient::GetLanguageState() {
+  return nullptr;
 }
 
 void AwAutofillClient::ShowAutofillSettings(bool show_credit_card_settings) {
@@ -120,34 +128,6 @@ void AwAutofillClient::OnUnmaskVerificationResult(PaymentsRpcResult result) {
   NOTIMPLEMENTED();
 }
 
-void AwAutofillClient::ShowLocalCardMigrationDialog(
-    base::OnceClosure show_migration_dialog_closure) {
-  NOTIMPLEMENTED();
-}
-
-void AwAutofillClient::ConfirmMigrateLocalCardToCloud(
-    const autofill::LegalMessageLines& legal_message_lines,
-    const std::string& user_email,
-    const std::vector<autofill::MigratableCreditCard>& migratable_credit_cards,
-    LocalCardMigrationCallback start_migrating_cards_callback) {
-  NOTIMPLEMENTED();
-}
-
-void AwAutofillClient::ShowLocalCardMigrationResults(
-    const bool has_server_error,
-    const base::string16& tip_message,
-    const std::vector<autofill::MigratableCreditCard>& migratable_credit_cards,
-    MigrationDeleteCardCallback delete_local_card_callback) {
-  NOTIMPLEMENTED();
-}
-
-void AwAutofillClient::ConfirmSaveCreditCardLocally(
-    const autofill::CreditCard& card,
-    SaveCreditCardOptions options,
-    LocalSaveCardPromptCallback callback) {
-  NOTIMPLEMENTED();
-}
-
 void AwAutofillClient::ConfirmAccountNameFixFlow(
     base::OnceCallback<void(const base::string16&)> callback) {
   NOTIMPLEMENTED();
@@ -157,6 +137,13 @@ void AwAutofillClient::ConfirmExpirationDateFixFlow(
     const autofill::CreditCard& card,
     base::OnceCallback<void(const base::string16&, const base::string16&)>
         callback) {
+  NOTIMPLEMENTED();
+}
+
+void AwAutofillClient::ConfirmSaveCreditCardLocally(
+    const autofill::CreditCard& card,
+    SaveCreditCardOptions options,
+    LocalSaveCardPromptCallback callback) {
   NOTIMPLEMENTED();
 }
 
@@ -187,23 +174,19 @@ void AwAutofillClient::ScanCreditCard(CreditCardScanCallback callback) {
 }
 
 void AwAutofillClient::ShowAutofillPopup(
-    const gfx::RectF& element_bounds,
-    base::i18n::TextDirection text_direction,
-    const std::vector<autofill::Suggestion>& suggestions,
-    bool /*unused_autoselect_first_suggestion*/,
-    autofill::PopupType popup_type,
+    const autofill::AutofillClient::PopupOpenArgs& open_args,
     base::WeakPtr<autofill::AutofillPopupDelegate> delegate) {
-  suggestions_ = suggestions;
+  suggestions_ = open_args.suggestions;
   delegate_ = delegate;
 
   // Convert element_bounds to be in screen space.
   gfx::Rect client_area = web_contents_->GetContainerBounds();
   gfx::RectF element_bounds_in_screen_space =
-      element_bounds + client_area.OffsetFromOrigin();
+      open_args.element_bounds + client_area.OffsetFromOrigin();
 
   ShowAutofillPopupImpl(element_bounds_in_screen_space,
-                        text_direction == base::i18n::RIGHT_TO_LEFT,
-                        suggestions);
+                        open_args.text_direction == base::i18n::RIGHT_TO_LEFT,
+                        open_args.suggestions);
 }
 
 void AwAutofillClient::UpdateAutofillPopupDataListValues(
@@ -224,6 +207,12 @@ void AwAutofillClient::PinPopupView() {
   NOTIMPLEMENTED();
 }
 
+autofill::AutofillClient::PopupOpenArgs AwAutofillClient::GetReopenPopupArgs()
+    const {
+  NOTIMPLEMENTED();
+  return {};
+}
+
 void AwAutofillClient::UpdatePopup(
     const std::vector<autofill::Suggestion>& suggestions,
     autofill::PopupType popup_type) {
@@ -233,7 +222,7 @@ void AwAutofillClient::UpdatePopup(
 void AwAutofillClient::HideAutofillPopup(autofill::PopupHidingReason reason) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
-  if (obj.is_null())
+  if (!obj)
     return;
   delegate_.reset();
   Java_AwAutofillClient_hideAutofillPopup(env, obj);
@@ -328,7 +317,7 @@ void AwAutofillClient::ShowAutofillPopupImpl(
     const std::vector<autofill::Suggestion>& suggestions) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
-  if (obj.is_null())
+  if (!obj)
     return;
 
   // We need an array of AutofillSuggestion.
@@ -350,11 +339,11 @@ void AwAutofillClient::ShowAutofillPopupImpl(
     return;
 
   const ScopedJavaLocalRef<jobject> current_view = anchor_view_.view();
-  if (current_view.is_null())
+  if (!current_view)
     anchor_view_ = view_android->AcquireAnchorView();
 
   const ScopedJavaLocalRef<jobject> view = anchor_view_.view();
-  if (view.is_null())
+  if (!view)
     return;
 
   view_android->SetAnchorRect(view, element_bounds);

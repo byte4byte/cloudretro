@@ -7,8 +7,10 @@ package org.chromium.base;
 import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.ResolveInfo;
 import android.os.BadParcelableException;
 import android.os.Binder;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.IBinder;
 import android.os.Parcel;
@@ -33,6 +35,26 @@ public class IntentUtils {
      */
     public static final String ANDROID_APP_REFERRER_SCHEME = "android-app";
 
+    // Instant Apps system resolver activity on N-MR1+.
+    @VisibleForTesting
+    public static final String EPHEMERAL_INSTALLER_CLASS =
+            "com.google.android.gms.instantapps.routing.EphemeralInstallerActivity";
+
+    /**
+     * Whether the given ResolveInfo object refers to Instant Apps as a launcher.
+     * @param info The resolve info.
+     */
+    public static boolean isInstantAppResolveInfo(ResolveInfo info) {
+        if (info == null) return false;
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            return info.isInstantAppAvailable;
+        } else if (info.activityInfo != null) {
+            return EPHEMERAL_INSTALLER_CLASS.equals(info.activityInfo.name);
+        }
+
+        return false;
+    }
     /**
      * Just like {@link Intent#hasExtra(String)} but doesn't throw exceptions.
      */
@@ -343,7 +365,6 @@ public class IntentUtils {
      * Creates a temporary copy of the extra Bundle, which is required as
      * Intent#getBinderExtra() doesn't exist, but Bundle.getBinder() does.
      */
-    @VisibleForTesting
     public static IBinder safeGetBinderExtra(Intent intent, String name) {
         if (!intent.hasExtra(name)) return null;
         Bundle extras = intent.getExtras();
@@ -359,7 +380,6 @@ public class IntentUtils {
      * @param name Key.
      * @param binder Binder object.
      */
-    @VisibleForTesting
     public static void safePutBinderExtra(Intent intent, String name, IBinder binder) {
         if (intent == null) return;
         Bundle bundle = new Bundle();
@@ -396,8 +416,7 @@ public class IntentUtils {
 
     /** Returns whether the intent starts an activity in a new task or a new document. */
     public static boolean isIntentForNewTaskOrNewDocument(Intent intent) {
-        int testFlags =
-                Intent.FLAG_ACTIVITY_NEW_TASK | ApiCompatibilityUtils.getActivityNewDocumentFlag();
+        int testFlags = Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NEW_DOCUMENT;
         return (intent.getFlags() & testFlags) != 0;
     }
 

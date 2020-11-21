@@ -15,6 +15,8 @@ import androidx.annotation.StyleRes;
 import androidx.appcompat.app.AppCompatActivity;
 
 import org.chromium.base.ContextUtils;
+import org.chromium.chrome.browser.base.SplitCompatUtils;
+import org.chromium.chrome.browser.language.GlobalAppLocaleController;
 import org.chromium.chrome.browser.night_mode.GlobalNightModeStateProviderHolder;
 import org.chromium.chrome.browser.night_mode.NightModeStateProvider;
 import org.chromium.chrome.browser.night_mode.NightModeUtils;
@@ -29,23 +31,30 @@ public class ChromeBaseAppCompatActivity
     private @StyleRes int mThemeResId;
 
     @Override
-    protected void attachBaseContext(Context baseContext) {
+    protected void attachBaseContext(Context newBase) {
+        super.attachBaseContext(newBase);
         mNightModeStateProvider = createNightModeStateProvider();
-        // Pre-Android O, fontScale gets initialized to 1 in the constructor. Set it to 0 so
-        // that it is not interpreted as an overridden value.
-        // https://crbug.com/834191
-        Configuration overrideConfig = new Configuration();
-        overrideConfig.fontScale = 0;
-        applyConfigurationOverrides(baseContext, overrideConfig);
 
-        super.attachBaseContext(baseContext.createConfigurationContext(overrideConfig));
+        Configuration config = new Configuration();
+        // Pre-Android O, fontScale gets initialized to 1 in the constructor. Set it to 0 so
+        // that applyOverrideConfiguration() does not interpret it as an overridden value.
+        // https://crbug.com/834191
+        config.fontScale = 0;
+        // NightMode and other applyOverrides must be done before onCreate in attachBaseContext.
+        // https://crbug.com/1139760
+        if (applyOverrides(newBase, config)) applyOverrideConfiguration(config);
     }
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
+        getSupportFragmentManager().setFragmentFactory(SplitCompatUtils.createFragmentFactory());
+
         initializeNightModeStateProvider();
         mNightModeStateProvider.addObserver(this);
         super.onCreate(savedInstanceState);
+
+        // Activity level locale overrides must be done in onCreate.
+        GlobalAppLocaleController.getInstance().maybeOverrideContextConfig(this);
     }
 
     @Override
@@ -63,23 +72,29 @@ public class ChromeBaseAppCompatActivity
     @Override
     public void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
-        NightModeUtils.updateConfigurationForNightMode(this, newConfig, mThemeResId);
+        NightModeUtils.updateConfigurationForNightMode(
+                this, mNightModeStateProvider.isInNightMode(), newConfig, mThemeResId);
     }
 
     /**
-     * Called during {@link #attachBaseContext(Context)} to allow for configuration overrides.
+     * Called during {@link #attachBaseContext(Context)} to allow configuration overrides to be
+     * applied. If this methods return true, the overrides will be applied using
+     * {@link #applyOverrideConfiguration(Configuration)}.
      * @param baseContext The base {@link Context} attached to this class.
-     * @return A Configuration object with overrides set.
+     * @param overrideConfig The {@link Configuration} that will be passed to
+     *                       @link #applyOverrideConfiguration(Configuration)} if necessary.
+     * @return True if any configuration overrides were applied, and false otherwise.
      */
     @CallSuper
-    protected void applyConfigurationOverrides(Context baseContext, Configuration overrideConfig) {
-        NightModeUtils.applyOverridesForNightMode(mNightModeStateProvider, overrideConfig);
+    protected boolean applyOverrides(Context baseContext, Configuration overrideConfig) {
+        return NightModeUtils.applyOverridesForNightMode(
+                getNightModeStateProvider(), overrideConfig);
     }
 
     /**
      * @return The {@link NightModeStateProvider} that provides the state of night mode.
      */
-    public final NightModeStateProvider getNightModeStateProvider() {
+    protected final NightModeStateProvider getNightModeStateProvider() {
         return mNightModeStateProvider;
     }
 

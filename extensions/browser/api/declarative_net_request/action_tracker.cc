@@ -25,6 +25,7 @@
 #include "extensions/common/manifest.h"
 #include "extensions/common/permissions/api_permission.h"
 #include "extensions/common/permissions/permissions_data.h"
+#include "services/network/public/mojom/fetch_api.mojom-shared.h"
 
 namespace extensions {
 namespace declarative_net_request {
@@ -35,7 +36,7 @@ namespace dnr_api = api::declarative_net_request;
 
 bool IsMainFrameNavigationRequest(const WebRequestInfo& request_info) {
   return request_info.is_navigation_request &&
-         request_info.type == blink::mojom::ResourceType::kMainFrame;
+         request_info.web_request_type == WebRequestResourceType::MAIN_FRAME;
 }
 
 // Returns whether a TrackedRule should be recorded on a rule match for the
@@ -117,7 +118,7 @@ void ActionTracker::OnRuleMatched(const RequestAction& request_action,
       trim_rules_timer_->Reset();
 
     tracked_info->matched_rules.emplace_back(request_action.rule_id,
-                                             request_action.source_type);
+                                             request_action.ruleset_id);
   };
 
   // Allow rules do not result in any action being taken on the request, and
@@ -257,25 +258,26 @@ void ActionTracker::ResetTrackedInfoForTab(int tab_id, int64_t navigation_id) {
 }
 
 std::vector<dnr_api::MatchedRuleInfo> ActionTracker::GetMatchedRules(
-    const ExtensionId& extension_id,
+    const Extension& extension,
     const base::Optional<int>& tab_id,
     const base::Time& min_time_stamp) {
   TrimRulesFromNonActiveTabs();
 
   std::vector<dnr_api::MatchedRuleInfo> matched_rules;
-  auto add_to_matched_rules = [this, &matched_rules, &min_time_stamp](
-                                  const std::list<TrackedRule>& tracked_rules,
-                                  int tab_id) {
-    for (const TrackedRule& tracked_rule : tracked_rules) {
-      // Filter by the provided |min_time_stamp| for both active and non-active
-      // tabs.
-      if (tracked_rule.time_stamp >= min_time_stamp)
-        matched_rules.push_back(CreateMatchedRuleInfo(tracked_rule, tab_id));
-    }
-  };
+  auto add_to_matched_rules =
+      [this, &matched_rules, &min_time_stamp, &extension](
+          const std::list<TrackedRule>& tracked_rules, int tab_id) {
+        for (const TrackedRule& tracked_rule : tracked_rules) {
+          // Filter by the provided |min_time_stamp| for both active and
+          // non-active tabs.
+          if (tracked_rule.time_stamp >= min_time_stamp)
+            matched_rules.push_back(
+                CreateMatchedRuleInfo(extension, tracked_rule, tab_id));
+        }
+      };
 
   if (tab_id.has_value()) {
-    ExtensionTabIdKey key(extension_id, *tab_id);
+    ExtensionTabIdKey key(extension.id(), *tab_id);
 
     auto tracked_info = rules_tracked_.find(key);
     if (tracked_info == rules_tracked_.end())
@@ -287,7 +289,7 @@ std::vector<dnr_api::MatchedRuleInfo> ActionTracker::GetMatchedRules(
 
   // Iterate over all tabs if |tab_id| is not specified.
   for (auto it = rules_tracked_.begin(); it != rules_tracked_.end(); ++it) {
-    if (it->first.extension_id != extension_id)
+    if (it->first.extension_id != extension.id())
       continue;
 
     add_to_matched_rules(it->second.matched_rules, it->first.secondary_id);
@@ -342,10 +344,8 @@ bool ActionTracker::TrackedInfoContextKey<T>::operator<(
          std::tie(other.secondary_id, other.extension_id);
 }
 
-ActionTracker::TrackedRule::TrackedRule(
-    int rule_id,
-    api::declarative_net_request::SourceType source_type)
-    : rule_id(rule_id), source_type(source_type), time_stamp(GetNow()) {}
+ActionTracker::TrackedRule::TrackedRule(int rule_id, RulesetID ruleset_id)
+    : rule_id(rule_id), ruleset_id(ruleset_id), time_stamp(GetNow()) {}
 
 ActionTracker::TrackedInfo::TrackedInfo() = default;
 ActionTracker::TrackedInfo::~TrackedInfo() = default;
@@ -378,7 +378,8 @@ void ActionTracker::DispatchOnRuleMatchedDebugIfNeeded(
   // Create and dispatch the OnRuleMatchedDebug event.
   dnr_api::MatchedRule matched_rule;
   matched_rule.rule_id = request_action.rule_id;
-  matched_rule.source_type = request_action.source_type;
+  matched_rule.ruleset_id =
+      GetPublicRulesetID(*extension, request_action.ruleset_id);
 
   dnr_api::MatchedRuleInfoDebug matched_rule_info_debug;
   matched_rule_info_debug.rule = std::move(matched_rule);
@@ -445,11 +446,13 @@ void ActionTracker::StartTrimRulesTask() {
 }
 
 dnr_api::MatchedRuleInfo ActionTracker::CreateMatchedRuleInfo(
+    const Extension& extension,
     const ActionTracker::TrackedRule& tracked_rule,
     int tab_id) const {
   dnr_api::MatchedRule matched_rule;
   matched_rule.rule_id = tracked_rule.rule_id;
-  matched_rule.source_type = tracked_rule.source_type;
+  matched_rule.ruleset_id =
+      GetPublicRulesetID(extension, tracked_rule.ruleset_id);
 
   dnr_api::MatchedRuleInfo matched_rule_info;
   matched_rule_info.rule = std::move(matched_rule);

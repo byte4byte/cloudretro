@@ -21,20 +21,35 @@ class PLATFORM_EXPORT ActiveScriptWrappableBase : public GarbageCollectedMixin {
  public:
   virtual ~ActiveScriptWrappableBase() = default;
 
-  virtual bool IsContextDestroyed() const { return false; }
-  virtual bool DispatchHasPendingActivity() const { return false; }
+  virtual bool IsContextDestroyed() const = 0;
+  virtual bool DispatchHasPendingActivity() const = 0;
+
+  void ActiveScriptWrappableBaseConstructed();
 
  protected:
-  // ActiveScriptWrappableBase registers itself with the corresponding
-  // ActiveScriptWrappableManager. The default versions of the virtual methods
-  // above make sure that in case of a conservative GC, the manager object can
-  // already call the virtual methods as non-virtual The objects themselves are
-  // generally held alive via conservative stack scan and do not require to be
-  // treated as active.
-  ActiveScriptWrappableBase();
+  ActiveScriptWrappableBase() = default;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ActiveScriptWrappableBase);
+};
+
+template <typename T>
+struct PostConstructionHookTrait<
+    T,
+    base::void_t<decltype(
+        std::declval<T>().ActiveScriptWrappableBaseConstructed())>> {
+  static void Call(T* object) {
+    static_assert(std::is_base_of<ActiveScriptWrappableBase, T>::value,
+                  "Only ActiveScriptWrappableBase should use the "
+                  "post-construction hook.");
+    // Registering the ActiveScriptWrappableBase after construction means that
+    // the garbage collector does not need to deal with objects that are
+    // currently under construction. This is imnportant as checking whether ASW
+    // should be treated as active involves calling virtual functions which may
+    // not work during construction. The objects in construction are kept alive
+    // via conservative stack scanning.
+    object->ActiveScriptWrappableBaseConstructed();
+  }
 };
 
 }  // namespace blink

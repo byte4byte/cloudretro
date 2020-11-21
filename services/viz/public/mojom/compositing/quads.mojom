@@ -5,10 +5,12 @@
 module viz.mojom;
 
 import "mojo/public/mojom/base/unguessable_token.mojom";
+import "services/viz/public/mojom/compositing/compositor_render_pass_id.mojom";
 import "services/viz/public/mojom/compositing/shared_quad_state.mojom";
 import "services/viz/public/mojom/compositing/surface_range.mojom";
 import "ui/gfx/geometry/mojom/geometry.mojom";
 import "ui/gfx/mojom/color_space.mojom";
+import "ui/gfx/mojom/hdr_metadata.mojom";
 import "ui/gfx/mojom/transform.mojom";
 
 enum ProtectedVideoState {
@@ -25,8 +27,8 @@ struct DebugBorderQuadState {
   int32 width;
 };
 
-struct RenderPassQuadState {
-  uint64 render_pass_id;
+struct CompositorRenderPassQuadState {
+  CompositorRenderPassId render_pass_id;
 
   // If nonzero, resource id of mask to use when drawing this pass.
   uint32 mask_resource_id;
@@ -49,10 +51,9 @@ struct RenderPassQuadState {
 
   bool force_anti_aliasing_off;
   float backdrop_filter_quality;
-  // If the quad has backdrop filters, this flag indicates if the cached
-  // backdrop filtered result can be used instead of having to recompute the
-  // filter operation.
-  bool can_use_backdrop_filter_cache;
+  // Indicates if the quad intersects any damage coming from quads under it
+  // rendering to the same target.
+  bool intersects_damage_under;
 };
 
 struct SolidColorQuadState {
@@ -86,6 +87,7 @@ struct TextureQuadState {
   bool y_flipped;
   bool nearest_neighbor;
   bool secure_output_only;
+  bool is_video_frame;
   ProtectedVideoState protected_video_type;
 };
 
@@ -112,6 +114,7 @@ struct YUVVideoQuadState {
   uint32 bits_per_channel;
   gfx.mojom.ColorSpace video_color_space;
   ProtectedVideoState protected_video_type;
+  gfx.mojom.HDRMetadata hdr_metadata;
 };
 
 struct VideoHoleQuadState {
@@ -120,7 +123,7 @@ struct VideoHoleQuadState {
 
 union DrawQuadState {
   DebugBorderQuadState debug_border_quad_state;
-  RenderPassQuadState render_pass_quad_state;
+  CompositorRenderPassQuadState render_pass_quad_state;
   SolidColorQuadState solid_color_quad_state;
   StreamVideoQuadState stream_video_quad_state;
   SurfaceQuadState surface_quad_state;

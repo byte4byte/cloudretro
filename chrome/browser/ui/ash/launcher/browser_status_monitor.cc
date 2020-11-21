@@ -13,6 +13,7 @@
 #include "chrome/browser/ui/ash/launcher/browser_shortcut_launcher_item_controller.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller_util.h"
+#include "chrome/browser/ui/ash/launcher/shelf_spinner_controller.h"
 #include "chrome/browser/ui/ash/multi_user/multi_user_util.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
@@ -20,7 +21,7 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/web_applications/components/web_app_helpers.h"
-#include "chrome/common/chrome_features.h"
+#include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
@@ -96,12 +97,10 @@ BrowserStatusMonitor::BrowserStatusMonitor(
       browser_tab_strip_tracker_(this, nullptr) {
   DCHECK(launcher_controller_);
 
-  if (base::FeatureList::IsEnabled(features::kAppServiceInstanceRegistry)) {
-    app_service_instance_helper_ =
-        launcher_controller->app_service_app_window_controller()
-            ->app_service_instance_helper();
-    DCHECK(app_service_instance_helper_);
-  }
+  app_service_instance_helper_ =
+      launcher_controller->app_service_app_window_controller()
+          ->app_service_instance_helper();
+  DCHECK(app_service_instance_helper_);
 }
 
 BrowserStatusMonitor::~BrowserStatusMonitor() {
@@ -195,11 +194,12 @@ void BrowserStatusMonitor::OnTabStripModelChanged(
 
   if (change.type() == TabStripModelChange::kInserted) {
     for (const auto& contents : change.GetInsert()->contents)
-      OnTabInserted(contents.contents);
+      OnTabInserted(tab_strip_model, contents.contents);
+    UpdateBrowserItemState();
   } else if (change.type() == TabStripModelChange::kRemoved) {
     auto* remove = change.GetRemove();
-    if (remove->will_be_deleted) {
-      for (const auto& contents : remove->contents)
+    for (const auto& contents : remove->contents) {
+      if (contents.will_be_deleted)
         OnTabClosing(contents.contents);
     }
   } else if (change.type() == TabStripModelChange::kReplaced) {
@@ -228,8 +228,12 @@ void BrowserStatusMonitor::AddV1AppToShelf(Browser* browser) {
   std::string app_id =
       web_app::GetAppIdFromApplicationName(browser->app_name());
   DCHECK(!app_id.empty());
-  if (!IsV1AppInShelfWithAppId(app_id))
+  if (!IsV1AppInShelfWithAppId(app_id)) {
+    if (auto* chrome_controller = ChromeLauncherController::instance()) {
+      chrome_controller->GetShelfSpinnerController()->CloseSpinner(app_id);
+    }
     launcher_controller_->SetV1AppStatus(app_id, ash::STATUS_RUNNING);
+  }
   browser_to_app_id_map_[browser] = app_id;
 }
 
@@ -313,8 +317,18 @@ void BrowserStatusMonitor::OnTabReplaced(TabStripModel* tab_strip_model,
     app_service_instance_helper_->OnTabReplaced(old_contents, new_contents);
 }
 
-void BrowserStatusMonitor::OnTabInserted(content::WebContents* contents) {
+void BrowserStatusMonitor::OnTabInserted(TabStripModel* tab_strip_model,
+                                         content::WebContents* contents) {
   UpdateAppItemState(contents, false /*remove*/);
+  // If the contents does not have a visible navigation entry, wait until a
+  // navigation status changes before setting the browser window Shelf ID
+  // (done by the web contents observer added by AddWebContentsObserver()).
+  if (tab_strip_model->GetActiveWebContents() == contents &&
+      contents->GetController().GetVisibleEntry()) {
+    Browser* browser = chrome::FindBrowserWithWebContents(contents);
+    SetShelfIDForBrowserWindowContents(browser, contents);
+  }
+
   AddWebContentsObserver(contents);
   if (app_service_instance_helper_)
     app_service_instance_helper_->OnTabInserted(contents);
@@ -348,4 +362,9 @@ void BrowserStatusMonitor::SetShelfIDForBrowserWindowContents(
     content::WebContents* web_contents) {
   launcher_controller_->GetBrowserShortcutLauncherItemController()
       ->SetShelfIDForBrowserWindowContents(browser, web_contents);
+
+  if (app_service_instance_helper_) {
+    app_service_instance_helper_->OnSetShelfIDForBrowserWindowContents(
+        web_contents);
+  }
 }

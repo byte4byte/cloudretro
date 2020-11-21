@@ -16,10 +16,8 @@ class GURL;
 
 namespace chromeos {
 namespace assistant {
-namespace mojom {
 enum class AssistantEntryPoint;
 enum class AssistantQuerySource;
-}  // namespace mojom
 }  // namespace assistant
 }  // namespace chromeos
 
@@ -69,7 +67,9 @@ enum class DeepLinkParam {
 // Enumeration of alarm/timer deep link actions.
 enum class AlarmTimerAction {
   kAddTimeToTimer,
-  kRemove,
+  kPauseTimer,
+  kRemoveAlarmOrTimer,
+  kResumeTimer,
 };
 
 // Enumeration of proactive suggestions deep link actions.
@@ -91,14 +91,14 @@ enum class ReminderAction {
 COMPONENT_EXPORT(ASSISTANT_UTIL)
 GURL AppendOrReplaceEntryPointParam(
     const GURL& deep_link,
-    chromeos::assistant::mojom::AssistantEntryPoint entry_point);
+    chromeos::assistant::AssistantEntryPoint entry_point);
 
 // Returns a new deep link, having appended or replaced the query source param
 // from the original |deep_link| with |query_source|.
 COMPONENT_EXPORT(ASSISTANT_UTIL)
 GURL AppendOrReplaceQuerySourceParam(
     const GURL& deep_link,
-    chromeos::assistant::mojom::AssistantQuerySource query_source);
+    chromeos::assistant::AssistantQuerySource query_source);
 
 // Returns a deep link to perform an alarm/timer action.
 COMPONENT_EXPORT(ASSISTANT_UTIL)
@@ -148,7 +148,7 @@ base::Optional<bool> GetDeepLinkParamAsBool(
 // desired parameter is not found or is not mappable to an Assistant entry
 // point, an empty value is returned.
 COMPONENT_EXPORT(ASSISTANT_UTIL)
-base::Optional<chromeos::assistant::mojom::AssistantEntryPoint>
+base::Optional<chromeos::assistant::AssistantEntryPoint>
 GetDeepLinkParamAsEntryPoint(const std::map<std::string, std::string>& params,
                              DeepLinkParam param);
 
@@ -186,7 +186,7 @@ GetDeepLinkParamAsProactiveSuggestionsAction(
 // desired parameter is not found or is not mappable to an Assistant query
 // source, an empty value is returned.
 COMPONENT_EXPORT(ASSISTANT_UTIL)
-base::Optional<chromeos::assistant::mojom::AssistantQuerySource>
+base::Optional<chromeos::assistant::AssistantQuerySource>
 GetDeepLinkParamAsQuerySource(const std::map<std::string, std::string>& params,
                               DeepLinkParam param);
 

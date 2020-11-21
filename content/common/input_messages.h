@@ -13,9 +13,6 @@
 #include "cc/input/overscroll_behavior.h"
 #include "content/common/content_export.h"
 #include "content/common/content_param_traits.h"
-#include "content/common/edit_command.h"
-#include "content/common/input/input_event.h"
-#include "content/common/input/input_event_dispatch_type.h"
 #include "content/common/input/synthetic_gesture_params.h"
 #include "content/common/input/synthetic_pinch_gesture_params.h"
 #include "content/common/input/synthetic_pointer_action_list_params.h"
@@ -33,7 +30,6 @@
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/vector2d_f.h"
 #include "ui/gfx/ipc/gfx_param_traits.h"
-#include "ui/gfx/ipc/skia/gfx_skia_param_traits.h"
 #include "ui/gfx/range/range.h"
 #include "ui/latency/ipc/latency_info_param_traits.h"
 
@@ -53,33 +49,6 @@ IPC_ENUM_TRAITS_MAX_VALUE(
 IPC_ENUM_TRAITS_MAX_VALUE(
     content::SyntheticPointerActionParams::Button,
     content::SyntheticPointerActionParams::Button::BUTTON_MAX)
-IPC_ENUM_TRAITS_MAX_VALUE(content::InputEventDispatchType,
-                          content::InputEventDispatchType::DISPATCH_TYPE_MAX)
-IPC_ENUM_TRAITS_MAX_VALUE(blink::WebPointerProperties::PointerType,
-                          blink::WebPointerProperties::PointerType::kMaxValue)
-IPC_ENUM_TRAITS_MAX_VALUE(blink::WebTouchPoint::State,
-                          blink::WebTouchPoint::State::kStateMax)
-IPC_ENUM_TRAITS_MAX_VALUE(
-    cc::OverscrollBehavior::OverscrollBehaviorType,
-    cc::OverscrollBehavior::OverscrollBehaviorType::kOverscrollBehaviorTypeMax)
-
-IPC_STRUCT_TRAITS_BEGIN(ui::DidOverscrollParams)
-  IPC_STRUCT_TRAITS_MEMBER(accumulated_overscroll)
-  IPC_STRUCT_TRAITS_MEMBER(latest_overscroll_delta)
-  IPC_STRUCT_TRAITS_MEMBER(current_fling_velocity)
-  IPC_STRUCT_TRAITS_MEMBER(causal_event_viewport_point)
-  IPC_STRUCT_TRAITS_MEMBER(overscroll_behavior)
-IPC_STRUCT_TRAITS_END()
-
-IPC_STRUCT_TRAITS_BEGIN(cc::OverscrollBehavior)
-  IPC_STRUCT_TRAITS_MEMBER(x)
-  IPC_STRUCT_TRAITS_MEMBER(y)
-IPC_STRUCT_TRAITS_END()
-
-IPC_STRUCT_TRAITS_BEGIN(content::EditCommand)
-  IPC_STRUCT_TRAITS_MEMBER(name)
-  IPC_STRUCT_TRAITS_MEMBER(value)
-IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(content::SyntheticGestureParams)
   IPC_STRUCT_TRAITS_MEMBER(gesture_source_type)
@@ -101,7 +70,7 @@ IPC_STRUCT_TRAITS_BEGIN(content::SyntheticSmoothScrollGestureParams)
   IPC_STRUCT_TRAITS_MEMBER(fling_velocity_x)
   IPC_STRUCT_TRAITS_MEMBER(fling_velocity_y)
   IPC_STRUCT_TRAITS_MEMBER(granularity)
-  IPC_STRUCT_TRAITS_MEMBER(key_modifiers)
+  IPC_STRUCT_TRAITS_MEMBER(modifiers)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(content::SyntheticPinchGestureParams)

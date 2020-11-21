@@ -8,7 +8,7 @@
 
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
-#include "base/logging.h"
+#include "base/check_op.h"
 
 namespace base {
 namespace android {
@@ -164,7 +164,7 @@ ScopedJavaLocalRef<jobjectArray> ToJavaArrayOfByteArray(
 
 ScopedJavaLocalRef<jobjectArray> ToJavaArrayOfByteArray(
     JNIEnv* env,
-    base::span<std::vector<uint8_t>> v) {
+    base::span<const std::vector<uint8_t>> v) {
   ScopedJavaLocalRef<jclass> byte_array_clazz = GetClass(env, "[B");
   jobjectArray joa =
       env->NewObjectArray(v.size(), byte_array_clazz.obj(), nullptr);
@@ -351,6 +351,17 @@ void JavaFloatArrayToFloatVector(JNIEnv* env,
   if (!len)
     return;
   env->GetFloatArrayRegion(float_array.obj(), 0, len, out->data());
+}
+
+void JavaDoubleArrayToDoubleVector(JNIEnv* env,
+                                   const JavaRef<jdoubleArray>& double_array,
+                                   std::vector<double>* out) {
+  DCHECK(out);
+  size_t len = SafeGetArrayLength(env, double_array);
+  out->resize(len);
+  if (!len)
+    return;
+  env->GetDoubleArrayRegion(double_array.obj(), 0, len, out->data());
 }
 
 void JavaArrayOfByteArrayToStringVector(JNIEnv* env,

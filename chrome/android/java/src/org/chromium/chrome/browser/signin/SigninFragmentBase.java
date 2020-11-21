@@ -33,7 +33,8 @@ import org.chromium.chrome.R;
 import org.chromium.chrome.browser.consent_auditor.ConsentAuditorFeature;
 import org.chromium.chrome.browser.externalauth.UserRecoverableErrorHandler;
 import org.chromium.chrome.browser.preferences.Pref;
-import org.chromium.chrome.browser.preferences.PrefServiceBridge;
+import org.chromium.chrome.browser.profiles.Profile;
+import org.chromium.chrome.browser.signin.account_picker.AccountPickerCoordinator;
 import org.chromium.chrome.browser.sync.SyncUserDataWiper;
 import org.chromium.components.signin.AccountManagerDelegateException;
 import org.chromium.components.signin.AccountManagerFacadeProvider;
@@ -44,6 +45,7 @@ import org.chromium.components.signin.AccountsChangeObserver;
 import org.chromium.components.signin.ChildAccountStatus;
 import org.chromium.components.signin.GmsAvailabilityException;
 import org.chromium.components.signin.GmsJustUpdatedException;
+import org.chromium.components.user_prefs.UserPrefs;
 import org.chromium.ui.text.NoUnderlineClickableSpan;
 import org.chromium.ui.text.SpanApplier;
 
@@ -58,7 +60,7 @@ import java.util.List;
  * derived classes.
  */
 public abstract class SigninFragmentBase
-        extends Fragment implements AccountPickerDialogFragment.Callback {
+        extends Fragment implements AccountPickerCoordinator.Listener {
     private static final String TAG = "SigninFragmentBase";
 
     private static final String SETTINGS_LINK_OPEN = "<LINK1>";
@@ -334,12 +336,12 @@ public abstract class SigninFragmentBase
         if (!TextUtils.isEmpty(fullName)) {
             mConsentTextTracker.setTextNonRecordable(mView.getAccountTextPrimary(), fullName);
             mConsentTextTracker.setTextNonRecordable(
-                    mView.getAccountTextSecondary(), profileData.getAccountName());
+                    mView.getAccountTextSecondary(), profileData.getAccountEmail());
             mView.getAccountTextSecondary().setVisibility(View.VISIBLE);
         } else {
             // Full name is not available, show the email in the primary TextView.
             mConsentTextTracker.setTextNonRecordable(
-                    mView.getAccountTextPrimary(), profileData.getAccountName());
+                    mView.getAccountTextPrimary(), profileData.getAccountEmail());
             mView.getAccountTextSecondary().setVisibility(View.GONE);
         }
     }
@@ -402,7 +404,8 @@ public abstract class SigninFragmentBase
         // as this is needed for the previous account check.
         final long seedingStartTime = SystemClock.elapsedRealtime();
         final AccountTrackerService accountTrackerService =
-                IdentityServicesProvider.get().getAccountTrackerService();
+                IdentityServicesProvider.get().getAccountTrackerService(
+                        Profile.getLastUsedRegularProfile());
         if (accountTrackerService.checkAndSeedSystemAccounts()) {
             recordAccountTrackerServiceSeedingTime(seedingStartTime);
             runStateMachineAndSignin(settingsClicked);
@@ -427,7 +430,8 @@ public abstract class SigninFragmentBase
     private void runStateMachineAndSignin(boolean settingsClicked) {
         mConfirmSyncDataStateMachine = new ConfirmSyncDataStateMachine(
                 new ConfirmSyncDataStateMachineDelegate(getChildFragmentManager()),
-                PrefServiceBridge.getInstance().getString(Pref.SYNC_LAST_ACCOUNT_NAME),
+                UserPrefs.get(Profile.getLastUsedRegularProfile())
+                        .getString(Pref.GOOGLE_SERVICES_LAST_USERNAME),
                 mSelectedAccountName, new ConfirmSyncDataStateMachine.Listener() {
                     @Override
                     public void onConfirm(boolean wipeData) {
@@ -496,6 +500,7 @@ public abstract class SigninFragmentBase
     @Override
     public void onAccountSelected(String accountName, boolean isDefaultAccount) {
         selectAccount(accountName, isDefaultAccount);
+        getAccountPickerDialogFragment().dismissAllowingStateLoss();
     }
 
     @Override
@@ -651,8 +656,9 @@ public abstract class SigninFragmentBase
                 && mGooglePlayServicesUpdateErrorHandler.isShowing()) {
             return;
         }
-        boolean cancelable =
-                !IdentityServicesProvider.get().getSigninManager().isForceSigninEnabled();
+        boolean cancelable = !IdentityServicesProvider.get()
+                                      .getSigninManager(Profile.getLastUsedRegularProfile())
+                                      .isForceSigninEnabled();
         mGooglePlayServicesUpdateErrorHandler =
                 new UserRecoverableErrorHandler.ModalDialog(getActivity(), cancelable);
         mGooglePlayServicesUpdateErrorHandler.handleError(getActivity(), gmsErrorCode);

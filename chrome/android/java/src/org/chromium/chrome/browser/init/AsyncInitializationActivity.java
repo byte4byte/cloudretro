@@ -32,17 +32,21 @@ import org.chromium.base.TraceEvent;
 import org.chromium.base.library_loader.LibraryLoader;
 import org.chromium.base.library_loader.LoaderErrors;
 import org.chromium.base.library_loader.ProcessInitException;
+import org.chromium.base.supplier.ObservableSupplier;
+import org.chromium.base.supplier.ObservableSupplierImpl;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeBaseAppCompatActivity;
 import org.chromium.chrome.browser.IntentHandler;
 import org.chromium.chrome.browser.LaunchIntentDispatcher;
 import org.chromium.chrome.browser.WarmupManager;
 import org.chromium.chrome.browser.firstrun.FirstRunFlowSequencer;
+import org.chromium.chrome.browser.incognito.IncognitoUtils;
 import org.chromium.chrome.browser.lifecycle.ActivityLifecycleDispatcher;
 import org.chromium.chrome.browser.multiwindow.MultiWindowModeStateDispatcher;
 import org.chromium.chrome.browser.multiwindow.MultiWindowModeStateDispatcherImpl;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.tasks.tab_management.TabUiFeatureUtilities;
+import org.chromium.chrome.features.start_surface.StartSurfaceConfiguration;
 import org.chromium.ui.base.ActivityWindowAndroid;
 import org.chromium.ui.base.DeviceFormFactor;
 import org.chromium.ui.base.WindowAndroid;
@@ -58,6 +62,8 @@ import java.lang.reflect.Field;
  */
 public abstract class AsyncInitializationActivity extends ChromeBaseAppCompatActivity
         implements ChromeActivityNativeDelegate, BrowserParts, ModalDialogManagerHolder {
+    @VisibleForTesting
+    public static final String FIRST_DRAW_COMPLETED_TIME_MS_UMA = "FirstDrawCompletedTime";
     private static final String TAG = "AsyncInitActivity";
     protected final Handler mHandler;
 
@@ -72,11 +78,9 @@ public abstract class AsyncInitializationActivity extends ChromeBaseAppCompatAct
     /** Time at which onCreate is called. This is realtime, counted in ms since device boot. */
     private long mOnCreateTimestampMs;
 
-    /** Time at which onCreate is called. This is uptime, to be sent to native code. */
-    private long mOnCreateTimestampUptimeMs;
-
     private ActivityWindowAndroid mWindowAndroid;
-    private ModalDialogManager mModalDialogManager;
+    private final ObservableSupplierImpl<ModalDialogManager> mModalDialogManagerSupplier =
+            new ObservableSupplierImpl<>();
     private Bundle mSavedInstanceState;
     private int mCurrentOrientation;
     private boolean mDestroyed;
@@ -109,9 +113,9 @@ public abstract class AsyncInitializationActivity extends ChromeBaseAppCompatAct
             mWindowAndroid = null;
         }
 
-        if (mModalDialogManager != null) {
-            mModalDialogManager.destroy();
-            mModalDialogManager = null;
+        if (mModalDialogManagerSupplier.get() != null) {
+            mModalDialogManagerSupplier.get().destroy();
+            mModalDialogManagerSupplier.set(null);
         }
 
         super.onDestroy();
@@ -120,22 +124,19 @@ public abstract class AsyncInitializationActivity extends ChromeBaseAppCompatAct
 
     @Override
     @CallSuper
-    protected void applyConfigurationOverrides(Context baseContext, Configuration overrideConfig) {
-        super.applyConfigurationOverrides(baseContext, overrideConfig);
-        // Before Android M, an IllegalStateException is thrown for trying to access DisplayManager
-        // before attachBaseContext() has been called. Multi-window wasn't added until N, so it is
-        // unlikely for multi-window to be a large issue on Lollipop.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            // We override the smallestScreenWidthDp here for two reasons:
-            // 1. To prevent multi-window from hiding the tabstrip when on a tablet.
-            // 2. To ensure mIsTablet only needs to be set once. Since the override lasts for the
-            //    life of the activity, it will never change via onConfigurationUpdated().
-            // See crbug.com/588838, crbug.com/662338, crbug.com/780593.
-            DisplayAndroid display = DisplayAndroid.getNonMultiDisplay(baseContext);
-            int targetSmallestScreenWidthDp =
-                    DisplayUtil.pxToDp(display, DisplayUtil.getSmallestWidth(display));
-            overrideConfig.smallestScreenWidthDp = targetSmallestScreenWidthDp;
-        }
+    protected boolean applyOverrides(Context baseContext, Configuration overrideConfig) {
+        super.applyOverrides(baseContext, overrideConfig);
+
+        // We override the smallestScreenWidthDp here for two reasons:
+        // 1. To prevent multi-window from hiding the tabstrip when on a tablet.
+        // 2. To ensure mIsTablet only needs to be set once. Since the override lasts for the life
+        //    of the activity, it will never change via onConfigurationUpdated().
+        // See crbug.com/588838, crbug.com/662338, crbug.com/780593.
+        DisplayAndroid display = DisplayAndroid.getNonMultiDisplay(baseContext);
+        int targetSmallestScreenWidthDp =
+                DisplayUtil.pxToDp(display, DisplayUtil.getSmallestWidth(display));
+        overrideConfig.smallestScreenWidthDp = targetSmallestScreenWidthDp;
+        return true;
     }
 
     @Override
@@ -158,7 +159,8 @@ public abstract class AsyncInitializationActivity extends ChromeBaseAppCompatAct
 
     @Override
     public final void setContentViewAndLoadLibrary(Runnable onInflationCompleteCallback) {
-        boolean enableInstantStart = TabUiFeatureUtilities.supportInstantStart(isTablet());
+        boolean enableInstantStart =
+                TabUiFeatureUtilities.supportInstantStart(isTablet()) && !mHadWarmStart;
         mOnInflationCompleteCallback = onInflationCompleteCallback;
         if (enableInstantStart) {
             triggerLayoutInflation();
@@ -193,7 +195,17 @@ public abstract class AsyncInitializationActivity extends ChromeBaseAppCompatAct
     @Override
     public final void postInflationStartup() {
         performPostInflationStartup();
+        dispatchOnInflationComplete();
         mLifecycleDispatcher.dispatchPostInflationStartup();
+    }
+
+    /**
+     * This function allows subclasses overriding and adding additional tasks between calling
+     * mLifecycleDispatcher.dispatchOnInflationComplete() and
+     * mLifecycleDispatcher.dispatchPostInflationStartup().
+     */
+    protected void dispatchOnInflationComplete() {
+        mLifecycleDispatcher.dispatchOnInflationComplete();
     }
 
     /**
@@ -206,6 +218,9 @@ public abstract class AsyncInitializationActivity extends ChromeBaseAppCompatAct
         assert firstDrawView != null;
         FirstDrawDetector.waitForFirstDraw(firstDrawView, () -> {
             mFirstDrawComplete = true;
+            StartSurfaceConfiguration.recordHistogram(FIRST_DRAW_COMPLETED_TIME_MS_UMA,
+                    SystemClock.elapsedRealtime() - getOnCreateTimestampMs(),
+                    TabUiFeatureUtilities.supportInstantStart(isTablet()));
             if (!mStartupDelayed) {
                 onFirstDrawComplete();
             }
@@ -228,11 +243,11 @@ public abstract class AsyncInitializationActivity extends ChromeBaseAppCompatAct
             if (intent == null || !Intent.ACTION_VIEW.equals(intent.getAction())) return;
             String url = IntentHandler.getUrlFromIntent(intent);
             if (url == null) return;
-            // TODO(https://crbug.com/1041781): Use the current profile (i.e., regular profile or
-            // incognito profile) instead of always using regular profile. It is wrong and needs to
-            // be fixed.
-            WarmupManager.getInstance().maybePreconnectUrlAndSubResources(
-                    Profile.getLastUsedRegularProfile(), url);
+            // Blocking pre-connect for all off-the-record profiles.
+            if (!IncognitoUtils.hasAnyIncognitoExtra(intent)) {
+                WarmupManager.getInstance().maybePreconnectUrlAndSubResources(
+                        Profile.getLastUsedRegularProfile(), url);
+            }
         } finally {
             TraceEvent.end("maybePreconnect");
         }
@@ -322,14 +337,13 @@ public abstract class AsyncInitializationActivity extends ChromeBaseAppCompatAct
             super.onCreate(transformSavedInstanceStateForOnCreate(savedInstanceState));
         }
         mOnCreateTimestampMs = SystemClock.elapsedRealtime();
-        mOnCreateTimestampUptimeMs = SystemClock.uptimeMillis();
         mSavedInstanceState = savedInstanceState;
 
         mWindowAndroid = createWindowAndroid();
         if (mWindowAndroid != null) {
             getWindowAndroid().restoreInstanceState(getSavedInstanceState());
         }
-        mModalDialogManager = createModalDialogManager();
+        mModalDialogManagerSupplier.set(createModalDialogManager());
 
         mStartupDelayed = shouldDelayBrowserStartup();
         ChromeBrowserInitializer.getInstance().handlePreNativeStartup(this);
@@ -440,13 +454,6 @@ public abstract class AsyncInitializationActivity extends ChromeBaseAppCompatAct
     }
 
     /**
-     * @return The elapsed real time for the activity creation in ms.
-     */
-    protected long getOnCreateTimestampUptimeMs() {
-        return mOnCreateTimestampUptimeMs;
-    }
-
-    /**
      * @return The uptime for the activity creation in ms.
      */
     protected long getOnCreateTimestampMs() {
@@ -504,7 +511,8 @@ public abstract class AsyncInitializationActivity extends ChromeBaseAppCompatAct
 
     @CallSuper
     @Override
-    protected void onNewIntent(Intent intent) {
+    @SuppressLint("MissingSuperCall") // Empty method in parent Activity class.
+    public void onNewIntent(Intent intent) {
         if (intent == null) return;
         mNativeInitializationController.onNewIntent(intent);
         setIntent(intent);
@@ -512,6 +520,7 @@ public abstract class AsyncInitializationActivity extends ChromeBaseAppCompatAct
 
     @CallSuper
     @Override
+    @SuppressLint("MissingSuperCall") // Empty method in parent Activity class.
     public void onActivityResult(int requestCode, int resultCode, Intent data) {
         mNativeInitializationController.onActivityResult(requestCode, resultCode, data);
     }
@@ -551,16 +560,29 @@ public abstract class AsyncInitializationActivity extends ChromeBaseAppCompatAct
         return mDestroyed || isFinishing();
     }
 
+    /**
+     * Every child class wanting to perform tasks on configuration changed should override
+     * {@link #performOnConfigurationChanged(Configuration)} instead.
+     * @param newConfig The new configuration.
+     */
     @Override
-    public void onConfigurationChanged(Configuration newConfig) {
+    public final void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
+        performOnConfigurationChanged(newConfig);
         mLifecycleDispatcher.dispatchOnConfigurationChanged(newConfig);
     }
+
+    /**
+     * Handle an {@link #onConfigurationChanged(Configuration)} event.
+     * @param newConfig The new configuration.
+     */
+    @CallSuper
+    public void performOnConfigurationChanged(Configuration newConfig) {}
 
     @Override
     public void onMultiWindowModeChanged(boolean inMultiWindowMode) {
         super.onMultiWindowModeChanged(inMultiWindowMode);
-        mMultiWindowModeStateDispatcher.dipatchMultiWindowModeChanged(inMultiWindowMode);
+        mMultiWindowModeStateDispatcher.dispatchMultiWindowModeChanged(inMultiWindowMode);
     }
 
     @Override
@@ -617,14 +639,15 @@ public abstract class AsyncInitializationActivity extends ChromeBaseAppCompatAct
      */
     @Override
     public ModalDialogManager getModalDialogManager() {
-        return mModalDialogManager;
+        // TODO(jinsukkim): Remove this method in favor of getModalDialogManagerSupplier below.
+        return mModalDialogManagerSupplier.get();
     }
 
     /**
-     * Overrides the originally created modal dialog manager.
+     * @return The supplier of {@link ModalDialogManager} that manages the display of modal dialogs.
      */
-    public void overrideModalDialogManager(ModalDialogManager modalDialogManager) {
-        mModalDialogManager = modalDialogManager;
+    public ObservableSupplier<ModalDialogManager> getModalDialogManagerSupplier() {
+        return mModalDialogManagerSupplier;
     }
 
     /**
@@ -670,6 +693,14 @@ public abstract class AsyncInitializationActivity extends ChromeBaseAppCompatAct
         super.onWindowFocusChanged(hasFocus);
 
         mLifecycleDispatcher.dispatchOnWindowFocusChanged(hasFocus);
+    }
+
+    @CallSuper
+    @Override
+    public void recreate() {
+        super.recreate();
+
+        mLifecycleDispatcher.dispatchOnRecreate();
     }
 
     /**

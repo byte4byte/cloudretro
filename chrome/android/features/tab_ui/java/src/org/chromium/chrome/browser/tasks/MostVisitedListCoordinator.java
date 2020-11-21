@@ -8,16 +8,13 @@ import android.view.ContextMenu;
 import android.view.View;
 import android.view.ViewGroup;
 
-import org.chromium.base.DiscardableReferencePool;
-import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.GlobalDiscardableReferencePool;
-import org.chromium.chrome.browser.ntp.snippets.SuggestionsSource;
+import org.chromium.base.supplier.Supplier;
+import org.chromium.chrome.browser.app.ChromeActivity;
 import org.chromium.chrome.browser.offlinepages.OfflinePageBridge;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.suggestions.ImageFetcher;
 import org.chromium.chrome.browser.suggestions.SuggestionsConfig;
 import org.chromium.chrome.browser.suggestions.SuggestionsDependencyFactory;
-import org.chromium.chrome.browser.suggestions.SuggestionsEventReporter;
 import org.chromium.chrome.browser.suggestions.SuggestionsUiDelegate;
 import org.chromium.chrome.browser.suggestions.SuggestionsUiDelegateImpl;
 import org.chromium.chrome.browser.suggestions.tile.SuggestionsTileView;
@@ -27,8 +24,9 @@ import org.chromium.chrome.browser.suggestions.tile.TileGroup.TileInteractionDel
 import org.chromium.chrome.browser.suggestions.tile.TileGroupDelegateImpl;
 import org.chromium.chrome.browser.suggestions.tile.TileRenderer;
 import org.chromium.chrome.browser.suggestions.tile.TileSectionType;
-import org.chromium.chrome.browser.ui.favicon.LargeIconBridge;
+import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManager;
+import org.chromium.components.favicon.LargeIconBridge;
 import org.chromium.ui.base.PageTransition;
 import org.chromium.ui.modelutil.PropertyModel;
 import org.chromium.ui.modelutil.PropertyModelChangeProcessor;
@@ -46,32 +44,27 @@ class MostVisitedListCoordinator implements TileGroup.Observer, TileGroup.TileSe
     private final ChromeActivity mActivity;
     private final ViewGroup mParent;
     private final PropertyModelChangeProcessor mModelChangeProcessor;
+    private final Supplier<Tab> mParentTabSupplier;
     private TileGroup mTileGroup;
     private TileRenderer mRenderer;
 
-    public MostVisitedListCoordinator(
-            ChromeActivity activity, ViewGroup parent, PropertyModel propertyModel) {
+    public MostVisitedListCoordinator(ChromeActivity activity, ViewGroup parent,
+            PropertyModel propertyModel, Supplier<Tab> parentTabSupplier) {
         mActivity = activity;
         mParent = parent;
         mModelChangeProcessor = PropertyModelChangeProcessor.create(
                 propertyModel, mParent, MostVisitedListViewBinder::bind);
+        mParentTabSupplier = parentTabSupplier;
     }
 
     public void initialize() {
         if (mRenderer != null) return;
         assert mTileGroup == null;
 
-        // TODO(https://crbug.com/1041781): Use the current profile (i.e., regular profile or
-        // incognito profile) instead of always using regular profile. It is wrong and needs to be
-        // fixed.
+        // This function is never called in incognito mode.
         Profile profile = Profile.getLastUsedRegularProfile();
-        SuggestionsSource suggestionsSource =
-                SuggestionsDependencyFactory.getInstance().createSuggestionSource(profile);
-        SuggestionsEventReporter eventReporter =
-                SuggestionsDependencyFactory.getInstance().createEventReporter();
 
-        DiscardableReferencePool referencePool = GlobalDiscardableReferencePool.getReferencePool();
-        ImageFetcher imageFetcher = new ImageFetcher(suggestionsSource, profile, referencePool);
+        ImageFetcher imageFetcher = new ImageFetcher(profile);
         SnackbarManager snackbarManager = mActivity.getSnackbarManager();
 
         mRenderer = new TileRenderer(
@@ -82,8 +75,8 @@ class MostVisitedListCoordinator implements TileGroup.Observer, TileGroup.TileSe
 
         TileGroupDelegateImpl tileGroupDelegate =
                 new TileGroupDelegateImpl(mActivity, profile, null, snackbarManager);
-        SuggestionsUiDelegate suggestionsUiDelegate = new MostVisitedSuggestionsUiDelegate(
-                suggestionsSource, eventReporter, profile, referencePool, snackbarManager);
+        SuggestionsUiDelegate suggestionsUiDelegate =
+                new MostVisitedSuggestionsUiDelegate(profile, snackbarManager);
         mTileGroup = new TileGroup(
                 mRenderer, suggestionsUiDelegate, null, tileGroupDelegate, this, offlinePageBridge);
         mTileGroup.startObserving(MAX_RESULTS);
@@ -124,7 +117,7 @@ class MostVisitedListCoordinator implements TileGroup.Observer, TileGroup.TileSe
     /** TileSetupDelegate implementation. */
     @Override
     public TileInteractionDelegate createInteractionDelegate(Tile tile) {
-        return new MostVisitedTileInteractionDelegate(tile);
+        return new MostVisitedTileInteractionDelegate(tile, mParentTabSupplier);
     }
 
     @Override
@@ -149,9 +142,11 @@ class MostVisitedListCoordinator implements TileGroup.Observer, TileGroup.TileSe
     /** Handle interactions with the Most Visited tiles. */
     private static class MostVisitedTileInteractionDelegate implements TileInteractionDelegate {
         private Tile mTile;
+        private Supplier<Tab> mParentTabSupplier;
 
-        public MostVisitedTileInteractionDelegate(Tile tile) {
+        public MostVisitedTileInteractionDelegate(Tile tile, Supplier<Tab> parentTabSupplier) {
             mTile = tile;
+            mParentTabSupplier = parentTabSupplier;
         }
 
         @Override
@@ -160,7 +155,8 @@ class MostVisitedListCoordinator implements TileGroup.Observer, TileGroup.TileSe
         @Override
         public void onClick(View v) {
             ReturnToChromeExperimentsUtil.willHandleLoadUrlFromStartSurface(
-                    mTile.getUrl(), PageTransition.AUTO_BOOKMARK);
+                    mTile.getUrl().getSpec(), PageTransition.AUTO_BOOKMARK, null /*incognito*/,
+                    mParentTabSupplier.get());
         }
 
         @Override
@@ -172,11 +168,8 @@ class MostVisitedListCoordinator implements TileGroup.Observer, TileGroup.TileSe
 
     /** Suggestions UI Delegate for constructing the TileGroup. */
     private static class MostVisitedSuggestionsUiDelegate extends SuggestionsUiDelegateImpl {
-        public MostVisitedSuggestionsUiDelegate(SuggestionsSource suggestionsSource,
-                SuggestionsEventReporter eventReporter, Profile profile,
-                DiscardableReferencePool referencePool, SnackbarManager snackbarManager) {
-            super(suggestionsSource, eventReporter, null, profile, null, referencePool,
-                    snackbarManager);
+        public MostVisitedSuggestionsUiDelegate(Profile profile, SnackbarManager snackbarManager) {
+            super(null, profile, null, snackbarManager);
         }
 
         @Override

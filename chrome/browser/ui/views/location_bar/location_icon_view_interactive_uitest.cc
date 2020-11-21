@@ -12,6 +12,7 @@
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/interactive_test_utils.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/test_utils.h"
 
 namespace {
@@ -55,7 +56,7 @@ IN_PROC_BROWSER_TEST_F(LocationIconViewTest, HideOnSecondClick) {
             PageInfoBubbleView::GetShownBubbleType());
 }
 
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
 // TODO(jongkwon.lee): https://crbug.com/825834 NativeWidgetMac::Deactivate is
 // not implemented on Mac.
 #define MAYBE_ActivateFirstInactiveBubbleForAccessibility \

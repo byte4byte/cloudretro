@@ -8,8 +8,9 @@
 #include <utility>
 #include <vector>
 
-#include "ash/public/mojom/assistant_state_controller.mojom.h"
-#include "base/logging.h"
+#include "ash/public/cpp/ambient/ambient_ui_model.h"
+#include "ash/public/cpp/assistant/test_support/mock_assistant_controller.h"
+#include "base/check.h"
 #include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/run_loop.h"
@@ -20,11 +21,10 @@
 #include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "chromeos/audio/cras_audio_handler.h"
-#include "chromeos/constants/chromeos_features.h"
 #include "chromeos/dbus/power/fake_power_manager_client.h"
-#include "chromeos/services/assistant/assistant_state_proxy.h"
 #include "chromeos/services/assistant/fake_assistant_manager_service_impl.h"
 #include "chromeos/services/assistant/public/cpp/assistant_prefs.h"
+#include "chromeos/services/assistant/public/cpp/features.h"
 #include "chromeos/services/assistant/test_support/fully_initialized_assistant_state.h"
 #include "chromeos/services/assistant/test_support/scoped_assistant_client.h"
 #include "chromeos/services/assistant/test_support/scoped_device_actions.h"
@@ -54,25 +54,17 @@ const char* kEmailAddress = "user@gmail.com";
 class ScopedFakeAssistantClient : public ScopedAssistantClient {
  public:
   explicit ScopedFakeAssistantClient(ash::AssistantState* assistant_state)
-      : assistant_state_(assistant_state),
-        status_(ash::mojom::AssistantState::NOT_READY) {}
+      : status_(AssistantStatus::NOT_READY) {}
 
-  ash::mojom::AssistantState status() { return status_; }
+  AssistantStatus status() { return status_; }
 
  private:
   // ScopedAssistantClient:
-  void OnAssistantStatusChanged(ash::mojom::AssistantState new_state) override {
-    status_ = new_state;
+  void OnAssistantStatusChanged(AssistantStatus new_status) override {
+    status_ = new_status;
   }
 
-  void RequestAssistantStateController(
-      mojo::PendingReceiver<ash::mojom::AssistantStateController> receiver)
-      override {
-    assistant_state_->BindReceiver(std::move(receiver));
-  }
-
-  ash::AssistantState* const assistant_state_;
-  ash::mojom::AssistantState status_;
+  AssistantStatus status_;
 
   DISALLOW_COPY_AND_ASSIGN(ScopedFakeAssistantClient);
 };
@@ -85,7 +77,7 @@ class AssistantServiceTest : public testing::Test {
 
   void SetUp() override {
     scoped_feature_list_.InitAndEnableFeature(
-        chromeos::features::kAmbientModeFeature);
+        chromeos::assistant::features::kEnableAmbientAssistant);
 
     chromeos::CrasAudioHandler::InitializeForTesting();
 
@@ -101,12 +93,13 @@ class AssistantServiceTest : public testing::Test {
     pref_service_.SetBoolean(prefs::kAssistantEnabled, true);
     pref_service_.SetBoolean(prefs::kAssistantHotwordEnabled, true);
 
+    assistant_state_.RegisterPrefChanges(&pref_service_);
+
     // In production the primary account is set before the service is created.
     identity_test_env_.MakeUnconsentedPrimaryAccountAvailable(kEmailAddress);
 
-    service_ = std::make_unique<Service>(
-        shared_url_loader_factory_->Clone(),
-        identity_test_env_.identity_manager(), &pref_service_);
+    service_ = std::make_unique<Service>(shared_url_loader_factory_->Clone(),
+                                         identity_test_env_.identity_manager());
     service_->SetAssistantManagerServiceForTesting(
         std::make_unique<FakeAssistantManagerServiceImpl>());
 
@@ -155,20 +148,22 @@ class AssistantServiceTest : public testing::Test {
     return &identity_test_env_;
   }
 
-  ash::AssistantState* assistant_state() { return &assistant_state_; }
-
   PrefService* pref_service() { return &pref_service_; }
+
+  ash::AssistantState* assistant_state() { return &assistant_state_; }
 
   ScopedFakeAssistantClient* client() { return &fake_assistant_client_; }
 
   base::test::TaskEnvironment* task_environment() { return &task_environment_; }
 
-  ash::AmbientModeState* ambient_mode_state() { return &ambient_mode_state_; }
+  ash::AmbientUiModel* ambient_ui_model() { return &ambient_ui_model_; }
 
  private:
   base::test::TaskEnvironment task_environment_{
       base::test::TaskEnvironment::TimeSource::MOCK_TIME};
   base::test::ScopedFeatureList scoped_feature_list_;
+
+  TestingPrefServiceSimple pref_service_;
 
   std::unique_ptr<Service> service_;
 
@@ -176,13 +171,12 @@ class AssistantServiceTest : public testing::Test {
   signin::IdentityTestEnvironment identity_test_env_;
   ScopedFakeAssistantClient fake_assistant_client_{&assistant_state_};
   ScopedDeviceActions fake_device_actions_;
-
-  TestingPrefServiceSimple pref_service_;
+  testing::NiceMock<ash::MockAssistantController> mock_assistant_controller;
 
   network::TestURLLoaderFactory url_loader_factory_;
   scoped_refptr<network::SharedURLLoaderFactory> shared_url_loader_factory_;
 
-  ash::AmbientModeState ambient_mode_state_;
+  ash::AmbientUiModel ambient_ui_model_;
 
   DISALLOW_COPY_AND_ASSIGN(AssistantServiceTest);
 };
@@ -267,7 +261,9 @@ TEST_F(AssistantServiceTest, ShouldSendUserInfoWhenStarting) {
   // Now start the service
   StartAssistantAndWait();
 
-  EXPECT_EQ(kAccessToken, assistant_manager()->access_token());
+  ASSERT_TRUE(assistant_manager()->access_token().has_value());
+  EXPECT_EQ(kAccessToken, assistant_manager()->access_token().value());
+  ASSERT_TRUE(assistant_manager()->gaia_id().has_value());
   EXPECT_EQ(kGaiaId, assistant_manager()->gaia_id());
 }
 
@@ -282,7 +278,9 @@ TEST_F(AssistantServiceTest, ShouldSendUserInfoWhenAccessTokenIsRefreshed) {
   task_environment()->FastForwardBy(kDefaultTokenExpirationDelay);
   IssueAccessToken("new token");
 
+  ASSERT_TRUE(assistant_manager()->access_token().has_value());
   EXPECT_EQ("new token", assistant_manager()->access_token());
+  ASSERT_TRUE(assistant_manager()->gaia_id().has_value());
   EXPECT_EQ(kGaiaId, assistant_manager()->gaia_id());
 }
 
@@ -291,15 +289,17 @@ TEST_F(AssistantServiceTest, ShouldSetClientStatusToNotReadyWhenStarting) {
       AssistantManagerService::State::STARTING);
   base::RunLoop().RunUntilIdle();
 
-  EXPECT_EQ(client()->status(), ash::mojom::AssistantState::NOT_READY);
+  EXPECT_EQ(client()->status(), AssistantStatus::NOT_READY);
 }
 
-TEST_F(AssistantServiceTest, ShouldSetClientStatusToReadyWhenStarted) {
+TEST_F(AssistantServiceTest, ShouldKeepClientStatusNotReadyWhenStarted) {
+  // Note: even though we've started, we are not ready to handle the queries
+  // until LibAssistant tells us we are.
   assistant_manager()->SetStateAndInformObservers(
       AssistantManagerService::State::STARTED);
   base::RunLoop().RunUntilIdle();
 
-  EXPECT_EQ(client()->status(), ash::mojom::AssistantState::READY);
+  EXPECT_EQ(client()->status(), AssistantStatus::NOT_READY);
 }
 
 TEST_F(AssistantServiceTest, ShouldSetClientStatusToNewReadyWhenRunning) {
@@ -307,7 +307,7 @@ TEST_F(AssistantServiceTest, ShouldSetClientStatusToNewReadyWhenRunning) {
       AssistantManagerService::State::RUNNING);
   base::RunLoop().RunUntilIdle();
 
-  EXPECT_EQ(client()->status(), ash::mojom::AssistantState::NEW_READY);
+  EXPECT_EQ(client()->status(), AssistantStatus::READY);
 }
 
 TEST_F(AssistantServiceTest, ShouldSetClientStatusToNotReadyWhenStopped) {
@@ -317,7 +317,7 @@ TEST_F(AssistantServiceTest, ShouldSetClientStatusToNotReadyWhenStopped) {
 
   StopAssistantAndWait();
 
-  EXPECT_EQ(client()->status(), ash::mojom::AssistantState::NOT_READY);
+  EXPECT_EQ(client()->status(), AssistantStatus::NOT_READY);
 }
 
 TEST_F(AssistantServiceTest,
@@ -328,13 +328,13 @@ TEST_F(AssistantServiceTest,
   ASSERT_TRUE(assistant_manager()->access_token().has_value());
   ASSERT_EQ(assistant_manager()->access_token().value(), kAccessToken);
 
-  ambient_mode_state()->SetAmbientModeEnabled(true);
+  ambient_ui_model()->SetUiVisibility(ash::AmbientUiVisibility::kShown);
   base::RunLoop().RunUntilIdle();
   EXPECT_FALSE(identity_test_env()->IsAccessTokenRequestPending());
   ASSERT_FALSE(assistant_manager()->access_token().has_value());
 
   // Disabling ambient mode requests a new token.
-  ambient_mode_state()->SetAmbientModeEnabled(false);
+  ambient_ui_model()->SetUiVisibility(ash::AmbientUiVisibility::kClosed);
   EXPECT_TRUE(identity_test_env()->IsAccessTokenRequestPending());
 
   // Assistant manager receives the new token.

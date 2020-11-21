@@ -173,9 +173,6 @@ const AcceleratorAction kActionsAllowedAtLoginOrLockScreen[] = {
     START_AMBIENT_MODE,
     SWITCH_TO_LAST_USED_IME,
     SWITCH_TO_NEXT_IME,
-    TAKE_PARTIAL_SCREENSHOT,
-    TAKE_SCREENSHOT,
-    TAKE_WINDOW_SCREENSHOT,
     TOGGLE_CAPS_LOCK,
     TOGGLE_DICTATION,
     TOGGLE_DOCKED_MAGNIFIER,
@@ -199,7 +196,11 @@ const size_t kActionsAllowedAtLoginOrLockScreenLength =
     base::size(kActionsAllowedAtLoginOrLockScreen);
 
 const AcceleratorAction kActionsAllowedAtLockScreen[] = {
-    EXIT, SUSPEND,
+    EXIT,
+    SUSPEND,
+    TAKE_PARTIAL_SCREENSHOT,
+    TAKE_SCREENSHOT,
+    TAKE_WINDOW_SCREENSHOT,
 };
 
 const size_t kActionsAllowedAtLockScreenLength =
@@ -322,6 +323,7 @@ const AcceleratorAction kActionsAllowedInAppModeOrPinnedMode[] = {
     SWITCH_TO_LAST_USED_IME,
     SWITCH_TO_NEXT_IME,
     TOGGLE_CAPS_LOCK,
+    TOGGLE_CLIPBOARD_HISTORY,
     TOGGLE_DICTATION,
     TOGGLE_DOCKED_MAGNIFIER,
     TOGGLE_FULLSCREEN_MAGNIFIER,
@@ -349,6 +351,13 @@ const AcceleratorAction kActionsAllowedInPinnedMode[] = {
 
 const size_t kActionsAllowedInPinnedModeLength =
     base::size(kActionsAllowedInPinnedMode);
+
+const AcceleratorAction kActionsAllowedInAppMode[] = {
+    FOCUS_SHELF,
+};
+
+const size_t kActionsAllowedInAppModeLength =
+    base::size(kActionsAllowedInAppMode);
 
 const AcceleratorAction kActionsNeedingWindow[] = {
     // clang-format off
@@ -391,6 +400,7 @@ const AcceleratorAction kActionsKeepingMenuOpen[] = {
     TOGGLE_APP_LIST,
     TOGGLE_APP_LIST_FULLSCREEN,
     TOGGLE_CAPS_LOCK,
+    TOGGLE_CLIPBOARD_HISTORY,
     TOGGLE_DICTATION,
     TOGGLE_DOCKED_MAGNIFIER,
     TOGGLE_FULLSCREEN_MAGNIFIER,

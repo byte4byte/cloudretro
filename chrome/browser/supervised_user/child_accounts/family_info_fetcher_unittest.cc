@@ -22,7 +22,6 @@
 #include "components/signin/public/identity_manager/identity_test_environment.h"
 #include "net/base/net_errors.h"
 #include "net/http/http_status_code.h"
-#include "net/url_request/url_request_test_util.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
 #include "services/network/test/test_url_loader_factory.h"
@@ -319,7 +318,7 @@ TEST_F(FamilyInfoFetcherTest, GetTokenFailure) {
   StartGetFamilyProfile();
 
   // On failure to get an access token we expect a token error.
-  EXPECT_CALL(*this, OnFailure(FamilyInfoFetcher::TOKEN_ERROR));
+  EXPECT_CALL(*this, OnFailure(FamilyInfoFetcher::ErrorCode::kTokenError));
   identity_test_env_.WaitForAccessTokenRequestIfNecessaryAndRespondWithError(
       identity_test_env_.identity_manager()->GetPrimaryAccountId(
           signin::ConsentLevel::kNotRequired),
@@ -334,7 +333,7 @@ TEST_F(FamilyInfoFetcherTest, InvalidResponse) {
   WaitForAccessTokenRequestAndIssueToken();
 
   // Invalid response data should result in a service error.
-  EXPECT_CALL(*this, OnFailure(FamilyInfoFetcher::SERVICE_ERROR));
+  EXPECT_CALL(*this, OnFailure(FamilyInfoFetcher::ErrorCode::kServiceError));
   SendInvalidGetFamilyProfileResponse();
 }
 
@@ -346,6 +345,6 @@ TEST_F(FamilyInfoFetcherTest, FailedResponse) {
   WaitForAccessTokenRequestAndIssueToken();
 
   // Failed API call should result in a network error.
-  EXPECT_CALL(*this, OnFailure(FamilyInfoFetcher::NETWORK_ERROR));
+  EXPECT_CALL(*this, OnFailure(FamilyInfoFetcher::ErrorCode::kNetworkError));
   SendFailedResponse();
 }

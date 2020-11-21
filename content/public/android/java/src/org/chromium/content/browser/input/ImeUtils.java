@@ -13,6 +13,8 @@ import android.view.inputmethod.BaseInputConnection;
 import android.view.inputmethod.CorrectionInfo;
 import android.view.inputmethod.EditorInfo;
 
+import androidx.core.view.inputmethod.EditorInfoCompat;
+
 import org.chromium.base.ThreadUtils;
 import org.chromium.blink_public.web.WebTextInputFlags;
 import org.chromium.blink_public.web.WebTextInputMode;
@@ -38,7 +40,8 @@ public class ImeUtils {
      * @param outAttrs An instance of {@link EditorInfo} that we are going to change.
      */
     public static void computeEditorInfo(int inputType, int inputFlags, int inputMode,
-            int inputAction, int initialSelStart, int initialSelEnd, EditorInfo outAttrs) {
+            int inputAction, int initialSelStart, int initialSelEnd, String lastText,
+            EditorInfo outAttrs) {
         outAttrs.inputType =
                 EditorInfo.TYPE_CLASS_TEXT | EditorInfo.TYPE_TEXT_VARIATION_WEB_EDIT_TEXT;
 
@@ -139,6 +142,11 @@ public class ImeUtils {
 
         outAttrs.initialSelStart = initialSelStart;
         outAttrs.initialSelEnd = initialSelEnd;
+        // Note: Android's internal implementation trims the text up to 2048 chars before
+        // sending it to the IMM service. In the future, if we consider limiting the number of
+        // chars between renderer and browser, then consider calling
+        // setInitialSurroundingSubText() instead.
+        EditorInfoCompat.setInitialSurroundingText(outAttrs, lastText);
     }
 
     private static int getImeAction(int inputType, int inputFlags, int inputMode, int inputAction,

@@ -6,6 +6,7 @@ package org.chromium.chrome.browser.webapps;
 
 import android.content.Intent;
 import android.os.Bundle;
+import android.provider.Browser;
 
 import org.chromium.base.IntentUtils;
 import org.chromium.chrome.browser.ShortcutHelper;
@@ -39,7 +40,10 @@ public class WebappIntentUtils {
             ShortcutHelper.EXTRA_SOURCE, WebApkConstants.EXTRA_WEBAPK_PACKAGE_NAME,
             WebApkConstants.EXTRA_SPLASH_PROVIDED_BY_WEBAPK,
             WebApkConstants.EXTRA_WEBAPK_LAUNCH_TIME,
-            WebApkConstants.EXTRA_NEW_STYLE_SPLASH_SHOWN_TIME};
+            WebApkConstants.EXTRA_NEW_STYLE_SPLASH_SHOWN_TIME,
+            WebApkConstants.EXTRA_WEBAPK_SELECTED_SHARE_TARGET_ACTIVITY_CLASS_NAME,
+            Intent.EXTRA_SUBJECT, Intent.EXTRA_TEXT, Intent.EXTRA_STREAM,
+            Browser.EXTRA_APPLICATION_ID};
 
     /**
      * Converts color from signed Integer where an unspecified color is represented as null to
@@ -66,8 +70,26 @@ public class WebappIntentUtils {
         return isLongColorValid(longColor) ? Integer.valueOf((int) longColor) : null;
     }
 
-    public static String idFromIntent(Intent intent) {
+    /**
+     * Extracts id from homescreen shortcut intent.
+     */
+    public static String getIdForHomescreenShortcut(Intent intent) {
         return IntentUtils.safeGetStringExtra(intent, ShortcutHelper.EXTRA_ID);
+    }
+
+    /**
+     * Generates id for the passed-in WebAPK package name.
+     */
+    public static String getIdForWebApkPackage(String packageName) {
+        return WebApkConstants.WEBAPK_ID_PREFIX + packageName;
+    }
+
+    public static String getUrl(Intent intent) {
+        return IntentUtils.safeGetStringExtra(intent, WebApkConstants.EXTRA_URL);
+    }
+
+    public static String getWebApkPackageName(Intent intent) {
+        return IntentUtils.safeGetStringExtra(intent, WebApkConstants.EXTRA_WEBAPK_PACKAGE_NAME);
     }
 
     /**

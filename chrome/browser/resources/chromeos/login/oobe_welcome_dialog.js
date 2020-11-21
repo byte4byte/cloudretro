@@ -234,8 +234,12 @@
      *  Starts active video.
      */
     play() {
-      if (this.getActiveVideo_())
+      let activeVideo = this.getActiveVideo_();
+      if (activeVideo) {
+        // The active video could be paused, even if it hasn't changed
+        activeVideo.play();
         return;
+      }
 
       let key = this.calcKey_(this.device, this.orientation, this.type);
       let video = this.videos.get(key);
@@ -243,6 +247,15 @@
       if (video) {
         video.removeAttribute('hidden');
         video.play();
+      }
+    }
+    /**
+     *  Pauses active video.
+     */
+    pause() {
+      let video = this.getActiveVideo_();
+      if (video) {
+        video.pause();
       }
     }
   }
@@ -289,6 +302,15 @@
       isInPortraitMode: {
         type: Boolean,
         observer: 'updateVideoMode_',
+      },
+
+      /**
+       * Observer for when this screen is hidden, or shown.
+       */
+      hidden: {
+        type: Boolean,
+        observer: 'updateHidden_',
+        reflectToAttribute: true,
       }
     },
 
@@ -382,12 +404,20 @@
         focusedElement.focus();
     },
 
-    /**
-     * This is called from oobe_welcome when this dialog is shown.
+    /*
+     * Observer method for changes to the hidden property.
+     * This replaces the show() function, in this class.
      */
-    show() {
-      this.focus();
-      this.welcomeVideoController_.play();
+    updateHidden_(newValue, oldValue) {
+      let visible = !newValue;
+      if (visible) {
+        this.focus();
+        this.welcomeVideoController_.play();
+      } else {
+        // Pause the welcome video to avoid using resources while
+        // this page is not visible
+        this.welcomeVideoController_.pause();
+      }
     },
 
     /**

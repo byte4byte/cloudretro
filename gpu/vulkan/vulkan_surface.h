@@ -8,8 +8,8 @@
 #include <vulkan/vulkan.h>
 
 #include "base/callback.h"
+#include "base/component_export.h"
 #include "gpu/vulkan/vulkan_device_queue.h"
-#include "gpu/vulkan/vulkan_export.h"
 #include "gpu/vulkan/vulkan_swap_chain.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/native_widget_types.h"
@@ -21,7 +21,7 @@ namespace gpu {
 class VulkanDeviceQueue;
 class VulkanSwapChain;
 
-class VULKAN_EXPORT VulkanSurface {
+class COMPONENT_EXPORT(VULKAN) VulkanSurface {
  public:
   // Minimum bit depth of surface.
   enum Format {
@@ -42,10 +42,13 @@ class VULKAN_EXPORT VulkanSurface {
   bool Initialize(VulkanDeviceQueue* device_queue,
                   VulkanSurface::Format format);
   // Destroy() should be called when all related GPU tasks have been finished.
-  void Destroy();
+  virtual void Destroy();
 
   gfx::SwapResult SwapBuffers();
   gfx::SwapResult PostSubBuffer(const gfx::Rect& rect);
+  void PostSubBufferAsync(
+      const gfx::Rect& rect,
+      VulkanSwapChain::PostSubBufferCompletionCallback callback);
 
   void Finish();
 
@@ -61,8 +64,8 @@ class VULKAN_EXPORT VulkanSurface {
   VulkanSwapChain* swap_chain() const { return swap_chain_.get(); }
   uint32_t swap_chain_generation() const { return swap_chain_generation_; }
   const gfx::Size& image_size() const { return image_size_; }
+  VkImageUsageFlags image_usage_flags() const { return image_usage_flags_; }
   gfx::OverlayTransform transform() const { return transform_; }
-  uint32_t image_count() const { return image_count_; }
   VkSurfaceFormatKHR surface_format() const { return surface_format_; }
 
  private:
@@ -77,18 +80,17 @@ class VULKAN_EXPORT VulkanSurface {
 
   const bool enforce_protected_memory_;
 
-  // The generation of |swap_chain_|, it will be increasted if a new
-  // |swap_chain_| is created due to resizing, etec.
+  // The generation of |swap_chain_|, it will be increased if a new
+  // |swap_chain_| is created due to resizing, etc.
   uint32_t swap_chain_generation_ = 0u;
 
   // Swap chain image size.
   gfx::Size image_size_;
 
+  VkImageUsageFlags image_usage_flags_ = 0;
+
   // Swap chain pre-transform.
   gfx::OverlayTransform transform_ = gfx::OVERLAY_TRANSFORM_INVALID;
-
-  // Swap chain image count.
-  uint32_t image_count_ = 0u;
 
   std::unique_ptr<VulkanSwapChain> swap_chain_;
 

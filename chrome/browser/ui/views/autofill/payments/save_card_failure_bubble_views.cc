@@ -16,7 +16,7 @@ SaveCardFailureBubbleViews::SaveCardFailureBubbleViews(
     content::WebContents* web_contents,
     SaveCardBubbleController* controller)
     : SaveCardBubbleViews(anchor_view, web_contents, controller) {
-  DialogDelegate::SetButtons(ui::DIALOG_BUTTON_NONE);
+  SetButtons(ui::DIALOG_BUTTON_NONE);
 }
 
 std::unique_ptr<views::View>
@@ -30,8 +30,9 @@ SaveCardFailureBubbleViews::CreateMainContentView() {
 
   base::string16 explanation = controller()->GetExplanatoryMessage();
   if (!explanation.empty()) {
-    auto* explanation_label = new views::Label(
-        explanation, CONTEXT_BODY_TEXT_LARGE, views::style::STYLE_SECONDARY);
+    auto* explanation_label =
+        new views::Label(explanation, views::style::CONTEXT_DIALOG_BODY_TEXT,
+                         views::style::STYLE_SECONDARY);
     explanation_label->SetMultiLine(true);
     explanation_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
     main_view->AddChildView(explanation_label);

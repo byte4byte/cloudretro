@@ -21,12 +21,13 @@ NSString* const kWebViewShellAddressFieldAccessibilityLabel = @"Address field";
 NSString* const kWebViewShellJavaScriptDialogTextFieldAccessibilityIdentifier =
     @"WebViewShellJavaScriptDialogTextFieldAccessibilityIdentifier";
 
-@interface ShellViewController ()<CWVDownloadTaskDelegate,
-                                  CWVNavigationDelegate,
-                                  CWVUIDelegate,
-                                  CWVScriptCommandHandler,
-                                  CWVSyncControllerDelegate,
-                                  UITextFieldDelegate>
+@interface ShellViewController () <CWVDownloadTaskDelegate,
+                                   CWVNavigationDelegate,
+                                   CWVUIDelegate,
+                                   CWVScriptCommandHandler,
+                                   CWVSyncControllerDelegate,
+                                   UIScrollViewDelegate,
+                                   UITextFieldDelegate>
 // Header containing navigation buttons and |field|.
 @property(nonatomic, strong) UIView* headerBackgroundView;
 // Header containing navigation buttons and |field|.
@@ -268,6 +269,14 @@ NSString* const kWebViewShellJavaScriptDialogTextFieldAccessibilityIdentifier =
   self.webView = [self createWebViewWithConfiguration:configuration];
 }
 
+- (void)applicationFinishedRestoringState {
+  [super applicationFinishedRestoringState];
+
+  // The scroll view is reset on state restoration. So the delegate must be
+  // reassigned.
+  self.webView.scrollView.delegate = self;
+}
+
 - (UIStatusBarStyle)preferredStatusBarStyle {
   return UIStatusBarStyleLightContent;
 }
@@ -373,22 +382,6 @@ NSString* const kWebViewShellJavaScriptDialogTextFieldAccessibilityIdentifier =
     NSString* message = [descriptions componentsJoinedByString:@"\n\n"];
     UIAlertController* alertController =
         [self actionSheetWithTitle:@"Credit cards" message:message];
-    for (CWVCreditCard* creditCard in creditCards) {
-      // Cards from Google Play can only be deleted on the Google Pay website.
-      if (creditCard.fromGooglePay) {
-        continue;
-      }
-      NSString* title =
-          [NSString stringWithFormat:@"Delete %@",
-                                     @([creditCards indexOfObject:creditCard])];
-      UIAlertAction* action =
-          [UIAlertAction actionWithTitle:title
-                                   style:UIAlertActionStyleDefault
-                                 handler:^(UIAlertAction* action) {
-                                   [dataManager deleteCreditCard:creditCard];
-                                 }];
-      [alertController addAction:action];
-    }
     __weak ShellViewController* weakSelf = self;
     [alertController
         addAction:[UIAlertAction
@@ -631,6 +624,13 @@ NSString* const kWebViewShellJavaScriptDialogTextFieldAccessibilityIdentifier =
                                          [weakSelf resetTranslateSettings];
                                        }]];
 
+  [alertController
+      addAction:[UIAlertAction actionWithTitle:@"Request translation offer"
+                                         style:UIAlertActionStyleDefault
+                                       handler:^(UIAlertAction* action) {
+                                         [weakSelf requestTranslationOffer];
+                                       }]];
+
   // Shows sync menu.
   [alertController
       addAction:[UIAlertAction actionWithTitle:@"Sync menu"
@@ -657,6 +657,11 @@ NSString* const kWebViewShellJavaScriptDialogTextFieldAccessibilityIdentifier =
   [configuration.preferences resetTranslationSettings];
 }
 
+- (void)requestTranslationOffer {
+  BOOL offered = [_webView.translationController requestTranslationOffer];
+  NSLog(@"Manual translation was offered: %d", offered);
+}
+
 - (void)toggleIncognito {
   BOOL wasPersistent = _webView.configuration.persistent;
   [self removeWebView];
@@ -668,7 +673,12 @@ NSString* const kWebViewShellJavaScriptDialogTextFieldAccessibilityIdentifier =
 
 - (CWVWebView*)createWebViewWithConfiguration:
     (CWVWebViewConfiguration*)configuration {
-  CWVWebView* webView = [[CWVWebView alloc] initWithFrame:[_contentView bounds]
+  // Set a non empty CGRect to avoid DCHECKs that occur when a load happens
+  // after state restoration, and before the view hierarchy is laid out for the
+  // first time.
+  // https://source.chromium.org/chromium/chromium/src/+/master:ios/web/web_state/ui/crw_web_request_controller.mm;l=518;drc=df887034106ef438611326745a7cd276eedd4953
+  CGRect frame = CGRectMake(0, 0, 1, 1);
+  CWVWebView* webView = [[CWVWebView alloc] initWithFrame:frame
                                             configuration:configuration];
   [_contentView addSubview:webView];
 
@@ -682,6 +692,7 @@ NSString* const kWebViewShellJavaScriptDialogTextFieldAccessibilityIdentifier =
   webView.translationController.delegate = _translationDelegate;
   _autofillDelegate = [[ShellAutofillDelegate alloc] init];
   webView.autofillController.delegate = _autofillDelegate;
+  webView.scrollView.delegate = self;
 
   // Constraints.
   webView.translatesAutoresizingMaskIntoConstraints = NO;
@@ -1122,6 +1133,12 @@ NSString* const kWebViewShellJavaScriptDialogTextFieldAccessibilityIdentifier =
 }
 
 - (void)syncControllerDidStopSync:(CWVSyncController*)syncController {
+  NSLog(@"%@", NSStringFromSelector(_cmd));
+}
+
+#pragma mark UIScrollViewDelegate
+
+- (void)scrollViewWillBeginDragging:(UIScrollView*)scrollView {
   NSLog(@"%@", NSStringFromSelector(_cmd));
 }
 

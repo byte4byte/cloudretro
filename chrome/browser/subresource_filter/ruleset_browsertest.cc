@@ -14,6 +14,7 @@
 #include "components/subresource_filter/content/browser/ruleset_service.h"
 #include "components/subresource_filter/core/common/common_features.h"
 #include "components/subresource_filter/core/common/indexed_ruleset.h"
+#include "content/public/test/browser_test.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace subresource_filter {
@@ -108,7 +109,7 @@ IN_PROC_BROWSER_TEST_F(SubresourceFilterBrowserTest, InvalidRuleset_Checksum) {
       g_browser_process->subresource_filter_ruleset_service();
 
   // Publish the good ruleset.
-  TestRulesetPublisher publisher;
+  TestRulesetPublisher publisher(service);
   publisher.SetRuleset(test_ruleset_pair.unindexed);
 
   // Now corrupt it by flipping one entry.  This can only be detected

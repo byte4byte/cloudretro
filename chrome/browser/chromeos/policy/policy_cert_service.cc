@@ -5,7 +5,7 @@
 #include "chrome/browser/chromeos/policy/policy_cert_service.h"
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
@@ -119,16 +119,6 @@ void PolicyCertService::GetPolicyCertificatesForStoragePartition(
   // The following code checks those preconditions and attempts to find the
   // extension ID (among extensions IDs with policy-provided certificates) that
   // corresponds to |partition_path|.
-
-  // Only allow certificates that are specific to |partition_path| if the
-  // built-in certificate verifier is active. The platform certificate verifier
-  // is not able to isolate contexts from each other.
-  auto* profile_network_context =
-      ProfileNetworkContextServiceFactory::GetForContext(profile_);
-  if (!profile_network_context->using_builtin_cert_verifier()) {
-    LOG(ERROR) << "Ignoring extension-scoped policy certificates";
-    return;
-  }
 
   base::FilePath default_storage_partition_path =
       content::BrowserContext::GetDefaultStoragePartition(profile_)->GetPath();

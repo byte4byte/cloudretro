@@ -49,7 +49,9 @@ def run_single_test(port, options, results_directory, worker_name, driver,
         return test_result
     except DeviceFailure as error:
         _log.error('device failed: %s', error)
-        return TestResult(test_input.test_name, device_failed=True)
+        return TestResult(
+            test_input.test_name, device_failed=True,
+            failures=[test_failures.FailureEarlyExit()])
 
 
 class SingleTestRunner(object):
@@ -589,7 +591,7 @@ class SingleTestRunner(object):
         if not expected_driver_output.image or not expected_driver_output.image_hash:
             return []
         # The presence of an expected image, but a lack of an outputted image
-        # does not signify an error. content::BlinkTestController checks the
+        # does not signify an error. content::WebTestControlHost checks the
         # image_hash, and upon a match simply skips recording the outputted
         # image. This even occurs when results_directory is set.
         if not driver_output.image or not driver_output.image_hash:

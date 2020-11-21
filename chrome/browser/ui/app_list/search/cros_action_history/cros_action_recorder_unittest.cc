@@ -52,7 +52,7 @@ class CrOSActionRecorderTest : public testing::Test {
     Test::TearDown();
     // Delete download_filename_ because it is put into a directory that may not
     // be deleted automatically.
-    base::DeleteFile(download_filename_, false);
+    base::DeleteFile(download_filename_);
   }
 
   CrOSActionHistoryProto GetCrOSActionHistory() { return recorder_->actions_; }
@@ -107,8 +107,7 @@ class CrOSActionRecorderTest : public testing::Test {
     const base::FilePath action_file_path =
         model_dir_.AppendASCII(base::NumberToString(day));
     const std::string proto_str = proto.SerializeAsString();
-    ASSERT_TRUE(
-        base::WriteFile(action_file_path, proto_str.data(), proto_str.size()));
+    ASSERT_TRUE(base::WriteFile(action_file_path, proto_str));
   }
 
   // Expects |action| to be actions_[i], with certain features.

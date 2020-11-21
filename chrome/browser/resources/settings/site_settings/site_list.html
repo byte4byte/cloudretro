@@ -1,11 +1,10 @@
     <style include="cr-shared-style settings-shared iron-flex">
-      paper-tooltip {
-        --paper-tooltip: var(--cr-tooltip);
-      }
     </style>
     <div id="category">
       <div class="cr-row first">
-        <h2 class="flex">[[categoryHeader]]</h2>
+        <h2 class$="flex [[getCssClass_(enableContentSettingsRedesign_)]]">
+          [[categoryHeader]]
+        </h2>
         <cr-button id="addSite" class="header-aligned-button"
             hidden$="[[!showAddSiteButton_]]" on-click="onAddSiteTap_">
           $i18n{add}
@@ -57,7 +56,8 @@
         </iron-list>
       </div>
     </div>
-    <paper-tooltip id="tooltip" fit-to-visible-bounds manual-mode
+    <paper-tooltip id="tooltip"
+        fit-to-visible-bounds manual-mode
         position="top">
       [[tooltipText_]]
     </paper-tooltip>

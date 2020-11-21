@@ -8,50 +8,25 @@
 #include <stdint.h>
 
 #include "base/bind.h"
+#include "base/optional.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread.h"
-#include "content/browser/frame_host/render_frame_host_impl.h"
-#include "content/browser/renderer_host/frame_token_message_queue.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
-#include "content/browser/renderer_host/render_widget_host_delegate.h"
-#include "content/browser/renderer_host/render_widget_host_impl.h"
-#include "content/common/text_input_client_messages.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/test/browser_task_environment.h"
 #include "content/public/test/fake_local_frame.h"
 #include "content/public/test/mock_render_process_host.h"
-#include "content/public/test/test_browser_context.h"
 #include "content/public/test/test_renderer_host.h"
-#include "content/test/mock_widget_impl.h"
 #include "ipc/ipc_test_sink.h"
-#include "mojo/public/cpp/bindings/pending_remote.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "testing/gtest_mac.h"
 
 namespace content {
 
 namespace {
 const int64_t kTaskDelayMs = 200;
-
-class MockRenderWidgetHostDelegate : public RenderWidgetHostDelegate {
- public:
-  MockRenderWidgetHostDelegate() {}
-  ~MockRenderWidgetHostDelegate() override {}
-
- private:
-  void ExecuteEditCommand(
-      const std::string& command,
-      const base::Optional<base::string16>& value) override {}
-  void Undo() override {}
-  void Redo() override {}
-  void Cut() override {}
-  void Copy() override {}
-  void Paste() override {}
-  void PasteAndMatchStyle() override {}
-  void SelectAll() override {}
-};
 
 // Stub out local frame mojo binding. Intercepts calls for text input
 // and marks the message as received. This class attaches to the first
@@ -70,6 +45,11 @@ class TextInputClientLocalFrame : public content::FakeLocalFrame,
   }
 
   void GetCharacterIndexAtPoint(const gfx::Point& point) override {
+    if (completion_callback_)
+      std::move(completion_callback_).Run();
+  }
+
+  void GetFirstRectForRange(const gfx::Range& range) override {
     if (completion_callback_)
       std::move(completion_callback_).Run();
   }
@@ -94,7 +74,7 @@ class TextInputClientMacTest : public content::RenderViewHostTestHarness {
     content::RenderViewHostTestHarness::SetUp();
     local_frame_ = std::make_unique<TextInputClientLocalFrame>(web_contents());
     RenderViewHostTester::For(rvh())->CreateTestRenderView(
-        base::string16(), MSG_ROUTING_NONE, MSG_ROUTING_NONE, false);
+        base::nullopt, MSG_ROUTING_NONE, false);
     widget_ = rvh()->GetWidget();
     FocusWebContentsOnMainFrame();
   }
@@ -218,27 +198,24 @@ TEST_F(TextInputClientMacTest, NotFoundCharacterIndex) {
 TEST_F(TextInputClientMacTest, GetRectForRange) {
   ScopedTestingThread thread(this);
   const gfx::Rect kSuccessValue(42, 43, 44, 45);
-  size_t current_count = ipc_sink().message_count();
 
   PostTask(FROM_HERE,
            base::BindOnce(&TextInputClientMac::SetFirstRectAndSignal,
                           base::Unretained(service()), kSuccessValue));
+  base::RunLoop run_loop;
+  local_frame()->SetCallback(run_loop.QuitClosure());
   gfx::Rect rect =
       service()->GetFirstRectForRange(widget(), gfx::Range(NSMakeRange(0, 32)));
-
-  EXPECT_EQ(1U, ipc_sink().message_count() - current_count);
-  EXPECT_TRUE(ipc_sink().GetUniqueMessageMatching(
-      TextInputClientMsg_FirstRectForCharacterRange::ID));
+  run_loop.Run();
   EXPECT_EQ(kSuccessValue, rect);
 }
 
 TEST_F(TextInputClientMacTest, TimeoutRectForRange) {
-  size_t current_count = ipc_sink().message_count();
+  base::RunLoop run_loop;
+  local_frame()->SetCallback(run_loop.QuitClosure());
   gfx::Rect rect =
       service()->GetFirstRectForRange(widget(), gfx::Range(NSMakeRange(0, 32)));
-  EXPECT_EQ(1U, ipc_sink().message_count() - current_count);
-  EXPECT_TRUE(ipc_sink().GetUniqueMessageMatching(
-      TextInputClientMsg_FirstRectForCharacterRange::ID));
+  run_loop.Run();
   EXPECT_EQ(gfx::Rect(), rect);
 }
 

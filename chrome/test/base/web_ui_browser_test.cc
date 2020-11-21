@@ -10,8 +10,8 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/files/file_util.h"
 #include "base/lazy_instance.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/path_service.h"
 #include "base/strings/string_util.h"
@@ -43,6 +43,7 @@
 #include "content/public/test/test_navigation_observer.h"
 #include "net/base/filename_util.h"
 #include "printing/buildflags/buildflags.h"
+#include "services/network/public/mojom/content_security_policy.mojom.h"
 #include "ui/base/resource/resource_handle.h"
 
 #if BUILDFLAG(ENABLE_PRINT_PREVIEW)
@@ -56,8 +57,8 @@ using content::WebUIMessageHandler;
 
 namespace {
 
-base::LazyInstance<std::vector<std::string>>::DestructorAtExit error_messages_ =
-    LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<std::vector<std::string>>::DestructorAtExit
+    g_error_messages = LAZY_INSTANCE_INITIALIZER;
 
 // Intercepts all log messages.
 bool LogHandler(int severity,
@@ -67,7 +68,7 @@ bool LogHandler(int severity,
                 const std::string& str) {
   if (severity == logging::LOG_ERROR && file &&
       std::string("CONSOLE") == file) {
-    error_messages_.Get().push_back(str);
+    g_error_messages.Get().push_back(str);
   }
 
   return false;
@@ -90,7 +91,7 @@ class WebUIJsInjectionReadyObserver : public content::WebContentsObserver {
   }
 
  private:
-  BaseWebUIBrowserTest* browser_test_;
+  BaseWebUIBrowserTest* const browser_test_;
   std::string preload_test_fixture_;
   std::string preload_test_name_;
 };
@@ -100,7 +101,9 @@ class WebUITestMessageHandler : public content::WebUIMessageHandler,
                                 public WebUITestHandler {
  public:
   WebUITestMessageHandler() = default;
-  ~WebUITestMessageHandler() override {}
+  WebUITestMessageHandler(const WebUITestMessageHandler&) = delete;
+  WebUITestMessageHandler& operator=(const WebUITestMessageHandler&) = delete;
+  ~WebUITestMessageHandler() override = default;
 
   // Receives testResult messages.
   void HandleTestResult(const base::ListValue* test_result) {
@@ -125,14 +128,11 @@ class WebUITestMessageHandler : public content::WebUIMessageHandler,
   }
 
   content::WebUI* GetWebUI() override { return web_ui(); }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(WebUITestMessageHandler);
 };
 
 }  // namespace
 
-BaseWebUIBrowserTest::~BaseWebUIBrowserTest() {}
+BaseWebUIBrowserTest::~BaseWebUIBrowserTest() = default;
 
 bool BaseWebUIBrowserTest::RunJavascriptFunction(
     const std::string& function_name) {
@@ -174,8 +174,7 @@ bool BaseWebUIBrowserTest::RunJavascriptTestF(bool is_async,
 
   if (is_async)
     return RunJavascriptAsyncTest("RUN_TEST_F", std::move(args));
-  else
-    return RunJavascriptTest("RUN_TEST_F", std::move(args));
+  return RunJavascriptTest("RUN_TEST_F", std::move(args));
 }
 
 bool BaseWebUIBrowserTest::RunJavascriptTest(const std::string& test_name) {
@@ -291,13 +290,12 @@ class PrintContentBrowserClient : public ChromeContentBrowserClient {
       : browser_test_(browser_test),
         preload_test_fixture_(preload_test_fixture),
         preload_test_name_(preload_test_name),
-        preview_dialog_(nullptr),
         message_loop_runner_(
             base::MakeRefCounted<content::MessageLoopRunner>()) {}
 
   void Wait() {
     message_loop_runner_->Run();
-    content::WaitForLoadStop(preview_dialog_);
+    EXPECT_TRUE(content::WaitForLoadStop(preview_dialog_));
   }
 
  private:
@@ -312,11 +310,11 @@ class PrintContentBrowserClient : public ChromeContentBrowserClient {
     return nullptr;
   }
 
-  BaseWebUIBrowserTest* browser_test_;
+  BaseWebUIBrowserTest* const browser_test_;
   std::unique_ptr<WebUIJsInjectionReadyObserver> observer_;
   std::string preload_test_fixture_;
   std::string preload_test_name_;
-  content::WebContents* preview_dialog_;
+  content::WebContents* preview_dialog_ = nullptr;
   scoped_refptr<content::MessageLoopRunner> message_loop_runner_;
 };
 #endif
@@ -347,8 +345,7 @@ void BaseWebUIBrowserTest::BrowsePrintPreload(const GURL& browse_to) {
 #endif
 }
 
-BaseWebUIBrowserTest::BaseWebUIBrowserTest()
-    : libraries_preloaded_(false), override_selected_web_ui_(nullptr) {}
+BaseWebUIBrowserTest::BaseWebUIBrowserTest() = default;
 
 void BaseWebUIBrowserTest::set_preload_test_fixture(
     const std::string& preload_test_fixture) {
@@ -377,8 +374,10 @@ const GURL& DummyUrl() {
 // event).
 class MockWebUIDataSource : public content::URLDataSource {
  public:
-  MockWebUIDataSource() {}
-  ~MockWebUIDataSource() override {}
+  MockWebUIDataSource() = default;
+  MockWebUIDataSource(const MockWebUIDataSource&) = delete;
+  MockWebUIDataSource& operator=(const MockWebUIDataSource&) = delete;
+  ~MockWebUIDataSource() override = default;
 
  private:
   std::string GetSource() override { return "dummyurl"; }
@@ -400,11 +399,18 @@ class MockWebUIDataSource : public content::URLDataSource {
   // Append 'unsave-eval' to the default script-src CSP policy, since it is
   // needed by some tests using chrome://dummyurl (because they depend on
   // Mock4JS, see crbug.com/844820).
-  std::string GetContentSecurityPolicyScriptSrc() override {
-    return "script-src chrome://resources 'self' 'unsafe-eval';";
-  }
+  std::string GetContentSecurityPolicy(
+      const network::mojom::CSPDirectiveName directive) override {
+    if (directive == network::mojom::CSPDirectiveName::ScriptSrc) {
+      return "script-src chrome://resources 'self' 'unsafe-eval';";
+    } else if (directive ==
+                   network::mojom::CSPDirectiveName::RequireTrustedTypesFor ||
+               directive == network::mojom::CSPDirectiveName::TrustedTypes) {
+      return std::string();
+    }
 
-  DISALLOW_COPY_AND_ASSIGN(MockWebUIDataSource);
+    return content::URLDataSource::GetContentSecurityPolicy(directive);
+  }
 };
 
 // WebUIProvider to allow attaching the DataSource for the dummy URL when
@@ -413,6 +419,8 @@ class MockWebUIProvider
     : public TestChromeWebUIControllerFactory::WebUIProvider {
  public:
   MockWebUIProvider() = default;
+  MockWebUIProvider(const MockWebUIProvider&) = delete;
+  MockWebUIProvider& operator=(const MockWebUIProvider&) = delete;
   ~MockWebUIProvider() override = default;
 
   // Returns a new WebUI
@@ -422,9 +430,6 @@ class MockWebUIProvider
                                 std::make_unique<MockWebUIDataSource>());
     return std::make_unique<content::WebUIController>(web_ui);
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(MockWebUIProvider);
 };
 
 base::LazyInstance<MockWebUIProvider>::DestructorAtExit mock_provider_ =
@@ -530,15 +535,15 @@ bool BaseWebUIBrowserTest::RunJavascriptUsingHandler(
   else
     test_handler_->RunJavaScript(content);
 
-  if (error_messages_.Get().size() > 0) {
+  if (g_error_messages.Get().size() > 0) {
     LOG(ERROR) << "CONDITION FAILURE: encountered javascript console error(s):";
-    for (const auto& msg : error_messages_.Get()) {
+    for (const auto& msg : g_error_messages.Get()) {
       LOG(ERROR) << "JS ERROR: '" << msg << "'";
     }
     LOG(ERROR) << "JS call assumed failed, because JS console error(s) found.";
 
     result = false;
-    error_messages_.Get().clear();
+    g_error_messages.Get().clear();
   }
   return result;
 }
@@ -563,7 +568,7 @@ void WebUIBrowserTest::SetupHandlers() {
       override_selected_web_ui()
           ? override_selected_web_ui()
           : browser()->tab_strip_model()->GetActiveWebContents()->GetWebUI();
-  ASSERT_TRUE(web_ui_instance != nullptr);
+  ASSERT_TRUE(web_ui_instance);
 
   test_message_handler_->set_web_ui(web_ui_instance);
   test_message_handler_->RegisterMessages();

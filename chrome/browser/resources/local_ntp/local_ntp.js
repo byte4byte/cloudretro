@@ -194,6 +194,13 @@ const MAX_NUM_TILES_CUSTOM_LINKS = 10;
 const MAX_NUM_TILES_MOST_VISITED = 8;
 
 /**
+ * Indicates a missing suggestion group Id. Based on
+ * SearchSuggestionParser::kNoSuggestionGroupId.
+ * @type {number}
+ */
+const NO_SUGGESTION_GROUP_ID = -1;
+
+/**
  * The period of time (ms) before the Most Visited notification is hidden.
  * @type {number}
  */
@@ -1675,31 +1682,30 @@ function renderAutocompleteMatches(matches, suggestionGroupsMap) {
   suggestionGroupElsMap = {};
 
   /**
-   * Creates and returns a remove button that once clicked invokes |callback|.
+   * Creates and returns an action button that once clicked invokes |callback|.
    * @param {!function()} callback
    */
-  function createRemoveButton(callback) {
-    const icon = document.createElement('button');
-    icon.title = configData.translatedStrings.removeSuggestion;
+  function createActionButton(callback) {
+    const icon = document.createElement('div');
     icon.classList.add(CLASSES.REMOVE_ICON);
-    icon.onmousedown = e => {
+    const action = document.createElement('button');
+    action.classList.add(CLASSES.REMOVE_MATCH);
+    action.appendChild(icon);
+    action.onmousedown = e => {
       e.preventDefault();  // Stops default browser action (focus)
     };
-    icon.onauxclick = e => {
+    action.onauxclick = e => {
       if (e.button == 1) {
         // Middle click on delete should just noop for now (matches omnibox).
         e.preventDefault();
       }
     };
-    icon.onclick = e => {
+    action.onclick = e => {
       callback();
       e.preventDefault();  // Stops default browser action (navigation)
     };
 
-    const remove = document.createElement('div');
-    remove.classList.add(CLASSES.REMOVE_MATCH);
-    remove.appendChild(icon);
-    return remove;
+    return action;
   }
 
   /**
@@ -1714,20 +1720,41 @@ function renderAutocompleteMatches(matches, suggestionGroupsMap) {
 
     const suggestionGroup = assert(suggestionGroupsMap[suggestionGroupId]);
 
+    /**
+     * Updates the tooltip and a11y label of the suggestion group toggle button.
+     * @param {!Element} toggleButtonEl
+     * @param {boolean} groupIsHidden
+     */
+    function updateToggleButtonA11y(toggleButtonEl, groupIsHidden) {
+      toggleButtonEl.title = groupIsHidden ?
+          configData.translatedStrings.showSuggestions :
+          configData.translatedStrings.hideSuggestions;
+      toggleButtonEl.ariaLabel = utils.substituteString(
+          groupIsHidden ? configData.translatedStrings.showSection :
+                          configData.translatedStrings.hideSection,
+          suggestionGroup.header);
+    }
+
     const groupEl = document.createElement('div');
     groupEl.classList.toggle(CLASSES.COLLAPSED, suggestionGroup.hidden);
     const headerEl = document.createElement('a');
     headerEl.classList.add(CLASSES.HEADER);
+    // The header cannot be tabbed into but it will get focus when clicked;
+    // preventing the popup from losing focus and closing as a result.
+    headerEl.tabIndex = -1;
     headerEl.append(document.createTextNode(suggestionGroup.header));
-    if (configData.suggestionTransparencyEnabled) {
-      const remove = createRemoveButton(() => {
-        groupEl.classList.toggle(CLASSES.COLLAPSED);
-        window.chrome.embeddedSearch.searchBox
-            .toggleSuggestionGroupIdVisibility(suggestionGroupId);
-      });
-      headerEl.appendChild(remove);
-      realboxMatchesEl.classList.add(CLASSES.REMOVABLE);
-    }
+
+    const toggle = createActionButton(() => {
+      groupEl.classList.toggle(CLASSES.COLLAPSED);
+      updateToggleButtonA11y(
+          toggle, groupEl.classList.contains(CLASSES.COLLAPSED));
+      window.chrome.embeddedSearch.searchBox.toggleSuggestionGroupIdVisibility(
+          suggestionGroupId);
+    });
+    updateToggleButtonA11y(toggle, suggestionGroup.hidden);
+    headerEl.appendChild(toggle);
+    realboxMatchesEl.classList.add(CLASSES.REMOVABLE);
+
     groupEl.appendChild(headerEl);
     realboxMatchesEl.appendChild(groupEl);
     suggestionGroupElsMap[suggestionGroupId] = groupEl;
@@ -1821,15 +1848,17 @@ function renderAutocompleteMatches(matches, suggestionGroupsMap) {
       }
     }
 
-    if (match.supportsDeletion && configData.suggestionTransparencyEnabled) {
-      const remove = createRemoveButton(() => {
+    if (match.supportsDeletion) {
+      const remove = createActionButton(() => {
         window.chrome.embeddedSearch.searchBox.deleteAutocompleteMatch(i);
       });
+      remove.title = configData.translatedStrings.removeSuggestion;
       matchEl.appendChild(remove);
       realboxMatchesEl.classList.add(CLASSES.REMOVABLE);
     }
 
-    if (match.suggestionGroupId) {
+    if (match.suggestionGroupId &&
+        match.suggestionGroupId !== NO_SUGGESTION_GROUP_ID) {
       const groupEl = createSuggestionGroupEl(match.suggestionGroupId);
       groupEl.append(matchEl);
     } else {

@@ -7,6 +7,7 @@
 
 #include "third_party/blink/renderer/platform/bindings/active_script_wrappable_base.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 
 namespace blink {
 
@@ -22,6 +23,8 @@ class LivenessBroker;
 class PLATFORM_EXPORT ActiveScriptWrappableManager final
     : public GarbageCollected<ActiveScriptWrappableManager> {
  public:
+  enum class RecomputeMode { kOpportunistic, kRequired };
+
   // Adds an ActiveScriptWrappable to the set that is managed by
   // ActiveScriptWrappableManager.
   void Add(ActiveScriptWrappableBase* wrappable) {
@@ -38,27 +41,39 @@ class PLATFORM_EXPORT ActiveScriptWrappableManager final
   // Recomputes the current set of active ScriptWrappable objects that should be
   // kept alive by the manager because there's some activity pending.
   //
+  // If called with RecomputeMode::kOpportunistic, recomputation may be skipped.
+  //
   // Called during GC prologue. Not allowed to allocate.
-  void RecomputeActiveScriptWrappables();
+  void RecomputeActiveScriptWrappables(RecomputeMode);
 
   // Iterate the current set of active ScriptWrappable objects.
   //
   // Does not allocate.
   void IterateActiveScriptWrappables(Visitor*);
 
-  void Trace(Visitor* visitor);
+  void Trace(Visitor* visitor) const;
 
  private:
   // Called during weakness processing. Not allowed to allocate. The next Add()
   // call ensures reasonable capacities.
   //
   // Does not allocate.
-  void CleanupInactiveAndClearActiveScriptWrappables(
-      const LivenessBroker& info);
+  void CleanupInactiveAndClearActiveScriptWrappables(const LivenessBroker&);
 
+  // We use a single HeapVector to always have storage for the strong Member<>
+  // reference available. The alternative is keeping separate data structures
+  // and synchronize their capacities in Add(). We use UntracedMember<> as a
+  // weak references that is cleared in
+  // CleanupInactiveAndClearActiveScriptWrappables. WeakMember would require
+  // using a HeapHashSet which is slower to iterate. In addition, we already
+  // require a custom callback for clearing out the Member<> reference, so we
+  // can clear the UntracedMember<> there as well.
   HeapVector<std::pair<UntracedMember<const ActiveScriptWrappableBase>,
                        Member<const ActiveScriptWrappableBase>>>
       active_script_wrappables_;
+
+  // Count how often ASWs have been recomputed in the current GC cycle.
+  size_t recomputed_cnt_ = 0;
 };
 
 }  // namespace blink

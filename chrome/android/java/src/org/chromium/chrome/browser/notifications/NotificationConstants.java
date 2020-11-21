@@ -55,8 +55,9 @@ public class NotificationConstants {
     @SuppressWarnings("unused")
     public static final int NOTIFICATION_ID_SIGNED_IN = 2;
     /**
-     * Unique identifier for the Physical Web notification.
+     * Unique identifier for the Physical Web notification. No longer used.
      */
+    @SuppressWarnings("unused")
     public static final int NOTIFICATION_ID_PHYSICAL_WEB = 3;
 
     /**
@@ -114,6 +115,18 @@ public class NotificationConstants {
      * Unique identifier for ClickToCall error notification.
      */
     public static final int NOTIFICATION_ID_CLICK_TO_CALL_ERROR = 12;
+
+    /**
+     * Unique identifier for the high priority "Running in Chrome" notification displayed the first
+     * time a TWA is run.
+     */
+    public static final int NOTIFICATION_ID_TWA_DISCLOSURE_INITIAL = 13;
+
+    /**
+     * Unique identifier for the low priority "Running in Chrome" notifications that are disabled
+     * subsequent times a TWA is run.
+     */
+    public static final int NOTIFICATION_ID_TWA_DISCLOSURE_SUBSEQUENT = 14;
 
     /**
      * Separator used to separate the notification origin from additional data such as the

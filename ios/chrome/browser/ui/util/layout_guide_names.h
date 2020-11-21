@@ -44,9 +44,6 @@ extern GuideName* const kNewTabButtonGuide;
 // A guide that is constrained to match the frame of the TabSwitcher button's
 // image.
 extern GuideName* const kTabSwitcherGuide;
-// A guide that is constrained to match the frame of the TabStrip's TabSwitcher
-// button's image.
-extern GuideName* const kTabStripTabSwitcherGuide;
 // A guide that is constrained to match the frame of the ToolsMenu button.
 extern GuideName* const kToolsMenuGuide;
 // A guide that is constrained to match the frame of the translate infobar
@@ -55,5 +52,11 @@ extern GuideName* const kTranslateInfobarOptionsGuide;
 // A guide that is constrained to match the frame of the last-tapped voice
 // search button.
 extern GuideName* const kVoiceSearchButtonGuide;
+// A guide that is constrained to match the frame of the Discover feed header's
+// top-level menu button.
+extern GuideName* const kDiscoverFeedHeaderMenuGuide;
+// A guide that is constrained to match the frame of the location view in the
+// primary toolbar (i.e. the Address Bar).
+extern GuideName* const kPrimaryToolbarLocationViewGuide;
 
 #endif  // IOS_CHROME_BROWSER_UI_UTIL_LAYOUT_GUIDE_NAMES_H_

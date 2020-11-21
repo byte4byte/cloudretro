@@ -6,8 +6,8 @@
 #define EXTENSIONS_COMMON_CONSTANTS_H_
 
 #include "base/files/file_path.h"
-#include "base/logging.h"
 #include "base/strings/string_piece_forward.h"
+#include "build/chromeos_buildflags.h"
 #include "components/services/app_service/public/mojom/types.mojom.h"
 #include "components/version_info/channel.h"
 #include "ui/base/layout.h"
@@ -210,16 +210,34 @@ extern const char kLacrosAppId[];
 // The extension id of the Files Manager application.
 extern const char kFilesManagerAppId[];
 
+// The extension id of the Calculator application.
+extern const char kCalculatorAppId[];
+
+// The extension id of the demo Calendar application.
+extern const char kCalendarDemoAppId[];
+
+// The extension id of the GMail application.
+extern const char kGMailAppId[];
+
+// The extension id of the demo Google Docs application.
+extern const char kGoogleDocsDemoAppId[];
+
+// The extension id of the Google Drive application.
+extern const char kGoogleDriveAppId[];
+
+// The extension id of the demo Google Sheets application.
+extern const char kGoogleSheetsDemoAppId[];
+
+// The extension id of the demo Google Slides application.
+extern const char kGoogleSlidesDemoAppId[];
+
 // The extension id of the Google Keep application.
 extern const char kGoogleKeepAppId[];
 
 // The extension id of the Youtube application.
 extern const char kYoutubeAppId[];
 
-// The extension id of the genius (Get Help) app.
-extern const char kGeniusAppId[];
-
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 // The extension id of the default Demo Mode Highlights app.
 extern const char kHighlightsAppId[];
 
@@ -229,8 +247,8 @@ extern const char kHighlightsEveAppId[];
 // The extension id of the nocturne Demo Mode Highlights app.
 extern const char kHighlightsNocturneAppId[];
 
-// The extension id of an alternate Demo Mode Highlights app.
-extern const char kHighlightsAltAppId[];
+// The extension id of the atlas Demo Mode Highlights app.
+extern const char kHighlightsAtlasAppId[];
 
 // The extension id of the default Demo Mode screensaver app.
 extern const char kScreensaverAppId[];
@@ -246,6 +264,9 @@ extern const char kScreensaverAtlasAppId[];
 
 // The extension id of the kukui Demo Mode screensaver app.
 extern const char kScreensaverKukuiAppId[];
+
+// The id of the testing extension allowed in the signin profile.
+extern const char kSigninProfileTestExtensionId[];
 
 // Returns true if this app is part of the "system UI". Generally this is UI
 // that that on other operating systems would be considered part of the OS,
@@ -270,7 +291,11 @@ extern const logging::LogSeverity kMinimumSeverityToReportError;
 
 // The minimum channel where Service Worker based extensions can run.
 constexpr version_info::Channel kMinChannelForServiceWorkerBasedExtension =
-    version_info::Channel::DEV;
+    version_info::Channel::STABLE;
+
+// IDs for the Media Router Component Extension.
+extern const char kCastExtensionIdRelease[];
+extern const char kCastExtensionIdDev[];
 
 }  // namespace extension_misc
 

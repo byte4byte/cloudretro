@@ -36,10 +36,10 @@ ParseCommitmentsFromCommandLine() {
           raw_commitments)) {
     return std::move(*parsed);
   } else {
-    // Crash loudly here because the user presumably only provides key
+    // Complain loudly here because the user presumably only provides key
     // commitments through the command line out of a desire to _use_ the key
     // commitments.
-    LOG(FATAL)
+    LOG(ERROR)
         << "Couldn't parse Trust Tokens key commitments from the command line: "
         << raw_commitments;
   }
@@ -48,15 +48,14 @@ ParseCommitmentsFromCommandLine() {
 
 // Filters |result->keys| to contain only a small number of
 // soon-to-expire-but-not-yet-expired keys, then passes |result| to |done|.
-void ReturnCommitmentsAfterFiltering(
-    base::OnceCallback<void(mojom::TrustTokenKeyCommitmentResultPtr)> done,
+mojom::TrustTokenKeyCommitmentResultPtr FilterCommitments(
     mojom::TrustTokenKeyCommitmentResultPtr result) {
   if (result) {
-    RetainSoonestToExpireTrustTokenKeys(
-        &result->keys, kMaximumConcurrentlyValidTrustTokenVerificationKeys);
+    size_t max_keys = TrustTokenMaxKeysForVersion(result->protocol_version);
+    RetainSoonestToExpireTrustTokenKeys(&result->keys, max_keys);
   }
 
-  std::move(done).Run(std::move(result));
+  return result;
 }
 
 }  // namespace
@@ -105,28 +104,30 @@ void TrustTokenKeyCommitments::Get(
     const url::Origin& origin,
     base::OnceCallback<void(mojom::TrustTokenKeyCommitmentResultPtr)> done)
     const {
+  std::move(done).Run(GetSync(origin));
+}
+
+mojom::TrustTokenKeyCommitmentResultPtr TrustTokenKeyCommitments::GetSync(
+    const url::Origin& origin) const {
   base::Optional<SuitableTrustTokenOrigin> suitable_origin =
       SuitableTrustTokenOrigin::Create(origin);
   if (!suitable_origin) {
-    std::move(done).Run(nullptr);
-    return;
+    return nullptr;
   }
 
   if (!additional_commitments_from_command_line_.empty()) {
     auto it = additional_commitments_from_command_line_.find(*suitable_origin);
-    if (it != commitments_.end()) {
-      ReturnCommitmentsAfterFiltering(std::move(done), it->second->Clone());
-      return;
+    if (it != additional_commitments_from_command_line_.end()) {
+      return FilterCommitments(it->second->Clone());
     }
   }
 
   auto it = commitments_.find(*suitable_origin);
   if (it == commitments_.end()) {
-    std::move(done).Run(nullptr);
-    return;
+    return nullptr;
   }
 
-  ReturnCommitmentsAfterFiltering(std::move(done), it->second->Clone());
+  return FilterCommitments(it->second->Clone());
 }
 
 }  // namespace network

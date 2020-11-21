@@ -15,12 +15,12 @@
 #include "base/compiler_specific.h"
 #include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string16.h"
 #include "base/values.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/profiles/profile_attributes_entry.h"
 #include "chrome/browser/profiles/profile_attributes_storage.h"
 #include "chrome/browser/profiles/profile_info_cache_observer.h"
@@ -48,6 +48,8 @@ class ProfileInfoCache : public ProfileInfoInterface,
                          public base::SupportsWeakPtr<ProfileInfoCache> {
  public:
   ProfileInfoCache(PrefService* prefs, const base::FilePath& user_data_dir);
+  ProfileInfoCache(const ProfileInfoCache&) = delete;
+  ProfileInfoCache& operator=(const ProfileInfoCache&) = delete;
   ~ProfileInfoCache() override;
 
   // If the |supervised_user_id| is non-empty, the profile will be marked to be
@@ -127,6 +129,7 @@ class ProfileInfoCache : public ProfileInfoInterface,
   void NotifyIfProfileNamesHaveChanged();
   void NotifyProfileSupervisedUserIdChanged(const base::FilePath& profile_path);
   void NotifyProfileIsOmittedChanged(const base::FilePath& profile_path);
+  void NotifyProfileThemeColorsChanged(const base::FilePath& profile_path);
 
  private:
   FRIEND_TEST_ALL_PREFIXES(ProfileAttributesStorageTest,
@@ -174,7 +177,7 @@ class ProfileInfoCache : public ProfileInfoInterface,
   void LoadGAIAPictureIfNeeded();
 #endif
 
-#if !defined(OS_ANDROID) && !defined(OS_CHROMEOS)
+#if !defined(OS_ANDROID) && !BUILDFLAG(IS_CHROMEOS_ASH)
   // Migrate any legacy profile names ("First user", "Default Profile") to
   // new style default names ("Person 1"). Rename any duplicates of "Person n"
   // i.e. Two or more profiles with the profile name "Person 1" would be
@@ -183,13 +186,11 @@ class ProfileInfoCache : public ProfileInfoInterface,
   static void SetLegacyProfileMigrationForTesting(bool value);
 
   std::unique_ptr<signin::PersistentRepeatingTimer> repeating_timer_;
-#endif  // !defined(OS_ANDROID) && !defined(OS_CHROMEOS)
+#endif  // !defined(OS_ANDROID) && !BUILDFLAG(IS_CHROMEOS_ASH)
 
   std::vector<std::string> keys_;
   const base::FilePath user_data_dir_;
   base::WeakPtrFactory<ProfileInfoCache> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(ProfileInfoCache);
 };
 
 #endif  // CHROME_BROWSER_PROFILES_PROFILE_INFO_CACHE_H_

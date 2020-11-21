@@ -10,6 +10,7 @@
 #include "base/command_line.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/string_util.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
@@ -18,6 +19,7 @@
 #include "components/keyed_service/core/service_access_type.h"
 #include "components/safe_browsing/buildflags.h"
 #include "components/safe_browsing/core/db/v4_local_database_manager.h"
+#include "components/safe_browsing/core/features.h"
 #include "components/safe_browsing/core/verdict_cache_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
@@ -49,17 +51,6 @@ ServicesDelegateDesktop::ServicesDelegateDesktop(
 
 ServicesDelegateDesktop::~ServicesDelegateDesktop() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-}
-
-void ServicesDelegateDesktop::InitializeCsdService(
-    scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory) {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-#if BUILDFLAG(SAFE_BROWSING_CSD)
-  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
-          ::switches::kDisableClientSidePhishingDetection)) {
-    csd_service_ = ClientSideDetectionService::Create(url_loader_factory);
-  }
-#endif  // BUILDFLAG(SAFE_BROWSING_CSD)
 }
 
 ExtendedReportingLevel
@@ -111,11 +102,6 @@ void ServicesDelegateDesktop::ShutdownServices() {
 
   download_service_.reset();
 
-  // The IO thread is going away, so make sure the ClientSideDetectionService
-  // dtor executes now since it may call the dtor of URLFetcher which relies
-  // on it.
-  csd_service_.reset();
-
   resource_request_detector_.reset();
   incident_service_.reset();
 
@@ -124,8 +110,6 @@ void ServicesDelegateDesktop::ShutdownServices() {
 
 void ServicesDelegateDesktop::RefreshState(bool enable) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  if (csd_service_)
-    csd_service_->SetEnabledAndRefreshState(enable);
   if (download_service_)
     download_service_->SetEnabled(enable);
 }
@@ -144,20 +128,15 @@ ServicesDelegateDesktop::CreatePreferenceValidationDelegate(Profile* profile) {
 }
 
 void ServicesDelegateDesktop::RegisterDelayedAnalysisCallback(
-    const DelayedAnalysisCallback& callback) {
+    DelayedAnalysisCallback callback) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  incident_service_->RegisterDelayedAnalysisCallback(callback);
+  incident_service_->RegisterDelayedAnalysisCallback(std::move(callback));
 }
 
 void ServicesDelegateDesktop::AddDownloadManager(
     content::DownloadManager* download_manager) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   incident_service_->AddDownloadManager(download_manager);
-}
-
-ClientSideDetectionService* ServicesDelegateDesktop::GetCsdService() {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  return csd_service_.get();
 }
 
 DownloadProtectionService* ServicesDelegateDesktop::GetDownloadService() {
@@ -191,9 +170,14 @@ ServicesDelegateDesktop::CreateResourceRequestDetector() {
 }
 
 void ServicesDelegateDesktop::StartOnIOThread(
-    scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
+    scoped_refptr<network::SharedURLLoaderFactory> sb_url_loader_factory,
+    scoped_refptr<network::SharedURLLoaderFactory> browser_url_loader_factory,
     const V4ProtocolConfig& v4_config) {
-  database_manager_->StartOnIOThread(url_loader_factory, v4_config);
+  if (base::FeatureList::IsEnabled(kSafeBrowsingRemoveCookies)) {
+    database_manager_->StartOnIOThread(browser_url_loader_factory, v4_config);
+  } else {
+    database_manager_->StartOnIOThread(sb_url_loader_factory, v4_config);
+  }
 }
 
 void ServicesDelegateDesktop::StopOnIOThread(bool shutdown) {

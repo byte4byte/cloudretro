@@ -17,6 +17,7 @@ import android.provider.Settings;
 import android.view.ViewGroup;
 import android.webkit.CookieManager;
 import android.webkit.GeolocationPermissions;
+import android.webkit.PacProcessor;
 import android.webkit.ServiceWorkerController;
 import android.webkit.TokenBindingService;
 import android.webkit.TracingController;
@@ -32,6 +33,7 @@ import com.android.webview.chromium.WebViewDelegateFactory.WebViewDelegate;
 
 import org.chromium.android_webview.AwBrowserContext;
 import org.chromium.android_webview.AwBrowserProcess;
+import org.chromium.android_webview.AwContentsStatics;
 import org.chromium.android_webview.AwSettings;
 import org.chromium.android_webview.ProductConfig;
 import org.chromium.android_webview.WebViewChromiumRunQueue;
@@ -54,8 +56,8 @@ import org.chromium.base.library_loader.NativeLibraries;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.ScopedSysTraceEvent;
 import org.chromium.components.autofill.AutofillProvider;
-import org.chromium.components.autofill.AutofillProviderImpl;
 import org.chromium.components.embedder_support.application.ClassLoaderContextWrapperFactory;
+import org.chromium.components.embedder_support.application.FirebaseConfig;
 import org.chromium.content_public.browser.LGEmailActionModeWorkaround;
 
 import java.io.File;
@@ -316,17 +318,21 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
             }
 
             String webViewPackageName = AwBrowserProcess.getWebViewPackageName();
+            long developerModeStart = SystemClock.elapsedRealtime();
             boolean isDeveloperModeEnabled =
                     DeveloperModeUtils.isDeveloperModeEnabled(webViewPackageName);
+            long developerModeEnd = SystemClock.elapsedRealtime();
+            RecordHistogram.recordTimesHistogram("Android.WebView.DevUi.DeveloperModeBlockingTime",
+                    developerModeEnd - developerModeStart);
             RecordHistogram.recordBooleanHistogram(
                     "Android.WebView.DevUi.DeveloperModeEnabled", isDeveloperModeEnabled);
+            Map<String, Boolean> flagOverrides = null;
             if (isDeveloperModeEnabled) {
                 long start = SystemClock.elapsedRealtime();
                 try {
                     FlagOverrideHelper helper =
                             new FlagOverrideHelper(ProductionSupportedFlagList.sFlagList);
-                    Map<String, Boolean> flagOverrides =
-                            DeveloperModeUtils.getFlagOverrides(webViewPackageName);
+                    flagOverrides = DeveloperModeUtils.getFlagOverrides(webViewPackageName);
                     helper.applyFlagOverrides(flagOverrides);
 
                     RecordHistogram.recordCount100Histogram(
@@ -340,6 +346,8 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
 
             ThreadUtils.setWillOverrideUiThread(true);
             BuildInfo.setBrowserPackageInfo(packageInfo);
+            BuildInfo.setFirebaseAppId(
+                    FirebaseConfig.getFirebaseAppIdForPackage(packageInfo.packageName));
 
             try (StrictModeContext ignored = StrictModeContext.allowDiskWrites()) {
                 try (ScopedSysTraceEvent e2 = ScopedSysTraceEvent.scoped(
@@ -360,6 +368,10 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
             }
 
             // Now safe to use WebView data directory.
+
+            if (flagOverrides != null) {
+                AwContentsStatics.logFlagOverridesWithNative(flagOverrides);
+            }
 
             mAwInit.startVariationsInit();
 
@@ -490,7 +502,7 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
                     @Override
                     public void setSafeBrowsingWhitelist(
                             List<String> urls, ValueCallback<Boolean> callback) {
-                        sharedStatics.setSafeBrowsingWhitelist(
+                        sharedStatics.setSafeBrowsingAllowlist(
                                 urls, CallbackConverter.fromValueCallback(callback));
                     }
 
@@ -611,7 +623,7 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
 
     AutofillProvider createAutofillProvider(Context context, ViewGroup containerView) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return null;
-        return new AutofillProviderImpl(context, containerView, "Android WebView");
+        return new AutofillProvider(context, containerView, "Android WebView");
     }
 
     void startYourEngines(boolean onMainThread) {
@@ -696,5 +708,10 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
         getSingleton().addTask(() -> {
             getSingleton().getBrowserContextOnUiThread().setWebLayerRunningInSameProcess();
         });
+    }
+
+    @Override
+    public PacProcessor getPacProcessor() {
+        return GlueApiHelperForR.getPacProcessor();
     }
 }

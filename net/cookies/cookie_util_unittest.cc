@@ -7,7 +7,7 @@
 
 #include "base/callback.h"
 #include "base/strings/string_split.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "net/cookies/cookie_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -222,6 +222,36 @@ TEST(CookieUtilTest, TestRequestCookieParsing) {
     SCOPED_TRACE(testing::Message() << "Test " << i);
     CheckParse(tests[i].str, tests[i].parsed);
     CheckSerialize(tests[i].parsed, tests[i].str);
+  }
+}
+
+TEST(CookieUtilTest, CookieDomainAndPathToURL) {
+  struct {
+    std::string domain;
+    std::string path;
+    bool is_https;
+    std::string expected_url;
+  } kTests[]{
+      {"a.com", "/", true, "https://a.com/"},
+      {"a.com", "/", false, "http://a.com/"},
+      {".a.com", "/", true, "https://a.com/"},
+      {".a.com", "/", false, "http://a.com/"},
+      {"b.a.com", "/", true, "https://b.a.com/"},
+      {"b.a.com", "/", false, "http://b.a.com/"},
+      {"a.com", "/example/path", true, "https://a.com/example/path"},
+      {".a.com", "/example/path", false, "http://a.com/example/path"},
+      {"b.a.com", "/example/path", true, "https://b.a.com/example/path"},
+      {".b.a.com", "/example/path", false, "http://b.a.com/example/path"},
+  };
+
+  for (auto& test : kTests) {
+    GURL url1 = cookie_util::CookieDomainAndPathToURL(test.domain, test.path,
+                                                      test.is_https);
+    GURL url2 = cookie_util::CookieDomainAndPathToURL(
+        test.domain, test.path, std::string(test.is_https ? "https" : "http"));
+    // Test both overloads for equality.
+    EXPECT_EQ(url1, url2);
+    EXPECT_EQ(url1, GURL(test.expected_url));
   }
 }
 
@@ -1211,18 +1241,17 @@ TEST(CookieUtilTest, TestComputeSameSiteContextForSubresource) {
                 false /* force_ignore_site_for_cookies */));
 }
 
-TEST(CookieUtilTest, AdaptCookieInclusionStatusToBool) {
+TEST(CookieUtilTest, AdaptCookieAccessResultToBool) {
   bool result_out = true;
   base::OnceCallback<void(bool)> callback = base::BindLambdaForTesting(
       [&result_out](bool result) { result_out = result; });
 
-  base::OnceCallback<void(CanonicalCookie::CookieInclusionStatus)>
-      adapted_callback =
-          cookie_util::AdaptCookieInclusionStatusToBool(std::move(callback));
+  base::OnceCallback<void(CookieAccessResult)> adapted_callback =
+      cookie_util::AdaptCookieAccessResultToBool(std::move(callback));
 
   std::move(adapted_callback)
-      .Run(CanonicalCookie::CookieInclusionStatus(
-          CanonicalCookie::CookieInclusionStatus::EXCLUDE_UNKNOWN_ERROR));
+      .Run(CookieAccessResult(
+          CookieInclusionStatus(CookieInclusionStatus::EXCLUDE_UNKNOWN_ERROR)));
 
   EXPECT_FALSE(result_out);
 
@@ -1231,9 +1260,9 @@ TEST(CookieUtilTest, AdaptCookieInclusionStatusToBool) {
       [&result_out](bool result) { result_out = result; });
 
   adapted_callback =
-      cookie_util::AdaptCookieInclusionStatusToBool(std::move(callback));
+      cookie_util::AdaptCookieAccessResultToBool(std::move(callback));
 
-  std::move(adapted_callback).Run(CanonicalCookie::CookieInclusionStatus());
+  std::move(adapted_callback).Run(CookieAccessResult());
 
   EXPECT_TRUE(result_out);
 }

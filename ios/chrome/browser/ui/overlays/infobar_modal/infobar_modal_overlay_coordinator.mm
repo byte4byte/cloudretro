@@ -5,8 +5,8 @@
 #import "ios/chrome/browser/ui/overlays/infobar_modal/infobar_modal_overlay_coordinator.h"
 #import "ios/chrome/browser/ui/overlays/infobar_modal/infobar_modal_overlay_coordinator+modal_configuration.h"
 
-#include "base/logging.h"
 #include "base/mac/foundation_util.h"
+#include "base/notreached.h"
 #import "ios/chrome/browser/ui/infobars/presentation/infobar_modal_positioner.h"
 #import "ios/chrome/browser/ui/infobars/presentation/infobar_modal_transition_driver.h"
 #import "ios/chrome/browser/ui/overlays/infobar_modal/infobar_modal_overlay_mediator.h"
@@ -52,11 +52,13 @@
 - (void)stopAnimated:(BOOL)animated {
   if (!self.started)
     return;
+  // Mark started as NO before calling dismissal callback to prevent dup
+  // stopAnimated: executions.
+  self.started = NO;
   [self.baseViewController dismissViewControllerAnimated:animated
                                               completion:^{
                                                 [self finishDismissal];
                                               }];
-  self.started = NO;
 }
 
 - (UIViewController*)viewController {

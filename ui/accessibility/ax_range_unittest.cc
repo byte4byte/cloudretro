@@ -17,7 +17,7 @@
 #include "ui/accessibility/ax_tree.h"
 #include "ui/accessibility/ax_tree_id.h"
 #include "ui/accessibility/ax_tree_update.h"
-#include "ui/accessibility/platform/test_ax_node_wrapper.h"
+#include "ui/accessibility/test_ax_node_helper.h"
 #include "ui/accessibility/test_ax_tree_manager.h"
 
 namespace ui {
@@ -68,8 +68,8 @@ class TestAXRangeScreenRectDelegate : public AXRangeRectDelegate {
     if (!node)
       return gfx::Rect();
 
-    TestAXNodeWrapper* wrapper =
-        TestAXNodeWrapper::GetOrCreate(tree_manager_->GetTree(), node);
+    TestAXNodeHelper* wrapper =
+        TestAXNodeHelper::GetOrCreate(tree_manager_->GetTree(), node);
     return wrapper->GetInnerTextRangeBoundsRect(
         start_offset, end_offset, AXCoordinateSystem::kScreenDIPs,
         AXClippingBehavior::kClipped, offscreen_result);
@@ -85,8 +85,8 @@ class TestAXRangeScreenRectDelegate : public AXRangeRectDelegate {
     if (!node)
       return gfx::Rect();
 
-    TestAXNodeWrapper* wrapper =
-        TestAXNodeWrapper::GetOrCreate(tree_manager_->GetTree(), node);
+    TestAXNodeHelper* wrapper =
+        TestAXNodeHelper::GetOrCreate(tree_manager_->GetTree(), node);
     return wrapper->GetBoundsRect(AXCoordinateSystem::kScreenDIPs,
                                   AXClippingBehavior::kClipped,
                                   offscreen_result);
@@ -171,7 +171,7 @@ void AXRangeTest::SetUp() {
   button_.role = ax::mojom::Role::kButton;
   button_.SetHasPopup(ax::mojom::HasPopup::kMenu);
   button_.SetName(BUTTON);
-  button_.SetValue(BUTTON);
+  button_.SetNameFrom(ax::mojom::NameFrom::kValue);
   button_.relative_bounds.bounds = gfx::RectF(20, 20, 100, 30);
   button_.AddIntAttribute(ax::mojom::IntAttribute::kNextOnLineId,
                           check_box1_.id);
@@ -323,7 +323,7 @@ TEST_F(AXRangeTest, EqualityOperators) {
       GetTreeID(), button_.id, 0 /* text_offset */,
       ax::mojom::TextAffinity::kDownstream);
   TestPositionInstance test_position2 = AXNodePosition::CreateTextPosition(
-      GetTreeID(), line_break1_.id, 1 /* text_offset */,
+      GetTreeID(), text_field_.id, 7 /* text_offset */,
       ax::mojom::TextAffinity::kDownstream);
   TestPositionInstance test_position3 = AXNodePosition::CreateTextPosition(
       GetTreeID(), inline_box2_.id, 0 /* text_offset */,

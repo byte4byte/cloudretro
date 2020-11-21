@@ -67,6 +67,7 @@
     <output filename="values-sl/android_ui_strings.xml" lang="sl" type="android" />
     <output filename="values-sq/android_ui_strings.xml" lang="sq" type="android" />
     <output filename="values-sr/android_ui_strings.xml" lang="sr" type="android" />
+    <output filename="values-b+sr+Latn/android_ui_strings.xml" lang="sr-Latn" type="android" />
     <output filename="values-sv/android_ui_strings.xml" lang="sv" type="android" />
     <output filename="values-sw/android_ui_strings.xml" lang="sw" type="android" />
     <output filename="values-ta/android_ui_strings.xml" lang="ta" type="android" />
@@ -178,8 +179,11 @@
       <message name="IDS_COPY_TO_CLIPBOARD_FAILURE_MESSAGE" desc="Notification for when copying to the clipboard fails. [CHAR-LIMIT=64]">
         Failed to copy to the clipboard
       </message>
-      <message name="IDS_URL_COPIED" desc="Notification telling the user that the url has been copied to clipboard. [CHAR-LIMIT=32]">
-        URL copied
+      <message name="IDS_LINK_COPIED" desc="Notification telling the user that the url has been copied to clipboard. [CHAR-LIMIT=32]">
+        Link copied
+      </message>
+      <message name="IDS_CHIP_REMOVE_ICON_CONTENT_DESCRIPTION" desc="Accessibility string for X icon on a chip announcing that clicking on this icon will remove this input chip.">
+        Remove '<ph name="CHIP_LABEL">%1$s<ex>News</ex></ph>'
       </message>
     </messages>
   </release>

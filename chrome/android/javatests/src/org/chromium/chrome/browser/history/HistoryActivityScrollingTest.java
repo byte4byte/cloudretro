@@ -7,12 +7,10 @@ package org.chromium.chrome.browser.history;
 import static org.junit.Assume.assumeFalse;
 import static org.junit.Assume.assumeTrue;
 
-import android.support.test.espresso.intent.rule.IntentsTestRule;
-import android.support.test.filters.SmallTest;
-
 import androidx.recyclerview.widget.RecyclerView;
+import androidx.test.espresso.intent.rule.IntentsTestRule;
+import androidx.test.filters.SmallTest;
 
-import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Rule;
@@ -23,18 +21,19 @@ import org.chromium.base.test.params.ParameterAnnotations;
 import org.chromium.base.test.params.ParameterProvider;
 import org.chromium.base.test.params.ParameterSet;
 import org.chromium.base.test.params.ParameterizedRunner;
+import org.chromium.base.test.util.Batch;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Restriction;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.history.HistoryTestUtils.TestObserver;
-import org.chromium.chrome.browser.widget.DateDividedAdapter.FooterItem;
-import org.chromium.chrome.browser.widget.DateDividedAdapter.TimedItem;
 import org.chromium.chrome.test.ChromeJUnit4RunnerDelegate;
-import org.chromium.chrome.test.util.browser.RecyclerViewTestUtils;
-import org.chromium.chrome.test.util.browser.signin.SigninTestUtil;
+import org.chromium.chrome.test.util.browser.signin.AccountManagerTestRule;
+import org.chromium.components.browser_ui.widget.DateDividedAdapter.FooterItem;
+import org.chromium.components.browser_ui.widget.DateDividedAdapter.TimedItem;
 import org.chromium.components.browser_ui.widget.MoreProgressButton;
 import org.chromium.components.browser_ui.widget.MoreProgressButton.State;
+import org.chromium.components.browser_ui.widget.RecyclerViewTestUtils;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 import org.chromium.ui.test.util.UiRestriction;
 
@@ -50,6 +49,7 @@ import java.util.List;
  */
 // clang-format off
 @RunWith(ParameterizedRunner.class)
+@Batch(Batch.PER_CLASS)
 @ParameterAnnotations.UseRunnerDelegate(ChromeJUnit4RunnerDelegate.class)
 @CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 @Restriction(UiRestriction.RESTRICTION_TYPE_PHONE)
@@ -95,6 +95,9 @@ public class HistoryActivityScrollingTest {
         }
     }
 
+    @Rule
+    public final AccountManagerTestRule mAccountManagerTestRule = new AccountManagerTestRule();
+
     private StubbedHistoryProvider mHistoryProvider;
     private HistoryAdapter mAdapter;
     private HistoryManager mHistoryManager;
@@ -119,11 +122,11 @@ public class HistoryActivityScrollingTest {
 
     @Before
     public void setUp() throws Exception {
-        // Account not signed in by default. The clear browsing data header, one date view, and two
-        // history item views should be shown, but the info header should not. We enforce a defaultx
+        // Account not signed in by default, the AccountManagerTestRule above is used to setup
+        // the signin environment.
+        // The clear browsing data header, one date view, and two history item views
+        // should be shown, but the info header should not. We enforce a defaultx
         // state because the number of headers shown depends on the signed-in state.
-        SigninTestUtil.setUpAuthForTest();
-
         mHistoryProvider = new StubbedHistoryProvider();
         mHistoryProvider.setPaging(mPaging);
 
@@ -146,11 +149,6 @@ public class HistoryActivityScrollingTest {
         Assert.assertTrue("At least one item should be loaded to adapter", mOrigItemsCount > 0);
     }
 
-    @After
-    public void tearDown() {
-        SigninTestUtil.tearDownAuthForTest();
-    }
-
     private void launchHistoryActivity() {
         HistoryActivity activity = mActivityTestRule.launchActivity(null);
         mHistoryManager = activity.getHistoryManagerForTests();
@@ -158,7 +156,7 @@ public class HistoryActivityScrollingTest {
         mTestObserver = new TestObserver();
         mHistoryManager.getSelectionDelegateForTests().addObserver(mTestObserver);
         mAdapter.registerAdapterDataObserver(mTestObserver);
-        mRecyclerView = ((RecyclerView) activity.findViewById(R.id.recycler_view));
+        mRecyclerView = activity.findViewById(R.id.recycler_view);
     }
 
     @Test

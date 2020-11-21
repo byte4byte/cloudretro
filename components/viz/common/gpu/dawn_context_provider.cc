@@ -4,8 +4,12 @@
 
 #include "components/viz/common/gpu/dawn_context_provider.h"
 
-#include "base/logging.h"
+#include <memory>
+#include <vector>
+
+#include "base/check_op.h"
 #include "base/memory/ptr_util.h"
+#include "base/notreached.h"
 #include "build/build_config.h"
 #include "third_party/dawn/src/include/dawn/dawn_proc.h"
 
@@ -16,7 +20,7 @@ namespace {
 dawn_native::BackendType GetDefaultBackendType() {
 #if defined(OS_WIN)
   return dawn_native::BackendType::D3D12;
-#elif defined(OS_LINUX)
+#elif defined(OS_LINUX) || defined(OS_CHROMEOS)
   return dawn_native::BackendType::Vulkan;
 #else
   NOTREACHED();
@@ -40,7 +44,7 @@ DawnContextProvider::DawnContextProvider() {
   // MTLCreateSystemDefaultDevice().
   device_ = CreateDevice(GetDefaultBackendType());
   if (device_)
-    gr_context_ = GrContext::MakeDawn(device_);
+    gr_context_ = GrDirectContext::MakeDawn(device_);
 }
 
 DawnContextProvider::~DawnContextProvider() = default;

@@ -4,7 +4,7 @@
 
 #import "ios/chrome/browser/overlays/public/overlay_presenter_observer_bridge.h"
 
-#include "base/logging.h"
+#include "base/check.h"
 #include "ios/chrome/browser/overlays/public/overlay_request_support.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -30,10 +30,14 @@ const OverlayRequestSupport* OverlayPresenterObserverBridge::GetRequestSupport(
 
 void OverlayPresenterObserverBridge::WillShowOverlay(
     OverlayPresenter* presenter,
-    OverlayRequest* request) {
-  if ([observer_ respondsToSelector:@selector(overlayPresenter:
-                                        willShowOverlayForRequest:)]) {
-    [observer_ overlayPresenter:presenter willShowOverlayForRequest:request];
+    OverlayRequest* request,
+    bool initial_presentation) {
+  if ([observer_ respondsToSelector:@selector
+                 (overlayPresenter:
+                     willShowOverlayForRequest:initialPresentation:)]) {
+    [observer_ overlayPresenter:presenter
+        willShowOverlayForRequest:request
+              initialPresentation:initial_presentation];
   }
 }
 

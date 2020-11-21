@@ -6,6 +6,7 @@
 
 #include "base/bind.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "build/chromeos_buildflags.h"
 #include "components/viz/common/resources/returned_resource.h"
 #include "components/viz/service/display/output_surface_client.h"
 #include "components/viz/test/begin_frame_args_test.h"
@@ -68,6 +69,10 @@ void FakeOutputSurface::SetDrawRectangle(const gfx::Rect& rect) {
   last_set_draw_rectangle_ = rect;
 }
 
+void FakeOutputSurface::SetEnableDCLayers(bool enabled) {
+  context_provider_->ContextGL()->SetEnableDCLayersCHROMIUM(enabled);
+}
+
 uint32_t FakeOutputSurface::GetFramebufferCopyTextureFormat() {
   if (framebuffer_)
     return framebuffer_format_;
@@ -111,17 +116,11 @@ gfx::OverlayTransform FakeOutputSurface::GetDisplayTransform() {
                                          : gfx::OVERLAY_TRANSFORM_NONE;
 }
 
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
+// TODO(crbug.com/1052397): Revisit the macro expression once build flag switch
+// of lacros-chrome is complete.
+#if defined(OS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)
 void FakeOutputSurface::SetNeedsSwapSizeNotifications(
     bool needs_swap_size_notifications) {}
 #endif
 
-scoped_refptr<gpu::GpuTaskSchedulerHelper>
-FakeOutputSurface::GetGpuTaskSchedulerHelper() {
-  return nullptr;
-}
-
-gpu::MemoryTracker* FakeOutputSurface::GetMemoryTracker() {
-  return nullptr;
-}
 }  // namespace viz

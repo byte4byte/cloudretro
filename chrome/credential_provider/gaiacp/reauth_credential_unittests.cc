@@ -62,7 +62,7 @@ TEST_F(GcpReauthCredentialTest, SetOSUserInfoAndReauthEmail) {
   Microsoft::WRL::ComPtr<IReauthCredential> reauth;
   ASSERT_EQ(S_OK, CComCreator<CComObject<CReauthCredential>>::CreateInstance(
                       nullptr, IID_IReauthCredential, (void**)&reauth));
-  ASSERT_TRUE(!!reauth);
+  ASSERT_TRUE(reauth);
 
   const CComBSTR kSid(W2COLE(L"sid"));
   ASSERT_EQ(S_OK, reauth->SetOSUserInfo(
@@ -109,7 +109,7 @@ TEST_P(GcpReauthCredentialGetStringValueTest, FidDescription) {
   Microsoft::WRL::ComPtr<IReauthCredential> reauth;
   ASSERT_EQ(S_OK, CComCreator<CComObject<CReauthCredential>>::CreateInstance(
                       nullptr, IID_IReauthCredential, (void**)&reauth));
-  ASSERT_TRUE(!!reauth);
+  ASSERT_TRUE(reauth);
 
   CComBSTR username = L"foo_bar";
   CComBSTR full_name = A2COLE(test_data_storage.GetSuccessFullName().c_str());
@@ -173,9 +173,10 @@ INSTANTIATE_TEST_SUITE_P(All,
 // 1. Is enrolled with mdm.
 // 2. Is encrypted data missing in lsa store.
 // 3. Is online login stale.
+// 4. Is online login enforced.
 class GcpReauthCredentialEnforceAuthReasonGetStringValueTest
     : public GcpReauthCredentialTest,
-      public ::testing::WithParamInterface<std::tuple<bool, bool, bool>> {
+      public ::testing::WithParamInterface<std::tuple<bool, bool, bool, bool>> {
  protected:
   FakeAssociatedUserValidator* fake_associated_user_validator() {
     return &fake_associated_user_validator_;
@@ -195,6 +196,7 @@ TEST_P(GcpReauthCredentialEnforceAuthReasonGetStringValueTest,
   const bool enrolled_mdm = std::get<0>(GetParam());
   const bool store_encrypted_data = std::get<1>(GetParam());
   const bool is_stale_login = std::get<2>(GetParam());
+  const bool is_online_login_enforced = std::get<3>(GetParam());
 
   ASSERT_EQ(S_OK, SetGlobalFlagForTesting(kRegMdmUrl, L"https://mdm.com"));
   ASSERT_EQ(S_OK, SetGlobalFlagForTesting(kRegDisablePasswordSync, 0));
@@ -204,7 +206,7 @@ TEST_P(GcpReauthCredentialEnforceAuthReasonGetStringValueTest,
   Microsoft::WRL::ComPtr<IReauthCredential> reauth;
   ASSERT_EQ(S_OK, CComCreator<CComObject<CReauthCredential>>::CreateInstance(
                       nullptr, IID_IReauthCredential, (void**)&reauth));
-  ASSERT_TRUE(!!reauth);
+  ASSERT_TRUE(reauth);
 
   CComBSTR username = L"foo_bar";
   CComBSTR full_name = A2COLE(test_data_storage.GetSuccessFullName().c_str());
@@ -230,15 +232,21 @@ TEST_P(GcpReauthCredentialEnforceAuthReasonGetStringValueTest,
   }
 
   if (is_stale_login) {
-    ASSERT_EQ(S_OK, SetUserProperty((BSTR)sid,
-                                    base::UTF8ToUTF16(std::string(
-                                        kKeyLastSuccessfulOnlineLoginMillis)),
-                                    L"0"));
+    ASSERT_EQ(S_OK,
+              SetUserProperty(
+                  (BSTR)sid, base::UTF8ToUTF16(std::string(kKeyLastTokenValid)),
+                  L"0"));
     ASSERT_EQ(S_OK,
               SetGlobalFlagForTesting(
                   base::UTF8ToUTF16(std::string(kKeyValidityPeriodInDays)),
                   (DWORD)0));
   }
+
+  if (is_online_login_enforced)
+    ASSERT_EQ(S_OK,
+              SetGlobalFlagForTesting(
+                  base::UTF8ToUTF16(std::string("enforce_online_login")),
+                  (DWORD)1));
 
   // Populate the associated users list. The created user's token handle
   // should be valid so that no reauth credential is created.
@@ -272,6 +280,11 @@ TEST_P(GcpReauthCredentialEnforceAuthReasonGetStringValueTest,
     ASSERT_STREQ(
         string_value,
         W2COLE(GetStringResource(IDS_REAUTH_FID_DESCRIPTION_BASE).c_str()));
+  } else if (is_online_login_enforced) {
+    ASSERT_STREQ(
+        string_value,
+        W2COLE(GetStringResource(
+          IDS_REAUTH_ONLINE_LOGIN_ENFORCED_DESCRIPTION_BASE).c_str()));
   } else {
     ASSERT_STREQ(
         string_value,
@@ -282,6 +295,7 @@ TEST_P(GcpReauthCredentialEnforceAuthReasonGetStringValueTest,
 INSTANTIATE_TEST_SUITE_P(All,
                          GcpReauthCredentialEnforceAuthReasonGetStringValueTest,
                          ::testing::Combine(::testing::Bool(),
+                                            ::testing::Bool(),
                                             ::testing::Bool(),
                                             ::testing::Bool()));
 
@@ -327,7 +341,7 @@ TEST_P(GcpReauthCredentialGlsTest, GetUserGlsCommandLine) {
   SetDefaultTokenHandleResponse(kDefaultInvalidTokenHandleResponse);
   ASSERT_EQ(S_OK, InitializeProviderAndGetCredential(1, &cred));
 
-  ASSERT_TRUE(!!cred);
+  ASSERT_TRUE(cred);
 
   Microsoft::WRL::ComPtr<IReauthCredential> ireauth;
   ASSERT_EQ(S_OK, cred.As(&ireauth));
@@ -375,7 +389,7 @@ TEST_P(GcpReauthCredentialGlsTest, GetUserGlsCommandLine) {
     if (set_email_for_reauth) {
       ASSERT_EQ(
           gcpw_path,
-          base::StringPrintf("embedded/reauth/windows?device_id=%s&show_tos=%d",
+          base::StringPrintf("embedded/setup/windows?device_id=%s&show_tos=%d",
                              device_id.c_str(), is_tos_accepted ? 0 : 1));
     } else {
       ASSERT_EQ(
@@ -456,7 +470,7 @@ TEST_F(GcpReauthCredentialGlsRunnerTest, NoGaiaIdAvailableForADUser) {
 
   // Create a fake ad joined domain user to reauth.
   CComBSTR sid;
-  std::string empty_gaia_id = "";
+  std::string empty_gaia_id;
   ASSERT_EQ(S_OK, fake_os_user_manager()->CreateTestOSUser(
                       OLE2CW(username), OLE2CW(password), OLE2CW(full_name),
                       L"comment", base::UTF8ToUTF16(empty_gaia_id),

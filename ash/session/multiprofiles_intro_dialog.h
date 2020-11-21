@@ -23,11 +23,6 @@ class MultiprofilesIntroDialog : public views::DialogDelegateView {
 
   static void Show(OnAcceptCallback on_accept);
 
-  // views::WidgetDelegate overrides.
-  ui::ModalType GetModalType() const override;
-  base::string16 GetWindowTitle() const override;
-  bool ShouldShowCloseButton() const override;
-
   // views::View overrides.
   gfx::Size CalculatePreferredSize() const override;
 

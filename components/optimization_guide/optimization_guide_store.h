@@ -99,7 +99,8 @@ class OptimizationGuideStore {
       scoped_refptr<base::SequencedTaskRunner> store_task_runner);
   // For tests only.
   explicit OptimizationGuideStore(
-      std::unique_ptr<StoreEntryProtoDatabase> database);
+      std::unique_ptr<StoreEntryProtoDatabase> database,
+      scoped_refptr<base::SequencedTaskRunner> store_task_runner);
   virtual ~OptimizationGuideStore();
 
   // Initializes the store. If |purge_existing_data| is set to true,
@@ -204,6 +205,11 @@ class OptimizationGuideStore {
   virtual void LoadPredictionModel(const EntryKey& prediction_model_entry_key,
                                    PredictionModelLoadedCallback callback);
 
+  // Removes the prediction model specified by |entry_key| if it exists. Returns
+  // true if |entry_key| is found and the remove operation is initiated, and
+  // false otherwise.
+  bool RemovePredictionModelFromEntryKey(const EntryKey& entry_key);
+
   // Creates and returns a StoreUpdateData object for host model features. This
   // object is used to collect a batch of host model features in a format that
   // is usable to update the store on a background thread. This is always
@@ -252,6 +258,9 @@ class OptimizationGuideStore {
 
   // Clears all host model features from the database and resets the entry keys.
   void ClearHostModelFeaturesFromDatabase();
+
+  // Returns true if the current status is Status::kAvailable.
+  bool IsAvailable() const;
 
  private:
   friend class OptimizationGuideStoreTest;
@@ -311,9 +320,6 @@ class OptimizationGuideStore {
   // transition, and destroys the database in the case where the status
   // transitions to Status::kFailed.
   void UpdateStatus(Status new_status);
-
-  // Returns true if the current status is Status::kAvailable.
-  bool IsAvailable() const;
 
   // Asynchronously purges all existing entries from the database and runs the
   // callback after it completes. This should only be run during initialization.
@@ -410,6 +416,25 @@ class OptimizationGuideStore {
                              bool success,
                              std::unique_ptr<proto::StoreEntry> entry);
 
+  // Callback that runs when the prediction models that need to be updated and
+  // removed are loaded from the database. This will remove the files associated
+  // with those models and run the update routine with |update_vector| and
+  // |remove_vector| after that.
+  void OnLoadModelsToBeUpdated(
+      std::unique_ptr<EntryVector> update_vector,
+      std::unique_ptr<leveldb_proto::KeyVector> remove_vector,
+      base::OnceClosure callback,
+      bool success,
+      std::unique_ptr<EntryMap> entries);
+
+  // Callback that runs after the download URL in |loaded_model| has been
+  // verified. If |success| is false, the associated entry from |database_| will
+  // be removed and |callback| will run as if the model is not loaded.
+  void OnModelFilePathVerified(
+      std::unique_ptr<proto::PredictionModel> loaded_model,
+      PredictionModelLoadedCallback callback,
+      bool success);
+
   // Callback that runs after a host model features entry is loaded from the
   // database. If there's currently an in-flight update, then the data could be
   // invalidated, so loaded host model features data is discarded. Otherwise,
@@ -462,6 +487,9 @@ class OptimizationGuideStore {
 
   // The keys of the entries available within the store.
   std::unique_ptr<EntryKeySet> entry_keys_;
+
+  // The background task runner used to perform operations on the store.
+  scoped_refptr<base::SequencedTaskRunner> store_task_runner_;
 
   SEQUENCE_CHECKER(sequence_checker_);
 

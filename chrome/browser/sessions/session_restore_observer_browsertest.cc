@@ -29,6 +29,7 @@
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -163,7 +164,7 @@ class SessionRestoreObserverTest : public InProcessBrowserTest {
   DISALLOW_COPY_AND_ASSIGN(SessionRestoreObserverTest);
 };
 
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
 #define MAYBE_SingleTabSessionRestore DISABLED_SingleTabSessionRestore
 #else
 #define MAYBE_SingleTabSessionRestore SingleTabSessionRestore

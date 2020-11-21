@@ -11,6 +11,7 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/macros.h"
 #include "base/strings/stringprintf.h"
+#include "base/test/scoped_feature_list.h"
 #include "content/browser/appcache/appcache_database.h"
 #include "content/browser/appcache/appcache_entry.h"
 #include "sql/database.h"
@@ -20,6 +21,7 @@
 #include "sql/test/test_helpers.h"
 #include "sql/transaction.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/common/features.h"
 #include "third_party/sqlite/sqlite3.h"
 
 namespace {
@@ -32,6 +34,11 @@ namespace content {
 
 class AppCacheDatabaseTest : public testing::Test {
  public:
+  AppCacheDatabaseTest() {
+    appcache_require_origin_trial_feature_.InitAndDisableFeature(
+        blink::features::kAppCacheRequireOriginTrial);
+  }
+
   int64_t GetCacheManifestParserVersion(const content::AppCacheDatabase& db,
                                         int64_t cache_id) {
     static const char kSql[] =
@@ -55,6 +62,9 @@ class AppCacheDatabaseTest : public testing::Test {
     EXPECT_TRUE(statement.Step());
     return statement.ColumnString(0);
   }
+
+ private:
+  base::test::ScopedFeatureList appcache_require_origin_trial_feature_;
 };
 
 TEST_F(AppCacheDatabaseTest, LazyOpen) {
@@ -87,7 +97,7 @@ TEST_F(AppCacheDatabaseTest, ReCreate) {
   const base::FilePath kNestedDir = temp_dir.GetPath().AppendASCII("nested");
   const base::FilePath kOtherFile =  kNestedDir.AppendASCII("other_file");
   EXPECT_TRUE(base::CreateDirectory(kNestedDir));
-  EXPECT_EQ(3, base::WriteFile(kOtherFile, "foo", 3));
+  EXPECT_TRUE(base::WriteFile(kOtherFile, "foo"));
 
   AppCacheDatabase db(kDbFile);
   EXPECT_FALSE(db.LazyOpen(false));
@@ -120,7 +130,7 @@ TEST_F(AppCacheDatabaseTest, QuickIntegrityCheck) {
 
   const base::FilePath kDbFile = mock_dir.AppendASCII("appcache.db");
   const base::FilePath kOtherFile = mock_dir.AppendASCII("other_file");
-  EXPECT_EQ(3, base::WriteFile(kOtherFile, "foo", 3));
+  EXPECT_TRUE(base::WriteFile(kOtherFile, "foo"));
 
   // First create a valid db file.
   {
@@ -183,7 +193,7 @@ TEST_F(AppCacheDatabaseTest, ExperimentalFlags) {
   const base::FilePath kDbFile = temp_dir.GetPath().AppendASCII("appcache.db");
   const base::FilePath kOtherFile =
       temp_dir.GetPath().AppendASCII("other_file");
-  EXPECT_EQ(3, base::WriteFile(kOtherFile, "foo", 3));
+  EXPECT_TRUE(base::WriteFile(kOtherFile, "foo"));
   EXPECT_TRUE(base::PathExists(kOtherFile));
 
   // Inject a non empty flags value, and verify it got there.
@@ -661,7 +671,7 @@ TEST_F(AppCacheDatabaseTest, NamespaceRecords) {
   ASSERT_TRUE(expecter.SawExpectedErrors());
 }
 
-TEST_F(AppCacheDatabaseTest, OnlineWhiteListRecords) {
+TEST_F(AppCacheDatabaseTest, OnlineSafeListRecords) {
   const base::FilePath kEmptyPath;
   AppCacheDatabase db(kEmptyPath);
   EXPECT_TRUE(db.LazyOpen(true));
@@ -670,22 +680,22 @@ TEST_F(AppCacheDatabaseTest, OnlineWhiteListRecords) {
   const GURL kFooNameSpace2("http://foo/namespace2");
   const GURL kBarNameSpace1("http://bar/namespace1");
 
-  const AppCacheDatabase::OnlineWhiteListRecord kZeroRecord;
-  AppCacheDatabase::OnlineWhiteListRecord record;
-  std::vector<AppCacheDatabase::OnlineWhiteListRecord> records;
+  const AppCacheDatabase::OnlineSafeListRecord kZeroRecord;
+  AppCacheDatabase::OnlineSafeListRecord record;
+  std::vector<AppCacheDatabase::OnlineSafeListRecord> records;
 
   // Behavior with an empty table
-  EXPECT_TRUE(db.FindOnlineWhiteListForCache(1, &records));
+  EXPECT_TRUE(db.FindOnlineSafeListForCache(1, &records));
   EXPECT_TRUE(records.empty());
-  EXPECT_TRUE(db.DeleteOnlineWhiteListForCache(1));
+  EXPECT_TRUE(db.DeleteOnlineSafeListForCache(1));
 
   record.cache_id = 1;
   record.namespace_url = kFooNameSpace1;
-  EXPECT_TRUE(db.InsertOnlineWhiteList(&record));
+  EXPECT_TRUE(db.InsertOnlineSafeList(&record));
   record.namespace_url = kFooNameSpace2;
-  EXPECT_TRUE(db.InsertOnlineWhiteList(&record));
+  EXPECT_TRUE(db.InsertOnlineSafeList(&record));
   records.clear();
-  EXPECT_TRUE(db.FindOnlineWhiteListForCache(1, &records));
+  EXPECT_TRUE(db.FindOnlineSafeListForCache(1, &records));
   EXPECT_EQ(2U, records.size());
   EXPECT_EQ(1, records[0].cache_id);
   EXPECT_EQ(kFooNameSpace1, records[0].namespace_url);
@@ -694,14 +704,14 @@ TEST_F(AppCacheDatabaseTest, OnlineWhiteListRecords) {
 
   record.cache_id = 2;
   record.namespace_url = kBarNameSpace1;
-  EXPECT_TRUE(db.InsertOnlineWhiteList(&record));
+  EXPECT_TRUE(db.InsertOnlineSafeList(&record));
   records.clear();
-  EXPECT_TRUE(db.FindOnlineWhiteListForCache(2, &records));
+  EXPECT_TRUE(db.FindOnlineSafeListForCache(2, &records));
   EXPECT_EQ(1U, records.size());
 
-  EXPECT_TRUE(db.DeleteOnlineWhiteListForCache(1));
+  EXPECT_TRUE(db.DeleteOnlineSafeListForCache(1));
   records.clear();
-  EXPECT_TRUE(db.FindOnlineWhiteListForCache(1, &records));
+  EXPECT_TRUE(db.FindOnlineSafeListForCache(1, &records));
   EXPECT_TRUE(records.empty());
 }
 

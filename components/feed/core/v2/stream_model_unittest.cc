@@ -13,7 +13,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "components/feed/core/proto/v2/store.pb.h"
 #include "components/feed/core/proto/v2/wire/content_id.pb.h"
-#include "components/feed/core/v2/stream_model_update_request.h"
+#include "components/feed/core/v2/protocol_translator.h"
 #include "components/feed/core/v2/test/stream_builder.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -37,7 +37,7 @@ std::vector<std::string> GetContentFrames(const StreamModel& model) {
 
 class TestObserver : public StreamModel::Observer {
  public:
-  explicit TestObserver(StreamModel* model) { model->SetObserver(this); }
+  explicit TestObserver(StreamModel* model) { model->AddObserver(this); }
 
   // StreamModel::Observer.
   void OnUiUpdate(const UiUpdate& update) override { update_ = update; }

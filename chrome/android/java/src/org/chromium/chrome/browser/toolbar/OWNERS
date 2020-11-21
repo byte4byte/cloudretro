@@ -3,5 +3,4 @@ tedchoc@chromium.org
 yusufo@chromium.org
 twellington@chromium.org
 
-# COMPONENT: UI>Browser>Toolbar
-# OS: Android
+per-file TabSwitcher*=file://chrome/android/java/src/org/chromium/chrome/browser/tasks/OWNERS

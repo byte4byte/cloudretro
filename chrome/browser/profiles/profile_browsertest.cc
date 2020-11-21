@@ -25,12 +25,13 @@
 #include "base/synchronization/waitable_event.h"
 #include "base/task/post_task.h"
 #include "base/task/thread_pool/thread_pool_instance.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/values.h"
 #include "base/version.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/profiles/chrome_version_service.h"
@@ -46,18 +47,16 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "components/bookmarks/browser/startup_task_runner_service.h"
 #include "components/prefs/pref_service.h"
 #include "components/version_info/version_info.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/storage_partition.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/test_utils.h"
-#include "extensions/browser/extension_registry.h"
-#include "extensions/common/extension.h"
-#include "extensions/common/extension_builder.h"
-#include "extensions/common/value_builder.h"
+#include "extensions/buildflags/buildflags.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
 #include "net/dns/mock_host_resolver.h"
@@ -65,15 +64,24 @@
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/url_request/url_request_failed_job.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
+#include "services/metrics/public/cpp/ukm_source_id.h"
 #include "services/network/public/cpp/features.h"
 #include "services/network/public/cpp/simple_url_loader.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chromeos/constants/chromeos_switches.h"
+#endif
+
+#if BUILDFLAG(ENABLE_EXTENSIONS)
+#include "extensions/browser/extension_protocols.h"
+#include "extensions/browser/extension_registry.h"
+#include "extensions/common/extension.h"
+#include "extensions/common/extension_builder.h"
+#include "extensions/common/value_builder.h"
 #endif
 
 namespace {
@@ -143,17 +151,21 @@ class ProfileDestructionWatcher : public ProfileObserver {
 
   void Watch(Profile* profile) { observed_profiles_.Add(profile); }
 
+  bool destroyed() const { return destroyed_; }
+
+  void WaitForDestruction() { run_loop_.Run(); }
+
+ private:
   // ProfileObserver:
   void OnProfileWillBeDestroyed(Profile* profile) override {
     DCHECK(!destroyed_) << "Double profile destruction";
     destroyed_ = true;
+    run_loop_.Quit();
     observed_profiles_.Remove(profile);
   }
 
-  bool destroyed() const { return destroyed_; }
-
- private:
   bool destroyed_ = false;
+  base::RunLoop run_loop_;
   ScopedObserver<Profile, ProfileObserver> observed_profiles_{this};
 
   DISALLOW_COPY_AND_ASSIGN(ProfileDestructionWatcher);
@@ -163,8 +175,7 @@ class ProfileDestructionWatcher : public ProfileObserver {
 void CreatePrefsFileInDirectory(const base::FilePath& directory_path) {
   base::FilePath pref_path(directory_path.Append(chrome::kPreferencesFilename));
   std::string data("{}");
-  ASSERT_EQ(static_cast<int>(data.size()),
-            base::WriteFile(pref_path, data.c_str(), data.size()));
+  ASSERT_TRUE(base::WriteFile(pref_path, data));
 }
 
 void CheckChromeVersion(Profile *profile, bool is_new) {
@@ -208,7 +219,7 @@ void SpinThreads() {
 class ProfileBrowserTest : public InProcessBrowserTest {
  protected:
   void SetUpCommandLine(base::CommandLine* command_line) override {
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
     command_line->AppendSwitch(
         chromeos::switches::kIgnoreUserProfileMappingForTests);
 #endif
@@ -518,7 +529,7 @@ IN_PROC_BROWSER_TEST_F(ProfileBrowserTest,
   ASSERT_NE(loaded_profiles.size(), 0UL);
   Profile* profile = loaded_profiles[0];
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   for (auto* loaded_profile : loaded_profiles) {
     if (!chromeos::ProfileHelper::IsSigninProfile(loaded_profile)) {
       profile = loaded_profile;
@@ -584,7 +595,6 @@ IN_PROC_BROWSER_TEST_F(ProfileBrowserTest,
 
 // The following tests make sure that it's safe to shut down while one of the
 // Profile's URLLoaderFactories is in use by a SimpleURLLoader.
-
 IN_PROC_BROWSER_TEST_F(ProfileBrowserTest,
                        SimpleURLLoaderUsingMainContextDuringShutdown) {
   ASSERT_TRUE(embedded_test_server()->Start());
@@ -596,7 +606,6 @@ IN_PROC_BROWSER_TEST_F(ProfileBrowserTest,
 
 // The following tests make sure that it's safe to destroy an incognito profile
 // while one of the its URLLoaderFactory is in use by a SimpleURLLoader.
-
 IN_PROC_BROWSER_TEST_F(ProfileBrowserTest,
                        SimpleURLLoaderUsingMainContextDuringIncognitoTeardown) {
   ASSERT_TRUE(embedded_test_server()->Start());
@@ -610,7 +619,64 @@ IN_PROC_BROWSER_TEST_F(ProfileBrowserTest,
           .get());
 }
 
-// Verifies the cache directory supports multiple profiles when it's overriden
+#if BUILDFLAG(ENABLE_EXTENSIONS)
+// Regression test for https://crbug.com/1136214 - verification that
+// ExtensionURLLoaderFactory won't hit a use-after-free bug when used after
+// a Profile has been torn down already.
+IN_PROC_BROWSER_TEST_F(ProfileBrowserTest,
+                       ExtensionURLLoaderFactoryAfterIncognitoTeardown) {
+  // Create a mojo::Remote to ExtensionURLLoaderFactory for the incognito
+  // profile.
+  Browser* incognito_browser =
+      OpenURLOffTheRecord(browser()->profile(), GURL("about:blank"));
+  Profile* incognito_profile = incognito_browser->profile();
+  mojo::Remote<network::mojom::URLLoaderFactory> url_loader_factory;
+  url_loader_factory.Bind(extensions::CreateExtensionNavigationURLLoaderFactory(
+      incognito_profile, ukm::kInvalidSourceIdObj,
+      false /* is_web_view_request */));
+
+  // Verify that the factory works fine while the profile is still alive.
+  // We don't need to test with a real extension URL - it is sufficient to
+  // verify that the factory responds with ERR_BLOCKED_BY_CLIENT that indicates
+  // a missing extension.
+  GURL missing_extension_url("chrome-extension://no-such-extension/blah");
+  {
+    SimpleURLLoaderHelper simple_loader_helper(url_loader_factory.get(),
+                                               missing_extension_url,
+                                               net::ERR_BLOCKED_BY_CLIENT);
+    simple_loader_helper.WaitForCompletion();
+  }
+
+  {
+    // Start monitoring |incognito_profile| for shutdown.
+    ProfileManager* profile_manager = g_browser_process->profile_manager();
+    EXPECT_TRUE(profile_manager->IsValidProfile(incognito_profile));
+    ProfileDestructionWatcher watcher;
+    watcher.Watch(incognito_profile);
+
+    // Close all incognito tabs, starting profile shutdown.
+    incognito_browser->tab_strip_model()->CloseAllTabs();
+
+    // ProfileDestructionWatcher waits for
+    // BrowserContext::NotifyWillBeDestroyed, but after the RunLoop unwinds, the
+    // profile should already be gone - let's assert this below (since this
+    // ensures that |simple_loader_helper2| really tests what needs to be
+    // tested).
+    watcher.WaitForDestruction();
+    EXPECT_FALSE(profile_manager->IsValidProfile(incognito_profile));
+  }
+
+  // Verify that the factory doesn't crash (https://crbug.com/1136214), but
+  // instead SimpleURLLoaderImpl::OnMojoDisconnect reports net::ERR_FAILED.
+  {
+    SimpleURLLoaderHelper simple_loader_helper2(
+        url_loader_factory.get(), missing_extension_url, net::ERR_FAILED);
+    simple_loader_helper2.WaitForCompletion();
+  }
+}
+#endif
+
+// Verifies the cache directory supports multiple profiles when it's overridden
 // by group policy or command line switches.
 IN_PROC_BROWSER_TEST_F(ProfileBrowserTest, DiskCacheDirOverride) {
   base::ScopedAllowBlockingForTesting allow_blocking;
@@ -665,12 +731,12 @@ IN_PROC_BROWSER_TEST_F(ProfileBrowserTest, Notifications) {
         chrome::NOTIFICATION_PROFILE_CREATED,
         content::NotificationService::AllSources());
 
-    otr_profile = profile->GetOffTheRecordProfile();
+    otr_profile = profile->GetPrimaryOTRProfile();
     profile_created_observer.Wait();
 
     EXPECT_EQ(profile_created_observer.source(),
               content::Source<Profile>(otr_profile));
-    EXPECT_TRUE(profile->HasOffTheRecordProfile());
+    EXPECT_TRUE(profile->HasPrimaryOTRProfile());
     EXPECT_TRUE(otr_profile->IsOffTheRecord());
     EXPECT_TRUE(otr_profile->IsPrimaryOTRProfile());
     EXPECT_TRUE(otr_profile->IsIncognitoProfile());
@@ -693,10 +759,12 @@ IN_PROC_BROWSER_TEST_F(ProfileBrowserTest, Notifications) {
         chrome::NOTIFICATION_PROFILE_DESTROYED,
         content::Source<Profile>(otr_profile));
 
-    profile->DestroyOffTheRecordProfile();
-    profile_destroyed_observer.Wait();
+    if (profile->HasPrimaryOTRProfile()) {
+      profile->DestroyOffTheRecordProfile(profile->GetPrimaryOTRProfile());
+      profile_destroyed_observer.Wait();
+    }
 
-    EXPECT_FALSE(profile->HasOffTheRecordProfile());
+    EXPECT_FALSE(profile->HasPrimaryOTRProfile());
   }
 
   // Destroy the regular profile.
@@ -816,3 +884,92 @@ IN_PROC_BROWSER_TEST_F(ProfileBrowserTest, TestGetAllOffTheRecordProfiles) {
   EXPECT_TRUE(base::Contains(all_otrs, otr_profile2));
   EXPECT_TRUE(base::Contains(all_otrs, incognito_profile));
 }
+
+// Tests Profile::IsSameOrParent
+IN_PROC_BROWSER_TEST_F(ProfileBrowserTest, TestIsSameOrParent) {
+  Profile::OTRProfileID otr_profile_id("profile::otr");
+
+  Profile* regular_profile = browser()->profile();
+  Profile* otr_profile =
+      regular_profile->GetOffTheRecordProfile(otr_profile_id);
+  Profile* incognito_profile = regular_profile->GetPrimaryOTRProfile();
+
+  EXPECT_TRUE(regular_profile->IsSameOrParent(otr_profile));
+  EXPECT_TRUE(otr_profile->IsSameOrParent(regular_profile));
+
+  EXPECT_TRUE(regular_profile->IsSameOrParent(incognito_profile));
+  EXPECT_TRUE(incognito_profile->IsSameOrParent(regular_profile));
+
+  EXPECT_FALSE(incognito_profile->IsSameOrParent(otr_profile));
+  EXPECT_FALSE(otr_profile->IsSameOrParent(incognito_profile));
+}
+
+// Tests if browser creation using non primary OTRs is blocked.
+IN_PROC_BROWSER_TEST_F(ProfileBrowserTest,
+                       TestCreatingBrowserUsingNonPrimaryOffTheRecordProfile) {
+  Profile::OTRProfileID otr_profile_id("profile::otr");
+  Profile* otr_profile =
+      browser()->profile()->GetOffTheRecordProfile(otr_profile_id);
+
+  EXPECT_EQ(Browser::BrowserCreationStatus::kErrorProfileUnsuitable,
+            Browser::GetBrowserCreationStatusForProfile(otr_profile));
+}
+
+#if !defined(OS_ANDROID) && !BUILDFLAG(IS_CHROMEOS_ASH)
+class EphemeralGuestProfileBrowserTest : public ProfileBrowserTest {
+ public:
+  EphemeralGuestProfileBrowserTest() {
+    scoped_feature_list_.InitAndEnableFeature(
+        features::kEnableEphemeralGuestProfilesOnDesktop);
+  }
+
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
+};
+
+// Tests profile type functions on an ephemeral Guest profile.
+IN_PROC_BROWSER_TEST_F(EphemeralGuestProfileBrowserTest, TestProfileType) {
+  Profile* guest_profile = CreateGuestBrowser()->profile();
+
+  EXPECT_TRUE(guest_profile->IsRegularProfile());
+  EXPECT_FALSE(guest_profile->IsOffTheRecord());
+  EXPECT_FALSE(guest_profile->IsGuestSession());
+  EXPECT_TRUE(guest_profile->IsEphemeralGuestProfile());
+}
+
+// Tests if ephemeral Guest profile paths are persistent as long as one does not
+// close all Guest browsers.
+IN_PROC_BROWSER_TEST_F(EphemeralGuestProfileBrowserTest,
+                       TestProfilePathIsStableWhileNotClosed) {
+  Browser* guest1 = CreateGuestBrowser();
+  base::FilePath guest_path1 = guest1->profile()->GetPath();
+
+  Browser* guest2 = CreateGuestBrowser();
+  base::FilePath guest_path2 = guest2->profile()->GetPath();
+
+  EXPECT_EQ(guest_path1, guest_path2);
+
+  CloseBrowserSynchronously(guest1);
+
+  Browser* guest3 = CreateGuestBrowser();
+  base::FilePath guest_path3 = guest3->profile()->GetPath();
+
+  EXPECT_EQ(guest_path1, guest_path3);
+}
+
+// Tests if closing all ephemeral Guest profiles will result in a new path for
+// the next ephemeral Guest profile.
+IN_PROC_BROWSER_TEST_F(EphemeralGuestProfileBrowserTest,
+                       TestGuestGetsNewPathAfterClosing) {
+  Browser* guest1 = CreateGuestBrowser();
+  base::FilePath guest_path1 = guest1->profile()->GetPath();
+
+  CloseBrowserSynchronously(guest1);
+
+  Browser* guest2 = CreateGuestBrowser();
+  base::FilePath guest_path2 = guest2->profile()->GetPath();
+
+  EXPECT_NE(guest_path1, guest_path2);
+}
+
+#endif  // !defined(OS_ANDROID) && !BUILDFLAG(IS_CHROMEOS_ASH)

@@ -13,6 +13,7 @@
 #include "base/stl_util.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
+#include "components/page_load_metrics/common/page_load_metrics.mojom.h"
 #include "components/page_load_metrics/common/page_load_metrics_constants.h"
 #include "components/page_load_metrics/renderer/page_timing_sender.h"
 #include "services/network/public/cpp/url_loader_completion_status.h"
@@ -20,7 +21,6 @@
 #include "ui/gfx/geometry/rect.h"
 
 namespace page_load_metrics {
-
 namespace {
 const int kInitialTimerDelayMillis = 50;
 const int64_t kInputDelayAdjustmentMillis = int64_t(50);
@@ -44,9 +44,9 @@ PageTimingMetricsSender::PageTimingMetricsSender(
       new_deferred_resource_data_(mojom::DeferredResourceCounts::New()),
       buffer_timer_delay_ms_(kBufferTimerDelayMillis),
       metadata_recorder_(initial_monotonic_timing) {
+  const auto resource_id = initial_request->resource_id();
   page_resource_data_use_.emplace(
-      std::piecewise_construct,
-      std::forward_as_tuple(initial_request->resource_id()),
+      std::piecewise_construct, std::forward_as_tuple(resource_id),
       std::forward_as_tuple(std::move(initial_request)));
   buffer_timer_delay_ms_ = base::GetFieldTrialParamByFeatureAsInt(
       kPageLoadMetricsTimerDelayFeature, "BufferTimerDelayMillis",
@@ -108,6 +108,17 @@ void PageTimingMetricsSender::DidObserveLayoutShift(
   EnsureSendTimer();
 }
 
+void PageTimingMetricsSender::DidObserveLayoutNg(uint32_t all_block_count,
+                                                 uint32_t ng_block_count,
+                                                 uint32_t all_call_count,
+                                                 uint32_t ng_call_count) {
+  render_data_.all_layout_block_count_delta += all_block_count;
+  render_data_.ng_layout_block_count_delta += ng_block_count;
+  render_data_.all_layout_call_count_delta += all_call_count;
+  render_data_.ng_layout_call_count_delta += ng_call_count;
+  EnsureSendTimer();
+}
+
 void PageTimingMetricsSender::DidObserveLazyLoadBehavior(
     blink::WebLocalFrameClient::LazyLoadBehavior lazy_load_behavior) {
   switch (lazy_load_behavior) {
@@ -124,6 +135,12 @@ void PageTimingMetricsSender::DidObserveLazyLoadBehavior(
       ++new_deferred_resource_data_->images_loaded_after_deferral;
       break;
   }
+}
+
+void PageTimingMetricsSender::DidObserveMobileFriendlinessChanged(
+    const blink::MobileFriendliness& mf) {
+  mobile_friendliness_ = mf;
+  EnsureSendTimer();
 }
 
 void PageTimingMetricsSender::DidStartResponse(
@@ -206,10 +223,10 @@ void PageTimingMetricsSender::DidLoadResourceFromMemoryCache(
   modified_resources_.insert(resource_it.first->second.get());
 }
 
-void PageTimingMetricsSender::OnMainFrameDocumentIntersectionChanged(
-    const blink::WebRect& main_frame_document_intersection) {
-  metadata_->intersection_update = mojom::FrameIntersectionUpdate::New(
-      gfx::Rect(main_frame_document_intersection));
+void PageTimingMetricsSender::OnMainFrameIntersectionChanged(
+    const blink::WebRect& main_frame_intersection) {
+  metadata_->intersection_update =
+      mojom::FrameIntersectionUpdate::New(gfx::Rect(main_frame_intersection));
   EnsureSendTimer();
 }
 
@@ -233,6 +250,11 @@ void PageTimingMetricsSender::UpdateResourceMetadata(
     it->second->SetCompletedBeforeFCP(completed_before_fcp);
 
   it->second->SetIsMainFrameResource(is_main_frame_resource);
+}
+
+void PageTimingMetricsSender::SetUpSmoothnessReporting(
+    base::ReadOnlySharedMemoryRegion shared_memory) {
+  sender_->SetUpSmoothnessReporting(std::move(shared_memory));
 }
 
 void PageTimingMetricsSender::Update(
@@ -291,10 +313,11 @@ void PageTimingMetricsSender::SendNow() {
     }
   }
 
-  sender_->SendTiming(last_timing_, metadata_, std::move(new_features_),
-                      std::move(resources), render_data_, last_cpu_timing_,
-                      std::move(new_deferred_resource_data_),
-                      std::move(input_timing_delta_));
+  sender_->SendTiming(
+      last_timing_, metadata_, std::move(new_features_), std::move(resources),
+      render_data_, last_cpu_timing_, std::move(new_deferred_resource_data_),
+      std::move(input_timing_delta_), std::move(mobile_friendliness_));
+  mobile_friendliness_ = blink::MobileFriendliness();
   input_timing_delta_ = mojom::InputTiming::New();
   new_deferred_resource_data_ = mojom::DeferredResourceCounts::New();
   new_features_ = mojom::PageLoadFeatures::New();
@@ -303,6 +326,10 @@ void PageTimingMetricsSender::SendNow() {
   modified_resources_.clear();
   render_data_.layout_shift_delta = 0;
   render_data_.layout_shift_delta_before_input_or_scroll = 0;
+  render_data_.all_layout_block_count_delta = 0;
+  render_data_.ng_layout_block_count_delta = 0;
+  render_data_.all_layout_call_count_delta = 0;
+  render_data_.ng_layout_call_count_delta = 0;
 }
 
 void PageTimingMetricsSender::DidObserveInputDelay(

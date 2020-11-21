@@ -6,10 +6,12 @@
 #import <UIKit/UIKit.h>
 
 #include "ios/chrome/browser/pref_names.h"
+#import "ios/chrome/browser/ui/settings/password/passwords_table_view_constants.h"
 #import "ios/chrome/browser/ui/ui_feature_flags.h"
 #include "ios/chrome/grit/ios_strings.h"
 #import "ios/chrome/test/earl_grey/chrome_actions.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey.h"
+#import "ios/chrome/test/earl_grey/chrome_earl_grey_app_interface.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey_ui.h"
 #import "ios/chrome/test/earl_grey/chrome_matchers.h"
 #import "ios/chrome/test/earl_grey/chrome_test_case.h"
@@ -32,16 +34,14 @@
 // Tests that a tab can be opened.
 - (void)testOpenTab {
   // Open tools menu.
-  [[EarlGrey selectElementWithMatcher:chrome_test_util::ToolsMenuButton()]
-      performAction:grey_tap()];
+  [ChromeEarlGreyUI openToolsMenu];
 
   // Open new tab.
   // TODO(crbug.com/917114): Calling the string directly is temporary while we
   // roll out a solution to access constants across the code base for EG2.
   id<GREYMatcher> newTabButtonMatcher =
       grey_accessibilityID(@"kToolsMenuNewTabId");
-  [[EarlGrey selectElementWithMatcher:newTabButtonMatcher]
-      performAction:grey_tap()];
+  [ChromeEarlGreyUI tapToolsMenuButton:newTabButtonMatcher];
 
   // Wait until tab opened and test if there're 2 tabs in total.
   [ChromeEarlGrey waitForMainTabCount:2];
@@ -59,20 +59,16 @@
 
 // Tests that helpers from chrome_actions.h are available for use in tests.
 - (void)testToggleSettingsSwitch {
-  [[EarlGrey selectElementWithMatcher:chrome_test_util::ToolsMenuButton()]
-      performAction:grey_tap()];
-  [[EarlGrey selectElementWithMatcher:chrome_test_util::SettingsMenuButton()]
-      performAction:grey_tap()];
-  [[EarlGrey
-      selectElementWithMatcher:chrome_test_util::SettingsMenuPasswordsButton()]
-      performAction:grey_tap()];
+  [ChromeEarlGreyUI openSettingsMenu];
+  [ChromeEarlGreyUI
+      tapSettingsMenuButton:chrome_test_util::SettingsMenuPasswordsButton()];
 
   // Toggle the passwords switch off and on.
   [[EarlGrey selectElementWithMatcher:grey_accessibilityID(
-                                          @"savePasswordsItem_switch")]
+                                          kSavePasswordSwitchTableViewId)]
       performAction:chrome_test_util::TurnSettingsSwitchOn(NO)];
   [[EarlGrey selectElementWithMatcher:grey_accessibilityID(
-                                          @"savePasswordsItem_switch")]
+                                          kSavePasswordSwitchTableViewId)]
       performAction:chrome_test_util::TurnSettingsSwitchOn(YES)];
 
   // Close the settings menu.
@@ -158,7 +154,7 @@
 
 // Tests waitForSufficientlyVisibleElementWithMatcher in chrome_earl_grey.h
 - (void)testWaitForSufficientlyVisibleElementWithMatcher {
-  [[EarlGrey selectElementWithMatcher:chrome_test_util::FakeOmnibox()]
+  [[EarlGrey selectElementWithMatcher:chrome_test_util::NewTabPageOmnibox()]
       performAction:grey_tap()];
   [ChromeEarlGrey
       waitForSufficientlyVisibleElementWithMatcher:chrome_test_util::Omnibox()];
@@ -250,16 +246,12 @@
 
 // Tests gracefully kill through AppLaunchManager.
 - (void)testAppLaunchManagerForceRelaunchByCleanShutdown {
-// TODO(crbug.com/1067821): ForceRelaunchByCleanShutdown only compiles and works
-// on simulator.
-#if TARGET_IPHONE_SIMULATOR
   [ChromeEarlGrey openNewTab];
   [[AppLaunchManager sharedManager] ensureAppLaunchedWithFeaturesEnabled:{}
       disabled:{}
       relaunchPolicy:ForceRelaunchByCleanShutdown];
   [[EarlGrey selectElementWithMatcher:grey_text(@"Restore")]
       assertWithMatcher:grey_notVisible()];
-#endif
 }
 
 // Tests hard kill(crash) through AppLaunchManager.
@@ -268,14 +260,13 @@
   [[AppLaunchManager sharedManager] ensureAppLaunchedWithFeaturesEnabled:{}
       disabled:{}
       relaunchPolicy:ForceRelaunchByKilling];
-  [[EarlGrey selectElementWithMatcher:grey_text(@"Restore")]
-      assertWithMatcher:grey_sufficientlyVisible()];
+  [ChromeEarlGrey
+      waitForSufficientlyVisibleElementWithMatcher:grey_text(@"Restore")];
   [ChromeEarlGrey waitForMainTabCount:1];
 }
 
 // Tests running resets after relaunch through AppLaunchManager.
 - (void)testAppLaunchManagerNoForceRelaunchAndResetState {
-  [self stopHTTPServer];
   [self disableMockAuthentication];
   [ChromeEarlGrey openNewTab];
   [[AppLaunchManager sharedManager]
@@ -283,15 +274,11 @@
                                   disabled:{}
                             relaunchPolicy:NoForceRelaunchAndResetState];
   [ChromeEarlGrey waitForMainTabCount:1];
-  // |stopHTTPServer| and |disableMockAuthentication| DCHECK the flags are in
-  // correct states, which can serve as assertion that proper resets are run.
-  [self stopHTTPServer];
-  [self disableMockAuthentication];
+  DCHECK([ChromeEarlGreyAppInterface isFakeSyncServerSetUp]);
 }
 
 // Tests no force relaunch.
 - (void)testAppLaunchManagerNoForceRelaunchAndKeepState {
-  [self stopHTTPServer];
   [self disableMockAuthentication];
   [ChromeEarlGrey openNewTab];
   // No relauch when feature list isn't changed.

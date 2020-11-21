@@ -180,7 +180,8 @@ class CORE_EXPORT Performance : public EventTargetWithInlineData {
       mojom::blink::ResourceTimingInfoPtr,
       const AtomicString& initiator_type,
       mojo::PendingReceiver<mojom::blink::WorkerTimingContainer>
-          worker_timing_receiver);
+          worker_timing_receiver,
+      ExecutionContext* context);
 
   void NotifyNavigationTimingToObservers();
 
@@ -304,23 +305,11 @@ class CORE_EXPORT Performance : public EventTargetWithInlineData {
 
   ScriptValue toJSONForBinding(ScriptState*) const;
 
-  void Trace(Visitor*) override;
-
-  class UnifiedClock {
-   public:
-    UnifiedClock(const base::Clock* clock, const base::TickClock* tick_clock)
-        : clock_(clock), tick_clock_(tick_clock) {}
-    DOMHighResTimeStamp GetUnixAtZeroMonotonic() const;
-    base::TimeTicks NowTicks() const;
-
-   private:
-    const base::Clock* clock_;
-    const base::TickClock* tick_clock_;
-    mutable base::Optional<DOMHighResTimeStamp> unix_at_zero_monotonic_;
-  };
+  void Trace(Visitor*) const override;
 
   // The caller owns the |clock|.
-  void SetClocksForTesting(const UnifiedClock* clock);
+  void SetClocksForTesting(const base::Clock* clock,
+                           const base::TickClock* tick_clock);
   void ResetTimeOriginForTesting(base::TimeTicks time_origin);
 
  private:
@@ -334,17 +323,20 @@ class CORE_EXPORT Performance : public EventTargetWithInlineData {
       base::Optional<String> end_mark,
       ExceptionState&);
 
-  PerformanceMeasure* MeasureWithDetail(ScriptState*,
-                                        const AtomicString& measure_name,
-                                        const StringOrDouble& start,
-                                        base::Optional<double> duration,
-                                        const StringOrDouble& end,
-                                        const ScriptValue& detail,
-                                        ExceptionState&);
+  PerformanceMeasure* MeasureWithDetail(
+      ScriptState*,
+      const AtomicString& measure_name,
+      const base::Optional<StringOrDouble>& start,
+      const base::Optional<double>& duration,
+      const base::Optional<StringOrDouble>& end,
+      const ScriptValue& detail,
+      ExceptionState&);
 
   void CopySecondaryBuffer();
   PerformanceEntryVector getEntriesByTypeInternal(
       PerformanceEntry::EntryType type);
+
+  void MeasureMemoryExperimentTimerFired(TimerBase*);
 
  protected:
   Performance(base::TimeTicks time_origin,
@@ -380,6 +372,7 @@ class CORE_EXPORT Performance : public EventTargetWithInlineData {
   PerformanceEntryVector layout_shift_buffer_;
   PerformanceEntryVector largest_contentful_paint_buffer_;
   PerformanceEntryVector longtask_buffer_;
+  PerformanceEntryVector visibility_state_buffer_;
   Member<PerformanceEntry> navigation_timing_;
   Member<UserTiming> user_timing_;
   Member<PerformanceEntry> first_paint_timing_;
@@ -387,7 +380,8 @@ class CORE_EXPORT Performance : public EventTargetWithInlineData {
   Member<PerformanceEventTiming> first_input_timing_;
 
   base::TimeTicks time_origin_;
-  const UnifiedClock* unified_clock_;
+  DOMHighResTimeStamp unix_at_zero_monotonic_;
+  const base::TickClock* tick_clock_;
 
   PerformanceEntryTypeMask observer_filter_options_;
   HeapLinkedHashSet<Member<PerformanceObserver>> observers_;

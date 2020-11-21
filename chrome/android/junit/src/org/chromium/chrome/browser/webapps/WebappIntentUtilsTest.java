@@ -9,6 +9,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
 
 import android.content.Intent;
+import android.net.Uri;
 
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -16,6 +17,8 @@ import org.robolectric.annotation.Config;
 
 import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.chrome.browser.ShortcutHelper;
+
+import java.util.ArrayList;
 
 /**
  * Tests for {@link WebappIntentUtils}.
@@ -35,6 +38,7 @@ public class WebappIntentUtilsTest {
         assertFalse(toIntent.hasExtra(ShortcutHelper.EXTRA_IS_ICON_ADAPTIVE));
         assertFalse(toIntent.hasExtra(ShortcutHelper.EXTRA_DISPLAY_MODE));
         assertFalse(toIntent.hasExtra(ShortcutHelper.EXTRA_BACKGROUND_COLOR));
+        assertFalse(toIntent.hasExtra(Intent.EXTRA_STREAM));
     }
 
     /**
@@ -60,12 +64,41 @@ public class WebappIntentUtilsTest {
     }
 
     /**
-     * Test that {@link WebappIntentUtils#copyWebappLaunchIntentExtras()} does not copy non white
+     * Test that {@link WebappIntentUtils#copyWebApkLaunchIntentExtras()} properly copies both of
+     * the data types which can be used for Intent.EXTRA_STREAM.
+     */
+    @Test
+    public void testCopyStream() {
+        {
+            ArrayList fromList = new ArrayList<Uri>();
+            fromList.add(Uri.parse("https://www.google.com/"));
+            fromList.add(Uri.parse("https://www.blogspot.com/"));
+            Intent fromIntent = new Intent();
+            fromIntent.putExtra(Intent.EXTRA_STREAM, fromList);
+
+            Intent toIntent = new Intent();
+            WebappIntentUtils.copyWebApkLaunchIntentExtras(fromIntent, toIntent);
+            assertEquals(fromList, toIntent.getParcelableArrayListExtra(Intent.EXTRA_STREAM));
+        }
+
+        {
+            Uri fromUri = Uri.parse("https://www.google.com/");
+            Intent fromIntent = new Intent();
+            fromIntent.putExtra(Intent.EXTRA_STREAM, fromUri);
+
+            Intent toIntent = new Intent();
+            WebappIntentUtils.copyWebApkLaunchIntentExtras(fromIntent, toIntent);
+            assertEquals(fromUri, toIntent.getParcelableExtra(Intent.EXTRA_STREAM));
+        }
+    }
+
+    /**
+     * Test that {@link WebappIntentUtils#copyWebappLaunchIntentExtras()} does not copy non allow
      * listed intent extras.
      */
     @Test
-    public void testCopyWebappLaunchIntentExtrasWhitelist() {
-        final String extraKey = "not_in_whitelist";
+    public void testCopyWebappLaunchIntentExtrasAllowlist() {
+        final String extraKey = "not_in_allowlist";
         Intent fromIntent = new Intent();
         fromIntent.putExtra(extraKey, "random");
         Intent toIntent = new Intent();
@@ -79,14 +112,14 @@ public class WebappIntentUtilsTest {
      */
     @Test
     public void testCopyWebappLaunchIntentExtrasDoesNotModifyFromIntent() {
-        final String notInWhitelistKey = "not_in_whitelist";
+        final String notInAllowlistKey = "not_in_allowlist";
         Intent fromIntent = new Intent();
         fromIntent.putExtra(ShortcutHelper.EXTRA_NAME, "name");
-        fromIntent.putExtra(notInWhitelistKey, "random");
+        fromIntent.putExtra(notInAllowlistKey, "random");
         Intent toIntent = new Intent();
         WebappIntentUtils.copyWebappLaunchIntentExtras(fromIntent, toIntent);
         assertEquals("name", fromIntent.getStringExtra(ShortcutHelper.EXTRA_NAME));
-        assertEquals("random", fromIntent.getStringExtra(notInWhitelistKey));
+        assertEquals("random", fromIntent.getStringExtra(notInAllowlistKey));
         assertEquals("name", toIntent.getStringExtra(ShortcutHelper.EXTRA_NAME));
     }
 }

@@ -3,7 +3,8 @@
 // found in the LICENSE file.
 
 GEN_INCLUDE(['//chrome/test/data/webui/polymer_browser_test_base.js']);
-GEN('#include "services/network/public/cpp/features.h"');
+
+GEN('#include "content/public/test/browser_test.h"');
 
 // SetTimeDialogBrowserTest tests the "Set Time" web UI dialog.
 // eslint-disable-next-line no-var
@@ -19,11 +20,6 @@ var SetTimeDialogBrowserTest = class extends PolymerTest {
       '//third_party/mocha/mocha.js',
       '//chrome/test/data/webui/mocha_adapter.js',
     ];
-  }
-
-  /** @override */
-  get featureList() {
-    return {enabled: ['network::features::kOutOfBlinkCors']};
   }
 };
 

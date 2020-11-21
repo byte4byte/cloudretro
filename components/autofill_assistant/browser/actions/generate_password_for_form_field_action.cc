@@ -9,6 +9,7 @@
 
 #include "components/autofill/core/common/form_data.h"
 #include "components/autofill/core/common/form_field_data.h"
+#include "components/autofill/core/common/signatures.h"
 #include "components/autofill_assistant/browser/actions/action_delegate.h"
 #include "components/autofill_assistant/browser/client_status.h"
 #include "components/autofill_assistant/browser/value_util.h"
@@ -28,9 +29,7 @@ void GeneratePasswordForFormFieldAction::InternalProcessAction(
     ProcessActionCallback callback) {
   callback_ = std::move(callback);
 
-  selector_ = Selector(proto_.generate_password_for_form_field().element())
-                  .MustBeVisible();
-
+  selector_ = Selector(proto_.generate_password_for_form_field().element());
   if (selector_.empty()) {
     VLOG(1) << __func__ << ": empty selector";
     EndAction(ClientStatus(INVALID_SELECTOR));
@@ -52,25 +51,30 @@ void GeneratePasswordForFormFieldAction::OnGetFormAndFieldDataForGeneration(
     const autofill::FormFieldData& field_data) {
   if (!status.ok()) {
     EndAction(status);
+    return;
   }
+
   uint64_t max_length = field_data.max_length;
-  std::string password = delegate_->GetWebsiteLoginFetcher()->GeneratePassword(
+  std::string password = delegate_->GetWebsiteLoginManager()->GeneratePassword(
       autofill::CalculateFormSignature(form_data),
       autofill::CalculateFieldSignatureForField(field_data), max_length);
+
   delegate_->WriteUserData(base::BindOnce(
       &GeneratePasswordForFormFieldAction::StoreGeneratedPasswordToUserData,
-      weak_ptr_factory_.GetWeakPtr(), memory_key, password));
+      weak_ptr_factory_.GetWeakPtr(), memory_key, password, form_data));
+
+  EndAction(ClientStatus(ACTION_APPLIED));
 }
 
 void GeneratePasswordForFormFieldAction::StoreGeneratedPasswordToUserData(
     const std::string& memory_key,
     const std::string& generated_password,
+    const autofill::FormData& form_data,
     UserData* user_data,
     UserData::FieldChange* field_change) {
   DCHECK(user_data);
   user_data->additional_values_[memory_key] = SimpleValue(generated_password);
-
-  EndAction(ClientStatus(ACTION_APPLIED));
+  user_data->password_form_data_ = form_data;
 }
 
 void GeneratePasswordForFormFieldAction::EndAction(const ClientStatus& status) {

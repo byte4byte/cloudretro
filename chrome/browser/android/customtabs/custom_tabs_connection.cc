@@ -6,13 +6,14 @@
 #include "base/android/jni_string.h"
 #include "base/android/scoped_java_ref.h"
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "chrome/android/chrome_jni_headers/CustomTabsConnection_jni.h"
 #include "chrome/browser/android/customtabs/client_data_header_web_contents_observer.h"
 #include "chrome/browser/android/customtabs/detached_resource_request.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_android.h"
 #include "content/public/common/referrer.h"
+#include "net/url_request/referrer_policy.h"
 #include "url/gurl.h"
 
 namespace customtabs {
@@ -35,6 +36,7 @@ static void JNI_CustomTabsConnection_CreateAndStartDetachedResourceRequest(
     JNIEnv* env,
     const base::android::JavaParamRef<jobject>& profile,
     const base::android::JavaParamRef<jobject>& session,
+    const base::android::JavaParamRef<jstring>& package_name,
     const base::android::JavaParamRef<jstring>& url,
     const base::android::JavaParamRef<jstring>& origin,
     jint referrer_policy,
@@ -49,8 +51,12 @@ static void JNI_CustomTabsConnection_CreateAndStartDetachedResourceRequest(
   DCHECK(native_url.is_valid());
   DCHECK(native_origin.is_valid());
 
+  std::string native_package;
+  if (!package_name.is_null())
+    base::android::ConvertJavaStringToUTF8(env, package_name, &native_package);
+
   // Java only knows about the blink referrer policy.
-  net::URLRequest::ReferrerPolicy url_request_referrer_policy =
+  net::ReferrerPolicy url_request_referrer_policy =
       content::Referrer::ReferrerPolicyForUrlRequest(
           content::Referrer::ConvertToPolicy(referrer_policy));
   DetachedResourceRequest::Motivation request_motivation =
@@ -65,7 +71,7 @@ static void JNI_CustomTabsConnection_CreateAndStartDetachedResourceRequest(
 
   DetachedResourceRequest::CreateAndStart(
       native_profile, native_url, native_origin, url_request_referrer_policy,
-      request_motivation, std::move(cb));
+      request_motivation, native_package, std::move(cb));
 }
 
 static void JNI_CustomTabsConnection_SetClientDataHeader(

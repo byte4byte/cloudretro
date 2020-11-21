@@ -30,9 +30,9 @@ SyncSessionDurationsMetricsRecorder::SyncSessionDurationsMetricsRecorder(
     : sync_service_(sync_service), identity_manager_(identity_manager) {
   // |sync_service| can be null if sync is disabled by a command line flag.
   if (sync_service_) {
-    sync_observer_.Add(sync_service_);
+    sync_observation_.Observe(sync_service_);
   }
-  identity_manager_observer_.Add(identity_manager_);
+  identity_manager_observation_.Observe(identity_manager_);
 
   // Since this is created after the profile itself is created, we need to
   // handle the initial state.
@@ -52,8 +52,9 @@ SyncSessionDurationsMetricsRecorder::SyncSessionDurationsMetricsRecorder(
 
 SyncSessionDurationsMetricsRecorder::~SyncSessionDurationsMetricsRecorder() {
   DCHECK(!total_session_timer_) << "Missing a call to OnSessionEnded().";
-  sync_observer_.RemoveAll();
-  identity_manager_observer_.RemoveAll();
+  if (sync_observation_.IsObserving())
+    sync_observation_.RemoveObservation();
+  identity_manager_observation_.RemoveObservation();
 }
 
 void SyncSessionDurationsMetricsRecorder::OnSessionStarted(
@@ -71,6 +72,12 @@ void SyncSessionDurationsMetricsRecorder::OnSessionEnded(
   if (!total_session_timer_) {
     // If there was no active session, just ignore this call.
     return;
+  }
+
+  if (session_length.is_zero()) {
+    // During Profile teardown, this method is called with a |session_length|
+    // of zero.
+    session_length = total_session_timer_->Elapsed();
   }
 
   base::TimeDelta total_session_time = total_session_timer_->Elapsed();

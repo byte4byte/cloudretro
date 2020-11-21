@@ -34,12 +34,10 @@ import org.chromium.chrome.R;
 import org.chromium.chrome.browser.flags.BooleanCachedFieldTrialParameter;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.flags.ChromeSwitches;
-import org.chromium.chrome.browser.tab.SadTab;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tasks.tab_management.TabUiFeatureUtilities;
 import org.chromium.chrome.browser.ui.native_page.FrozenNativePage;
 import org.chromium.chrome.browser.ui.native_page.NativePage;
-import org.chromium.chrome.browser.usage_stats.SuspendedTab;
 import org.chromium.ui.base.DeviceFormFactor;
 import org.chromium.ui.display.DisplayAndroid;
 
@@ -60,7 +58,8 @@ public class TabContentManager {
     // These are used for UMA logging, so append only. Please update the
     // GridTabSwitcherThumbnailFetchingResult enum in enums.xml if these change.
     @IntDef({ThumbnailFetchingResult.GOT_JPEG, ThumbnailFetchingResult.GOT_ETC1,
-            ThumbnailFetchingResult.GOT_NOTHING})
+            ThumbnailFetchingResult.GOT_NOTHING,
+            ThumbnailFetchingResult.GOT_DIFFERENT_ASPECT_RATIO_JPEG})
     @Retention(RetentionPolicy.SOURCE)
     public @interface ThumbnailFetchingResult {
         int GOT_JPEG = 0;
@@ -280,7 +279,7 @@ public class TabContentManager {
 
         View viewToDraw = null;
         if (isNativeViewShowing) {
-            viewToDraw = tab.getContentView();
+            viewToDraw = tab.getView();
         } else if (!(nativePage instanceof FrozenNativePage)) {
             viewToDraw = nativePage.getView();
         }
@@ -367,6 +366,8 @@ public class TabContentManager {
         // that first even if |forceUpdate|.
         getTabThumbnailFromDisk(tabId, (diskBitmap) -> {
             if (diskBitmap != null) callback.onResult(diskBitmap);
+
+            if (mTabFinder == null) return;
 
             Tab tab = mTabFinder.getTabById(tabId);
             if (tab == null) return;
@@ -473,8 +474,7 @@ public class TabContentManager {
 
                             mRefectchedTabIds.add(tabId);
                             TabContentManagerJni.get().getEtc1TabThumbnail(mNativeTabContentManager,
-                                    TabContentManager.this, tabId,
-                                    (etc1) -> callback.onResult(etc1));
+                                    TabContentManager.this, tabId, callback);
                             return;
                         }
                     }
@@ -644,7 +644,7 @@ public class TabContentManager {
     }
 
     private boolean isNativeViewShowing(Tab tab) {
-        return tab != null && (SadTab.isShowing(tab) || SuspendedTab.isShowing(tab));
+        return tab != null && tab.isShowingCustomView();
     }
 
     @NativeMethods

@@ -6,7 +6,7 @@
 #include <set>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
@@ -38,6 +38,7 @@
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/url_constants.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/download_test_observer.h"
 #include "content/public/test/no_renderer_crashes_assertion.h"
@@ -257,7 +258,7 @@ IN_PROC_BROWSER_TEST_F(WebNavigationApiTest, ServerRedirectSingleProcess) {
       << message_;
 
   WebContents* tab = browser()->tab_strip_model()->GetActiveWebContents();
-  content::WaitForLoadStop(tab);
+  EXPECT_TRUE(content::WaitForLoadStop(tab));
 
   ResultCatcher catcher;
   GURL url(
@@ -317,7 +318,7 @@ IN_PROC_BROWSER_TEST_F(WebNavigationApiTest, UserAction) {
   ASSERT_TRUE(RunExtensionTest("webnavigation/userAction")) << message_;
 
   WebContents* tab = browser()->tab_strip_model()->GetActiveWebContents();
-  content::WaitForLoadStop(tab);
+  EXPECT_TRUE(content::WaitForLoadStop(tab));
 
   ResultCatcher catcher;
 
@@ -356,7 +357,7 @@ IN_PROC_BROWSER_TEST_F(WebNavigationApiTest, RequestOpenTab) {
       << message_;
 
   WebContents* tab = browser()->tab_strip_model()->GetActiveWebContents();
-  content::WaitForLoadStop(tab);
+  EXPECT_TRUE(content::WaitForLoadStop(tab));
 
   ResultCatcher catcher;
 
@@ -375,9 +376,11 @@ IN_PROC_BROWSER_TEST_F(WebNavigationApiTest, RequestOpenTab) {
   mouse_event.button = blink::WebMouseEvent::Button::kMiddle;
   mouse_event.SetPositionInWidget(7, 7);
   mouse_event.click_count = 1;
-  tab->GetRenderViewHost()->GetWidget()->ForwardMouseEvent(mouse_event);
+  tab->GetMainFrame()->GetRenderViewHost()->GetWidget()->ForwardMouseEvent(
+      mouse_event);
   mouse_event.SetType(blink::WebInputEvent::Type::kMouseUp);
-  tab->GetRenderViewHost()->GetWidget()->ForwardMouseEvent(mouse_event);
+  tab->GetMainFrame()->GetRenderViewHost()->GetWidget()->ForwardMouseEvent(
+      mouse_event);
 
   ASSERT_TRUE(catcher.GetNextResult()) << catcher.message();
 }
@@ -389,7 +392,7 @@ IN_PROC_BROWSER_TEST_F(WebNavigationApiTest, TargetBlank) {
   ASSERT_TRUE(RunExtensionTest("webnavigation/targetBlank")) << message_;
 
   WebContents* tab = browser()->tab_strip_model()->GetActiveWebContents();
-  content::WaitForLoadStop(tab);
+  EXPECT_TRUE(content::WaitForLoadStop(tab));
 
   ResultCatcher catcher;
 
@@ -408,9 +411,11 @@ IN_PROC_BROWSER_TEST_F(WebNavigationApiTest, TargetBlank) {
   mouse_event.button = blink::WebMouseEvent::Button::kLeft;
   mouse_event.SetPositionInWidget(7, 7);
   mouse_event.click_count = 1;
-  tab->GetRenderViewHost()->GetWidget()->ForwardMouseEvent(mouse_event);
+  tab->GetMainFrame()->GetRenderViewHost()->GetWidget()->ForwardMouseEvent(
+      mouse_event);
   mouse_event.SetType(blink::WebInputEvent::Type::kMouseUp);
-  tab->GetRenderViewHost()->GetWidget()->ForwardMouseEvent(mouse_event);
+  tab->GetMainFrame()->GetRenderViewHost()->GetWidget()->ForwardMouseEvent(
+      mouse_event);
 
   ASSERT_TRUE(catcher.GetNextResult()) << catcher.message();
 }
@@ -439,9 +444,11 @@ IN_PROC_BROWSER_TEST_F(WebNavigationApiTest, TargetBlankIncognito) {
   mouse_event.button = blink::WebMouseEvent::Button::kLeft;
   mouse_event.SetPositionInWidget(7, 7);
   mouse_event.click_count = 1;
-  tab->GetRenderViewHost()->GetWidget()->ForwardMouseEvent(mouse_event);
+  tab->GetMainFrame()->GetRenderViewHost()->GetWidget()->ForwardMouseEvent(
+      mouse_event);
   mouse_event.SetType(blink::WebInputEvent::Type::kMouseUp);
-  tab->GetRenderViewHost()->GetWidget()->ForwardMouseEvent(mouse_event);
+  tab->GetMainFrame()->GetRenderViewHost()->GetWidget()->ForwardMouseEvent(
+      mouse_event);
 
   ASSERT_TRUE(catcher.GetNextResult()) << catcher.message();
 }
@@ -528,7 +535,7 @@ IN_PROC_BROWSER_TEST_F(WebNavigationApiTest, Crash) {
   ASSERT_TRUE(RunExtensionTest("webnavigation/crash")) << message_;
 
   WebContents* tab = browser()->tab_strip_model()->GetActiveWebContents();
-  content::WaitForLoadStop(tab);
+  EXPECT_TRUE(content::WaitForLoadStop(tab));
 
   ResultCatcher catcher;
 

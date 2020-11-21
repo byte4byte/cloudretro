@@ -10,6 +10,10 @@
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/permissions/permission_context_base.h"
 
+namespace content {
+class BrowserContext;
+}
+
 // This permission context is responsible for getting, deciding on and updating
 // the Periodic Background Sync permission for a particular website. This
 // permission guards the use of the Periodic Background Sync API. It's not being
@@ -35,10 +39,11 @@ class PeriodicBackgroundSyncPermissionContext
 
  protected:
   // Virtual for testing.
-  virtual bool IsPwaInstalled(const GURL& url) const;
+  virtual bool IsPwaInstalled(const GURL& origin) const;
 #if defined(OS_ANDROID)
-  virtual bool IsTwaInstalled(const GURL& url) const;
+  virtual bool IsTwaInstalled(const GURL& origin) const;
 #endif
+  virtual GURL GetDefaultSearchEngineUrl() const;
 
  private:
   // PermissionContextBase implementation.
@@ -59,7 +64,8 @@ class PeriodicBackgroundSyncPermissionContext
                            const GURL& embedding_origin,
                            permissions::BrowserPermissionCallback callback,
                            bool persist,
-                           ContentSetting content_setting) override;
+                           ContentSetting content_setting,
+                           bool is_one_time) override;
 
   DISALLOW_COPY_AND_ASSIGN(PeriodicBackgroundSyncPermissionContext);
 };

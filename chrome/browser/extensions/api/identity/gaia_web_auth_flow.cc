@@ -16,9 +16,11 @@
 #include "chrome/browser/signin/identity_manager_factory.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
 #include "components/signin/public/identity_manager/ubertoken_fetcher.h"
+#include "content/public/browser/storage_partition.h"
 #include "google_apis/gaia/gaia_auth_fetcher.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "net/base/escape.h"
+#include "services/network/public/mojom/cookie_manager.mojom.h"
 
 namespace extensions {
 
@@ -29,10 +31,11 @@ GaiaWebAuthFlow::GaiaWebAuthFlow(Delegate* delegate,
                                  const std::string& locale)
     : delegate_(delegate),
       profile_(profile),
-      account_id_(token_key->account_id) {
+      account_id_(token_key->account_info.account_id) {
   TRACE_EVENT_NESTABLE_ASYNC_BEGIN2(
       "identity", "GaiaWebAuthFlow", this, "extension_id",
-      token_key->extension_id, "account_id", token_key->account_id.ToString());
+      token_key->extension_id, "account_id",
+      token_key->account_info.account_id.ToString());
 
   const char kOAuth2RedirectPathFormat[] = "/%s";
   const char kOAuth2AuthorizeFormat[] =
@@ -120,6 +123,15 @@ void GaiaWebAuthFlow::OnUbertokenFetchComplete(GoogleServiceAuthError error,
       GaiaUrls::GetInstance()->merge_session_url().Resolve(merge_query));
 
   web_flow_ = CreateWebAuthFlow(merge_url);
+  network::mojom::CookieManager* cookie_manager =
+      web_flow_->GetGuestPartition()->GetCookieManagerForBrowserProcess();
+  cookie_manager->DeleteCookies(
+      network::mojom::CookieDeletionFilter::New(),
+      base::BindOnce(&GaiaWebAuthFlow::OnCookiesDeleted,
+                     weak_ptr_factory_.GetWeakPtr()));
+}
+
+void GaiaWebAuthFlow::OnCookiesDeleted(uint32_t num_deleted) {
   web_flow_->Start();
 }
 
@@ -212,7 +224,8 @@ void GaiaWebAuthFlow::OnAuthFlowTitleChange(const std::string& title) {
 
 std::unique_ptr<WebAuthFlow> GaiaWebAuthFlow::CreateWebAuthFlow(GURL url) {
   return std::unique_ptr<WebAuthFlow>(
-      new WebAuthFlow(this, profile_, url, WebAuthFlow::INTERACTIVE));
+      new WebAuthFlow(this, profile_, url, WebAuthFlow::INTERACTIVE,
+                      WebAuthFlow::GET_AUTH_TOKEN));
 }
 
 }  // namespace extensions

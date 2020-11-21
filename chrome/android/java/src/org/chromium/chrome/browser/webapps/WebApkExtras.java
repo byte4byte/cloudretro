@@ -5,8 +5,7 @@
 package org.chromium.chrome.browser.webapps;
 
 import androidx.annotation.NonNull;
-
-import org.chromium.chrome.browser.webapps.WebApkInfo.ShareTarget;
+import androidx.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -62,8 +61,8 @@ public class WebApkExtras {
      * TODO(pkotwicz): Remove this property in favor of
      * {@link BrowserServicesIntentDataProvider#shareTarget()}
      */
-    @NonNull
-    public final ShareTarget shareTarget;
+    @Nullable
+    public final WebApkShareTarget shareTarget;
 
     /**
      * Whether the WebAPK
@@ -91,14 +90,16 @@ public class WebApkExtras {
         public String launchUrl;
         public String iconUrl;
         public String iconHash;
+        public @NonNull WebappIcon icon;
 
-        public ShortcutItem(
-                String name, String shortName, String launchUrl, String iconUrl, String iconHash) {
+        public ShortcutItem(String name, String shortName, String launchUrl, String iconUrl,
+                String iconHash, @NonNull WebappIcon icon) {
             this.name = name;
             this.shortName = shortName;
             this.launchUrl = launchUrl;
             this.iconUrl = iconUrl;
             this.iconHash = iconHash;
+            this.icon = icon;
         }
     }
 
@@ -106,7 +107,7 @@ public class WebApkExtras {
         return new WebApkExtras(null /* webApkPackageName */, new WebappIcon(),
                 false /* isSplashIconMaskable */, 0 /* shellApkVersion */, null /* manifestUrl */,
                 null /* manifestStartUrl */, WebApkDistributor.OTHER,
-                new HashMap<String, String>() /* iconUrlToMurmur2HashMap */, new ShareTarget(),
+                new HashMap<String, String>() /* iconUrlToMurmur2HashMap */, null /* shareTarget */,
                 false /* isSplashProvidedByWebApk */, new ArrayList<>() /* shortcutItems */,
                 0 /* webApkVersionCode */);
     }
@@ -114,9 +115,9 @@ public class WebApkExtras {
     public WebApkExtras(String webApkPackageName, @NonNull WebappIcon splashIcon,
             boolean isSplashIconMaskable, int shellApkVersion, String manifestUrl,
             String manifestStartUrl, @WebApkDistributor int distributor,
-            @NonNull Map<String, String> iconUrlToMurmur2HashMap, @NonNull ShareTarget shareTarget,
-            boolean isSplashProvidedByWebApk, @NonNull List<ShortcutItem> shortcutItems,
-            int webApkVersionCode) {
+            @NonNull Map<String, String> iconUrlToMurmur2HashMap,
+            @Nullable WebApkShareTarget shareTarget, boolean isSplashProvidedByWebApk,
+            @NonNull List<ShortcutItem> shortcutItems, int webApkVersionCode) {
         this.webApkPackageName = webApkPackageName;
         this.splashIcon = splashIcon;
         this.isSplashIconMaskable = isSplashIconMaskable;

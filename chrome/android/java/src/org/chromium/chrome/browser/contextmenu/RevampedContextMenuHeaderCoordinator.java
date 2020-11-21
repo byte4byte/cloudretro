@@ -5,15 +5,9 @@
 package org.chromium.chrome.browser.contextmenu;
 
 import android.app.Activity;
-import android.content.Context;
-import android.graphics.Bitmap;
 import android.text.SpannableString;
 import android.text.TextUtils;
-import android.webkit.URLUtil;
 
-import org.chromium.base.Callback;
-import org.chromium.chrome.browser.ChromeBaseAppCompatActivity;
-import org.chromium.chrome.browser.night_mode.GlobalNightModeStateProviderHolder;
 import org.chromium.chrome.browser.omnibox.ChromeAutocompleteSchemeClassifier;
 import org.chromium.chrome.browser.performance_hints.PerformanceHintsObserver.PerformanceClass;
 import org.chromium.chrome.browser.profiles.Profile;
@@ -21,19 +15,17 @@ import org.chromium.components.embedder_support.contextmenu.ContextMenuParams;
 import org.chromium.components.omnibox.OmniboxUrlEmphasizer;
 import org.chromium.components.security_state.ConnectionSecurityLevel;
 import org.chromium.ui.modelutil.PropertyModel;
+import org.chromium.ui.util.ColorUtils;
 
 class RevampedContextMenuHeaderCoordinator {
     private PropertyModel mModel;
     private RevampedContextMenuHeaderMediator mMediator;
 
-    private Context mContext;
-
     RevampedContextMenuHeaderCoordinator(Activity activity, @PerformanceClass int performanceClass,
-            ContextMenuParams params, Profile profile) {
-        mContext = activity;
-        mModel = buildModel(getTitle(params), getUrl(activity, params, profile));
+            ContextMenuParams params, Profile profile, ContextMenuNativeDelegate nativeDelegate) {
+        mModel = buildModel(ContextMenuUtils.getTitle(params), getUrl(activity, params, profile));
         mMediator = new RevampedContextMenuHeaderMediator(
-                activity, mModel, performanceClass, params, profile);
+                activity, mModel, performanceClass, params, profile, nativeDelegate);
     }
 
     private PropertyModel buildModel(String title, CharSequence url) {
@@ -51,29 +43,10 @@ class RevampedContextMenuHeaderCoordinator {
                 .build();
     }
 
-    private String getTitle(ContextMenuParams params) {
-        if (!TextUtils.isEmpty(params.getTitleText())) {
-            return params.getTitleText();
-        }
-        if (!TextUtils.isEmpty(params.getLinkText())) {
-            return params.getLinkText();
-        }
-        if (params.isImage() || params.isVideo() || params.isFile()) {
-            return URLUtil.guessFileName(params.getSrcUrl(), null, null);
-        }
-        return "";
-    }
-
     private CharSequence getUrl(Activity activity, ContextMenuParams params, Profile profile) {
         CharSequence url = params.getUrl();
         if (!TextUtils.isEmpty(url)) {
-            boolean useDarkColors =
-                    !GlobalNightModeStateProviderHolder.getInstance().isInNightMode();
-            if (activity instanceof ChromeBaseAppCompatActivity) {
-                useDarkColors = !((ChromeBaseAppCompatActivity) activity)
-                                         .getNightModeStateProvider()
-                                         .isInNightMode();
-            }
+            boolean useDarkColors = !ColorUtils.inNightMode(activity);
 
             SpannableString spannableUrl =
                     new SpannableString(ChromeContextMenuPopulator.createUrlText(params));
@@ -86,10 +59,6 @@ class RevampedContextMenuHeaderCoordinator {
             url = spannableUrl;
         }
         return url;
-    }
-
-    Callback<Bitmap> getOnImageThumbnailRetrievedReference() {
-        return mMediator::onImageThumbnailRetrieved;
     }
 
     PropertyModel getModel() {

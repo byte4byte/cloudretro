@@ -4,6 +4,7 @@
 
 #include "content/browser/web_package/web_bundle_interceptor_for_tracked_navigation_from_trustable_file_or_from_network.h"
 
+#include "base/command_line.h"
 #include "content/browser/loader/single_request_url_loader_factory.h"
 #include "content/browser/web_package/web_bundle_reader.h"
 #include "content/browser/web_package/web_bundle_source.h"
@@ -48,9 +49,8 @@ void WebBundleInterceptorForTrackedNavigationFromTrustableFileOrFromNetwork::
   DCHECK(url_loader_factory_->reader()->HasEntry(resource_request.url));
   DCHECK(url_loader_factory_->reader()->source().is_trusted_file() ||
          (url_loader_factory_->reader()->source().is_network() &&
-          url_loader_factory_->reader()
-              ->source()
-              .IsNavigationPathRestrictionSatisfied(resource_request.url)));
+          url_loader_factory_->reader()->source().IsPathRestrictionSatisfied(
+              resource_request.url)));
   std::move(callback).Run(base::MakeRefCounted<
                           SingleRequestURLLoaderFactory>(base::BindOnce(
       &WebBundleInterceptorForTrackedNavigationFromTrustableFileOrFromNetwork::

@@ -8,9 +8,9 @@
 #include "base/test/scoped_feature_list.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
-#include "content/browser/frame_host/render_frame_host_impl.h"
 #include "content/browser/portal/portal.h"
 #include "content/browser/portal/portal_navigation_throttle.h"
+#include "content/browser/renderer_host/render_frame_host_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
@@ -295,20 +295,17 @@ IN_PROC_BROWSER_TEST_F(PortalNavigationThrottleBrowserTest,
       GetWebContents(),
       embedded_test_server()->GetURL("portal.test", "/title1.html")));
 
-  auto* old_delegate = GetWebContents()->GetDelegate();
-  ConsoleObserverDelegate console_delegate(GetWebContents(),
-                                           "*portal*cross-origin*");
-  GetWebContents()->SetDelegate(&console_delegate);
+  WebContentsConsoleObserver console_observer(GetWebContents());
+  console_observer.SetPattern("*portal*cross-origin*");
 
   Portal* portal = InsertAndWaitForPortal(
       embedded_test_server()->GetURL("not.portal.test", "/title2.html"),
       /*expected_to_succeed=*/false);
   EXPECT_NE(portal, nullptr);
 
-  console_delegate.Wait();
-  EXPECT_THAT(console_delegate.message(),
+  console_observer.Wait();
+  EXPECT_THAT(console_observer.GetMessageAt(0u),
               ::testing::HasSubstr("http://not.portal.test"));
-  GetWebContents()->SetDelegate(old_delegate);
 }
 
 // Ensure navigating while a portal is orphaned does not bypass cross-origin
@@ -332,16 +329,9 @@ IN_PROC_BROWSER_TEST_F(PortalNavigationThrottleBrowserTest,
                      "});"));
 
   TestNavigationObserver navigation_observer(predecessor_contents);
-  // TODO(1058455): Due to a race, navigating immediately after calling
-  // |portal.activate()| always gets canceled. This test would correctly fail
-  // regardless due to an initial request to /notreached, however these next
-  // assertions about whether the navigation was cancelled would trivially pass.
-  // We use a setTimeout for now to make these assertions meaningful.
   EXPECT_TRUE(ExecJs(predecessor_contents,
                      JsReplace("document.querySelector('portal').activate();"
-                               "setTimeout(() => {"
-                               "  location.href = $1;"
-                               "});",
+                               "location.href = $1;",
                                orphan_navigation_url)));
   navigation_observer.Wait();
   EXPECT_FALSE(navigation_observer.last_navigation_succeeded());
@@ -379,30 +369,26 @@ IN_PROC_BROWSER_TEST_F(PortalNavigationThrottleBrowserTestCrossOrigin,
   // should only be flaky if there is a bug.
 
   {
-    auto* old_delegate = portal->GetPortalContents()->GetDelegate();
-    ConsoleObserverDelegate console_delegate(portal->GetPortalContents(),
-                                             "*avigat*");
-    portal->GetPortalContents()->SetDelegate(&console_delegate);
+    WebContentsConsoleObserver console_observer(portal->GetPortalContents());
+    console_observer.SetPattern("*avigat*");
     EXPECT_TRUE(ExecJs(portal->GetPortalContents(),
                        "location.href = 'data:text/html,hello world';"));
-    console_delegate.Wait();
-    EXPECT_THAT(console_delegate.message(), ::testing::HasSubstr("data"));
+    console_observer.Wait();
+    EXPECT_THAT(console_observer.GetMessageAt(0u),
+                ::testing::HasSubstr("data"));
     SleepWithRunLoop(base::TimeDelta::FromSeconds(3), FROM_HERE);
     EXPECT_EQ(portal->GetPortalContents()->GetLastCommittedURL(), referrer_url);
-    portal->GetPortalContents()->SetDelegate(old_delegate);
   }
 
   {
-    auto* old_delegate = GetWebContents()->GetDelegate();
-    ConsoleObserverDelegate console_delegate(GetWebContents(), "*avigat*");
-    GetWebContents()->SetDelegate(&console_delegate);
+    WebContentsConsoleObserver console_observer(GetWebContents());
+    console_observer.SetPattern("*avigat*");
     EXPECT_TRUE(ExecJs(portal->GetPortalContents(),
                        "location.href = 'ftp://user:pass@example.com/';"));
-    console_delegate.Wait();
-    EXPECT_THAT(console_delegate.message(), ::testing::HasSubstr("ftp"));
+    console_observer.Wait();
+    EXPECT_THAT(console_observer.GetMessageAt(0u), ::testing::HasSubstr("ftp"));
     SleepWithRunLoop(base::TimeDelta::FromSeconds(3), FROM_HERE);
     EXPECT_EQ(portal->GetPortalContents()->GetLastCommittedURL(), referrer_url);
-    GetWebContents()->SetDelegate(old_delegate);
   }
 }
 

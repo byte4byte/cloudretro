@@ -9,7 +9,7 @@
 #include <vector>
 
 #include "base/atomicops.h"
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "base/stl_util.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
@@ -120,7 +120,7 @@ std::string GetHostAttributes() {
       media::InitializeMediaFoundation()) {
     result.push_back("HWEncoder");
   }
-#elif defined(OS_LINUX)
+#elif defined(OS_LINUX) || defined(OS_CHROMEOS)
   result.push_back("HWEncoder");
 #endif
 

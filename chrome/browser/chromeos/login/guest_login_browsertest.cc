@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "ash/public/cpp/keyboard/keyboard_controller.h"
 #include "ash/public/cpp/login_screen_test_api.h"
 #include "chrome/browser/chromeos/login/test/login_manager_mixin.h"
 #include "chrome/browser/ui/browser.h"
@@ -10,6 +11,7 @@
 #include "chromeos/dbus/power/fake_power_manager_client.h"
 #include "chromeos/dbus/session_manager/fake_session_manager_client.h"
 #include "components/user_manager/user_manager.h"
+#include "content/public/test/browser_test.h"
 
 namespace chromeos {
 
@@ -91,6 +93,35 @@ IN_PROC_BROWSER_TEST_F(GuestLoginTest, ExitFullscreenOnSuspend) {
   FakePowerManagerClient::Get()->SendSuspendImminent(
       power_manager::SuspendImminent_Reason_OTHER);
   EXPECT_FALSE(browser_window->IsFullscreen());
+}
+
+IN_PROC_BROWSER_TEST_F(GuestLoginTest,
+                       PRE_VirtualKeyboardFeaturesEnabledByDefault) {
+  base::RunLoop restart_job_waiter;
+  FakeSessionManagerClient::Get()->set_restart_job_callback(
+      restart_job_waiter.QuitClosure());
+
+  ASSERT_TRUE(ash::LoginScreenTestApi::ClickGuestButton());
+
+  restart_job_waiter.Run();
+  EXPECT_TRUE(FakeSessionManagerClient::Get()->restart_job_argv().has_value());
+}
+
+IN_PROC_BROWSER_TEST_F(GuestLoginTest,
+                       VirtualKeyboardFeaturesEnabledByDefault) {
+  login_manager_.WaitForActiveSession();
+
+  user_manager::UserManager* user_manager = user_manager::UserManager::Get();
+  EXPECT_TRUE(user_manager->IsLoggedInAsGuest());
+
+  keyboard::KeyboardConfig config =
+      ash::KeyboardController::Get()->GetKeyboardConfig();
+  EXPECT_TRUE(config.auto_capitalize);
+  EXPECT_TRUE(config.auto_complete);
+  EXPECT_TRUE(config.auto_correct);
+  EXPECT_TRUE(config.handwriting);
+  EXPECT_TRUE(config.spell_check);
+  EXPECT_TRUE(config.voice_input);
 }
 
 IN_PROC_BROWSER_TEST_F(GuestLoginWithLoginSwitchesTest, PRE_Login) {

@@ -58,7 +58,6 @@ public class TrustedWebActivityPermissionStore {
 
     private static final String KEY_NOTIFICATION_PERMISSION_PREFIX = "notification_permission.";
     private static final String KEY_GEOLOCATION_PERMISSION_PREFIX = "geolocation_permission.";
-    private static final String KEY_UNSUPPORTED_PERMISSION_PREFIX = "unsurpported__permission.";
     private static final String KEY_PACKAGE_NAME_PREFIX = "package_name.";
     private static final String KEY_APP_NAME_PREFIX = "app_name.";
     private static final String KEY_PRE_TWA_NOTIFICATION_PERMISSION_PREFIX
@@ -143,7 +142,7 @@ public class TrustedWebActivityPermissionStore {
     }
 
     /**
-     * Sets the notification state for the origin.
+     * Sets the permission state for the origin.
      * Returns whether {@code true} if state was changed, {@code false} if the provided state was
      * the same as the state beforehand.
      */
@@ -186,6 +185,11 @@ public class TrustedWebActivityPermissionStore {
                 .remove(createPackageNameKey(origin))
                 .remove(createAllDelegateAppsKey(origin))
                 .apply();
+    }
+
+    /** Reset permission {@type} from the store. */
+    void resetPermission(Origin origin, @ContentSettingsType int type) {
+        mPreferences.edit().remove(createPermissionKey(type, origin)).apply();
     }
 
     /** Stores the notification state the origin had before the TWA was installed. */
@@ -233,8 +237,7 @@ public class TrustedWebActivityPermissionStore {
             case ContentSettingsType.GEOLOCATION:
                 return KEY_GEOLOCATION_PERMISSION_PREFIX;
             default:
-                assert false;
-                return KEY_UNSUPPORTED_PERMISSION_PREFIX;
+                throw new IllegalStateException("Unsupported permission type.");
         }
     }
 

@@ -20,6 +20,7 @@
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/client_certificate_delegate.h"
+#include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/storage_partition.h"
@@ -31,10 +32,13 @@
 #include "headless/lib/browser/headless_devtools_manager_delegate.h"
 #include "headless/lib/browser/headless_quota_permission_context.h"
 #include "headless/lib/headless_macros.h"
+#include "mojo/public/cpp/bindings/binder_map.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/receiver_set.h"
 #include "net/base/url_util.h"
 #include "net/ssl/client_cert_identity.h"
 #include "printing/buildflags/buildflags.h"
-#include "services/service_manager/sandbox/switches.h"
+#include "sandbox/policy/switches.h"
 #include "ui/base/ui_base_switches.h"
 #include "ui/gfx/switches.h"
 
@@ -109,6 +113,32 @@ int GetCrashSignalFD(const base::CommandLine& command_line,
 
 }  // namespace
 
+// Implements a stub BadgeService. This implementation does nothing, but is
+// required because inbound Mojo messages which do not have a registered
+// handler are considered an error, and the render process is terminated.
+// See https://crbug.com/1090429
+class HeadlessContentBrowserClient::StubBadgeService
+    : public blink::mojom::BadgeService {
+ public:
+  StubBadgeService() = default;
+  StubBadgeService(const StubBadgeService&) = delete;
+  StubBadgeService& operator=(const StubBadgeService&) = delete;
+  ~StubBadgeService() override = default;
+
+  void Bind(mojo::PendingReceiver<blink::mojom::BadgeService> receiver) {
+    receivers_.Add(this, std::move(receiver));
+  }
+
+  void Reset() {}
+
+  // blink::mojom::BadgeService:
+  void SetBadge(blink::mojom::BadgeValuePtr value) override {}
+  void ClearBadge() override {}
+
+ private:
+  mojo::ReceiverSet<blink::mojom::BadgeService> receivers_;
+};
+
 HeadlessContentBrowserClient::HeadlessContentBrowserClient(
     HeadlessBrowserImpl* browser)
     : browser_(browser),
@@ -130,13 +160,20 @@ HeadlessContentBrowserClient::CreateBrowserMainParts(
 
 void HeadlessContentBrowserClient::OverrideWebkitPrefs(
     content::RenderViewHost* render_view_host,
-    content::WebPreferences* prefs) {
+    blink::web_pref::WebPreferences* prefs) {
   auto* browser_context = HeadlessBrowserContextImpl::From(
       render_view_host->GetProcess()->GetBrowserContext());
-  base::RepeatingCallback<void(WebPreferences*)> callback =
+  base::RepeatingCallback<void(blink::web_pref::WebPreferences*)> callback =
       browser_context->options()->override_web_preferences_callback();
   if (callback)
     callback.Run(prefs);
+}
+
+void HeadlessContentBrowserClient::RegisterBrowserInterfaceBindersForFrame(
+    content::RenderFrameHost* render_frame_host,
+    mojo::BinderMapWithContext<content::RenderFrameHost*>* map) {
+  map->Add<blink::mojom::BadgeService>(base::BindRepeating(
+      &HeadlessContentBrowserClient::BindBadgeService, base::Unretained(this)));
 }
 
 content::DevToolsManagerDelegate*
@@ -158,7 +195,7 @@ HeadlessContentBrowserClient::GetGeneratedCodeCacheSettings(
   return content::GeneratedCodeCacheSettings(true, 0, context->GetPath());
 }
 
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
+#if defined(OS_POSIX) && !defined(OS_MAC)
 void HeadlessContentBrowserClient::GetAdditionalMappedFilesForChildProcess(
     const base::CommandLine& command_line,
     int child_process_id,
@@ -166,10 +203,10 @@ void HeadlessContentBrowserClient::GetAdditionalMappedFilesForChildProcess(
 #if defined(HEADLESS_USE_BREAKPAD)
   int crash_signal_fd = GetCrashSignalFD(command_line, *browser_->options());
   if (crash_signal_fd >= 0)
-    mappings->Share(service_manager::kCrashDumpSignal, crash_signal_fd);
+    mappings->Share(kCrashDumpSignal, crash_signal_fd);
 #endif  // defined(HEADLESS_USE_BREAKPAD)
 }
-#endif  // defined(OS_POSIX) && !defined(OS_MACOSX)
+#endif  // defined(OS_POSIX) && !defined(OS_MAC)
 
 void HeadlessContentBrowserClient::AppendExtraCommandLineSwitches(
     base::CommandLine* command_line,
@@ -241,10 +278,10 @@ void HeadlessContentBrowserClient::AppendExtraCommandLineSwitches(
                                             process_type, child_process_id);
   }
 
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
   // Processes may only query perf_event_open with the BPF sandbox disabled.
   if (old_command_line.HasSwitch(::switches::kEnableThreadInstructionCount) &&
-      old_command_line.HasSwitch(service_manager::switches::kNoSandbox)) {
+      old_command_line.HasSwitch(sandbox::policy::switches::kNoSandbox)) {
     command_line->AppendSwitch(::switches::kEnableThreadInstructionCount);
   }
 #endif
@@ -300,13 +337,16 @@ bool HeadlessContentBrowserClient::ShouldEnableStrictSiteIsolation() {
   return browser_->options()->site_per_process;
 }
 
-mojo::Remote<::network::mojom::NetworkContext>
-HeadlessContentBrowserClient::CreateNetworkContext(
+void HeadlessContentBrowserClient::ConfigureNetworkContextParams(
     content::BrowserContext* context,
     bool in_memory,
-    const base::FilePath& relative_partition_path) {
-  return HeadlessBrowserContextImpl::From(context)->CreateNetworkContext(
-      in_memory, relative_partition_path);
+    const base::FilePath& relative_partition_path,
+    ::network::mojom::NetworkContextParams* network_context_params,
+    ::network::mojom::CertVerifierCreationParams*
+        cert_verifier_creation_params) {
+  HeadlessBrowserContextImpl::From(context)->ConfigureNetworkContextParams(
+      in_memory, relative_partition_path, network_context_params,
+      cert_verifier_creation_params);
 }
 
 std::string HeadlessContentBrowserClient::GetProduct() {
@@ -315,6 +355,15 @@ std::string HeadlessContentBrowserClient::GetProduct() {
 
 std::string HeadlessContentBrowserClient::GetUserAgent() {
   return browser_->options()->user_agent;
+}
+
+void HeadlessContentBrowserClient::BindBadgeService(
+    content::RenderFrameHost* render_frame_host,
+    mojo::PendingReceiver<blink::mojom::BadgeService> receiver) {
+  if (!stub_badge_service_)
+    stub_badge_service_ = std::make_unique<StubBadgeService>();
+
+  stub_badge_service_->Bind(std::move(receiver));
 }
 
 }  // namespace headless

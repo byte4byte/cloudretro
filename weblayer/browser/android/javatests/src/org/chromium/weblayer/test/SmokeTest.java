@@ -4,17 +4,21 @@
 
 package org.chromium.weblayer.test;
 
-import android.support.test.filters.SmallTest;
+import android.app.Activity;
+import android.content.pm.ActivityInfo;
 
 import androidx.fragment.app.Fragment;
+import androidx.test.filters.SmallTest;
 
+import org.hamcrest.Matchers;
 import org.junit.Assert;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
-import org.chromium.base.test.BaseJUnit4ClassRunner;
-import org.chromium.content_public.browser.test.util.CriteriaHelper;
+import org.chromium.base.test.util.Criteria;
+import org.chromium.base.test.util.CriteriaHelper;
+import org.chromium.base.test.util.CriteriaNotSatisfiedException;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 import org.chromium.weblayer.shell.InstrumentationActivity;
 
@@ -25,7 +29,7 @@ import java.lang.ref.ReferenceQueue;
 /**
  * Basic tests to make sure WebLayer works as expected.
  */
-@RunWith(BaseJUnit4ClassRunner.class)
+@RunWith(WebLayerJUnit4ClassRunner.class)
 public class SmokeTest {
     @Rule
     public InstrumentationActivityTestRule mActivityTestRule =
@@ -76,10 +80,36 @@ public class SmokeTest {
             Reference enqueuedReference = referenceQueue.poll();
             if (enqueuedReference == null) {
                 Runtime.getRuntime().gc();
-                Assert.fail("No enqueued reference");
+                throw new CriteriaNotSatisfiedException("No enqueued reference");
             }
-            Assert.assertEquals(reference, enqueuedReference);
+            Criteria.checkThat(reference, Matchers.is(enqueuedReference));
         });
+    }
+
+    @Test
+    @SmallTest
+    public void testRecreateInstance() {
+        try {
+            InstrumentationActivity activity = mActivityTestRule.launchShellWithUrl("about:blank");
+            TestThreadUtils.runOnUiThreadBlocking(() -> {
+                activity.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+            });
+            mActivityTestRule.setRetainInstance(false);
+            Fragment firstFragment = mActivityTestRule.getFragment();
+
+            mActivityTestRule.recreateByRotatingToLandscape();
+            boolean destroyed =
+                    TestThreadUtils.runOnUiThreadBlockingNoException(() -> activity.isDestroyed());
+            Assert.assertTrue(destroyed);
+
+            Fragment secondFragment = mActivityTestRule.getFragment();
+            Assert.assertNotSame(firstFragment, secondFragment);
+        } finally {
+            Activity activity = mActivityTestRule.getActivity();
+            TestThreadUtils.runOnUiThreadBlocking(() -> {
+                activity.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+            });
+        }
     }
 
     @Test
@@ -106,9 +136,9 @@ public class SmokeTest {
             Reference enqueuedReference = referenceQueue.poll();
             if (enqueuedReference == null) {
                 Runtime.getRuntime().gc();
-                Assert.fail("No enqueued reference");
+                throw new CriteriaNotSatisfiedException("No enqueued reference");
             }
-            Assert.assertEquals(reference, enqueuedReference);
+            Criteria.checkThat(reference, Matchers.is(enqueuedReference));
         });
     }
 }

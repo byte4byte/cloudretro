@@ -32,22 +32,26 @@ bool AreProgressMarkersEquivalent(const std::string& serialized1,
   DCHECK(marker1.data_type_id() == marker2.data_type_id());
 
   if (syncer::GetModelTypeFromSpecificsFieldNumber(marker1.data_type_id()) ==
-      syncer::AUTOFILL_WALLET_DATA) {
-    return fake_server::AreWalletDataProgressMarkersEquivalent(marker1,
-                                                               marker2);
+          syncer::AUTOFILL_WALLET_DATA ||
+      syncer::GetModelTypeFromSpecificsFieldNumber(marker1.data_type_id()) ==
+          syncer::AUTOFILL_WALLET_OFFER) {
+    return fake_server::AreFullUpdateTypeDataProgressMarkersEquivalent(marker1,
+                                                                       marker2);
   }
   return marker1.SerializeAsString() == marker2.SerializeAsString();
 }
 
 // Returns true if these services have matching progress markers.
 bool ProgressMarkersMatch(const syncer::ProfileSyncService* service1,
-                          const syncer::ProfileSyncService* service2) {
+                          const syncer::ProfileSyncService* service2,
+                          std::ostream* os) {
   // GetActiveDataTypes() is always empty during configuration, so progress
   // markers cannot be compared.
   if (service1->GetTransportState() !=
           syncer::SyncService::TransportState::ACTIVE ||
       service2->GetTransportState() !=
           syncer::SyncService::TransportState::ACTIVE) {
+    *os << "Transport state differs";
     return false;
   }
 
@@ -61,19 +65,29 @@ bool ProgressMarkersMatch(const syncer::ProfileSyncService* service1,
       service2->GetLastCycleSnapshotForDebugging();
 
   for (syncer::ModelType type : common_types) {
+    if (syncer::IsProxyType(type)) {
+      continue;
+    }
+
     // Look up the progress markers.  Fail if either one is missing.
     auto pm_it1 = snap1.download_progress_markers().find(type);
     if (pm_it1 == snap1.download_progress_markers().end()) {
+      *os << "Progress marker missing in client 1 for "
+          << syncer::ModelTypeToString(type);
       return false;
     }
 
     auto pm_it2 = snap2.download_progress_markers().find(type);
     if (pm_it2 == snap2.download_progress_markers().end()) {
+      *os << "Progress marker missing in client 2 for "
+          << syncer::ModelTypeToString(type);
       return false;
     }
 
     // Fail if any of them don't match.
     if (!AreProgressMarkersEquivalent(pm_it1->second, pm_it2->second)) {
+      *os << "Progress markers don't match for "
+          << syncer::ModelTypeToString(type);
       return false;
     }
   }
@@ -130,7 +144,8 @@ bool QuiesceStatusChangeChecker::IsExitConditionSatisfied(std::ostream* os) {
 
   for (size_t i = 1; i < enabled_services.size(); ++i) {
     // Return false if there is a progress marker mismatch.
-    if (!ProgressMarkersMatch(enabled_services[i - 1], enabled_services[i])) {
+    if (!ProgressMarkersMatch(enabled_services[i - 1], enabled_services[i],
+                              os)) {
       *os << "Not quiesced: Progress marker mismatch.";
       return false;
     }

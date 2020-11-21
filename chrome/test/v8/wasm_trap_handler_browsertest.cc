@@ -13,6 +13,7 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 
 namespace {
@@ -21,11 +22,11 @@ namespace {
 // support non-Android, Linux x64, and Windows x64. In the future more platforms
 // will be supported. Though this file is a browser test that is not built on
 // Android.
-#if defined(OS_LINUX) && defined(ARCH_CPU_X86_64)
+#if (defined(OS_LINUX) || defined(OS_CHROMEOS)) && defined(ARCH_CPU_X86_64)
 constexpr bool kIsTrapHandlerSupported = true;
 #elif defined(OS_WIN) && defined(ARCH_CPU_X86_64)
 constexpr bool kIsTrapHandlerSupported = true;
-#elif defined(OS_MACOSX) && defined(ARCH_CPU_X86_64)
+#elif defined(OS_MAC) && defined(ARCH_CPU_X86_64)
 constexpr bool kIsTrapHandlerSupported = true;
 #else
 constexpr bool kIsTrapHandlerSupported = false;

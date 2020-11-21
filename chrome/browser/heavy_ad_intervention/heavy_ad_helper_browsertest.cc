@@ -10,6 +10,7 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/render_frame_host.h"
+#include "content/public/browser/site_isolation_policy.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
@@ -24,7 +25,11 @@ namespace {
 bool IsContentInDocument(content::RenderFrameHost* rfh, std::string content) {
   std::string script =
       "document.documentElement.innerHTML.includes('" + content + "');";
-  return EvalJs(rfh, script).ExtractBool();
+  // Execute script in an isolated world to avoid causing a Trusted Types
+  // violation due to eval.
+  return EvalJs(rfh, script, content::EXECUTE_SCRIPT_DEFAULT_OPTIONS,
+                /*world_id=*/1)
+      .ExtractBool();
 }
 
 }  // namespace
@@ -55,15 +60,14 @@ IN_PROC_BROWSER_TEST_F(HeavyAdHelperBrowserTest,
   content::RenderFrameHost* child =
       ChildFrameAt(web_contents->GetMainFrame(), 0);
 
-  content::ConsoleObserverDelegate console_delegate(web_contents, "*");
-  web_contents->SetDelegate(&console_delegate);
+  content::WebContentsConsoleObserver console_observer(web_contents);
 
   content::TestNavigationObserver error_observer(web_contents);
   controller.LoadPostCommitErrorPage(
       child, url, heavy_ads::PrepareHeavyAdPage(), net::ERR_BLOCKED_BY_CLIENT);
   error_observer.Wait();
 
-  EXPECT_TRUE(console_delegate.messages().empty());
+  EXPECT_TRUE(console_observer.messages().empty());
 }
 
 // Checks that the heavy ad strings are in the html content of the rendered
@@ -84,6 +88,14 @@ IN_PROC_BROWSER_TEST_F(HeavyAdHelperBrowserTest,
   controller.LoadPostCommitErrorPage(
       child, url, heavy_ads::PrepareHeavyAdPage(), net::ERR_BLOCKED_BY_CLIENT);
   error_observer.Wait();
+
+  // With error page isolation, the error page will be loaded in the error
+  // page process, therefore it will have a different RenderFrameHost
+  // instance.
+  if (content::SiteIsolationPolicy::IsErrorPageIsolationEnabled(
+          /* in_main_frame = */ false)) {
+    child = ChildFrameAt(web_contents->GetMainFrame(), 0);
+  }
 
   EXPECT_TRUE(IsContentInDocument(
       child,

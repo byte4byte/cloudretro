@@ -29,25 +29,26 @@ using browsing_data::BrowsingDataCounter;
 
 ProfileStatisticsAggregator::ProfileStatisticsAggregator(
     Profile* profile,
-    const base::Closure& done_callback)
+    base::OnceClosure done_callback)
     : profile_(profile),
       profile_path_(profile_->GetPath()),
-      done_callback_(done_callback) {}
+      done_callback_(std::move(done_callback)) {}
 
 ProfileStatisticsAggregator::~ProfileStatisticsAggregator() {}
 
 void ProfileStatisticsAggregator::AddCallbackAndStartAggregator(
-    const profiles::ProfileStatisticsCallback& stats_callback) {
+    profiles::ProfileStatisticsCallback stats_callback) {
   if (stats_callback)
-    stats_callbacks_.push_back(stats_callback);
+    stats_callbacks_.push_back(std::move(stats_callback));
   StartAggregator();
 }
 
 void ProfileStatisticsAggregator::AddCounter(
     std::unique_ptr<BrowsingDataCounter> counter) {
   counter->InitWithoutPref(
-      base::Time(), base::Bind(&ProfileStatisticsAggregator::OnCounterResult,
-                               base::Unretained(this)));
+      base::Time(),
+      base::BindRepeating(&ProfileStatisticsAggregator::OnCounterResult,
+                          base::Unretained(this)));
   counter->Restart();
   counters_.push_back(std::move(counter));
 }
@@ -74,12 +75,12 @@ void ProfileStatisticsAggregator::StartAggregator() {
       browsing_data::HistoryCounter::GetUpdatedWebHistoryServiceCallback(),
       /*sync_service=*/nullptr));
 
-  // Initiate stored password counting.
+  // Initiate stored password counting. Only count local passwords.
   scoped_refptr<password_manager::PasswordStore> password_store =
       PasswordStoreFactory::GetForProfile(
           profile_, ServiceAccessType::EXPLICIT_ACCESS);
   AddCounter(std::make_unique<browsing_data::PasswordsCounter>(
-      password_store, /*sync_service=*/nullptr));
+      password_store, /*account_store=*/nullptr, /*sync_service=*/nullptr));
 
   // Initiate autofill counting.
   scoped_refptr<autofill::AutofillWebDataService> autofill_service =
@@ -123,7 +124,7 @@ void ProfileStatisticsAggregator::StatisticsCallback(const char* category,
 
   if (profile_category_stats_.size() ==
       profiles::kProfileStatisticsCategories.size()) {
-    if (done_callback_)
-      done_callback_.Run();
+    DCHECK(done_callback_);
+    std::move(done_callback_).Run();
   }
 }

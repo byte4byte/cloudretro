@@ -42,7 +42,6 @@
 #include "net/socket/client_socket_factory.h"
 #include "net/url_request/url_fetcher.h"
 #include "remoting/base/auto_thread_task_runner.h"
-#include "remoting/base/chromium_url_request.h"
 #include "remoting/base/constants.h"
 #include "remoting/base/logging.h"
 #include "remoting/base/oauth_token_getter_impl.h"
@@ -59,6 +58,7 @@
 #include "remoting/host/desktop_environment.h"
 #include "remoting/host/desktop_environment_options.h"
 #include "remoting/host/desktop_session_connector.h"
+#include "remoting/host/ftl_echo_message_listener.h"
 #include "remoting/host/ftl_host_change_notification_listener.h"
 #include "remoting/host/ftl_signaling_connector.h"
 #include "remoting/host/heartbeat_sender.h"
@@ -79,13 +79,13 @@
 #include "remoting/host/security_key/security_key_auth_handler.h"
 #include "remoting/host/security_key/security_key_extension.h"
 #include "remoting/host/shutdown_watchdog.h"
-#include "remoting/host/single_window_desktop_environment.h"
 #include "remoting/host/switches.h"
 #include "remoting/host/test_echo_extension.h"
 #include "remoting/host/third_party_auth_config.h"
 #include "remoting/host/token_validator_factory_impl.h"
 #include "remoting/host/usage_stats_consent.h"
 #include "remoting/host/username.h"
+#include "remoting/host/zombie_host_detector.h"
 #include "remoting/protocol/authenticator.h"
 #include "remoting/protocol/channel_authenticator.h"
 #include "remoting/protocol/chromium_port_allocator_factory.h"
@@ -111,20 +111,21 @@
 #include "remoting/host/posix/signal_handler.h"
 #endif  // defined(OS_POSIX)
 
-#if defined(OS_MACOSX)
+#if defined(OS_APPLE)
 #include "base/mac/mac_util.h"
 #include "base/mac/scoped_cftyperef.h"
 #include "remoting/host/desktop_capturer_checker.h"
 #include "remoting/host/mac/permission_utils.h"
-#endif  // defined(OS_MACOSX)
+#endif  // defined(OS_APPLE)
 
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
 #include <gtk/gtk.h>
+
 #include "base/linux_util.h"
 #include "remoting/host/audio_capturer_linux.h"
 #include "remoting/host/linux/certificate_watcher.h"
-#include "ui/gfx/x/x11.h"
-#endif  // defined(OS_LINUX)
+#include "ui/events/platform/x11/x11_event_source.h"
+#endif  // defined(OS_LINUX) || defined(OS_CHROMEOS)
 
 #if defined(OS_WIN)
 #include <commctrl.h>
@@ -137,7 +138,7 @@
 using remoting::protocol::PairingRegistry;
 using remoting::protocol::NetworkSettings;
 
-#if defined(OS_MACOSX)
+#if defined(OS_APPLE)
 
 // The following creates a section that tells Mac OS X that it is OK to let us
 // inject input in the login screen. Just the name of the section is important,
@@ -146,7 +147,7 @@ __attribute__((used))
 __attribute__((section ("__CGPreLoginApp,__cgpreloginapp")))
 static const char magic_section[] = "";
 
-#endif  // defined(OS_MACOSX)
+#endif  // defined(OS_APPLE)
 
 namespace {
 
@@ -159,11 +160,11 @@ const char kApplicationName[] = "chromoting";
 const char kStdinConfigPath[] = "-";
 #endif  // !defined(REMOTING_MULTI_PROCESS)
 
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
 // The command line switch used to pass name of the pipe to capture audio on
 // linux.
 const char kAudioPipeSwitchName[] = "audio-pipe-name";
-#endif  // defined(OS_LINUX)
+#endif  // defined(OS_LINUX) || defined(OS_CHROMEOS)
 
 #if defined(OS_POSIX)
 // The command line switch used to pass name of the unix domain socket used to
@@ -180,8 +181,6 @@ const char kEnableVp9SwitchName[] = "enable-vp9";
 
 // Command line switch used to enable hardware H264 encoding.
 const char kEnableH264SwitchName[] = "enable-h264";
-
-const char kWindowIdSwitchName[] = "window-id";
 
 // Command line switch used to send a custom offline reason and exit.
 const char kReportOfflineReasonSwitchName[] = "report-offline-reason";
@@ -200,6 +199,11 @@ const char kHostOfflineReasonPolicyReadError[] = "POLICY_READ_ERROR";
 const char kHostOfflineReasonPolicyChangeRequiresRestart[] =
     "POLICY_CHANGE_REQUIRES_RESTART";
 const char kHostOfflineReasonRemoteRestartHost[] = "REMOTE_RESTART_HOST";
+const char kHostOfflineReasonZombieStateDetected[] = "ZOMBIE_STATE_DETECTED";
+
+// The default email domain for Googlers. Used to determine whether the host's
+// email address is Google-internal or not.
+constexpr char kGooglerEmailDomain[] = "@google.com";
 
 }  // namespace
 
@@ -319,6 +323,7 @@ class HostProcess : public ConfigWatcher::Delegate,
   bool OnPairingPolicyUpdate(base::DictionaryValue* policies);
   bool OnGnubbyAuthPolicyUpdate(base::DictionaryValue* policies);
   bool OnFileTransferPolicyUpdate(base::DictionaryValue* policies);
+  bool OnEnableUserInterfacePolicyUpdate(base::DictionaryValue* policies);
 
   void InitializeSignaling();
 
@@ -331,14 +336,14 @@ class HostProcess : public ConfigWatcher::Delegate,
   void OnAuthFailed() override;
   void OnRemoteRestartHost() override;
 
+  void OnZombieStateDetected();
+
   void RestartHost(const std::string& host_offline_reason);
   void ShutdownHost(HostExitCodes exit_code);
 
   // Helper methods doing the work needed by RestartHost and ShutdownHost.
   void GoOffline(const std::string& host_offline_reason);
   void OnHostOfflineReasonAck(bool success);
-
-  void UpdateConfigRefreshToken(const std::string& token);
 
 #if defined(OS_WIN)
   // Initializes the pairing registry on Windows. This should be invoked on the
@@ -357,7 +362,7 @@ class HostProcess : public ConfigWatcher::Delegate,
 
   std::unique_ptr<ChromotingHostContext> context_;
 
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
   // Watch for certificate changes and kill the host when changes occur
   std::unique_ptr<CertificateWatcher> cert_watcher_;
 #endif
@@ -379,6 +384,7 @@ class HostProcess : public ConfigWatcher::Delegate,
   std::string robot_account_username_;
   std::string serialized_config_;
   std::string host_owner_;
+  bool is_googler_ = false;
   bool enable_vp9_ = false;
   bool enable_h264_ = false;
 
@@ -391,15 +397,12 @@ class HostProcess : public ConfigWatcher::Delegate,
   bool allow_relay_ = true;
   PortRange udp_port_range_;
   bool allow_pairing_ = true;
+  bool enable_user_interface_ = true;
 
   DesktopEnvironmentOptions desktop_environment_options_;
   ThirdPartyAuthConfig third_party_auth_config_;
   bool security_key_auth_policy_enabled_ = false;
   bool security_key_extension_supported_ = true;
-
-  // Boolean to change flow, where necessary, if we're
-  // capturing a window instead of the entire desktop.
-  bool enable_window_capture_ = false;
 
   // Used to specify which window to stream, if enabled.
   webrtc::WindowId window_id_ = 0;
@@ -407,8 +410,11 @@ class HostProcess : public ConfigWatcher::Delegate,
   // Must outlive |signal_strategy_| and |ftl_signaling_connector_|.
   std::unique_ptr<OAuthTokenGetterImpl> oauth_token_getter_;
 
-  // Must outlive |heartbeat_sender_| and |host_status_logger_|.
+  // Must outlive |host_status_logger_|.
   std::unique_ptr<LogToServer> log_to_server_;
+
+  // Must outlive |signal_strategy_| and |heartbeat_sender_|.
+  std::unique_ptr<ZombieHostDetector> zombie_host_detector_;
 
   // Signal strategies must outlive |ftl_signaling_connector_|.
   std::unique_ptr<SignalStrategy> signal_strategy_;
@@ -417,6 +423,7 @@ class HostProcess : public ConfigWatcher::Delegate,
   std::unique_ptr<HeartbeatSender> heartbeat_sender_;
   std::unique_ptr<FtlHostChangeNotificationListener>
       ftl_host_change_notification_listener_;
+  std::unique_ptr<FtlEchoMessageListener> ftl_echo_message_listener_;
 
   std::unique_ptr<HostStatusLogger> host_status_logger_;
   std::unique_ptr<HostEventLogger> host_event_logger_;
@@ -445,13 +452,13 @@ class HostProcess : public ConfigWatcher::Delegate,
 
   ShutdownWatchdog* shutdown_watchdog_;
 
-#if defined(OS_MACOSX)
+#if defined(OS_APPLE)
   // When using the command line option to check the Accessibility or Screen
   // Recording permission, these track the permission state and indicate that
   // the host should exit immediately with the result.
   bool checking_permission_state_ = false;
   bool permission_granted_ = false;
-#endif  // defined(OS_MACOSX)
+#endif  // defined(OS_APPLE)
 
   DISALLOW_COPY_AND_ASSIGN(HostProcess);
 };
@@ -471,7 +478,7 @@ HostProcess::HostProcess(std::unique_ptr<ChromotingHostContext> context,
 
   StartOnUiThread();
 
-#if defined(OS_MACOSX)
+#if defined(OS_APPLE)
   if (checking_permission_state_) {
     *exit_code_out = (permission_granted_ ? EXIT_SUCCESS : EXIT_FAILURE);
   }
@@ -494,7 +501,7 @@ HostProcess::~HostProcess() {
 }
 
 bool HostProcess::InitWithCommandLine(const base::CommandLine* cmd_line) {
-#if defined(OS_MACOSX)
+#if defined(OS_APPLE)
   if (cmd_line->HasSwitch(kCheckAccessibilityPermissionSwitchName)) {
     checking_permission_state_ = true;
     permission_granted_ = mac::CanInjectInput();
@@ -512,7 +519,7 @@ bool HostProcess::InitWithCommandLine(const base::CommandLine* cmd_line) {
     permission_granted_ = mac::CanRecordScreen();
     return false;
   }
-#endif  // defined(OS_MACOSX)
+#endif  // defined(OS_APPLE)
 
 #if defined(REMOTING_MULTI_PROCESS)
   // Mojo keeps the task runner passed to it alive forever, so an
@@ -572,27 +579,6 @@ bool HostProcess::InitWithCommandLine(const base::CommandLine* cmd_line) {
     if (report_offline_reason_.empty()) {
       LOG(ERROR) << "--" << kReportOfflineReasonSwitchName
                  << " requires an argument.";
-      return false;
-    }
-  }
-
-  enable_window_capture_ = cmd_line->HasSwitch(kWindowIdSwitchName);
-  if (enable_window_capture_) {
-
-#if defined(OS_LINUX) || defined(OS_WIN)
-    LOG(WARNING) << "Window capturing is not fully supported on Linux or "
-                    "Windows.";
-#endif  // defined(OS_LINUX) || defined(OS_WIN)
-
-    // uint32_t is large enough to hold window IDs on all platforms.
-    uint32_t window_id;
-    if (base::StringToUint(
-            cmd_line->GetSwitchValueASCII(kWindowIdSwitchName),
-            &window_id)) {
-      window_id_ = static_cast<webrtc::WindowId>(window_id);
-    } else {
-      LOG(ERROR) << "Window with window id: " << window_id_
-                 << " not found. Shutting down host.";
       return false;
     }
   }
@@ -718,8 +704,8 @@ void HostProcess::StartOnNetworkThread() {
 
 #if defined(OS_POSIX)
   remoting::RegisterSignalHandler(
-      SIGTERM,
-      base::Bind(&HostProcess::SigTermHandler, base::Unretained(this)));
+      SIGTERM, base::BindRepeating(&HostProcess::SigTermHandler,
+                                   base::Unretained(this)));
 #endif  // defined(OS_POSIX)
 }
 
@@ -777,11 +763,12 @@ void HostProcess::CreateAuthenticatorFactory() {
     DCHECK(third_party_auth_config_.token_url.is_valid());
     DCHECK(third_party_auth_config_.token_validation_url.is_valid());
 
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
     if (!cert_watcher_) {
-      cert_watcher_.reset(new CertificateWatcher(
-          base::Bind(&HostProcess::ShutdownHost, this, kSuccessExitCode),
-          context_->file_task_runner()));
+      cert_watcher_ = std::make_unique<CertificateWatcher>(
+          base::BindRepeating(&HostProcess::ShutdownHost, this,
+                              kSuccessExitCode),
+          context_->file_task_runner());
       cert_watcher_->Start();
     }
     cert_watcher_->SetMonitor(host_->status_monitor());
@@ -860,10 +847,10 @@ void HostProcess::StartOnUiThread() {
   policy_watcher_ =
       PolicyWatcher::CreateWithTaskRunner(context_->file_task_runner());
   policy_watcher_->StartWatching(
-      base::Bind(&HostProcess::OnPolicyUpdate, base::Unretained(this)),
-      base::Bind(&HostProcess::OnPolicyError, base::Unretained(this)));
+      base::BindRepeating(&HostProcess::OnPolicyUpdate, base::Unretained(this)),
+      base::BindRepeating(&HostProcess::OnPolicyError, base::Unretained(this)));
 
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
   // If an audio pipe is specific on the command-line then initialize
   // AudioCapturerLinux to capture from it.
   base::FilePath audio_pipe_name = base::CommandLine::ForCurrentProcess()->
@@ -872,7 +859,7 @@ void HostProcess::StartOnUiThread() {
     remoting::AudioCapturerLinux::InitializePipeReader(
         context_->audio_task_runner(), audio_pipe_name);
   }
-#endif  // defined(OS_LINUX)
+#endif  // defined(OS_LINUX) || defined(OS_CHROMEOS)
 
 #if defined(OS_POSIX)
   base::FilePath security_key_socket_name =
@@ -896,15 +883,9 @@ void HostProcess::StartOnUiThread() {
   desktop_session_connector_ = desktop_environment_factory;
 #else  // !defined(REMOTING_MULTI_PROCESS)
   BasicDesktopEnvironmentFactory* desktop_environment_factory;
-  if (enable_window_capture_) {
-    desktop_environment_factory = new SingleWindowDesktopEnvironmentFactory(
-        context_->network_task_runner(), context_->video_capture_task_runner(),
-        context_->input_task_runner(), context_->ui_task_runner(), window_id_);
-  } else {
-    desktop_environment_factory = new Me2MeDesktopEnvironmentFactory(
-        context_->network_task_runner(), context_->video_capture_task_runner(),
-        context_->input_task_runner(), context_->ui_task_runner());
-  }
+  desktop_environment_factory = new Me2MeDesktopEnvironmentFactory(
+      context_->network_task_runner(), context_->video_capture_task_runner(),
+      context_->input_task_runner(), context_->ui_task_runner());
 #endif  // !defined(REMOTING_MULTI_PROCESS)
 
   desktop_environment_factory_.reset(desktop_environment_factory);
@@ -927,7 +908,7 @@ void HostProcess::ShutdownOnUiThread() {
   // It is now safe for the HostProcess to be deleted.
   self_ = nullptr;
 
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
   // Cause the global AudioPipeReader to be freed, otherwise the audio
   // thread will remain in-use and prevent the process from exiting.
   // TODO(wez): DesktopEnvironmentFactory should own the pipe reader.
@@ -1052,6 +1033,10 @@ bool HostProcess::ApplyConfig(const base::DictionaryValue& config) {
   }
   host_owner_ = *host_owner_ptr;
 
+  // Check if the host owner's email is Google-internal.
+  is_googler_ = base::EndsWith(host_owner_, kGooglerEmailDomain,
+                               base::CompareCase::INSENSITIVE_ASCII);
+
   // Allow offering of VP9 encoding to be overridden by the command-line.
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(kEnableVp9SwitchName)) {
     enable_vp9_ = true;
@@ -1093,6 +1078,7 @@ void HostProcess::OnPolicyUpdate(
   restart_required |= OnPairingPolicyUpdate(policies.get());
   restart_required |= OnGnubbyAuthPolicyUpdate(policies.get());
   restart_required |= OnFileTransferPolicyUpdate(policies.get());
+  restart_required |= OnEnableUserInterfacePolicyUpdate(policies.get());
 
   policy_state_ = POLICY_LOADED;
 
@@ -1203,7 +1189,7 @@ void HostProcess::ApplyUsernamePolicy() {
         !base::StartsWith(host_owner_, username + std::string("@"),
                           base::CompareCase::INSENSITIVE_ASCII);
 
-#if defined(OS_MACOSX)
+#if defined(OS_APPLE)
     // On Mac, we run as root at the login screen, so the username won't match.
     // However, there's no need to enforce the policy at the login screen, as
     // the client will have to reconnect if a login occurs.
@@ -1307,7 +1293,7 @@ bool HostProcess::OnCurtainPolicyUpdate(base::DictionaryValue* policies) {
   }
   desktop_environment_options_.set_enable_curtaining(curtain_required);
 
-#if defined(OS_MACOSX)
+#if defined(OS_APPLE)
   if (curtain_required) {
     // When curtain mode is in effect on Mac, the host process runs in the
     // user's switched-out session, but launchd will also run an instance at
@@ -1407,6 +1393,29 @@ bool HostProcess::OnFileTransferPolicyUpdate(base::DictionaryValue* policies) {
   return true;
 }
 
+bool HostProcess::OnEnableUserInterfacePolicyUpdate(
+    base::DictionaryValue* policies) {
+  DCHECK(context_->network_task_runner()->BelongsToCurrentThread());
+
+  bool enable_user_interface;
+  if (!policies->GetBoolean(policy::key::kRemoteAccessHostEnableUserInterface,
+                            &enable_user_interface)) {
+    return false;
+  }
+
+  // Save the value until we have parsed the host config since we only want the
+  // policy to be applied to machines owned by a Googler.
+  enable_user_interface_ = enable_user_interface;
+  if (enable_user_interface_) {
+    HOST_LOG << "Policy enables user interface for non-curtained sessions.";
+  } else {
+    HOST_LOG << "Policy disables user interface for non-curtained sessions.";
+  }
+
+  // Restart required.
+  return true;
+}
+
 void HostProcess::InitializeSignaling() {
   DCHECK(!host_id_.empty());  // ApplyConfig() should already have been run.
 
@@ -1423,28 +1432,32 @@ void HostProcess::InitializeSignaling() {
   // callback will never be invoked once it is destroyed.
   oauth_token_getter_ = std::make_unique<OAuthTokenGetterImpl>(
       std::move(oauth_credentials),
-      base::BindRepeating(&HostProcess::UpdateConfigRefreshToken,
-                          base::Unretained(this)),
       context_->url_loader_factory(), false);
 
   log_to_server_ = std::make_unique<RemotingLogToServer>(
-      ServerLogEntry::ME2ME, std::make_unique<OAuthTokenGetterProxy>(
-                                 oauth_token_getter_->GetWeakPtr()));
+      ServerLogEntry::ME2ME,
+      std::make_unique<OAuthTokenGetterProxy>(
+          oauth_token_getter_->GetWeakPtr()),
+      context_->url_loader_factory());
+  zombie_host_detector_ = std::make_unique<ZombieHostDetector>(base::BindOnce(
+      &HostProcess::OnZombieStateDetected, base::Unretained(this)));
   auto ftl_signal_strategy = std::make_unique<FtlSignalStrategy>(
       std::make_unique<OAuthTokenGetterProxy>(
           oauth_token_getter_->GetWeakPtr()),
-      std::make_unique<FtlHostDeviceIdProvider>(host_id_));
+      context_->url_loader_factory(),
+      std::make_unique<FtlHostDeviceIdProvider>(host_id_),
+      zombie_host_detector_.get());
   ftl_signaling_connector_ = std::make_unique<FtlSignalingConnector>(
       ftl_signal_strategy.get(),
       base::BindOnce(&HostProcess::OnAuthFailed, base::Unretained(this)));
   ftl_signaling_connector_->Start();
+
   heartbeat_sender_ = std::make_unique<HeartbeatSender>(
       this, host_id_, ftl_signal_strategy.get(), oauth_token_getter_.get(),
-      log_to_server_.get());
-  ftl_host_change_notification_listener_ =
-      std::make_unique<FtlHostChangeNotificationListener>(
-          this, ftl_signal_strategy.get());
+      zombie_host_detector_.get(), context_->url_loader_factory(), is_googler_);
   signal_strategy_ = std::move(ftl_signal_strategy);
+
+  zombie_host_detector_->Start();
 }
 
 void HostProcess::StartHostIfReady() {
@@ -1495,9 +1508,8 @@ void HostProcess::StartHost() {
   scoped_refptr<protocol::TransportContext> transport_context =
       new protocol::TransportContext(
           std::make_unique<protocol::ChromiumPortAllocatorFactory>(),
-          std::make_unique<ChromiumUrlRequestFactory>(
-              context_->url_loader_factory()),
-          network_settings, protocol::TransportRole::SERVER);
+          context_->url_loader_factory(), network_settings,
+          protocol::TransportRole::SERVER);
   std::unique_ptr<protocol::SessionManager> session_manager(
       new protocol::JingleSessionManager(signal_strategy_.get()));
 
@@ -1512,11 +1524,20 @@ void HostProcess::StartHost() {
   protocol_config->set_webrtc_supported(true);
   session_manager->set_protocol_config(std::move(protocol_config));
 
-  host_.reset(new ChromotingHost(desktop_environment_factory_.get(),
-                                 std::move(session_manager), transport_context,
-                                 context_->audio_task_runner(),
-                                 context_->video_encode_task_runner(),
-                                 desktop_environment_options_));
+  if (is_googler_) {
+    // Enabling this policy means that a local user sitting at a host would not
+    // see any UI or indication that a remote user was connected.  We do have a
+    // few use cases for this internally where we know for a fact that there
+    // will not be a local user.  Since that isn't something we can control
+    // externally, we don't want to apply this policy for non-Googlers.
+    desktop_environment_options_.set_enable_user_interface(
+        enable_user_interface_);
+  }
+
+  host_ = std::make_unique<ChromotingHost>(
+      desktop_environment_factory_.get(), std::move(session_manager),
+      transport_context, context_->audio_task_runner(),
+      context_->video_encode_task_runner(), desktop_environment_options_);
 
   if (security_key_auth_policy_enabled_ && security_key_extension_supported_) {
     host_->AddExtension(
@@ -1526,7 +1547,7 @@ void HostProcess::StartHost() {
   host_->AddExtension(std::make_unique<TestEchoExtension>());
 
   // TODO(simonmorris): Get the maximum session duration from a policy.
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
   host_->SetMaximumSessionDuration(base::TimeDelta::FromHours(20));
 #endif
 
@@ -1537,6 +1558,13 @@ void HostProcess::StartHost() {
       host_->status_monitor(), context_->ui_task_runner(),
       context_->file_task_runner()));
 
+  ftl_host_change_notification_listener_ =
+      std::make_unique<FtlHostChangeNotificationListener>(
+          this, signal_strategy_.get());
+
+  ftl_echo_message_listener_ = std::make_unique<FtlEchoMessageListener>(
+      host_owner_, signal_strategy_.get());
+
   // Set up reporting the host status notifications.
 #if defined(REMOTING_MULTI_PROCESS)
   host_event_logger_.reset(
@@ -1546,7 +1574,7 @@ void HostProcess::StartHost() {
       HostEventLogger::Create(host_->status_monitor(), kApplicationName);
 #endif  // !defined(REMOTING_MULTI_PROCESS)
 
-#if defined(OS_MACOSX)
+#if defined(OS_APPLE)
   // Don't run the permission-checks as root (i.e. at the login screen), as they
   // are not actionable there.
   // Also, the permission-checks are not needed on MacOS 10.15+, as they are
@@ -1555,7 +1583,7 @@ void HostProcess::StartHost() {
   if (getuid() != 0U && base::mac::IsAtMostOS10_14()) {
     mac::PromptUserToChangeTrustStateIfNeeded(context_->ui_task_runner());
   }
-#endif  // defined(OS_MACOSX)
+#endif  // defined(OS_APPLE)
 
   host_->Start(host_owner_);
 
@@ -1571,6 +1599,10 @@ void HostProcess::OnAuthFailed() {
 
 void HostProcess::OnRemoteRestartHost() {
   RestartHost(kHostOfflineReasonRemoteRestartHost);
+}
+
+void HostProcess::OnZombieStateDetected() {
+  RestartHost(kHostOfflineReasonZombieStateDetected);
 }
 
 void HostProcess::RestartHost(const std::string& host_offline_reason) {
@@ -1651,7 +1683,9 @@ void HostProcess::OnHostOfflineReasonAck(bool success) {
   heartbeat_sender_.reset();
   oauth_token_getter_.reset();
   ftl_signaling_connector_.reset();
+  ftl_echo_message_listener_.reset();
   signal_strategy_.reset();
+  zombie_host_detector_.reset();
 
   if (state_ == HOST_GOING_OFFLINE_TO_RESTART) {
     SetState(HOST_STARTING);
@@ -1672,13 +1706,6 @@ void HostProcess::OnHostOfflineReasonAck(bool success) {
   }
 }
 
-void HostProcess::UpdateConfigRefreshToken(const std::string& token) {
-#if defined(REMOTING_MULTI_PROCESS)
-  daemon_channel_->Send(
-      new ChromotingNetworkDaemonMsg_UpdateConfigRefreshToken(token));
-#endif
-}
-
 void HostProcess::OnCrash(const std::string& function_name,
                           const std::string& file_name,
                           const int& line_number) {
@@ -1695,11 +1722,13 @@ void HostProcess::OnCrash(const std::string& function_name,
 int HostProcessMain() {
   HOST_LOG << "Starting host process: version " << STRINGIZE(VERSION);
 
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
+  std::unique_ptr<ui::X11EventSource> event_source;
   if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
           kReportOfflineReasonSwitchName)) {
-    // Required in order for us to run multiple X11 threads.
-    XInitThreads();
+    // Create an X11EventSource so the global X11 connection
+    // (x11::Connection::Get()) can dispatch X events.
+    event_source = std::make_unique<ui::X11EventSource>(x11::Connection::Get());
 
     // Required for any calls into GTK functions, such as the Disconnect and
     // Continue windows, though these should not be used for the Me2Me case

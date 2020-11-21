@@ -20,17 +20,23 @@ import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.base.supplier.Supplier;
 import org.chromium.chrome.browser.DefaultBrowserInfo;
 import org.chromium.chrome.browser.IntentHandler;
+import org.chromium.chrome.browser.bookmarks.BookmarkUtils;
 import org.chromium.chrome.browser.compositor.bottombar.ephemeraltab.EphemeralTabCoordinator;
 import org.chromium.chrome.browser.contextmenu.ContextMenuItemDelegate;
 import org.chromium.chrome.browser.document.ChromeLauncherActivity;
 import org.chromium.chrome.browser.download.ChromeDownloadDelegate;
+import org.chromium.chrome.browser.feature_engagement.TrackerFactory;
 import org.chromium.chrome.browser.incognito.IncognitoUtils;
 import org.chromium.chrome.browser.multiwindow.MultiWindowUtils;
 import org.chromium.chrome.browser.net.spdyproxy.DataReductionProxySettings;
+import org.chromium.chrome.browser.profiles.Profile;
+import org.chromium.chrome.browser.tab.state.CriticalPersistedTabData;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.browser.tabmodel.document.TabDelegate;
+import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManager;
 import org.chromium.components.embedder_support.util.UrlConstants;
 import org.chromium.components.embedder_support.util.UrlUtilities;
+import org.chromium.components.feature_engagement.EventConstants;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.common.Referrer;
@@ -45,17 +51,25 @@ import java.util.Locale;
  */
 public class TabContextMenuItemDelegate implements ContextMenuItemDelegate {
     private final TabImpl mTab;
+    private final TabModelSelector mTabModelSelector;
     private boolean mLoadOriginalImageRequestedForPageLoad;
     private EmptyTabObserver mDataReductionProxyContextMenuTabObserver;
     private final Supplier<EphemeralTabCoordinator> mEphemeralTabCoordinatorSupplier;
+    private final Runnable mContextMenuCopyLinkObserver;
+    private final Supplier<SnackbarManager> mSnackbarManagerSupplier;
 
     /**
      * Builds a {@link TabContextMenuItemDelegate} instance.
      */
-    public TabContextMenuItemDelegate(
-            Tab tab, Supplier<EphemeralTabCoordinator> ephemeralTabCoordinatorSupplier) {
+    public TabContextMenuItemDelegate(Tab tab, TabModelSelector tabModelSelector,
+            Supplier<EphemeralTabCoordinator> ephemeralTabCoordinatorSupplier,
+            Runnable contextMenuCopyLinkObserver,
+            Supplier<SnackbarManager> snackbarManagerSupplier) {
         mTab = (TabImpl) tab;
+        mTabModelSelector = tabModelSelector;
         mEphemeralTabCoordinatorSupplier = ephemeralTabCoordinatorSupplier;
+        mContextMenuCopyLinkObserver = contextMenuCopyLinkObserver;
+        mSnackbarManagerSupplier = snackbarManagerSupplier;
 
         mDataReductionProxyContextMenuTabObserver = new EmptyTabObserver() {
             @Override
@@ -69,6 +83,11 @@ public class TabContextMenuItemDelegate implements ContextMenuItemDelegate {
     @Override
     public void onDestroy() {
         mTab.removeObserver(mDataReductionProxyContextMenuTabObserver);
+    }
+
+    @Override
+    public String getPageTitle() {
+        return mTab.getTitle();
     }
 
     @Override
@@ -88,7 +107,8 @@ public class TabContextMenuItemDelegate implements ContextMenuItemDelegate {
 
     @Override
     public boolean isOpenInOtherWindowSupported() {
-        return MultiWindowUtils.getInstance().isOpenInOtherWindowSupported(mTab.getActivity());
+        return MultiWindowUtils.getInstance().isOpenInOtherWindowSupported(
+                TabUtils.getActivity(mTab));
     }
 
     @Override
@@ -105,6 +125,10 @@ public class TabContextMenuItemDelegate implements ContextMenuItemDelegate {
     @Override
     public void onSaveToClipboard(String text, int clipboardType) {
         Clipboard.getInstance().setText(text);
+        if (clipboardType == ClipboardType.LINK_URL) {
+            // TODO(crbug/1150090): Find a better way of passing event for IPH.
+            mContextMenuCopyLinkObserver.run();
+        }
     }
 
     @Override
@@ -124,7 +148,7 @@ public class TabContextMenuItemDelegate implements ContextMenuItemDelegate {
         Intent intent = new Intent(Intent.ACTION_VIEW);
         intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         intent.setData(Uri.parse(uri));
-        IntentUtils.safeStartActivity(mTab.getActivity(), intent);
+        IntentUtils.safeStartActivity(mTab.getContext(), intent);
     }
 
     @Override
@@ -139,7 +163,7 @@ public class TabContextMenuItemDelegate implements ContextMenuItemDelegate {
         Intent intent = new Intent(Intent.ACTION_VIEW);
         intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         intent.setData(Uri.parse(url));
-        IntentUtils.safeStartActivity(mTab.getActivity(), intent);
+        IntentUtils.safeStartActivity(mTab.getContext(), intent);
     }
 
     @Override
@@ -153,7 +177,7 @@ public class TabContextMenuItemDelegate implements ContextMenuItemDelegate {
     public void onSendTextMessage(String url) {
         Intent intent = new Intent(Intent.ACTION_VIEW);
         intent.setData(Uri.parse("sms:" + UrlUtilities.getTelNumber(url)));
-        IntentUtils.safeStartActivity(mTab.getActivity(), intent);
+        IntentUtils.safeStartActivity(mTab.getContext(), intent);
     }
 
     @Override
@@ -174,7 +198,7 @@ public class TabContextMenuItemDelegate implements ContextMenuItemDelegate {
         } else if (UrlUtilities.isTelScheme(url)) {
             intent.putExtra(ContactsContract.Intents.Insert.PHONE, UrlUtilities.getTelNumber(url));
         }
-        IntentUtils.safeStartActivity(mTab.getActivity(), intent);
+        IntentUtils.safeStartActivity(mTab.getContext(), intent);
     }
 
     @Override
@@ -182,7 +206,8 @@ public class TabContextMenuItemDelegate implements ContextMenuItemDelegate {
         TabDelegate tabDelegate = new TabDelegate(mTab.isIncognito());
         LoadUrlParams loadUrlParams = new LoadUrlParams(url);
         loadUrlParams.setReferrer(referrer);
-        tabDelegate.createTabInOtherWindow(loadUrlParams, mTab.getActivity(), mTab.getParentId());
+        tabDelegate.createTabInOtherWindow(loadUrlParams, TabUtils.getActivity(mTab),
+                CriticalPersistedTabData.from(mTab).getParentId());
     }
 
     @Override
@@ -191,7 +216,7 @@ public class TabContextMenuItemDelegate implements ContextMenuItemDelegate {
         RecordUserAction.record("LinkOpenedInNewTab");
         LoadUrlParams loadUrlParams = new LoadUrlParams(url);
         loadUrlParams.setReferrer(referrer);
-        TabModelSelector.from(mTab).openNewTab(
+        mTabModelSelector.openNewTab(
                 loadUrlParams, TabLaunchType.FROM_LONGPRESS_BACKGROUND, mTab, isIncognito());
     }
 
@@ -209,7 +234,7 @@ public class TabContextMenuItemDelegate implements ContextMenuItemDelegate {
     @Override
     public void onOpenInNewIncognitoTab(String url) {
         RecordUserAction.record("MobileNewTabOpened");
-        TabModelSelector.from(mTab).openNewTab(
+        mTabModelSelector.openNewTab(
                 new LoadUrlParams(url), TabLaunchType.FROM_LONGPRESS_FOREGROUND, mTab, true);
     }
 
@@ -230,7 +255,7 @@ public class TabContextMenuItemDelegate implements ContextMenuItemDelegate {
     public void onOpenImageInNewTab(String url, Referrer referrer) {
         LoadUrlParams loadUrlParams = new LoadUrlParams(url);
         loadUrlParams.setReferrer(referrer);
-        mTab.getActivity().getTabModelSelector().openNewTab(
+        mTabModelSelector.openNewTab(
                 loadUrlParams, TabLaunchType.FROM_LONGPRESS_BACKGROUND, mTab, isIncognito());
     }
 
@@ -241,6 +266,14 @@ public class TabContextMenuItemDelegate implements ContextMenuItemDelegate {
             return;
         }
         mEphemeralTabCoordinatorSupplier.get().requestOpenSheet(url, title, mTab.isIncognito());
+    }
+
+    @Override
+    public void onReadLater(String url, String title) {
+        BookmarkUtils.addToReadingList(
+                url, title, mSnackbarManagerSupplier.get(), mTab.getContext());
+        TrackerFactory.getTrackerForProfile(Profile.getLastUsedRegularProfile())
+                .notifyEvent(EventConstants.READ_LATER_CONTEXT_MENU_TAPPED);
     }
 
     @Override
@@ -274,9 +307,7 @@ public class TabContextMenuItemDelegate implements ContextMenuItemDelegate {
         }
 
         if (!activityStarted) {
-            Context context = mTab.getActivity();
-            if (context == null) context = applicationContext;
-            context.startActivity(chromeIntent);
+            mTab.getContext().startActivity(chromeIntent);
             activityStarted = true;
         }
     }
@@ -293,7 +324,7 @@ public class TabContextMenuItemDelegate implements ContextMenuItemDelegate {
             IntentHandler.addTrustedIntentExtras(intent);
             IntentHandler.setTabLaunchType(intent, TabLaunchType.FROM_EXTERNAL_APP);
         }
-        IntentUtils.safeStartActivity(mTab.getActivity(), intent);
+        IntentUtils.safeStartActivity(mTab.getContext(), intent);
     }
 
     @Override
@@ -305,7 +336,7 @@ public class TabContextMenuItemDelegate implements ContextMenuItemDelegate {
     public void onOpenInDefaultBrowser(String url) {
         Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
         CustomTabsIntent.setAlwaysUseBrowserUI(intent);
-        IntentUtils.safeStartActivity(mTab.getActivity(), intent);
+        IntentUtils.safeStartActivity(mTab.getContext(), intent);
     }
 
     /**

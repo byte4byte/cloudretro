@@ -6,21 +6,22 @@
 
 #include <map>
 #include <string>
+#include <utility>
 
 #include "ash/test/ash_test_base.h"
 #include "base/macros.h"
 #include "base/optional.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/timer/timer.h"
-#include "chromeos/services/assistant/public/mojom/assistant.mojom.h"
+#include "chromeos/services/assistant/public/cpp/assistant_service.h"
 #include "url/gurl.h"
 
 namespace ash {
 namespace assistant {
 namespace util {
 
-using chromeos::assistant::mojom::AssistantEntryPoint;
-using chromeos::assistant::mojom::AssistantQuerySource;
+using chromeos::assistant::AssistantEntryPoint;
+using chromeos::assistant::AssistantQuerySource;
 
 using DeepLinkUtilTest = AshTestBase;
 
@@ -73,10 +74,18 @@ TEST_F(DeepLinkUtilTest, CreateAlarmTimerDeeplink) {
       CreateAlarmTimerDeepLink(AlarmTimerAction::kAddTimeToTimer, "1",
                                base::TimeDelta::FromMinutes(1))
           .value());
-  ASSERT_EQ(
-      "googleassistant://alarm-timer?action=removeAlarmTimer&id=1",
-      CreateAlarmTimerDeepLink(AlarmTimerAction::kRemove, "1", base::nullopt)
-          .value());
+  ASSERT_EQ("googleassistant://alarm-timer?action=pauseTimer&id=1",
+            CreateAlarmTimerDeepLink(AlarmTimerAction::kPauseTimer, "1",
+                                     base::nullopt)
+                .value());
+  ASSERT_EQ("googleassistant://alarm-timer?action=removeAlarmOrTimer&id=1",
+            CreateAlarmTimerDeepLink(AlarmTimerAction::kRemoveAlarmOrTimer, "1",
+                                     base::nullopt)
+                .value());
+  ASSERT_EQ("googleassistant://alarm-timer?action=resumeTimer&id=1",
+            CreateAlarmTimerDeepLink(AlarmTimerAction::kResumeTimer, "1",
+                                     base::nullopt)
+                .value());
 
   // For invalid deeplink params, we will hit DCHECK since this API isn't meant
   // to be used in such cases. We'll use a |ScopedLogAssertHandler| to safely
@@ -84,16 +93,6 @@ TEST_F(DeepLinkUtilTest, CreateAlarmTimerDeeplink) {
   logging::ScopedLogAssertHandler handler(base::BindRepeating(
       [](const char* file, int line, const base::StringPiece message,
          const base::StringPiece stack_trace) {}));
-
-  ASSERT_EQ(base::nullopt,
-            CreateAlarmTimerDeepLink(AlarmTimerAction::kRemove, base::nullopt,
-                                     base::nullopt));
-  ASSERT_EQ(base::nullopt,
-            CreateAlarmTimerDeepLink(AlarmTimerAction::kRemove, base::nullopt,
-                                     base::TimeDelta::FromMinutes(1)));
-  ASSERT_EQ(base::nullopt,
-            CreateAlarmTimerDeepLink(AlarmTimerAction::kRemove, "1",
-                                     base::TimeDelta::FromMinutes(1)));
 
   ASSERT_EQ(base::nullopt,
             CreateAlarmTimerDeepLink(AlarmTimerAction::kAddTimeToTimer, "1",
@@ -104,6 +103,36 @@ TEST_F(DeepLinkUtilTest, CreateAlarmTimerDeeplink) {
   ASSERT_EQ(base::nullopt,
             CreateAlarmTimerDeepLink(AlarmTimerAction::kAddTimeToTimer,
                                      base::nullopt, base::nullopt));
+
+  ASSERT_EQ(base::nullopt,
+            CreateAlarmTimerDeepLink(AlarmTimerAction::kPauseTimer,
+                                     base::nullopt, base::nullopt));
+  ASSERT_EQ(base::nullopt, CreateAlarmTimerDeepLink(
+                               AlarmTimerAction::kPauseTimer, base::nullopt,
+                               base::TimeDelta::FromMinutes(1)));
+  ASSERT_EQ(base::nullopt,
+            CreateAlarmTimerDeepLink(AlarmTimerAction::kPauseTimer, "1",
+                                     base::TimeDelta::FromMinutes(1)));
+
+  ASSERT_EQ(base::nullopt,
+            CreateAlarmTimerDeepLink(AlarmTimerAction::kRemoveAlarmOrTimer,
+                                     base::nullopt, base::nullopt));
+  ASSERT_EQ(base::nullopt, CreateAlarmTimerDeepLink(
+                               AlarmTimerAction::kRemoveAlarmOrTimer,
+                               base::nullopt, base::TimeDelta::FromMinutes(1)));
+  ASSERT_EQ(base::nullopt,
+            CreateAlarmTimerDeepLink(AlarmTimerAction::kRemoveAlarmOrTimer, "1",
+                                     base::TimeDelta::FromMinutes(1)));
+
+  ASSERT_EQ(base::nullopt,
+            CreateAlarmTimerDeepLink(AlarmTimerAction::kResumeTimer,
+                                     base::nullopt, base::nullopt));
+  ASSERT_EQ(base::nullopt, CreateAlarmTimerDeepLink(
+                               AlarmTimerAction::kResumeTimer, base::nullopt,
+                               base::TimeDelta::FromMinutes(1)));
+  ASSERT_EQ(base::nullopt,
+            CreateAlarmTimerDeepLink(AlarmTimerAction::kResumeTimer, "1",
+                                     base::TimeDelta::FromMinutes(1)));
 }
 
 TEST_F(DeepLinkUtilTest, CreateAssistantQueryDeepLink) {
@@ -228,8 +257,12 @@ TEST_F(DeepLinkUtilTest, GetDeepLinkParamAsAlarmTimerAction) {
   // Case: Deep link parameter present, well formed.
   params["action"] = "addTimeToTimer";
   AssertDeepLinkParamEq(AlarmTimerAction::kAddTimeToTimer);
-  params["action"] = "removeAlarmTimer";
-  AssertDeepLinkParamEq(AlarmTimerAction::kRemove);
+  params["action"] = "pauseTimer";
+  AssertDeepLinkParamEq(AlarmTimerAction::kPauseTimer);
+  params["action"] = "removeAlarmOrTimer";
+  AssertDeepLinkParamEq(AlarmTimerAction::kRemoveAlarmOrTimer);
+  params["action"] = "resumeTimer";
+  AssertDeepLinkParamEq(AlarmTimerAction::kResumeTimer);
 
   // Case: Deep link parameter present, non AlarmTimerAction value.
   params["action"] = "true";
@@ -817,7 +850,7 @@ TEST_F(DeepLinkUtilTest, GetChromeSettingsUrl) {
       {base::Optional<std::string>("googleAssistant"),
        "chrome://os-settings/googleAssistant"},
       {base::Optional<std::string>("languages"),
-       "chrome://os-settings/languages/details"},
+       "chrome://os-settings/osLanguages/details"},
 
       // FALLBACK: Allowed pages are case sensitive.
       {base::Optional<std::string>("GOOGLEASSISTANT"), "chrome://os-settings/"},

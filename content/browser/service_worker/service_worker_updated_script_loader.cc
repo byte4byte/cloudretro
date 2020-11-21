@@ -11,19 +11,18 @@
 #include "base/memory/ptr_util.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/task/post_task.h"
-#include "content/browser/appcache/appcache_disk_cache_ops.h"
-#include "content/browser/loader/url_loader_throttles.h"
+#include "content/browser/renderer_host/frame_tree_node.h"
 #include "content/browser/service_worker/service_worker_cache_writer.h"
 #include "content/browser/service_worker/service_worker_consts.h"
 #include "content/browser/service_worker/service_worker_context_core.h"
 #include "content/browser/service_worker/service_worker_context_wrapper.h"
-#include "content/browser/service_worker/service_worker_disk_cache.h"
 #include "content/browser/service_worker/service_worker_loader_helpers.h"
 #include "content/browser/service_worker/service_worker_version.h"
 #include "content/browser/url_loader_factory_getter.h"
 #include "content/common/service_worker/service_worker_utils.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/content_browser_client.h"
+#include "content/public/browser/url_loader_throttles.h"
 #include "content/public/common/content_client.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/load_flags.h"
@@ -31,7 +30,6 @@
 #include "net/cert/cert_status_flags.h"
 #include "services/network/public/mojom/url_response_head.mojom.h"
 #include "third_party/blink/public/common/loader/throttling_url_loader.h"
-#include "third_party/blink/public/common/service_worker/service_worker_utils.h"
 
 namespace content {
 
@@ -172,7 +170,6 @@ ServiceWorkerUpdatedScriptLoader::CreateAndStart(
     const network::ResourceRequest& original_request,
     mojo::PendingRemote<network::mojom::URLLoaderClient> client,
     scoped_refptr<ServiceWorkerVersion> version) {
-  DCHECK(blink::ServiceWorkerUtils::IsImportedScriptUpdateCheckEnabled());
   return base::WrapUnique(new ServiceWorkerUpdatedScriptLoader(
       options, original_request, std::move(client), version));
 }
@@ -183,8 +180,7 @@ ServiceWorkerUpdatedScriptLoader::ServiceWorkerUpdatedScriptLoader(
     mojo::PendingRemote<network::mojom::URLLoaderClient> client,
     scoped_refptr<ServiceWorkerVersion> version)
     : request_url_(original_request.url),
-      resource_type_(static_cast<blink::mojom::ResourceType>(
-          original_request.resource_type)),
+      request_destination_(original_request.destination),
       options_(options),
       version_(std::move(version)),
       network_watcher_(FROM_HERE,
@@ -197,7 +193,7 @@ ServiceWorkerUpdatedScriptLoader::ServiceWorkerUpdatedScriptLoader(
       request_start_(base::TimeTicks::Now()) {
 #if DCHECK_IS_ON()
   service_worker_loader_helpers::CheckVersionStatusBeforeWorkerScriptLoad(
-      version_->status(), resource_type_);
+      version_->status(), request_destination_);
 #endif  // DCHECK_IS_ON()
 
   DCHECK(client_);
@@ -227,7 +223,7 @@ ServiceWorkerUpdatedScriptLoader::ServiceWorkerUpdatedScriptLoader(
          body_writer_state_ == WriterState::kCompleted);
 
   version_->script_cache_map()->NotifyStartedCaching(
-      request_url_, cache_writer_->WriterResourceId());
+      request_url_, cache_writer_->writer_resource_id());
 
   // Resume the cache writer and observe its writes, so all data written
   // is sent to |client_|.
@@ -248,6 +244,7 @@ ServiceWorkerUpdatedScriptLoader::~ServiceWorkerUpdatedScriptLoader() = default;
 void ServiceWorkerUpdatedScriptLoader::FollowRedirect(
     const std::vector<std::string>& removed_headers,
     const net::HttpRequestHeaders& modified_headers,
+    const net::HttpRequestHeaders& modified_cors_exempt_headers,
     const base::Optional<GURL>& new_url) {
   // Resource requests for service worker scripts should not follow redirects.
   // See comments in OnReceiveRedirect().
@@ -341,7 +338,8 @@ int ServiceWorkerUpdatedScriptLoader::WillWriteResponseHead(
   auto client_response = response_head.Clone();
   client_response->request_start = request_start_;
 
-  if (resource_type_ == blink::mojom::ResourceType::kServiceWorker) {
+  if (request_destination_ ==
+      network::mojom::RequestDestination::kServiceWorker) {
     version_->SetMainScriptResponse(
         std::make_unique<ServiceWorkerVersion::MainScriptResponse>(
             *client_response));

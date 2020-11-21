@@ -6,8 +6,9 @@
 
 #include <algorithm>
 
+#include "base/check_op.h"
 #include "base/i18n/break_iterator.h"
-#include "base/logging.h"
+#include "base/notreached.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/optional.h"
 #include "base/strings/string_util.h"
@@ -52,8 +53,10 @@ size_t FindAccessibleTextBoundary(const base::string16& text,
                                   size_t start_offset,
                                   ax::mojom::MoveDirection direction,
                                   ax::mojom::TextAffinity affinity) {
+  DCHECK_NE(boundary, ax::mojom::TextBoundary::kNone);
   size_t text_size = text.size();
   DCHECK_LE(start_offset, text_size);
+  DCHECK_NE(direction, ax::mojom::MoveDirection::kNone);
 
   base::i18n::BreakIterator::BreakType break_type =
       ICUBreakTypeForBoundaryType(boundary);
@@ -122,6 +125,7 @@ size_t FindAccessibleTextBoundary(const base::string16& text,
         if (break_iter.IsStartOfWord(result)) {
           // If we are searching forward and we are still at the start offset,
           // we need to find the next word.
+          DCHECK_NE(direction, ax::mojom::MoveDirection::kNone);
           if (direction == ax::mojom::MoveDirection::kBackward ||
               result != start_offset)
             return result;
@@ -131,12 +135,14 @@ size_t FindAccessibleTextBoundary(const base::string16& text,
         if (break_iter.IsStartOfWord(result)) {
           // If we are searching forward and we are still at the start offset,
           // we need to find the next word.
+          DCHECK_NE(direction, ax::mojom::MoveDirection::kNone);
           if (direction == ax::mojom::MoveDirection::kBackward ||
               result != start_offset)
             return result;
         } else if (break_iter.IsEndOfWord(result)) {
           // If we are searching backward and we are still at the end offset, we
           // need to find the previous word.
+          DCHECK_NE(direction, ax::mojom::MoveDirection::kNone);
           if (direction == ax::mojom::MoveDirection::kForward ||
               result != start_offset)
             return result;
@@ -205,4 +211,31 @@ std::vector<int> GetWordEndOffsets(const base::string16& text) {
   return word_ends;
 }
 
+std::vector<int> GetSentenceStartOffsets(const base::string16& text) {
+  std::vector<int> sentence_starts;
+  base::i18n::BreakIterator iter(text,
+                                 base::i18n::BreakIterator::BREAK_SENTENCE);
+  if (!iter.Init())
+    return sentence_starts;
+  // iter.Advance() returns false if we've run past end of the text.
+  while (iter.Advance()) {
+    sentence_starts.push_back(
+        base::checked_cast<int>(iter.prev()) /* start index */);
+  }
+  return sentence_starts;
+}
+
+std::vector<int> GetSentenceEndOffsets(const base::string16& text) {
+  std::vector<int> sentence_ends;
+  base::i18n::BreakIterator iter(text,
+                                 base::i18n::BreakIterator::BREAK_SENTENCE);
+  if (!iter.Init())
+    return sentence_ends;
+  // iter.Advance() returns false if we've run past end of the text.
+  while (iter.Advance()) {
+    sentence_ends.push_back(
+        base::checked_cast<int>(iter.pos()) /* end index */);
+  }
+  return sentence_ends;
+}
 }  // namespace ui

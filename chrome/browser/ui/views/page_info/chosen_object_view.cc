@@ -7,6 +7,7 @@
 #include <memory>
 #include <utility>
 
+#include "base/bind.h"
 #include "chrome/browser/ui/views/chrome_layout_provider.h"
 #include "chrome/browser/ui/views/chrome_typography.h"
 #include "chrome/browser/ui/views/page_info/chosen_object_view_observer.h"
@@ -45,17 +46,19 @@ ChosenObjectView::ChosenObjectView(
           views::DISTANCE_RELATED_LABEL_HORIZONTAL);
   views::ColumnSet* column_set = layout->AddColumnSet(column_set_id);
   column_set->AddColumn(views::GridLayout::CENTER, views::GridLayout::CENTER,
-                        views::GridLayout::kFixedSize, views::GridLayout::FIXED,
+                        views::GridLayout::kFixedSize,
+                        views::GridLayout::ColumnSize::kFixed,
                         PageInfoBubbleView::kIconColumnWidth, 0);
   column_set->AddPaddingColumn(views::GridLayout::kFixedSize,
                                related_label_padding);
   column_set->AddColumn(views::GridLayout::LEADING, views::GridLayout::CENTER,
-                        1.0, views::GridLayout::USE_PREF, 0, 0);
+                        1.0, views::GridLayout::ColumnSize::kUsePreferred, 0,
+                        0);
   column_set->AddPaddingColumn(views::GridLayout::kFixedSize,
                                related_label_padding);
   column_set->AddColumn(views::GridLayout::TRAILING, views::GridLayout::CENTER,
                         views::GridLayout::kFixedSize,
-                        views::GridLayout::USE_PREF,
+                        views::GridLayout::ColumnSize::kUsePreferred,
                         PageInfoBubbleView::kIconColumnWidth, 0);
 
   layout->StartRow(1.0, column_set_id);
@@ -70,21 +73,20 @@ ChosenObjectView::ChosenObjectView(
   icon_ = layout->AddView(std::make_unique<views::ImageView>());
 
   // Create the label that displays the chosen object name.
-  auto label =
-      std::make_unique<views::Label>(display_name, CONTEXT_BODY_TEXT_LARGE);
-  icon_->SetImage(
-      PageInfoUI::GetChosenObjectIcon(*info_, false, label->GetEnabledColor()));
+  auto label = std::make_unique<views::Label>(
+      display_name, views::style::CONTEXT_DIALOG_BODY_TEXT);
   layout->AddView(std::move(label));
 
   // Create the delete button.
   std::unique_ptr<views::ImageButton> delete_button =
-      views::CreateVectorImageButton(this);
+      views::CreateVectorImageButton(base::BindRepeating(
+          [](ChosenObjectView* view) { view->ExecuteDeleteCommand(); }, this));
+
   views::SetImageFromVectorIcon(
       delete_button.get(), vector_icons::kCloseRoundedIcon,
-      views::style::GetColor(*this, CONTEXT_BODY_TEXT_LARGE,
+      views::style::GetColor(*this, views::style::CONTEXT_DIALOG_BODY_TEXT,
                              views::style::STYLE_PRIMARY));
-  delete_button->SetFocusForPlatform();
-  delete_button->set_request_focus_on_press(true);
+  delete_button->SetRequestFocusOnPress(true);
   delete_button->SetTooltipText(
       l10n_util::GetStringUTF16(info_->ui_info.delete_tooltip_string_id));
   delete_button_ = layout->AddView(std::move(delete_button));
@@ -133,13 +135,9 @@ void ChosenObjectView::AddObserver(ChosenObjectViewObserver* observer) {
 
 ChosenObjectView::~ChosenObjectView() {}
 
-void ChosenObjectView::ButtonPressed(views::Button* sender,
-                                     const ui::Event& event) {
+void ChosenObjectView::ExecuteDeleteCommand() {
   // Change the icon to reflect the selected setting.
-  icon_->SetImage(PageInfoUI::GetChosenObjectIcon(
-      *info_, true,
-      views::style::GetColor(*this, views::style::CONTEXT_LABEL,
-                             views::style::STYLE_PRIMARY)));
+  UpdateIconImage(/*is_deleted=*/true);
 
   DCHECK(delete_button_->GetVisible());
   delete_button_->SetVisible(false);
@@ -147,4 +145,17 @@ void ChosenObjectView::ButtonPressed(views::Button* sender,
   for (ChosenObjectViewObserver& observer : observer_list_) {
     observer.OnChosenObjectDeleted(*info_);
   }
+}
+
+void ChosenObjectView::OnThemeChanged() {
+  views::View::OnThemeChanged();
+  UpdateIconImage(/*is_deleted=*/false);
+}
+
+void ChosenObjectView::UpdateIconImage(bool is_deleted) const {
+  // TODO(crbug.com/1096944): Why are we using label color for an icon?
+  icon_->SetImage(PageInfoUI::GetChosenObjectIcon(
+      *info_, is_deleted,
+      views::style::GetColor(*this, views::style::CONTEXT_LABEL,
+                             views::style::STYLE_PRIMARY)));
 }

@@ -13,6 +13,7 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
+#include "base/types/pass_key.h"
 #include "components/performance_manager/graph/node_attached_data.h"
 #include "components/performance_manager/graph/node_base.h"
 #include "components/performance_manager/public/graph/page_node.h"
@@ -22,11 +23,21 @@
 namespace performance_manager {
 
 class FrameNodeImpl;
+class FrozenFrameAggregatorAccess;
+class PageAggregatorAccess;
+class PageLoadTrackerAccess;
+class SiteDataAccess;
 
 class PageNodeImpl
     : public PublicNodeImpl<PageNodeImpl, PageNode>,
       public TypedNodeBase<PageNodeImpl, PageNode, PageNodeObserver> {
  public:
+  using PassKey = base::PassKey<PageNodeImpl>;
+  using FrozenFrameDataStorage =
+      InternalNodeAttachedDataStorage<sizeof(uintptr_t) + 8>;
+  using PageAggregatorDataStorage =
+      InternalNodeAttachedDataStorage<sizeof(uintptr_t) + 12>;
+
   static constexpr NodeTypeEnum Type() { return NodeTypeEnum::kPage; }
 
   PageNodeImpl(const WebContentsProxy& contents_proxy,
@@ -70,12 +81,13 @@ class PageNodeImpl
 
   // Accessors.
   const std::string& browser_context_id() const;
+  FrameNodeImpl* opener_frame_node() const;
+  OpenedType opened_type() const;
   bool is_visible() const;
   bool is_audible() const;
   bool is_loading() const;
   ukm::SourceId ukm_source_id() const;
   LifecycleState lifecycle_state() const;
-  InterventionPolicy origin_trial_freeze_policy() const;
   bool is_holding_weblock() const;
   bool is_holding_indexeddb_lock() const;
   const base::flat_set<FrameNodeImpl*>& main_frame_nodes() const;
@@ -85,6 +97,11 @@ class PageNodeImpl
   int64_t navigation_id() const;
   const std::string& contents_mime_type() const;
   bool had_form_interaction() const;
+
+  // Invoked to set/clear the opener of this page.
+  void SetOpenerFrameNodeAndOpenedType(FrameNodeImpl* opener,
+                                       OpenedType opened_type);
+  void ClearOpenerFrameNodeAndOpenedType();
 
   void set_usage_estimate_time(base::TimeTicks usage_estimate_time);
   void set_private_footprint_kb_estimate(
@@ -107,21 +124,61 @@ class PageNodeImpl
     return weak_factory_.GetWeakPtr();
   }
 
+  // Accessors to some of the NodeAttachedData:
+  std::unique_ptr<NodeAttachedData>& GetSiteData(
+      base::PassKey<SiteDataAccess>) {
+    return site_data_;
+  }
+  std::unique_ptr<NodeAttachedData>& GetPageLoadTrackerData(
+      base::PassKey<PageLoadTrackerAccess>) {
+    return page_load_tracker_data_;
+  }
+  FrozenFrameDataStorage& GetFrozenFrameData(
+      base::PassKey<FrozenFrameAggregatorAccess>) {
+    return frozen_frame_data_;
+  }
+  PageAggregatorDataStorage& GetPageAggregatorData(
+      base::PassKey<PageAggregatorAccess>) {
+    return page_aggregator_data_;
+  }
+
+  // Functions meant to be called by a FrameNodeImpl:
+  void AddFrame(base::PassKey<FrameNodeImpl>, FrameNodeImpl* frame_node);
+  void RemoveFrame(base::PassKey<FrameNodeImpl>, FrameNodeImpl* frame_node);
+
+  // Function meant to be called by FrozenFrameAggregatorAccess.
+  void SetLifecycleState(base::PassKey<FrozenFrameAggregatorAccess>,
+                         LifecycleState lifecycle_state) {
+    SetLifecycleState(lifecycle_state);
+  }
+
+  // Functions meant to be called by PageAggregatorAccess:
+  void SetIsHoldingWebLock(base::PassKey<PageAggregatorAccess>,
+                           bool is_holding_weblock) {
+    SetIsHoldingWebLock(is_holding_weblock);
+  }
+  void SetIsHoldingIndexedDBLock(base::PassKey<PageAggregatorAccess>,
+                                 bool is_holding_indexeddb_lock) {
+    SetIsHoldingIndexedDBLock(is_holding_indexeddb_lock);
+  }
+  void SetHadFormInteraction(base::PassKey<PageAggregatorAccess>,
+                             bool had_form_interaction) {
+    SetHadFormInteraction(had_form_interaction);
+  }
+
  private:
-  friend class FrameNodeImpl;
-  friend class PageAggregatorAccess;
-  friend class FrozenFrameAggregatorAccess;
-  friend class PageLoadTrackerAccess;
+  friend class PageNodeImplDescriber;
 
   // PageNode implementation.
   const std::string& GetBrowserContextID() const override;
+  const FrameNode* GetOpenerFrameNode() const override;
+  OpenedType GetOpenedType() const override;
   bool IsVisible() const override;
   base::TimeDelta GetTimeSinceLastVisibilityChange() const override;
   bool IsAudible() const override;
   bool IsLoading() const override;
   ukm::SourceId GetUkmSourceID() const override;
   LifecycleState GetLifecycleState() const override;
-  InterventionPolicy GetOriginTrialFreezePolicy() const override;
   bool IsHoldingWebLock() const override;
   bool IsHoldingIndexedDBLock() const override;
   int64_t GetNavigationID() const override;
@@ -134,15 +191,11 @@ class PageNodeImpl
   bool HadFormInteraction() const override;
   const WebContentsProxy& GetContentsProxy() const override;
 
-  void AddFrame(FrameNodeImpl* frame_node);
-  void RemoveFrame(FrameNodeImpl* frame_node);
-
   // NodeBase:
   void OnJoiningGraph() override;
   void OnBeforeLeavingGraph() override;
 
   void SetLifecycleState(LifecycleState lifecycle_state);
-  void SetOriginTrialFreezePolicy(InterventionPolicy policy);
   void SetIsHoldingWebLock(bool is_holding_weblock);
   void SetIsHoldingIndexedDBLock(bool is_holding_indexeddb_lock);
   void SetHadFormInteraction(bool had_form_interaction);
@@ -195,6 +248,12 @@ class PageNodeImpl
   // The unique ID of the browser context that this page belongs to.
   const std::string browser_context_id_;
 
+  // The opener of this page, if there is one.
+  FrameNodeImpl* opener_frame_node_ = nullptr;
+
+  // The way in which this page was opened, if it was opened.
+  OpenedType opened_type_ = OpenedType::kInvalid;
+
   // Whether or not the page is visible. Driven by browser instrumentation.
   // Initialized on construction.
   ObservedProperty::NotifiesOnlyOnChanges<bool,
@@ -221,12 +280,6 @@ class PageNodeImpl
       LifecycleState,
       &PageNodeObserver::OnPageLifecycleStateChanged>
       lifecycle_state_{LifecycleState::kRunning};
-  // The origin trial freeze policy of this page. This is aggregated from the
-  // origin trial freeze policy of each current frame in the frame tree.
-  ObservedProperty::NotifiesOnlyOnChanges<
-      InterventionPolicy,
-      &PageNodeObserver::OnPageOriginTrialFreezePolicyChanged>
-      origin_trial_freeze_policy_{InterventionPolicy::kDefault};
   // Indicates if at least one frame of the page is currently holding a WebLock.
   ObservedProperty::NotifiesOnlyOnChanges<
       bool,
@@ -248,11 +301,14 @@ class PageNodeImpl
   // Storage for PageLoadTracker user data.
   std::unique_ptr<NodeAttachedData> page_load_tracker_data_;
 
+  // Storage for SiteDataNodeData user data.
+  std::unique_ptr<NodeAttachedData> site_data_;
+
   // Inline storage for FrozenFrameAggregator user data.
-  InternalNodeAttachedDataStorage<sizeof(uintptr_t) + 8> frozen_frame_data_;
+  FrozenFrameDataStorage frozen_frame_data_;
 
   // Inline storage for PageAggregatorAccess user data.
-  InternalNodeAttachedDataStorage<sizeof(uintptr_t) + 24> page_aggregator_data_;
+  PageAggregatorDataStorage page_aggregator_data_;
 
   base::WeakPtrFactory<PageNodeImpl> weak_factory_{this};
 

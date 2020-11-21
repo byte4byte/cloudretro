@@ -6,6 +6,7 @@
 
 #include "third_party/blink/renderer/bindings/core/v8/v8_object_builder.h"
 #include "third_party/blink/renderer/core/animation/animation_input_helpers.h"
+#include "third_party/blink/renderer/core/animation/animation_utils.h"
 #include "third_party/blink/renderer/core/animation/compositor_animations.h"
 #include "third_party/blink/renderer/core/animation/css_interpolation_environment.h"
 #include "third_party/blink/renderer/core/animation/css_interpolation_types_map.h"
@@ -46,15 +47,14 @@ void TransitionKeyframe::AddKeyframePropertiesToV8Object(
   StyleResolverState state(document, *element);
   state.SetStyle(ComputedStyle::Create());
   CSSInterpolationTypesMap map(document.GetPropertyRegistry(), document);
-  CSSInterpolationEnvironment environment(map, state, nullptr);
+  CSSInterpolationEnvironment environment(map, state, nullptr, nullptr);
   value_->GetType().Apply(value_->GetInterpolableValue(),
                           value_->GetNonInterpolableValue(), environment);
 
   const ComputedStyle* style = state.Style();
-  CSSPropertyRef ref(property_.GetCSSPropertyName(), document);
   String property_value =
-      ref.GetProperty()
-          .CSSValueFromComputedStyle(*style, element->GetLayoutObject(), false)
+      AnimationUtils::KeyframeValueFromComputedStyle(
+          property_, *style, document, element->GetLayoutObject())
           ->CssText();
 
   String property_name =
@@ -62,7 +62,7 @@ void TransitionKeyframe::AddKeyframePropertiesToV8Object(
   object_builder.Add(property_name, property_value);
 }
 
-void TransitionKeyframe::Trace(Visitor* visitor) {
+void TransitionKeyframe::Trace(Visitor* visitor) const {
   visitor->Trace(compositor_value_);
   Keyframe::Trace(visitor);
 }
@@ -93,7 +93,8 @@ TransitionKeyframe::PropertySpecificKeyframe::CreateInterpolation(
       other.compositor_value_);
 }
 
-void TransitionKeyframe::PropertySpecificKeyframe::Trace(Visitor* visitor) {
+void TransitionKeyframe::PropertySpecificKeyframe::Trace(
+    Visitor* visitor) const {
   visitor->Trace(compositor_value_);
   Keyframe::PropertySpecificKeyframe::Trace(visitor);
 }

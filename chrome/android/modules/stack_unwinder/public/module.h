@@ -8,6 +8,7 @@
 #include <memory>
 
 #include "base/profiler/unwinder.h"
+#include "chrome/android/features/stack_unwinder/public/function_types.h"
 #include "chrome/android/features/stack_unwinder/public/memory_regions_map.h"
 
 namespace stack_unwinder {
@@ -25,8 +26,8 @@ class Module {
   // module is already installed.
   static void RequestInstallation();
 
-  // Attempts to load the module. Returns non-null if IsInstalled().
-  static std::unique_ptr<Module> TryLoad();
+  // Attempts to load the module. May be invoked only if IsInstalled().
+  static std::unique_ptr<Module> Load();
 
   // Returns a map representing the current memory regions (modules, stacks,
   // etc.).
@@ -34,12 +35,10 @@ class Module {
 
   // Creates a new native stack unwinder.
   std::unique_ptr<base::Unwinder> CreateNativeUnwinder(
-      MemoryRegionsMap* memory_regions_map);
+      MemoryRegionsMap* memory_regions_map,
+      uintptr_t exclude_module_with_base_address);
 
  private:
-  using CreateMemoryRegionsMapFunction = MemoryRegionsMap* (*)();
-  using CreateNativeUnwinderFunction = base::Unwinder* (*)(MemoryRegionsMap*);
-
   Module(CreateMemoryRegionsMapFunction create_memory_regions_map,
          CreateNativeUnwinderFunction create_native_unwinder);
 

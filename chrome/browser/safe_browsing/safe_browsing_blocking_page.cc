@@ -13,6 +13,7 @@
 #include "base/metrics/histogram_macros.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/history/history_service_factory.h"
+#include "chrome/browser/interstitials/chrome_settings_page_helper.h"
 #include "chrome/browser/interstitials/enterprise_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_preferences_util.h"
@@ -26,17 +27,16 @@
 #include "components/safe_browsing/core/triggers/trigger_manager.h"
 #include "components/security_interstitials/content/content_metrics_helper.h"
 #include "components/security_interstitials/content/security_interstitial_controller_client.h"
+#include "components/security_interstitials/content/settings_page_helper.h"
 #include "components/security_interstitials/content/unsafe_resource_util.h"
 #include "components/security_interstitials/core/controller_client.h"
 #include "components/security_interstitials/core/unsafe_resource.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/interstitial_page.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
 
 using content::BrowserThread;
-using content::InterstitialPage;
 using content::WebContents;
 using security_interstitials::BaseSafeBrowsingErrorUI;
 using security_interstitials::SecurityInterstitialControllerClient;
@@ -84,7 +84,8 @@ class SafeBrowsingBlockingPageFactoryImpl
         IsEnhancedProtectionEnabled(*prefs), is_proceed_anyway_disabled,
         true,  // should_open_links_in_new_tab
         true,  // always_show_back_to_safety
-        kHelpCenterLink);
+        IsEnhancedProtectionMessageInInterstitialsEnabled(),
+        IsSafeBrowsingPolicyManaged(*prefs), kHelpCenterLink);
 
     return new SafeBrowsingBlockingPage(
         ui_manager, web_contents, main_frame_url, unsafe_resources,
@@ -104,7 +105,7 @@ static base::LazyInstance<SafeBrowsingBlockingPageFactoryImpl>::DestructorAtExit
     g_safe_browsing_blocking_page_factory_impl = LAZY_INSTANCE_INITIALIZER;
 
 // static
-const content::InterstitialPageDelegate::TypeID
+const security_interstitials::SecurityInterstitialPage::TypeID
     SafeBrowsingBlockingPage::kTypeForTesting =
         &SafeBrowsingBlockingPage::kTypeForTesting;
 
@@ -160,55 +161,20 @@ SafeBrowsingBlockingPage::SafeBrowsingBlockingPage(
 SafeBrowsingBlockingPage::~SafeBrowsingBlockingPage() {
 }
 
-void SafeBrowsingBlockingPage::OverrideRendererPrefs(
-    blink::mojom::RendererPreferences* prefs) {
-  Profile* profile = Profile::FromBrowserContext(
-      web_contents()->GetBrowserContext());
-  renderer_preferences_util::UpdateFromSystemSettings(prefs, profile);
-}
-
-void SafeBrowsingBlockingPage::HandleSubresourcesAfterProceed() {
-  // Check to see if some new notifications of unsafe resources have been
-  // received while we were showing the interstitial.
-  UnsafeResourceMap* unsafe_resource_map = GetUnsafeResourcesMap();
-  auto iter = unsafe_resource_map->find(web_contents());
-  if (iter != unsafe_resource_map->end() && !iter->second.empty()) {
-    // All queued unsafe resources should be for the same page:
-    UnsafeResourceList unsafe_resources = iter->second;
-    content::NavigationEntry* entry =
-        GetNavigationEntryForResource(unsafe_resources[0]);
-    // Build an interstitial for all the unsafe resources notifications.
-    // Don't show it now as showing an interstitial while an interstitial is
-    // already showing would cause DontProceed() to be invoked.
-    SafeBrowsingBlockingPage* blocking_page = factory_->CreateSafeBrowsingPage(
-        ui_manager(), web_contents(), entry ? entry->GetURL() : GURL(),
-        unsafe_resources, /*should_trigger_reporting=*/true);
-    unsafe_resource_map->erase(iter);
-
-    // Now that this interstitial is gone, we can show the new one.
-    blocking_page->Show();
-  }
-}
-
-content::InterstitialPageDelegate::TypeID
+security_interstitials::SecurityInterstitialPage::TypeID
 SafeBrowsingBlockingPage::GetTypeForTesting() {
   return SafeBrowsingBlockingPage::kTypeForTesting;
 }
 
 void SafeBrowsingBlockingPage::OnInterstitialClosing() {
-  if (base::FeatureList::IsEnabled(safe_browsing::kCommittedSBInterstitials)) {
-    // With committed interstitials OnProceed and OnDontProceed don't get
-    // called, so call FinishThreatDetails from here.
-    FinishThreatDetails(
-        (proceeded()
-             ? base::TimeDelta::FromMilliseconds(threat_details_proceed_delay())
-             : base::TimeDelta()),
-        proceeded(), controller()->metrics_helper()->NumVisits());
-    if (proceeded()) {
-      HandleSubresourcesAfterProceed();
-    } else {
-      OnDontProceedDone();
-    }
+  // With committed interstitials OnProceed and OnDontProceed don't get
+  // called, so call FinishThreatDetails from here.
+  FinishThreatDetails((proceeded() ? base::TimeDelta::FromMilliseconds(
+                                         threat_details_proceed_delay())
+                                   : base::TimeDelta()),
+                      proceeded(), controller()->metrics_helper()->NumVisits());
+  if (!proceeded()) {
+    OnDontProceedDone();
   }
   BaseBlockingPage::OnInterstitialClosing();
 }
@@ -260,36 +226,6 @@ SafeBrowsingBlockingPage* SafeBrowsingBlockingPage::CreateBlockingPage(
 }
 
 // static
-void SafeBrowsingBlockingPage::ShowBlockingPage(
-    BaseUIManager* ui_manager,
-    const UnsafeResource& unsafe_resource) {
-  DVLOG(1) << __func__ << " " << unsafe_resource.url.spec();
-  WebContents* web_contents = unsafe_resource.web_contents_getter.Run();
-
-  if (InterstitialPage::GetInterstitialPage(web_contents) &&
-      unsafe_resource.is_subresource) {
-    // This is an interstitial for a page's resource, let's queue it.
-    UnsafeResourceMap* unsafe_resource_map = GetUnsafeResourcesMap();
-    (*unsafe_resource_map)[web_contents].push_back(unsafe_resource);
-  } else {
-    // There is no interstitial currently showing in that tab, or we are about
-    // to display a new one for the main frame. If there is already an
-    // interstitial, showing the new one will automatically hide the old one.
-    content::NavigationEntry* entry =
-        GetNavigationEntryForResource(unsafe_resource);
-    GURL main_fram_url = entry ? entry->GetURL() : GURL();
-    SafeBrowsingBlockingPage* blocking_page = CreateBlockingPage(
-        ui_manager, web_contents, main_fram_url, unsafe_resource,
-        /*should_trigger_reporting=*/true);
-    blocking_page->Show();
-    MaybeTriggerSecurityInterstitialShownEvent(
-        web_contents, main_fram_url,
-        GetThreatTypeStringForInterstitial(unsafe_resource.threat_type),
-        /*net_error_code=*/0);
-  }
-}
-
-// static
 std::unique_ptr<SecurityInterstitialControllerClient>
 SafeBrowsingBlockingPage::CreateControllerClient(
     WebContents* web_contents,
@@ -306,9 +242,13 @@ SafeBrowsingBlockingPage::CreateControllerClient(
               ServiceAccessType::EXPLICIT_ACCESS),
           unsafe_resources[0].url, GetReportingInfo(unsafe_resources));
 
+  auto chrome_settings_page_helper =
+      std::make_unique<security_interstitials::ChromeSettingsPageHelper>();
+
   return std::make_unique<ChromeControllerClient>(
       web_contents, std::move(metrics_helper), profile->GetPrefs(),
-      ui_manager->app_locale(), ui_manager->default_safe_page());
+      ui_manager->app_locale(), ui_manager->default_safe_page(),
+      std::move(chrome_settings_page_helper));
 }
 
 }  // namespace safe_browsing

@@ -6,6 +6,11 @@
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-progress/paper-progress.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-styles/color.html">
 
+<link rel="import" href="/components/common_styles.html">
+<link rel="import" href="/components/hd_iron_icon.html">
+<link rel="import" href="/components/oobe_dialog.html">
+<link rel="import" href="/components/oobe_i18n_behavior.html">
+
 <!--
   UI for checking and downloading updates as part of the update process.
   'indeterminate' paper-progress will recalculate styles on every frame
@@ -39,8 +44,7 @@
 
 <dom-module id="checking-downloading-update">
   <template>
-    <link rel="stylesheet" href="oobe_dialog_host.css">
-    <link rel="stylesheet" href="oobe_flex_layout.css">
+    <style include="oobe-dialog-host"></style>
     <link rel="stylesheet" href="checking_downloading_update.css">
     <oobe-dialog hidden="[[!checkingForUpdate]]"
         title-key="checkingForUpdates"

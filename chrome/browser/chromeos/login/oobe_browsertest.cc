@@ -28,6 +28,7 @@
 #include "components/account_id/account_id.h"
 #include "components/user_manager/known_user.h"
 #include "components/user_manager/user.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "google_apis/gaia/gaia_switches.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
@@ -78,7 +79,7 @@ class OobeTest : public OobeBaseTest {
 IN_PROC_BROWSER_TEST_F(OobeTest, NewUser) {
   WaitForGaiaPageLoad();
 
-  // Make the MountEx cryptohome call fail iff the |create| field is missing,
+  // Make the MountEx cryptohome call fail iff the `create` field is missing,
   // which simulates the real cryptohomed's behavior for the new user mount.
   FakeCryptohomeClient::Get()->set_mount_create_required(true);
   LoginDisplayHost::default_host()

@@ -9,6 +9,7 @@
  * a subpage with lots of other settings on Chrome OS.
  */
 import 'chrome://resources/cr_elements/cr_link_row/cr_link_row.m.js';
+import '../controls/settings_toggle_button.m.js';
 import '../settings_page/settings_animated_pages.m.js';
 import '../settings_shared_css.m.js';
 
@@ -17,15 +18,11 @@ import './captions_subpage.m.js';
 import '../settings_page/settings_subpage.m.js';
 // </if>
 
-// <if expr="not chromeos">
-import '../controls/settings_toggle_button.m.js';
-// </if>
-
 import {WebUIListenerBehavior} from 'chrome://resources/js/web_ui_listener_behavior.m.js';
 import {html, Polymer} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
-import {loadTimeData} from '../i18n_setup.m.js';
-import {routes} from '../route.m.js';
+import {loadTimeData} from '../i18n_setup.js';
+import {routes} from '../route.js';
 import {Router} from '../router.m.js';
 
 // <if expr="is_win or is_macosx">
@@ -57,15 +54,38 @@ Polymer({
       notify: true,
     },
 
-    /**
-     * Returns true if the 'LiveCaption' media switch is enabled.
-     */
+    // <if expr="not chromeos">
+    /** @private */
     enableLiveCaption_: {
       type: Boolean,
       value: function() {
         return loadTimeData.getBoolean('enableLiveCaption');
       },
     },
+
+    /**
+     * The subtitle to display under the Live Caption heading. Generally, this
+     * is a generic subtitle describing the feature. While the SODA model is
+     * being downloading, this displays the download progress.
+     * @private
+     */
+    enableLiveCaptionSubtitle_: {
+      type: String,
+      value: loadTimeData.getString('captionsEnableLiveCaptionSubtitle'),
+    },
+
+    /**
+     * Whether to show the focus highlight setting.
+     * Depends on feature flag for focus highlight.
+     * @private {boolean}
+     */
+    showFocusHighlightOption_: {
+      type: Boolean,
+      value: function() {
+        return loadTimeData.getBoolean('showFocusHighlightOption');
+      }
+    },
+    // </if>
 
     /**
      * Whether to show accessibility labels settings.
@@ -113,7 +133,15 @@ Polymer({
     this.addWebUIListener(
         'screen-reader-state-changed',
         this.onScreenReaderStateChanged_.bind(this));
-    chrome.send('getScreenReaderState');
+
+    // <if expr="not chromeos">
+    this.addWebUIListener(
+        'enable-live-caption-subtitle-changed',
+        this.onEnableLiveCaptionSubtitleChanged_.bind(this));
+    // </if>
+
+    // Enables javascript and gets the screen reader state.
+    chrome.send('a11yPageReady');
   },
 
   /**
@@ -126,16 +154,60 @@ Polymer({
         loadTimeData.getBoolean('showExperimentalA11yLabels');
   },
 
-  /** @private */
-  onToggleAccessibilityImageLabels_() {
-    const a11yImageLabelsOn = this.$.a11yImageLabels.checked;
+  /**
+   * @private
+   * @param {!Event} event
+   */
+  onA11yCaretBrowsingChange_(event) {
+    if (event.target.checked) {
+      chrome.metricsPrivate.recordUserAction(
+          'Accessibility.CaretBrowsing.EnableWithSettings');
+    } else {
+      chrome.metricsPrivate.recordUserAction(
+          'Accessibility.CaretBrowsing.DisableWithSettings');
+    }
+  },
+
+  /**
+   * @private
+   * @param {!Event} event
+   */
+  onA11yImageLabelsChange_(event) {
+    const a11yImageLabelsOn = event.target.checked;
     if (a11yImageLabelsOn) {
       chrome.send('confirmA11yImageLabels');
     }
-    chrome.metricsPrivate.recordBoolean(
-        'Accessibility.ImageLabels.FromSettings.ToggleSetting',
-        a11yImageLabelsOn);
   },
+
+  // <if expr="not chromeos">
+  /**
+   * @param {!Event} event
+   * @private
+   */
+  onA11yLiveCaptionChange_(event) {
+    const a11yLiveCaptionOn = event.target.checked;
+    chrome.metricsPrivate.recordBoolean(
+        'Accessibility.LiveCaption.EnableFromSettings', a11yLiveCaptionOn);
+  },
+
+  /**
+   * @private
+   * @param {!string} enableLiveCaptionSubtitle The message sent from the webui
+   *     to be displayed as a subtitle to Live Captions.
+   */
+  onEnableLiveCaptionSubtitleChanged_(enableLiveCaptionSubtitle) {
+    this.enableLiveCaptionSubtitle_ = enableLiveCaptionSubtitle;
+  },
+
+  /**
+   * @private
+   * @param {!Event} event
+   */
+  onFocusHighlightChange_(event) {
+    chrome.metricsPrivate.recordBoolean(
+        'Accessibility.FocusHighlight.ToggleEnabled', event.target.checked);
+  },
+  // </if>
 
   // <if expr="chromeos">
   /** @private */
@@ -152,25 +224,10 @@ Polymer({
 
   /** @private */
   onCaptionsClick_() {
-    // Open the system captions dialog for Mac.
-    // <if expr="is_macosx">
-    CaptionsBrowserProxyImpl.getInstance().openSystemCaptionsDialog();
-    // </if>
-
-    // Open the system captions dialog for Windows 10+ or navigate to the
-    // caption settings page for older versions of Windows
-    // <if expr="is_win">
-    if (loadTimeData.getBoolean('isWindows10OrNewer')) {
+    if (this.captionSettingsOpensExternally_) {
       CaptionsBrowserProxyImpl.getInstance().openSystemCaptionsDialog();
     } else {
       Router.getInstance().navigateTo(routes.CAPTIONS);
     }
-    // </if>
-
-    // Navigate to the caption settings page for Linux as they do not have
-    // system caption settings.
-    // <if expr="is_linux">
-    Router.getInstance().navigateTo(routes.CAPTIONS);
-    // </if>
   },
 });

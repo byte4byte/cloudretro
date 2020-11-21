@@ -23,6 +23,9 @@ class ChromeAppListItem;
 class ChromeAppListModelUpdater : public AppListModelUpdater {
  public:
   explicit ChromeAppListModelUpdater(Profile* profile);
+  ChromeAppListModelUpdater(const ChromeAppListModelUpdater&) = delete;
+  ChromeAppListModelUpdater& operator=(const ChromeAppListModelUpdater&) =
+      delete;
   ~ChromeAppListModelUpdater() override;
 
   void SetActive(bool active) override;
@@ -36,17 +39,12 @@ class ChromeAppListModelUpdater : public AppListModelUpdater {
   void MoveItemToFolder(const std::string& id,
                         const std::string& folder_id) override;
   void SetStatus(ash::AppListModelStatus status) override;
-  void SetState(ash::AppListState state) override;
-  void HighlightItemInstalledFromUI(const std::string& id) override;
   void SetSearchEngineIsGoogle(bool is_google) override;
-  void SetSearchTabletAndClamshellAccessibleName(
-      const base::string16& tablet_accessible_name,
-      const base::string16& clamshell_accessible_name) override;
-  void SetSearchHintText(const base::string16& hint_text) override;
   void UpdateSearchBox(const base::string16& text,
                        bool initiated_by_user) override;
   void PublishSearchResults(
       const std::vector<ChromeSearchResult*>& results) override;
+  std::vector<ChromeSearchResult*> GetPublishedSearchResultsForTest() override;
 
   // Methods only used by ChromeAppListItem that talk to ash directly.
   void SetItemIcon(const std::string& id, const gfx::ImageSkia& icon) override;
@@ -59,19 +57,11 @@ class ChromeAppListModelUpdater : public AppListModelUpdater {
   void SetItemIsPersistent(const std::string& id, bool is_persistent) override;
   void SetItemFolderId(const std::string& id,
                        const std::string& folder_id) override;
-  void SetItemIsInstalling(const std::string& id, bool is_installing) override;
-  void SetItemPercentDownloaded(const std::string& id,
-                                int32_t percent_downloaded) override;
 
   // Methods only used by ChromeSearchResult that talk to ash directly.
   void SetSearchResultMetadata(
       const std::string& id,
       std::unique_ptr<ash::SearchResultMetadata> metadata) override;
-  void SetSearchResultIsInstalling(const std::string& id,
-                                   bool is_installing) override;
-  void SetSearchResultPercentDownloaded(const std::string& id,
-                                        int percent_downloaded) override;
-  void NotifySearchResultItemInstalled(const std::string& id) override;
 
   // Methods only for visiting Chrome items that never talk to ash.
   void ActivateChromeItem(const std::string& id, int event_flags) override;
@@ -106,13 +96,12 @@ class ChromeAppListModelUpdater : public AppListModelUpdater {
       app_list::AppListSyncableService::SyncItem* sync_item,
       bool update_name,
       bool update_folder) override;
+  void NotifyProcessSyncChangesFinished() override;
 
   // Methods to handle model update from ash:
-  void OnFolderCreated(std::unique_ptr<ash::AppListItemMetadata> item) override;
-  void OnFolderDeleted(std::unique_ptr<ash::AppListItemMetadata> item) override;
+  void OnItemAdded(std::unique_ptr<ash::AppListItemMetadata> item) override;
   void OnItemUpdated(std::unique_ptr<ash::AppListItemMetadata> item) override;
-  void OnPageBreakItemAdded(const std::string& id,
-                            const syncer::StringOrdinal& position) override;
+  void OnFolderDeleted(std::unique_ptr<ash::AppListItemMetadata> item) override;
   void OnPageBreakItemDeleted(const std::string& id) override;
 
   void AddObserver(AppListModelUpdaterObserver* observer) override;
@@ -122,14 +111,14 @@ class ChromeAppListModelUpdater : public AppListModelUpdater {
   // A map from a ChromeAppListItem's id to its unique pointer. This item set
   // matches the one in AppListModel.
   std::map<std::string, std::unique_ptr<ChromeAppListItem>> items_;
+  // The most recently list of search results.
+  std::vector<ChromeSearchResult*> published_results_;
   Profile* const profile_ = nullptr;
   base::ObserverList<AppListModelUpdaterObserver> observers_;
   ash::AppListController* app_list_controller_ = nullptr;
   bool search_engine_is_google_ = false;
 
   base::WeakPtrFactory<ChromeAppListModelUpdater> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(ChromeAppListModelUpdater);
 };
 
 #endif  // CHROME_BROWSER_UI_APP_LIST_CHROME_APP_LIST_MODEL_UPDATER_H_

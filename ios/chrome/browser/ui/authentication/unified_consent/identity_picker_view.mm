@@ -4,14 +4,18 @@
 
 #import "ios/chrome/browser/ui/authentication/unified_consent/identity_picker_view.h"
 
-#include "base/logging.h"
+#import <MaterialComponents/MaterialRipple.h>
+
+#include "base/check.h"
+#include "base/feature_list.h"
 #import "ios/chrome/browser/ui/authentication/authentication_constants.h"
 #import "ios/chrome/browser/ui/authentication/unified_consent/identity_chooser/identity_view.h"
 #import "ios/chrome/browser/ui/authentication/unified_consent/unified_consent_constants.h"
+#include "ios/chrome/browser/ui/ui_feature_flags.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
 #import "ios/chrome/common/ui/colors/UIColor+cr_semantic_colors.h"
 #import "ios/chrome/common/ui/util/constraints_ui_util.h"
-#import "ios/third_party/material_components_ios/src/components/Ink/src/MaterialInk.h"
+#import "ios/chrome/common/ui/util/pointer_interaction_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -30,7 +34,8 @@ const CGFloat kArrowDownMargin = 12.;
 @interface IdentityPickerView ()
 
 @property(nonatomic, strong) IdentityView* identityView;
-@property(nonatomic, strong) MDCInkView* inkView;
+// Ripple effect when the user starts or stop a touch in the view.
+@property(nonatomic, strong) MDCRippleView* rippleView;
 // Image View for the down arrow, letting the user know that more profiles can
 // be selected.
 @property(nonatomic, strong) UIImageView* arrowDownImageView;
@@ -38,10 +43,6 @@ const CGFloat kArrowDownMargin = 12.;
 @end
 
 @implementation IdentityPickerView
-
-@synthesize identityView = _identityView;
-@synthesize inkView = _inkView;
-@synthesize arrowDownImageView = _arrowDownImageView;
 
 - (instancetype)initWithFrame:(CGRect)frame {
   self = [super initWithFrame:frame];
@@ -51,11 +52,11 @@ const CGFloat kArrowDownMargin = 12.;
     self.backgroundColor = UIColor.cr_secondarySystemBackgroundColor;
     // Adding view elements inside.
     // Ink view.
-    _inkView = [[MDCInkView alloc] initWithFrame:CGRectZero];
-    _inkView.layer.cornerRadius = kIdentityPickerViewRadius;
-    _inkView.inkStyle = MDCInkStyleBounded;
-    _inkView.translatesAutoresizingMaskIntoConstraints = NO;
-    [self addSubview:_inkView];
+    _rippleView = [[MDCRippleView alloc] initWithFrame:CGRectZero];
+    _rippleView.layer.cornerRadius = kIdentityPickerViewRadius;
+    _rippleView.rippleStyle = MDCRippleStyleBounded;
+    _rippleView.translatesAutoresizingMaskIntoConstraints = NO;
+    [self addSubview:_rippleView];
 
     // Arrow down.
     _arrowDownImageView = [[UIImageView alloc] initWithFrame:CGRectZero];
@@ -91,6 +92,14 @@ const CGFloat kArrowDownMargin = 12.;
     ];
     AddSameCenterYConstraint(self, _arrowDownImageView);
     ApplyVisualConstraintsWithMetrics(constraints, views, metrics);
+
+#if defined(__IPHONE_13_4)
+    if (@available(iOS 13.4, *)) {
+      if (base::FeatureList::IsEnabled(kPointerSupport)) {
+        [self addInteraction:[[ViewPointerInteraction alloc] init]];
+      }
+    }
+#endif  // defined(__IPHONE_13_4)
 
     // Accessibility.
     self.isAccessibilityElement = YES;
@@ -129,19 +138,19 @@ const CGFloat kArrowDownMargin = 12.;
 - (void)touchesBegan:(NSSet*)touches withEvent:(UIEvent*)event {
   [super touchesBegan:touches withEvent:event];
   CGPoint location = [self locationFromTouches:touches];
-  [self.inkView startTouchBeganAnimationAtPoint:location completion:nil];
+  [self.rippleView beginRippleTouchDownAtPoint:location
+                                      animated:YES
+                                    completion:nil];
 }
 
 - (void)touchesEnded:(NSSet*)touches withEvent:(UIEvent*)event {
   [super touchesEnded:touches withEvent:event];
-  CGPoint location = [self locationFromTouches:touches];
-  [self.inkView startTouchEndedAnimationAtPoint:location completion:nil];
+  [self.rippleView beginRippleTouchUpAnimated:YES completion:nil];
 }
 
 - (void)touchesCancelled:(NSSet*)touches withEvent:(UIEvent*)event {
   [super touchesCancelled:touches withEvent:event];
-  CGPoint location = [self locationFromTouches:touches];
-  [self.inkView startTouchEndedAnimationAtPoint:location completion:nil];
+  [self.rippleView beginRippleTouchUpAnimated:YES completion:nil];
 }
 
 @end

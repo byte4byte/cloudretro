@@ -4,7 +4,7 @@
 
 #include "third_party/blink/renderer/core/layout/ng/list/layout_ng_list_item.h"
 
-#include "third_party/blink/renderer/core/layout/ng/list/list_marker.h"
+#include "third_party/blink/renderer/core/layout/list_marker.h"
 
 namespace blink {
 
@@ -43,11 +43,16 @@ void LayoutNGListItem::StyleDidChange(StyleDifference diff,
 
   list_marker->UpdateMarkerContentIfNeeded(*marker);
 
-  if (old_style && (old_style->ListStyleType() != StyleRef().ListStyleType() ||
-                    (StyleRef().ListStyleType() == EListStyleType::kString &&
-                     old_style->ListStyleStringValue() !=
-                         StyleRef().ListStyleStringValue())))
-    list_marker->ListStyleTypeChanged(*marker);
+  if (old_style) {
+    const ListStyleTypeData* old_list_style_type =
+        old_style->GetListStyleType();
+    const ListStyleTypeData* new_list_style_type =
+        StyleRef().GetListStyleType();
+    if (old_list_style_type != new_list_style_type &&
+        (!old_list_style_type || !new_list_style_type ||
+         *old_list_style_type != *new_list_style_type))
+      list_marker->ListStyleTypeChanged(*marker);
+  }
 }
 
 void LayoutNGListItem::OrdinalValueChanged() {
@@ -98,7 +103,7 @@ const LayoutObject* LayoutNGListItem::FindSymbolMarkerLayoutText(
     return list_marker->SymbolMarkerLayoutText(*object);
 
   if (object->IsLayoutNGListItem())
-    return FindSymbolMarkerLayoutText(ToLayoutNGListItem(object)->Marker());
+    return FindSymbolMarkerLayoutText(To<LayoutNGListItem>(object)->Marker());
 
   if (object->IsAnonymousBlock())
     return FindSymbolMarkerLayoutText(object->Parent());

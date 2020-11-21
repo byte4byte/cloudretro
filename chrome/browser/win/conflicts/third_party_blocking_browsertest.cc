@@ -10,7 +10,7 @@
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/scoped_native_library.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/test_reg_util_win.h"
 #include "base/win/registry.h"
@@ -25,6 +25,7 @@
 #include "chrome/install_static/install_util.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "components/services/quarantine/public/cpp/quarantine_features_win.h"
+#include "content/public/test/browser_test.h"
 
 namespace {
 

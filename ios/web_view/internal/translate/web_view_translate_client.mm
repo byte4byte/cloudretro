@@ -6,7 +6,8 @@
 
 #include <vector>
 
-#include "base/logging.h"
+#include "base/check.h"
+#include "base/notreached.h"
 #include "components/infobars/core/infobar.h"
 #include "components/language/core/browser/language_model_manager.h"
 #include "components/language/core/browser/pref_names.h"
@@ -70,6 +71,15 @@ void WebViewTranslateClient::RevertTranslation() {
   translate_manager_.RevertTranslation();
 }
 
+bool WebViewTranslateClient::RequestTranslationOffer() {
+  if (translate_manager_.CanManuallyTranslate()) {
+    translate_manager_.InitiateManualTranslation();
+    return true;
+  } else {
+    return false;
+  }
+}
+
 // TranslateClient implementation:
 
 std::unique_ptr<infobars::InfoBar> WebViewTranslateClient::CreateInfoBar(
@@ -119,6 +129,10 @@ int WebViewTranslateClient::GetInfobarIconID() const {
 
 bool WebViewTranslateClient::IsTranslatableURL(const GURL& url) {
   return !url.is_empty() && !url.SchemeIs(url::kFtpScheme);
+}
+
+bool WebViewTranslateClient::IsAutofillAssistantRunning() const {
+  return false;
 }
 
 void WebViewTranslateClient::ShowReportLanguageDetectionErrorUI(

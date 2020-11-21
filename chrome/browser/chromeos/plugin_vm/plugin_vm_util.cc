@@ -10,25 +10,31 @@
 #include "base/bind.h"
 #include "base/files/file_util.h"
 #include "base/observer_list.h"
+#include "base/strings/pattern.h"
+#include "base/strings/string_util.h"
 #include "base/task/post_task.h"
 #include "base/task/thread_pool.h"
 #include "chrome/browser/chromeos/plugin_vm/plugin_vm_drive_image_download_service.h"
+#include "chrome/browser/chromeos/plugin_vm/plugin_vm_features.h"
 #include "chrome/browser/chromeos/plugin_vm/plugin_vm_manager.h"
+#include "chrome/browser/chromeos/plugin_vm/plugin_vm_manager_factory.h"
 #include "chrome/browser/chromeos/plugin_vm/plugin_vm_pref_names.h"
-#include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller.h"
-#include "chrome/common/chrome_features.h"
 #include "chromeos/dbus/dlcservice/dlcservice_client.h"
-#include "chromeos/tpm/install_attributes.h"
 #include "components/exo/shell_surface_util.h"
 #include "components/prefs/pref_service.h"
 #include "components/prefs/scoped_user_pref_update.h"
 #include "google_apis/drive/drive_api_error_codes.h"
+#include "net/base/url_util.h"
 
 namespace plugin_vm {
+
+const char kPluginVmShelfAppId[] = "lgjpclljbbmphhnalkeplcmnjpfmmaek";
+const char kPluginVmName[] = "PvmDefault";
+const char kChromeOSBaseDirectoryDisplayText[] = "Network \u203a ChromeOS";
 
 namespace {
 
@@ -42,80 +48,22 @@ static base::CallbackList<void(void)>& GetFakeLicenceKeyListeners() {
   return *instance;
 }
 
+static std::string& GetFakeUserId() {
+  static base::NoDestructor<std::string> user_id;
+  return *user_id;
+}
+
 }  // namespace
 
-// For PluginVm to be allowed:
-// * Profile should be eligible.
-// * PluginVm feature should be enabled.
-// * Device should be enterprise enrolled:
-//   * User should be affiliated.
-//   * PluginVmAllowed and PluginVmLicenseKey policies should be set.
-bool IsPluginVmAllowedForProfile(const Profile* profile) {
-  // Check that the profile is eligible.
-  if (!profile || profile->IsChild() || profile->IsLegacySupervised() ||
-      profile->IsOffTheRecord() ||
-      chromeos::ProfileHelper::IsEphemeralUserProfile(profile) ||
-      chromeos::ProfileHelper::IsLockScreenAppProfile(profile) ||
-      !chromeos::ProfileHelper::IsPrimaryProfile(profile)) {
-    return false;
-  }
-
-  // Check that PluginVm feature is enabled.
-  if (!base::FeatureList::IsEnabled(features::kPluginVm))
-    return false;
-
-  // Bypass other checks when a fake policy is set
-  if (FakeLicenseKeyIsSet())
-    return true;
-
-  // Check that the device is enterprise enrolled.
-  if (!chromeos::InstallAttributes::Get()->IsEnterpriseManaged())
-    return false;
-
-  // Check that the user is affiliated.
-  const user_manager::User* const user =
-      chromeos::ProfileHelper::Get()->GetUserByProfile(profile);
-  if (user == nullptr || !user->IsAffiliated())
-    return false;
-
-  // Check that PluginVm is allowed to run by policy.
-  bool plugin_vm_allowed_for_device;
-  if (!chromeos::CrosSettings::Get()->GetBoolean(
-          chromeos::kPluginVmAllowed, &plugin_vm_allowed_for_device)) {
-    return false;
-  }
-  if (!plugin_vm_allowed_for_device)
-    return false;
-
-  // Check that a license key is set.
-  std::string plugin_vm_license_key;
-  if (!chromeos::CrosSettings::Get()->GetString(chromeos::kPluginVmLicenseKey,
-                                                &plugin_vm_license_key)) {
-    return false;
-  }
-  if (plugin_vm_license_key == std::string())
-    return false;
-
-  return true;
-}
-
-bool IsPluginVmConfigured(const Profile* profile) {
-  return profile->GetPrefs()->GetBoolean(
-      plugin_vm::prefs::kPluginVmImageExists);
-}
-
-bool IsPluginVmEnabled(const Profile* profile) {
-  return IsPluginVmAllowedForProfile(profile) && IsPluginVmConfigured(profile);
-}
-
 bool IsPluginVmRunning(Profile* profile) {
-  return plugin_vm::PluginVmManager::GetForProfile(profile)->vm_state() ==
+  return plugin_vm::PluginVmManagerFactory::GetForProfile(profile)
+                 ->vm_state() ==
              vm_tools::plugin_dispatcher::VmState::VM_STATE_RUNNING &&
          ChromeLauncherController::instance()->IsOpen(
-             ash::ShelfID(kPluginVmAppId));
+             ash::ShelfID(kPluginVmShelfAppId));
 }
 
-bool IsPluginVmWindow(const aura::Window* window) {
+bool IsPluginVmAppWindow(const aura::Window* window) {
   const std::string* app_id = exo::GetShellApplicationId(window);
   if (!app_id)
     return false;
@@ -133,6 +81,11 @@ std::string GetPluginVmLicenseKey() {
   return plugin_vm_license_key;
 }
 
+std::string GetPluginVmUserIdForProfile(const Profile* profile) {
+  DCHECK(profile);
+  return profile->GetPrefs()->GetString(plugin_vm::prefs::kPluginVmUserId);
+}
+
 void SetFakePluginVmPolicy(Profile* profile,
                            const std::string& image_url,
                            const std::string& image_hash,
@@ -146,10 +99,15 @@ void SetFakePluginVmPolicy(Profile* profile,
   GetFakeLicenseKey() = license_key;
 
   GetFakeLicenceKeyListeners().Notify();
+  GetFakeUserId() = "FAKE_USER_ID";
 }
 
 bool FakeLicenseKeyIsSet() {
   return !GetFakeLicenseKey().empty();
+}
+
+bool FakeUserIdIsSet() {
+  return !GetFakeUserId().empty();
 }
 
 void RemoveDriveDownloadDirectoryIfExists() {
@@ -161,37 +119,39 @@ void RemoveDriveDownloadDirectoryIfExists() {
 
   base::ThreadPool::PostTaskAndReplyWithResult(
       FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
-      base::BindOnce(&base::DeleteFileRecursively,
+      base::BindOnce(&base::DeletePathRecursively,
                      base::FilePath(kPluginVmDriveDownloadDirectory)),
       base::BindOnce(std::move(log_file_deletion_if_failed)));
 }
 
-// TODO(muhamedp): Update if a different url format is ultimately chosen.
-bool IsDriveUrl(const GURL& url) {
-  const std::string url_base = "https://drive.google.com/open";
-  const std::string& spec = url.spec();
-  return spec.find(url_base) == 0 && spec.find("id=") < (spec.length() - 3);
-}
-
-// TODO(muhamedp): Update if a different url format is ultimately chosen.
-std::string GetIdFromDriveUrl(const GURL& url) {
+base::Optional<std::string> GetIdFromDriveUrl(const GURL& url) {
   const std::string& spec = url.spec();
 
-  const size_t id_start = spec.find("id=") + 3;
-  // In case there are other GET parameters after the id.
-  const size_t first_ampersand = spec.find('&', id_start);
+  const std::string kOpenUrlBase = "https://drive.google.com/open?";
+  if (base::StartsWith(spec, kOpenUrlBase,
+                       base::CompareCase::INSENSITIVE_ASCII)) {
+    // e.g. https://drive.google.com/open?id=[ID]
+    std::string id;
+    if (!net::GetValueForKeyInQuery(url, "id", &id))
+      return base::nullopt;
+    return id;
+  }
 
-  if (first_ampersand == std::string::npos)
-    return spec.substr(id_start);
-  else
-    return spec.substr(id_start, first_ampersand - id_start);
-}
+  // These will match some invalid URLs, which is fine.
+  const std::string kViewUrlPatternWithDomain =
+      "https://drive.google.com/a/*/file/d/*/view*";
+  const std::string kViewUrlPatternWithoutDomain =
+      "https://drive.google.com/file/d/*/view*";
+  if (base::MatchPattern(spec, kViewUrlPatternWithDomain) ||
+      base::MatchPattern(spec, kViewUrlPatternWithoutDomain)) {
+    // e.g. https://drive.google.com/a/example.org/file/d/[ID]/view?usp=sharing
+    // or https://drive.google.com/file/d/[ID]/view?usp=sharing
+    size_t id_end = spec.find("/view");
+    size_t id_start = spec.rfind('/', id_end - 1) + 1;
+    return spec.substr(id_start, id_end - id_start);
+  }
 
-dlcservice::DlcModuleList GetPluginVmDlcModuleList() {
-  dlcservice::DlcModuleList dlc_module_list;
-  auto* dlc_module_info = dlc_module_list.add_dlc_module_infos();
-  dlc_module_info->set_dlc_id("pita");
-  return dlc_module_list;
+  return base::nullopt;
 }
 
 PluginVmPolicySubscription::PluginVmPolicySubscription(
@@ -201,7 +161,17 @@ PluginVmPolicySubscription::PluginVmPolicySubscription(
   DCHECK(chromeos::CrosSettings::IsInitialized());
   chromeos::CrosSettings* cros_settings = chromeos::CrosSettings::Get();
   // Subscriptions are automatically removed when this object is destroyed.
-  allowed_subscription_ = cros_settings->AddSettingsObserver(
+  pref_change_registrar_ = std::make_unique<PrefChangeRegistrar>();
+  pref_change_registrar_->Init(profile->GetPrefs());
+  pref_change_registrar_->Add(
+      plugin_vm::prefs::kPluginVmAllowed,
+      base::BindRepeating(&PluginVmPolicySubscription::OnPolicyChanged,
+                          base::Unretained(this)));
+  pref_change_registrar_->Add(
+      plugin_vm::prefs::kPluginVmUserId,
+      base::BindRepeating(&PluginVmPolicySubscription::OnPolicyChanged,
+                          base::Unretained(this)));
+  device_allowed_subscription_ = cros_settings->AddSettingsObserver(
       chromeos::kPluginVmAllowed,
       base::BindRepeating(&PluginVmPolicySubscription::OnPolicyChanged,
                           base::Unretained(this)));
@@ -213,11 +183,11 @@ PluginVmPolicySubscription::PluginVmPolicySubscription(
       base::BindRepeating(&PluginVmPolicySubscription::OnPolicyChanged,
                           base::Unretained(this)));
 
-  is_allowed_ = IsPluginVmAllowedForProfile(profile);
+  is_allowed_ = PluginVmFeatures::Get()->IsAllowed(profile);
 }
 
 void PluginVmPolicySubscription::OnPolicyChanged() {
-  bool allowed = IsPluginVmAllowedForProfile(profile_);
+  bool allowed = PluginVmFeatures::Get()->IsAllowed(profile_);
   if (allowed != is_allowed_) {
     is_allowed_ = allowed;
     callback_.Run(allowed);

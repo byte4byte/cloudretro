@@ -5,7 +5,7 @@
 #include "cc/raster/lcd_text_disallowed_reason.h"
 
 #include <iostream>
-#include "base/logging.h"
+#include "base/notreached.h"
 
 namespace cc {
 
@@ -27,6 +27,12 @@ const char* LCDTextDisallowedReasonToString(LCDTextDisallowedReason reason) {
       return "non-integral-y-offset";
     case LCDTextDisallowedReason::kWillChangeTransform:
       return "will-change-transform";
+    case LCDTextDisallowedReason::kPixelOrColorEffect:
+      return "pixel-or-color-effect";
+    case LCDTextDisallowedReason::kTransformAnimation:
+      return "transform-animation";
+    case LCDTextDisallowedReason::kNoText:
+      return "no-text";
   }
   NOTREACHED();
   return "";

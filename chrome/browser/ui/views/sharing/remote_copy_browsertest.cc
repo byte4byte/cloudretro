@@ -24,6 +24,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/test/base/in_process_browser_test.h"
+#include "content/public/test/browser_test.h"
 #include "net/http/http_status_code.h"
 #include "ui/base/clipboard/clipboard.h"
 #include "ui/base/clipboard/clipboard_constants.h"
@@ -122,16 +123,15 @@ class RemoteCopyBrowserTestBase : public InProcessBrowserTest {
 
   std::vector<base::string16> GetAvailableClipboardTypes() {
     std::vector<base::string16> types;
-    bool contains_filenames;
     ui::Clipboard::GetForCurrentThread()->ReadAvailableTypes(
-        ui::ClipboardBuffer::kCopyPaste, &types, &contains_filenames);
+        ui::ClipboardBuffer::kCopyPaste, /* data_dst = */ nullptr, &types);
     return types;
   }
 
   std::string ReadClipboardText() {
     base::string16 text;
     ui::Clipboard::GetForCurrentThread()->ReadText(
-        ui::ClipboardBuffer::kCopyPaste, &text);
+        ui::ClipboardBuffer::kCopyPaste, /* data_dst = */ nullptr, &text);
     return base::UTF16ToUTF8(text);
   }
 
@@ -240,14 +240,14 @@ IN_PROC_BROWSER_TEST_F(RemoteCopyBrowserTest, ImageUrl) {
                 base::ASCIIToUTF16(kDeviceName)),
             notification.title());
   ASSERT_EQ(message_center::NOTIFICATION_TYPE_IMAGE, notification.type());
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
   // We show the image in the notification icon on macOS.
   ASSERT_EQ(640, notification.icon().Width());
   ASSERT_EQ(480, notification.icon().Height());
 #else
   ASSERT_EQ(640, notification.rich_notification_data().image.Width());
   ASSERT_EQ(480, notification.rich_notification_data().image.Height());
-#endif  // defined(OS_MACOSX)
+#endif  // defined(OS_MAC)
   histograms_.ExpectUniqueSample(kStatusCodeHistogram, net::HTTP_OK, 1);
   histograms_.ExpectTotalCount(kLoadTimeHistogram, 1);
   histograms_.ExpectUniqueSample(kImageSizeBeforeDecodeHistogram, 810490, 1);

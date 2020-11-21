@@ -26,6 +26,8 @@
 #include "base/android/scoped_java_ref.h"
 #include "base/memory/singleton.h"
 #include "chrome/browser/download/android/download_controller_base.h"
+#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_key.h"
 
 class DownloadController : public DownloadControllerBase {
  public:
@@ -80,9 +82,6 @@ class DownloadController : public DownloadControllerBase {
   // The download item contains dangerous file types.
   void OnDangerousDownload(download::DownloadItem* item);
 
-  // The download item is a mixed content download.
-  void OnMixedContentDownload(download::DownloadItem* item);
-
   // Helper methods to start android download on UI thread.
   void StartAndroidDownload(const content::WebContents::Getter& wc_getter,
                             const DownloadInfo& info);
@@ -94,6 +93,9 @@ class DownloadController : public DownloadControllerBase {
   // Check if an interrupted download item can be auto resumed.
   bool IsInterruptedDownloadAutoResumable(
       download::DownloadItem* download_item);
+
+  // Get profile key from download item.
+  ProfileKey* GetProfileKey(download::DownloadItem* download_item);
 
   std::string default_file_name_;
 

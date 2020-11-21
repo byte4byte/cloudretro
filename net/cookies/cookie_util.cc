@@ -9,9 +9,12 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/check.h"
 #include "base/feature_list.h"
-#include "base/logging.h"
+#include "base/metrics/histogram_macros.h"
+#include "base/notreached.h"
 #include "base/stl_util.h"
+#include "base/strings/strcat.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_tokenizer.h"
 #include "base/strings/string_util.h"
@@ -119,6 +122,10 @@ CookieOptions::SameSiteCookieContext ComputeSameSiteContextForSet(
 }
 
 }  // namespace
+
+void FireStorageAccessHistogram(StorageAccessResult result) {
+  UMA_HISTOGRAM_ENUMERATION("API.StorageAccess.AllowedRequests", result);
+}
 
 bool DomainIsHostOnly(const std::string& domain_string) {
   return (domain_string.empty() || domain_string[0] != '.');
@@ -325,23 +332,47 @@ base::Time ParseCookieExpirationTime(const std::string& time_string) {
   return base::Time();
 }
 
-GURL CookieOriginToURL(const std::string& domain, bool is_https) {
-  if (domain.empty())
+GURL CookieDomainAndPathToURL(const std::string& domain,
+                              const std::string& path,
+                              const std::string& source_scheme) {
+  // Note: domain_no_dot could be empty for e.g. file cookies.
+  std::string domain_no_dot = CookieDomainAsHost(domain);
+  if (domain_no_dot.empty() || source_scheme.empty())
     return GURL();
+  return GURL(base::StrCat(
+      {source_scheme, url::kStandardSchemeSeparator, domain_no_dot, path}));
+}
 
-  const std::string scheme = is_https ? url::kHttpsScheme : url::kHttpScheme;
-  return GURL(scheme + url::kStandardSchemeSeparator +
-              CookieDomainAsHost(domain) + "/");
+GURL CookieDomainAndPathToURL(const std::string& domain,
+                              const std::string& path,
+                              bool is_https) {
+  return CookieDomainAndPathToURL(
+      domain, path,
+      std::string(is_https ? url::kHttpsScheme : url::kHttpScheme));
+}
+
+GURL CookieDomainAndPathToURL(const std::string& domain,
+                              const std::string& path,
+                              CookieSourceScheme source_scheme) {
+  return CookieDomainAndPathToURL(domain, path,
+                                  source_scheme == CookieSourceScheme::kSecure);
+}
+
+GURL CookieOriginToURL(const std::string& domain, bool is_https) {
+  return CookieDomainAndPathToURL(domain, "/", is_https);
 }
 
 GURL SimulatedCookieSource(const CanonicalCookie& cookie,
                            const std::string& source_scheme) {
-  // Note: cookie.DomainWithoutDot() could be empty for e.g. file cookies.
-  if (cookie.DomainWithoutDot().empty() || source_scheme.empty())
-    return GURL();
+  return CookieDomainAndPathToURL(cookie.Domain(), cookie.Path(),
+                                  source_scheme);
+}
 
-  return GURL(source_scheme + url::kStandardSchemeSeparator +
-              cookie.DomainWithoutDot() + cookie.Path());
+CookieAccessScheme ProvisionalAccessScheme(const GURL& source_url) {
+  return source_url.SchemeIsCryptographic()
+             ? CookieAccessScheme::kCryptographic
+             : IsLocalhost(source_url) ? CookieAccessScheme::kTrustworthy
+                                       : CookieAccessScheme::kNonCryptographic;
 }
 
 bool IsDomainMatch(const std::string& domain, const std::string& host) {
@@ -564,68 +595,40 @@ bool IsSchemefulSameSiteEnabled() {
   return base::FeatureList::IsEnabled(features::kSchemefulSameSite);
 }
 
-bool IsRecentHttpSameSiteAccessGrantsLegacyCookieSemanticsEnabled() {
-  return IsSameSiteByDefaultCookiesEnabled() &&
-         base::FeatureList::IsEnabled(
-             features::kRecentHttpSameSiteAccessGrantsLegacyCookieSemantics) &&
-         features::
-                 kRecentHttpSameSiteAccessGrantsLegacyCookieSemanticsMilliseconds
-                     .Get() > 0;
-}
-
-bool IsRecentCreationTimeGrantsLegacyCookieSemanticsEnabled() {
-  return IsSameSiteByDefaultCookiesEnabled() &&
-         base::FeatureList::IsEnabled(
-             features::kRecentCreationTimeGrantsLegacyCookieSemantics) &&
-         features::kRecentCreationTimeGrantsLegacyCookieSemanticsMilliseconds
-                 .Get() > 0;
-}
-
-bool DoesLastHttpSameSiteAccessGrantLegacySemantics(
-    base::TimeTicks last_http_same_site_access) {
-  if (last_http_same_site_access.is_null())
-    return false;
-  if (!IsRecentHttpSameSiteAccessGrantsLegacyCookieSemanticsEnabled())
-    return false;
-
-  base::TimeDelta recency_threshold = base::TimeDelta::FromMilliseconds(
-      features::kRecentHttpSameSiteAccessGrantsLegacyCookieSemanticsMilliseconds
-          .Get());
-  DCHECK(!recency_threshold.is_zero());
-  return (base::TimeTicks::Now() - last_http_same_site_access) <
-         recency_threshold;
-}
-
-bool DoesCreationTimeGrantLegacySemantics(base::Time creation_date) {
-  if (creation_date.is_null())
-    return false;
-  if (!IsRecentCreationTimeGrantsLegacyCookieSemanticsEnabled())
-    return false;
-
-  base::TimeDelta recency_threshold = base::TimeDelta::FromMilliseconds(
-      features::kRecentCreationTimeGrantsLegacyCookieSemanticsMilliseconds
-          .Get());
-  DCHECK(!recency_threshold.is_zero());
-  return (base::Time::Now() - creation_date) < recency_threshold;
-}
-
-base::OnceCallback<void(net::CanonicalCookie::CookieInclusionStatus)>
-AdaptCookieInclusionStatusToBool(base::OnceCallback<void(bool)> callback) {
+base::OnceCallback<void(CookieAccessResult)> AdaptCookieAccessResultToBool(
+    base::OnceCallback<void(bool)> callback) {
   return base::BindOnce(
       [](base::OnceCallback<void(bool)> inner_callback,
-         const net::CanonicalCookie::CookieInclusionStatus status) {
-        bool success = status.IsInclude();
+         const CookieAccessResult access_result) {
+        bool success = access_result.status.IsInclude();
         std::move(inner_callback).Run(success);
       },
       std::move(callback));
 }
 
-CookieList StripStatuses(const CookieStatusList& cookie_status_list) {
+CookieList StripAccessResults(
+    const CookieAccessResultList& cookie_access_results_list) {
   CookieList cookies;
-  for (const CookieWithStatus& cookie_with_status : cookie_status_list) {
-    cookies.push_back(cookie_with_status.cookie);
+  for (const CookieWithAccessResult& cookie_with_access_result :
+       cookie_access_results_list) {
+    cookies.push_back(cookie_with_access_result.cookie);
   }
   return cookies;
+}
+
+NET_EXPORT void RecordCookiePortOmniboxHistograms(const GURL& url) {
+  int port = url.EffectiveIntPort();
+
+  if (port == url::PORT_UNSPECIFIED)
+    return;
+
+  if (IsLocalhost(url)) {
+    UMA_HISTOGRAM_ENUMERATION("Cookie.Port.OmniboxURLNavigation.Localhost",
+                              ReducePortRangeForCookieHistogram(port));
+  } else {
+    UMA_HISTOGRAM_ENUMERATION("Cookie.Port.OmniboxURLNavigation.RemoteHost",
+                              ReducePortRangeForCookieHistogram(port));
+  }
 }
 
 }  // namespace cookie_util

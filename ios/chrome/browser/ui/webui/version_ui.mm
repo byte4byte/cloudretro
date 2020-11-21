@@ -39,6 +39,8 @@ web::WebUIIOSDataSource* CreateVersionUIDataSource() {
 
   // Localized and data strings.
   html_source->AddLocalizedString(version_ui::kTitle, IDS_VERSION_UI_TITLE);
+  html_source->AddLocalizedString(version_ui::kLogoAltText,
+                                  IDS_SHORT_PRODUCT_LOGO_ALT_TEXT);
   html_source->AddLocalizedString(version_ui::kApplicationLabel,
                                   IDS_IOS_PRODUCT_NAME);
   html_source->AddString(version_ui::kVersion,
@@ -70,7 +72,7 @@ web::WebUIIOSDataSource* CreateVersionUIDataSource() {
                                       ? IDS_VERSION_UI_OFFICIAL
                                       : IDS_VERSION_UI_UNOFFICIAL);
   html_source->AddLocalizedString(
-      version_ui::kVersionBitSize,
+      version_ui::kVersionProcessorVariation,
       sizeof(void*) == 8 ? IDS_VERSION_UI_64BIT : IDS_VERSION_UI_32BIT);
   html_source->AddLocalizedString(version_ui::kUserAgentName,
                                   IDS_VERSION_UI_USER_AGENT);
@@ -112,7 +114,8 @@ web::WebUIIOSDataSource* CreateVersionUIDataSource() {
 
 }  // namespace
 
-VersionUI::VersionUI(web::WebUIIOS* web_ui) : web::WebUIIOSController(web_ui) {
+VersionUI::VersionUI(web::WebUIIOS* web_ui, const std::string& host)
+    : web::WebUIIOSController(web_ui, host) {
   web_ui->AddMessageHandler(std::make_unique<VersionHandler>());
   web::WebUIIOSDataSource::Add(ChromeBrowserState::FromWebUIIOS(web_ui),
                                CreateVersionUIDataSource());

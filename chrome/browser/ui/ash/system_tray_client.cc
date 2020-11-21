@@ -11,6 +11,8 @@
 #include "base/logging.h"
 #include "base/memory/weak_ptr.h"
 #include "base/metrics/user_metrics.h"
+#include "chrome/browser/apps/app_service/app_service_proxy.h"
+#include "chrome/browser/apps/app_service/app_service_proxy_factory.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_process_platform_part.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
@@ -32,8 +34,11 @@
 #include "chrome/browser/ui/webui/chromeos/internet_config_dialog.h"
 #include "chrome/browser/ui/webui/chromeos/internet_detail_dialog.h"
 #include "chrome/browser/ui/webui/chromeos/multidevice_setup/multidevice_setup_dialog.h"
+#include "chrome/browser/ui/webui/settings/chromeos/constants/routes.mojom.h"
 #include "chrome/browser/upgrade_detector/upgrade_detector.h"
+#include "chrome/browser/web_applications/components/web_app_id_constants.h"
 #include "chrome/common/url_constants.h"
+#include "chromeos/constants/chromeos_features.h"
 #include "chromeos/constants/chromeos_switches.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/session_manager/session_manager_client.h"
@@ -112,7 +117,10 @@ SystemTrayClient::SystemTrayClient()
       update_notification_style_(ash::NotificationStyle::kDefault) {
   // If this observes clock setting changes before ash comes up the IPCs will
   // be queued on |system_tray_|.
-  g_browser_process->platform_part()->GetSystemClock()->AddObserver(this);
+  chromeos::system::SystemClock* clock =
+      g_browser_process->platform_part()->GetSystemClock();
+  clock->AddObserver(this);
+  system_tray_->SetUse24HourClock(clock->ShouldUse24HourClock());
 
   // If an upgrade is available at startup then tell ash about it.
   if (UpgradeDetector::GetInstance()->notify_upgrade())
@@ -125,7 +133,7 @@ SystemTrayClient::SystemTrayClient()
       policy_connector->GetDeviceCloudPolicyManager();
   if (policy_manager)
     policy_manager->core()->store()->AddObserver(this);
-  UpdateEnterpriseDisplayDomain();
+  UpdateEnterpriseDomainInfo();
 
   system_tray_->SetClient(this);
 
@@ -201,7 +209,8 @@ void SystemTrayClient::ShowSettings() {
 
 void SystemTrayClient::ShowBluetoothSettings() {
   base::RecordAction(base::UserMetricsAction("ShowBluetoothSettingsPage"));
-  ShowSettingsSubPageForActiveUser(chrome::kBluetoothSubPage);
+  ShowSettingsSubPageForActiveUser(
+      chromeos::settings::mojom::kBluetoothDevicesSubpagePath);
 }
 
 void SystemTrayClient::ShowBluetoothPairingDialog(
@@ -219,7 +228,8 @@ void SystemTrayClient::ShowBluetoothPairingDialog(
 void SystemTrayClient::ShowDateSettings() {
   base::RecordAction(base::UserMetricsAction("ShowDateOptions"));
   // Everybody can change the time zone (even though it is a device setting).
-  ShowSettingsSubPageForActiveUser(chrome::kDateTimeSubPage);
+  ShowSettingsSubPageForActiveUser(
+      chromeos::settings::mojom::kDateAndTimeSectionPath);
 }
 
 void SystemTrayClient::ShowSetTimeDialog() {
@@ -228,12 +238,14 @@ void SystemTrayClient::ShowSetTimeDialog() {
 
 void SystemTrayClient::ShowDisplaySettings() {
   base::RecordAction(base::UserMetricsAction("ShowDisplayOptions"));
-  ShowSettingsSubPageForActiveUser(chrome::kDisplaySubPage);
+  ShowSettingsSubPageForActiveUser(
+      chromeos::settings::mojom::kDisplaySubpagePath);
 }
 
 void SystemTrayClient::ShowPowerSettings() {
   base::RecordAction(base::UserMetricsAction("Tray_ShowPowerOptions"));
-  ShowSettingsSubPageForActiveUser(chrome::kPowerSubPage);
+  ShowSettingsSubPageForActiveUser(
+      chromeos::settings::mojom::kPowerSubpagePath);
 }
 
 void SystemTrayClient::ShowChromeSlow() {
@@ -244,18 +256,30 @@ void SystemTrayClient::ShowChromeSlow() {
 
 void SystemTrayClient::ShowIMESettings() {
   base::RecordAction(base::UserMetricsAction("OpenLanguageOptionsDialog"));
-  ShowSettingsSubPageForActiveUser(chrome::kOsLanguagesDetailsSubPage);
+  const std::string path =
+      base::FeatureList::IsEnabled(
+          ::chromeos::features::kLanguageSettingsUpdate)
+          ? chromeos::settings::mojom::kInputSubpagePath
+          : chromeos::settings::mojom::kLanguagesAndInputDetailsSubpagePath;
+  ShowSettingsSubPageForActiveUser(path);
 }
 
 void SystemTrayClient::ShowConnectedDevicesSettings() {
-  ShowSettingsSubPageForActiveUser(chrome::kConnectedDevicesSubPage);
+  ShowSettingsSubPageForActiveUser(
+      chromeos::settings::mojom::kMultiDeviceFeaturesSubpagePath);
+}
+
+void SystemTrayClient::ShowTetherNetworkSettings() {
+  ShowSettingsSubPageForActiveUser(
+      chromeos::settings::mojom::kMobileDataNetworksSubpagePath);
 }
 
 void SystemTrayClient::ShowAboutChromeOS() {
   // We always want to check for updates when showing the about page from the
   // Ash UI.
-  ShowSettingsSubPageForActiveUser(std::string(chrome::kHelpSubPage) +
-                                   "?checkForUpdate=true");
+  ShowSettingsSubPageForActiveUser(
+      std::string(chromeos::settings::mojom::kAboutChromeOsSectionPath) +
+      "?checkForUpdate=true");
 }
 
 void SystemTrayClient::ShowHelp() {
@@ -271,15 +295,22 @@ void SystemTrayClient::ShowAccessibilityHelp() {
 
 void SystemTrayClient::ShowAccessibilitySettings() {
   base::RecordAction(base::UserMetricsAction("ShowAccessibilitySettings"));
-  ShowSettingsSubPageForActiveUser(chrome::kOsAccessibilitySubPage);
+  ShowSettingsSubPageForActiveUser(
+      chromeos::settings::mojom::kManageAccessibilitySubpagePath);
 }
 
 void SystemTrayClient::ShowGestureEducationHelp() {
-  chrome::ScopedTabbedBrowserDisplayer displayer(
-      ProfileManager::GetActiveUserProfile());
   base::RecordAction(base::UserMetricsAction("ShowGestureEducationHelp"));
-  ShowSingletonTab(displayer.browser(),
-                   GURL(chrome::kChromeOSGestureEducationHelpURL));
+  Profile* profile = ProfileManager::GetActiveUserProfile();
+  if (!profile)
+    return;
+
+  apps::AppServiceProxy* proxy =
+      apps::AppServiceProxyFactory::GetForProfileRedirectInIncognito(profile);
+  proxy->LaunchAppWithUrl(web_app::kHelpAppId, ui::EventFlags::EF_NONE,
+                          GURL(chrome::kChromeOSGestureEducationHelpURL),
+                          apps::mojom::LaunchSource::kFromOtherApp,
+                          display::kDefaultDisplayId);
 }
 
 void SystemTrayClient::ShowPaletteHelp() {
@@ -290,7 +321,8 @@ void SystemTrayClient::ShowPaletteHelp() {
 
 void SystemTrayClient::ShowPaletteSettings() {
   base::RecordAction(base::UserMetricsAction("ShowPaletteOptions"));
-  ShowSettingsSubPageForActiveUser(chrome::kStylusSubPage);
+  ShowSettingsSubPageForActiveUser(
+      chromeos::settings::mojom::kStylusSubpagePath);
 }
 
 void SystemTrayClient::ShowPublicAccountInfo() {
@@ -398,10 +430,12 @@ void SystemTrayClient::ShowNetworkSettingsHelper(const std::string& network_id,
     return;
   }
 
-  std::string page = chrome::kInternetSubPage;
+  std::string page = chromeos::settings::mojom::kNetworkSectionPath;
   const chromeos::NetworkState* network_state = GetNetworkState(network_id);
   if (!network_id.empty() && network_state) {
-    page = chrome::kNetworkDetailSubPage;
+    // TODO(khorimoto): Use a more general path name here. This path is named
+    // kWifi*, but it's actually a generic page.
+    page = chromeos::settings::mojom::kWifiDetailsSubpagePath;
     page += "?guid=";
     page += net::EscapeUrlEncodedData(network_id, true);
     page += "&name=";
@@ -495,26 +529,26 @@ void SystemTrayClient::OnUpgradeRecommended() {
 ////////////////////////////////////////////////////////////////////////////////
 // policy::CloudPolicyStore::Observer
 void SystemTrayClient::OnStoreLoaded(policy::CloudPolicyStore* store) {
-  UpdateEnterpriseDisplayDomain();
+  UpdateEnterpriseDomainInfo();
 }
 
 void SystemTrayClient::OnStoreError(policy::CloudPolicyStore* store) {
-  UpdateEnterpriseDisplayDomain();
+  UpdateEnterpriseDomainInfo();
 }
 
-void SystemTrayClient::UpdateEnterpriseDisplayDomain() {
+void SystemTrayClient::UpdateEnterpriseDomainInfo() {
   policy::BrowserPolicyConnectorChromeOS* connector =
       g_browser_process->platform_part()->browser_policy_connector_chromeos();
-  const std::string enterprise_display_domain =
-      connector->GetEnterpriseDisplayDomain();
+  const std::string enterprise_domain_manager =
+      connector->GetEnterpriseDomainManager();
   const bool active_directory_managed = connector->IsActiveDirectoryManaged();
-  if (enterprise_display_domain == last_enterprise_display_domain_ &&
+  if (enterprise_domain_manager == last_enterprise_domain_manager_ &&
       active_directory_managed == last_active_directory_managed_) {
     return;
   }
   // Send to ash, which will add an item to the system tray.
-  system_tray_->SetEnterpriseDisplayDomain(enterprise_display_domain,
-                                           active_directory_managed);
-  last_enterprise_display_domain_ = enterprise_display_domain;
+  system_tray_->SetEnterpriseDomainInfo(enterprise_domain_manager,
+                                        active_directory_managed);
+  last_enterprise_domain_manager_ = enterprise_domain_manager;
   last_active_directory_managed_ = active_directory_managed;
 }

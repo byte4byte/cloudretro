@@ -4,7 +4,9 @@
 
 #include "cc/paint/shader_transfer_cache_entry.h"
 
-#include "base/logging.h"
+#include <utility>
+
+#include "base/notreached.h"
 
 namespace cc {
 
@@ -21,7 +23,7 @@ size_t ServiceShaderTransferCacheEntry::CachedSize() const {
 }
 
 bool ServiceShaderTransferCacheEntry::Deserialize(
-    GrContext* context,
+    GrDirectContext* context,
     base::span<const uint8_t> data) {
   // These entries must be created directly via CreateLocalEntry.
   NOTREACHED();

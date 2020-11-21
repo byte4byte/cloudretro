@@ -11,7 +11,7 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/containers/queue.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
@@ -305,15 +305,15 @@ class CopyOrMoveOperationTestHelper {
       FileSystemURL dir = directories.front();
       directories.pop();
       ASSERT_EQ(base::File::FILE_OK, ReadDirectory(dir, &entries));
-      for (size_t i = 0; i < entries.size(); ++i) {
+      for (const filesystem::mojom::DirectoryEntry& entry : entries) {
         FileSystemURL url = file_system_context_->CreateCrackedFileSystemURL(
             dir.origin(), dir.mount_type(),
-            dir.virtual_path().Append(entries[i].name));
+            dir.virtual_path().Append(entry.name));
         base::FilePath relative;
         root.virtual_path().AppendRelativePath(url.virtual_path(), &relative);
         relative = relative.NormalizePathSeparators();
         ASSERT_TRUE(base::Contains(test_case_map, relative));
-        if (entries[i].type == filesystem::mojom::FsFileType::DIRECTORY) {
+        if (entry.type == filesystem::mojom::FsFileType::DIRECTORY) {
           EXPECT_TRUE(test_case_map[relative]->is_directory);
           directories.push(url);
         } else {
@@ -690,8 +690,7 @@ TEST(LocalFileSystemCopyOrMoveOperationTest, StreamCopyHelper) {
   base::FilePath source_path = temp_dir.GetPath().AppendASCII("source");
   base::FilePath dest_path = temp_dir.GetPath().AppendASCII("dest");
   const char kTestData[] = "abcdefghijklmnopqrstuvwxyz0123456789";
-  base::WriteFile(source_path, kTestData,
-                  base::size(kTestData) - 1);  // Exclude trailing '\0'.
+  base::WriteFile(source_path, kTestData);
 
   base::test::SingleThreadTaskEnvironment task_environment(
       base::test::SingleThreadTaskEnvironment::MainThreadType::IO);
@@ -747,8 +746,7 @@ TEST(LocalFileSystemCopyOrMoveOperationTest, StreamCopyHelperWithFlush) {
   base::FilePath source_path = temp_dir.GetPath().AppendASCII("source");
   base::FilePath dest_path = temp_dir.GetPath().AppendASCII("dest");
   const char kTestData[] = "abcdefghijklmnopqrstuvwxyz0123456789";
-  base::WriteFile(source_path, kTestData,
-                  base::size(kTestData) - 1);  // Exclude trailing '\0'.
+  base::WriteFile(source_path, kTestData);
 
   base::test::SingleThreadTaskEnvironment task_environment(
       base::test::SingleThreadTaskEnvironment::MainThreadType::IO);
@@ -800,8 +798,7 @@ TEST(LocalFileSystemCopyOrMoveOperationTest, StreamCopyHelper_Cancel) {
   base::FilePath source_path = temp_dir.GetPath().AppendASCII("source");
   base::FilePath dest_path = temp_dir.GetPath().AppendASCII("dest");
   const char kTestData[] = "abcdefghijklmnopqrstuvwxyz0123456789";
-  base::WriteFile(source_path, kTestData,
-                  base::size(kTestData) - 1);  // Exclude trailing '\0'.
+  base::WriteFile(source_path, kTestData);
 
   base::test::SingleThreadTaskEnvironment task_environment(
       base::test::SingleThreadTaskEnvironment::MainThreadType::IO);

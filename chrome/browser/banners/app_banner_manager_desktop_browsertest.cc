@@ -10,8 +10,9 @@
 #include "base/run_loop.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "base/test/metrics/histogram_tester.h"
+#include "base/test/scoped_feature_list.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/banners/app_banner_manager_browsertest_base.h"
 #include "chrome/browser/banners/app_banner_manager_desktop.h"
@@ -27,11 +28,15 @@
 #include "chrome/browser/ui/web_applications/test/web_app_browsertest_util.h"
 #include "chrome/browser/ui/web_applications/web_app_dialog_utils.h"
 #include "chrome/browser/web_applications/components/external_install_options.h"
+#include "chrome/browser/web_applications/components/pending_app_manager.h"
 #include "chrome/browser/web_applications/components/web_app_constants.h"
 #include "chrome/browser/web_applications/components/web_app_helpers.h"
+#include "chrome/browser/web_applications/components/web_app_provider_base.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/content_features.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "extensions/common/extension.h"
 
@@ -61,8 +66,30 @@ class AppBannerManagerDesktopBrowserTest
     chrome::SetAutoAcceptPWAInstallConfirmationForTesting(false);
   }
 
+  AppBannerManagerDesktopBrowserTest(
+      const AppBannerManagerDesktopBrowserTest&) = delete;
+  AppBannerManagerDesktopBrowserTest& operator=(
+      const AppBannerManagerDesktopBrowserTest&) = delete;
+};
+
+// A dedicated test fixture for DisplayOverride, which is supported
+// only for the new web apps mode, and requires a command line switch
+// to enable manifest parsing.
+class AppBannerManagerDesktopBrowserTest_DisplayOverride
+    : public AppBannerManagerDesktopBrowserTest {
+ public:
+  AppBannerManagerDesktopBrowserTest_DisplayOverride() {
+    scoped_feature_list_.InitAndEnableFeature(
+        features::kWebAppManifestDisplayOverride);
+  }
+
+  AppBannerManagerDesktopBrowserTest_DisplayOverride(
+      const AppBannerManagerDesktopBrowserTest_DisplayOverride&) = delete;
+  AppBannerManagerDesktopBrowserTest_DisplayOverride& operator=(
+      const AppBannerManagerDesktopBrowserTest_DisplayOverride&) = delete;
+
  private:
-  DISALLOW_COPY_AND_ASSIGN(AppBannerManagerDesktopBrowserTest);
+  base::test::ScopedFeatureList scoped_feature_list_;
 };
 
 IN_PROC_BROWSER_TEST_F(AppBannerManagerDesktopBrowserTest,
@@ -259,12 +286,14 @@ IN_PROC_BROWSER_TEST_F(AppBannerManagerDesktopBrowserTest,
       TestAppBannerManagerDesktop::FromWebContents(
           browser()->tab_strip_model()->GetActiveWebContents());
 
+  // Install web app by policy.
   web_app::ExternalInstallOptions options =
       web_app::CreateInstallOptions(GetBannerURL());
   options.install_source = web_app::ExternalInstallSource::kExternalPolicy;
   options.user_display_mode = web_app::DisplayMode::kBrowser;
   web_app::PendingAppManagerInstall(browser()->profile(), options);
 
+  // Run promotability check.
   {
     base::RunLoop run_loop;
     manager->PrepareDone(run_loop.QuitClosure());
@@ -274,7 +303,150 @@ IN_PROC_BROWSER_TEST_F(AppBannerManagerDesktopBrowserTest,
     EXPECT_EQ(State::COMPLETE, manager->state());
   }
 
-  EXPECT_EQ(AppBannerManager::InstallableWebAppCheckResult::kNo,
+  EXPECT_EQ(AppBannerManager::InstallableWebAppCheckResult::kNoAlreadyInstalled,
+            manager->GetInstallableWebAppCheckResultForTesting());
+  EXPECT_FALSE(manager->IsPromptAvailableForTesting());
+}
+
+IN_PROC_BROWSER_TEST_F(AppBannerManagerDesktopBrowserTest,
+                       PolicyAppUninstalled_Prompt) {
+  TestAppBannerManagerDesktop* manager =
+      TestAppBannerManagerDesktop::FromWebContents(
+          browser()->tab_strip_model()->GetActiveWebContents());
+  Profile* profile = browser()->profile();
+
+  // Install web app by policy.
+  web_app::ExternalInstallOptions options =
+      web_app::CreateInstallOptions(GetBannerURL());
+  options.install_source = web_app::ExternalInstallSource::kExternalPolicy;
+  options.user_display_mode = web_app::DisplayMode::kBrowser;
+  web_app::PendingAppManagerInstall(profile, options);
+
+  // Uninstall web app by policy.
+  {
+    base::RunLoop run_loop;
+    web_app::WebAppProviderBase::GetProviderBase(profile)
+        ->pending_app_manager()
+        .UninstallApps({GetBannerURL()},
+                       web_app::ExternalInstallSource::kExternalPolicy,
+                       base::BindLambdaForTesting(
+                           [&run_loop](const GURL& app_url, bool succeeded) {
+                             EXPECT_TRUE(succeeded);
+                             run_loop.Quit();
+                           }));
+    run_loop.Run();
+  }
+
+  // Run promotability check.
+  {
+    base::RunLoop run_loop;
+    manager->PrepareDone(run_loop.QuitClosure());
+
+    ui_test_utils::NavigateToURL(browser(), GetBannerURL());
+    run_loop.Run();
+    EXPECT_EQ(State::PENDING_PROMPT, manager->state());
+  }
+
+  EXPECT_EQ(AppBannerManager::InstallableWebAppCheckResult::kPromotable,
+            manager->GetInstallableWebAppCheckResultForTesting());
+  EXPECT_TRUE(manager->IsPromptAvailableForTesting());
+}
+
+IN_PROC_BROWSER_TEST_F(AppBannerManagerDesktopBrowserTest_DisplayOverride,
+                       InstallPromptAfterUserMenuInstall) {
+  base::HistogramTester tester;
+
+  TestAppBannerManagerDesktop* manager =
+      TestAppBannerManagerDesktop::FromWebContents(
+          browser()->tab_strip_model()->GetActiveWebContents());
+
+  {
+    base::RunLoop run_loop;
+    manager->PrepareDone(run_loop.QuitClosure());
+
+    ui_test_utils::NavigateToURL(
+        browser(), GetBannerURLWithManifestAndQuery(
+                       "/banners/manifest_display_override.json", "action",
+                       "stash_event"));
+    run_loop.Run();
+    EXPECT_EQ(State::PENDING_PROMPT, manager->state());
+  }
+
+  // Install the app via the menu instead of the banner.
+  chrome::SetAutoAcceptPWAInstallConfirmationForTesting(true);
+  browser()->command_controller()->ExecuteCommand(IDC_INSTALL_PWA);
+  manager->AwaitAppInstall();
+  chrome::SetAutoAcceptPWAInstallConfirmationForTesting(false);
+
+  EXPECT_FALSE(manager->IsPromptAvailableForTesting());
+
+  tester.ExpectUniqueSample(kInstallDisplayModeHistogram,
+                            blink::mojom::DisplayMode::kMinimalUi, 1);
+}
+
+IN_PROC_BROWSER_TEST_F(AppBannerManagerDesktopBrowserTest_DisplayOverride,
+                       WebAppBannerResolvesUserChoice) {
+  base::HistogramTester tester;
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  auto* manager = TestAppBannerManagerDesktop::FromWebContents(web_contents);
+
+  {
+    base::RunLoop run_loop;
+    manager->PrepareDone(run_loop.QuitClosure());
+
+    ui_test_utils::NavigateToURL(
+        browser(),
+        GetBannerURLWithManifestAndQuery(
+            "/banners/manifest_display_override_display_is_browser.json",
+            "action", "stash_event"));
+    run_loop.Run();
+    EXPECT_EQ(State::PENDING_PROMPT, manager->state());
+  }
+
+  {
+    // Trigger the installation prompt and wait for installation to occur.
+    base::RunLoop run_loop;
+    manager->PrepareDone(run_loop.QuitClosure());
+    ExecuteScript(browser(), "callStashedPrompt();", true /* with_gesture */);
+    run_loop.Run();
+    EXPECT_EQ(State::COMPLETE, manager->state());
+  }
+
+  // Ensure that the userChoice promise resolves.
+  const base::string16 title = base::ASCIIToUTF16("Got userChoice: accepted");
+  content::TitleWatcher watcher(web_contents, title);
+  EXPECT_EQ(title, watcher.WaitAndGetTitle());
+
+  tester.ExpectUniqueSample(kInstallDisplayModeHistogram,
+                            blink::mojom::DisplayMode::kStandalone, 1);
+}
+
+IN_PROC_BROWSER_TEST_F(AppBannerManagerDesktopBrowserTest_DisplayOverride,
+                       PolicyAppInstalled_NoPrompt) {
+  TestAppBannerManagerDesktop* manager =
+      TestAppBannerManagerDesktop::FromWebContents(
+          browser()->tab_strip_model()->GetActiveWebContents());
+
+  // Install web app by policy.
+  web_app::ExternalInstallOptions options =
+      web_app::CreateInstallOptions(GetBannerURLWithManifest(
+          "/banners/manifest_display_override_contains_browser.json"));
+  options.install_source = web_app::ExternalInstallSource::kExternalPolicy;
+  options.user_display_mode = web_app::DisplayMode::kBrowser;
+  web_app::PendingAppManagerInstall(browser()->profile(), options);
+
+  // Run promotability check.
+  {
+    base::RunLoop run_loop;
+    manager->PrepareDone(run_loop.QuitClosure());
+
+    ui_test_utils::NavigateToURL(browser(), GetBannerURL());
+    run_loop.Run();
+    EXPECT_EQ(State::COMPLETE, manager->state());
+  }
+
+  EXPECT_EQ(AppBannerManager::InstallableWebAppCheckResult::kNoAlreadyInstalled,
             manager->GetInstallableWebAppCheckResultForTesting());
   EXPECT_FALSE(manager->IsPromptAvailableForTesting());
 }

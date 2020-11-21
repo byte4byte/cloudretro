@@ -10,10 +10,12 @@
 #include "base/command_line.h"
 #include "base/files/file_util.h"
 #include "base/macros.h"
+#include "base/optional.h"
 #include "base/run_loop.h"
 #include "base/test/scoped_command_line.h"
 #include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/common/content_features.h"
@@ -39,7 +41,12 @@ namespace content {
 namespace {
 constexpr gfx::Rect kBounds = gfx::Rect(0, 0, 20, 20);
 constexpr gfx::PointF kClientPt = {5, 10};
+
+// TODO(crbug.com/1052397): Revisit once build flag switch of lacros-chrome is
+// complete.
+#if (defined(OS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)) || defined(OS_WIN)
 constexpr gfx::PointF kScreenPt = {17, 3};
+#endif
 
 // Runs a specified callback when a ui::MouseEvent is received.
 class RunCallbackOnActivation : public WebContentsDelegate {
@@ -178,12 +185,10 @@ TEST_F(WebContentsViewAuraTest, WebContentsDestroyedDuringClick) {
                              0);
   ui::EventHandler* event_handler = GetView();
   event_handler->OnMouseEvent(&mouse_event);
-#if defined(USE_X11)
-  // The web-content is not activated during mouse-press on X11.
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
+  // The web-content is not activated during mouse-press on Linux.
   // See comment in WebContentsViewAura::OnMouseEvent() for more details.
   EXPECT_NE(web_contents(), nullptr);
-#else
-  EXPECT_EQ(web_contents(), nullptr);
 #endif
 }
 
@@ -198,6 +203,9 @@ TEST_F(WebContentsViewAuraTest, OccludeView) {
   EXPECT_EQ(web_contents()->GetVisibility(), Visibility::VISIBLE);
 }
 
+// TODO(crbug.com/1052397): Revisit once build flag switch of lacros-chrome is
+// complete.
+#if (defined(OS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)) || defined(OS_WIN)
 TEST_F(WebContentsViewAuraTest, DragDropFiles) {
   WebContentsViewAura* view = GetView();
   auto data = std::make_unique<ui::OSExchangeData>();
@@ -233,12 +241,15 @@ TEST_F(WebContentsViewAuraTest, DragDropFiles) {
   view->OnDragEntered(event);
   ASSERT_NE(nullptr, view->current_drop_data_);
 
-#if defined(USE_X11)
-  // By design, OSExchangeDataProviderAuraX11::GetString returns an empty string
-  // if file data is also present.
-  EXPECT_TRUE(view->current_drop_data_->text.string().empty());
+// TODO(crbug.com/1052397): Revisit once build flag switch of lacros-chrome is
+// complete.
+#if defined(OS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)
+  // By design, Linux implementations return an empty string if file data
+  // is also present.
+  EXPECT_TRUE(!view->current_drop_data_->text ||
+              view->current_drop_data_->text->empty());
 #else
-  EXPECT_EQ(string_data, view->current_drop_data_->text.string());
+  EXPECT_EQ(string_data, view->current_drop_data_->text);
 #endif
 
   std::vector<ui::FileInfo> retrieved_file_infos =
@@ -263,12 +274,15 @@ TEST_F(WebContentsViewAuraTest, DragDropFiles) {
 
   CheckDropData(view);
 
-#if defined(USE_X11)
-  // By design, OSExchangeDataProviderAuraX11::GetString returns an empty string
-  // if file data is also present.
-  EXPECT_TRUE(drop_complete_data_->drop_data.text.string().empty());
+// TODO(crbug.com/1052397): Revisit once build flag switch of lacros-chrome is
+// complete.
+#if defined(OS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)
+  // By design, Linux implementations returns an empty string if file data
+  // is also present.
+  EXPECT_TRUE(!drop_complete_data_->drop_data.text ||
+              drop_complete_data_->drop_data.text->empty());
 #else
-  EXPECT_EQ(string_data, drop_complete_data_->drop_data.text.string());
+  EXPECT_EQ(string_data, drop_complete_data_->drop_data.text);
 #endif
 
   retrieved_file_infos = drop_complete_data_->drop_data.filenames;
@@ -280,7 +294,6 @@ TEST_F(WebContentsViewAuraTest, DragDropFiles) {
   }
 }
 
-#if defined(OS_WIN) || defined(USE_X11)
 TEST_F(WebContentsViewAuraTest, DragDropFilesOriginateFromRenderer) {
   WebContentsViewAura* view = GetView();
   auto data = std::make_unique<ui::OSExchangeData>();
@@ -320,12 +333,15 @@ TEST_F(WebContentsViewAuraTest, DragDropFilesOriginateFromRenderer) {
   view->OnDragEntered(event);
   ASSERT_NE(nullptr, view->current_drop_data_);
 
-#if defined(USE_X11)
-  // By design, OSExchangeDataProviderAuraX11::GetString returns an empty string
-  // if file data is also present.
-  EXPECT_TRUE(view->current_drop_data_->text.string().empty());
+// TODO(crbug.com/1052397): Revisit once build flag switch of lacros-chrome is
+// complete.
+#if defined(OS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)
+  // By design, Linux implementations return an empty string if file data
+  // is also present.
+  EXPECT_TRUE(!view->current_drop_data_->text ||
+              view->current_drop_data_->text->empty());
 #else
-  EXPECT_EQ(string_data, view->current_drop_data_->text.string());
+  EXPECT_EQ(string_data, view->current_drop_data_->text);
 #endif
 
   ASSERT_TRUE(view->current_drop_data_->filenames.empty());
@@ -343,12 +359,15 @@ TEST_F(WebContentsViewAuraTest, DragDropFilesOriginateFromRenderer) {
 
   CheckDropData(view);
 
-#if defined(USE_X11)
-  // By design, OSExchangeDataProviderAuraX11::GetString returns an empty string
-  // if file data is also present.
-  EXPECT_TRUE(drop_complete_data_->drop_data.text.string().empty());
+// TODO(crbug.com/1052397): Revisit once build flag switch of lacros-chrome is
+// complete.
+#if defined(OS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)
+  // By design, Linux implementations returns an empty string if file data is
+  // also present.
+  EXPECT_TRUE(!drop_complete_data_->drop_data.text ||
+              drop_complete_data_->drop_data.text->empty());
 #else
-  EXPECT_EQ(string_data, drop_complete_data_->drop_data.text.string());
+  EXPECT_EQ(string_data, drop_complete_data_->drop_data.text);
 #endif
 
   ASSERT_TRUE(drop_complete_data_->drop_data.filenames.empty());
@@ -385,7 +404,7 @@ TEST_F(WebContentsViewAuraTest, DragDropVirtualFiles) {
   view->OnDragEntered(event);
   ASSERT_NE(nullptr, view->current_drop_data_);
 
-  EXPECT_EQ(string_data, view->current_drop_data_->text.string());
+  EXPECT_EQ(string_data, view->current_drop_data_->text);
 
   const base::FilePath path_placeholder(FILE_PATH_LITERAL("temp.tmp"));
   std::vector<ui::FileInfo> retrieved_file_infos =
@@ -411,7 +430,7 @@ TEST_F(WebContentsViewAuraTest, DragDropVirtualFiles) {
 
   CheckDropData(view);
 
-  EXPECT_EQ(string_data, drop_complete_data_->drop_data.text.string());
+  EXPECT_EQ(string_data, drop_complete_data_->drop_data.text);
 
   std::string read_contents;
   base::FilePath temp_dir;
@@ -468,7 +487,7 @@ TEST_F(WebContentsViewAuraTest, DragDropVirtualFilesOriginateFromRenderer) {
   view->OnDragEntered(event);
   ASSERT_NE(nullptr, view->current_drop_data_);
 
-  EXPECT_EQ(string_data, view->current_drop_data_->text.string());
+  EXPECT_EQ(string_data, view->current_drop_data_->text);
 
   ASSERT_TRUE(view->current_drop_data_->filenames.empty());
 
@@ -486,7 +505,7 @@ TEST_F(WebContentsViewAuraTest, DragDropVirtualFilesOriginateFromRenderer) {
 
   CheckDropData(view);
 
-  EXPECT_EQ(string_data, drop_complete_data_->drop_data.text.string());
+  EXPECT_EQ(string_data, drop_complete_data_->drop_data.text);
 
   ASSERT_TRUE(drop_complete_data_->drop_data.filenames.empty());
 }

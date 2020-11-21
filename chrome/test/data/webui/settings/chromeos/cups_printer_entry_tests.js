@@ -2,6 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// clang-format off
+// #import 'chrome://os-settings/chromeos/lazy_load.js';
+
+// #import {PrinterType} from 'chrome://os-settings/chromeos/lazy_load.js';
+// #import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+// clang-format on
+
 /**
  * Helper function to verify that printers in |printerListEntries| that contain
  * |searchTerm| are not in |hiddenEntries|.
@@ -18,7 +25,7 @@ function verifyFilteredPrinters(printerEntryListTestElement, searchTerm) {
 
   for (let i = 0; i < printerListEntries.length; ++i) {
     const entry = printerListEntries[i];
-    if (hiddenEntries.indexOf(entry) == -1) {
+    if (hiddenEntries.indexOf(entry) === -1) {
       assertTrue(
           entry.printerEntry.printerInfo.printerName.toLowerCase().includes(
               searchTerm.toLowerCase()));

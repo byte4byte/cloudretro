@@ -17,7 +17,7 @@
 namespace blink {
 
 ModuleScriptFetcher::ModuleScriptFetcher(
-    util::PassKey<ModuleScriptLoader> pass_key) {}
+    base::PassKey<ModuleScriptLoader> pass_key) {}
 
 void ModuleScriptFetcher::Client::OnFetched(
     const base::Optional<ModuleScriptCreationParams>& params) {
@@ -28,7 +28,7 @@ void ModuleScriptFetcher::Client::OnFailed() {
   NotifyFetchFinished(base::nullopt, HeapVector<Member<ConsoleMessage>>());
 }
 
-void ModuleScriptFetcher::Trace(Visitor* visitor) {
+void ModuleScriptFetcher::Trace(Visitor* visitor) const {
   ResourceClient::Trace(visitor);
 }
 

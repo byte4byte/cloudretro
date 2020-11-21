@@ -8,7 +8,14 @@
 #include <memory>
 #include <string>
 
+#include "chrome/common/caption.mojom.h"
+#include "ui/native_theme/caption_style.h"
+
 class Browser;
+
+namespace content {
+class WebContents;
+}
 
 namespace captions {
 
@@ -30,11 +37,25 @@ class CaptionBubbleController {
 
   static std::unique_ptr<CaptionBubbleController> Create(Browser* browser);
 
-  // Called when captions are received from the service.
-  virtual void OnCaptionReceived(const std::string& text) {}
+  // Called when a transcription is received from the service. Returns whether
+  // the transcription result was set on the caption bubble successfully.
+  // Transcriptions will halt if this returns false.
+  virtual bool OnTranscription(
+      const chrome::mojom::TranscriptionResultPtr& transcription_result,
+      content::WebContents* web_contents) = 0;
 
-  // Called when the active tab changes.
-  virtual void OnActiveTabChanged(int index) {}
+  // Called when the speech service has an error.
+  virtual void OnError(content::WebContents* web_contents) = 0;
+
+  // Called when the caption style changes.
+  virtual void UpdateCaptionStyle(
+      base::Optional<ui::CaptionStyle> caption_style) = 0;
+
+ private:
+  friend class CaptionControllerTest;
+
+  virtual bool IsWidgetVisibleForTesting() = 0;
+  virtual std::string GetBubbleLabelTextForTesting() = 0;
 };
 
 }  // namespace captions

@@ -4,12 +4,14 @@
 
 #include <pwd.h>
 #include <stddef.h>
+#include <string.h>
 #include <sys/types.h>
 #include <unistd.h>
 
 #include "chrome/browser/policy/policy_path_parser.h"
 
 #include "base/logging.h"
+#include "base/notreached.h"
 
 namespace policy {
 

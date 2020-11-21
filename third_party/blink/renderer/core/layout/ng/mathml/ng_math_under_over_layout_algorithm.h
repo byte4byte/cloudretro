@@ -20,14 +20,12 @@ class CORE_EXPORT NGMathUnderOverLayoutAlgorithm
 
   scoped_refptr<const NGLayoutResult> Layout() override;
 
-  MinMaxSizes ComputeMinMaxSizes(const MinMaxSizesInput&) const override;
+  MinMaxSizesResult ComputeMinMaxSizes(const MinMaxSizesInput&) override;
 
  private:
   void GatherChildren(NGBlockNode* base,
                       NGBlockNode* second,
                       NGBlockNode* third);
-
-  const NGBoxStrut border_scrollbar_padding_;
 };
 
 }  // namespace blink

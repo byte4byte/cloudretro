@@ -4,6 +4,7 @@
 
 #include <string>
 
+#include "ash/public/cpp/login_accelerators.h"
 #include "ash/public/cpp/login_screen_test_api.h"
 #include "base/command_line.h"
 #include "base/scoped_observer.h"
@@ -36,6 +37,7 @@
 #include "chromeos/dbus/session_manager/session_manager_client.h"
 #include "chromeos/dbus/shill/shill_manager_client.h"
 #include "components/prefs/pref_service.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_launcher.h"
 #include "content/public/test/test_utils.h"
@@ -122,7 +124,8 @@ class ResetTest : public OobeBaseTest, public LocalStateMixin::Delegate {
 
   // Simulates reset screen request from views based login.
   void InvokeResetScreen() {
-    chromeos::LoginDisplayHost::default_host()->ShowResetScreen();
+    chromeos::LoginDisplayHost::default_host()->HandleAccelerator(
+        ash::LoginAcceleratorAction::kShowResetScreen);
     OobeScreenWaiter(ResetView::kScreenId).Wait();
     test::OobeJS()
         .CreateVisibilityWaiter(true /* visible */, {kResetScreen})

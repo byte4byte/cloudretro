@@ -18,15 +18,15 @@ public interface ProfileDataSource {
      * Immutable holder for profile data.
      */
     class ProfileData {
-        private final String mAccountName;
+        private final String mAccountEmail;
         private final @Nullable Bitmap mAvatar;
         private final @Nullable String mFullName;
         private final @Nullable String mGivenName;
 
-        public ProfileData(String accountName, @Nullable Bitmap avatar, @Nullable String fullName,
+        public ProfileData(String accountEmail, @Nullable Bitmap avatar, @Nullable String fullName,
                 @Nullable String givenName) {
-            assert accountName != null;
-            this.mAccountName = accountName;
+            assert accountEmail != null;
+            this.mAccountEmail = accountEmail;
             this.mAvatar = avatar;
             this.mFullName = fullName;
             this.mGivenName = givenName;
@@ -34,10 +34,10 @@ public interface ProfileDataSource {
 
         /**
          * Gets the account email address.
-         * @return the account name.
+         * @return the account email.
          */
-        public String getAccountName() {
-            return mAccountName;
+        public String getAccountEmail() {
+            return mAccountEmail;
         }
 
         /**
@@ -71,9 +71,9 @@ public interface ProfileDataSource {
     interface Observer {
         /**
          * Notifies that an account's profile data has been updated.
-         * @param accountId An account ID.
+         * @param accountEmail An account email.
          */
-        void onProfileDataUpdated(String accountId);
+        void onProfileDataUpdated(String accountEmail);
     }
 
     /**

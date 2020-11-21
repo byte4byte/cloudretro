@@ -47,6 +47,20 @@
 #define ALWAYS_INLINE inline
 #endif
 
+// Annotate a function indicating it should never be tail called. Useful to make
+// sure callers of the annotated function are never omitted from call-stacks.
+// To provide the complementary behavior (prevent the annotated function from
+// being omitted) look at NOINLINE. Also note that this doesn't prevent code
+// folding of multiple identical caller functions into a single signature. To
+// prevent code folding, see base::debug::Alias.
+// Use like:
+//   void NOT_TAIL_CALLED FooBar();
+#if defined(__clang__) && __has_attribute(not_tail_called)
+#define NOT_TAIL_CALLED __attribute__((not_tail_called))
+#else
+#define NOT_TAIL_CALLED
+#endif
+
 // Specify memory alignment for structs, classes, etc.
 // Use like:
 //   class ALIGNAS(16) MyClass { ... }
@@ -142,6 +156,19 @@
 #else
 #define DISABLE_CFI_PERF
 #endif
+#endif
+
+// DISABLE_CFI_ICALL -- Disable Control Flow Integrity indirect call checks.
+#if !defined(DISABLE_CFI_ICALL)
+#if defined(OS_WIN)
+// Windows also needs __declspec(guard(nocf)).
+#define DISABLE_CFI_ICALL NO_SANITIZE("cfi-icall") __declspec(guard(nocf))
+#else
+#define DISABLE_CFI_ICALL NO_SANITIZE("cfi-icall")
+#endif
+#endif
+#if !defined(DISABLE_CFI_ICALL)
+#define DISABLE_CFI_ICALL
 #endif
 
 // Macro useful for writing cross-platform function pointers.

@@ -5,7 +5,9 @@
 #include "third_party/blink/renderer/platform/graphics/bitmap_image_metrics.h"
 
 #include "base/metrics/histogram_base.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/numerics/safe_conversions.h"
+#include "media/media_buildflags.h"
 #include "third_party/blink/renderer/platform/geometry/int_size.h"
 #include "third_party/blink/renderer/platform/graphics/color_space_gamut.h"
 #include "third_party/blink/renderer/platform/instrumentation/histogram.h"
@@ -17,31 +19,29 @@ namespace blink {
 void BitmapImageMetrics::CountDecodedImageType(const String& type) {
   DecodedImageType decoded_image_type =
       type == "jpg"
-          ? kImageJPEG
+          ? DecodedImageType::kJPEG
           : type == "png"
-                ? kImagePNG
+                ? DecodedImageType::kPNG
                 : type == "gif"
-                      ? kImageGIF
+                      ? DecodedImageType::kGIF
                       : type == "webp"
-                            ? kImageWebP
+                            ? DecodedImageType::kWebP
                             : type == "ico"
-                                  ? kImageICO
+                                  ? DecodedImageType::kICO
                                   : type == "bmp"
-                                        ? kImageBMP
-                                        : DecodedImageType::kImageUnknown;
+                                        ? DecodedImageType::kBMP
+#if BUILDFLAG(ENABLE_AV1_DECODER)
+                                        : type == "avif"
+                                              ? DecodedImageType::kAVIF
+#endif
+                                              : DecodedImageType::kUnknown;
 
-  DEFINE_THREAD_SAFE_STATIC_LOCAL(
-      EnumerationHistogram, decoded_image_type_histogram,
-      ("Blink.DecodedImageType", kDecodedImageTypeEnumEnd));
-  decoded_image_type_histogram.Count(decoded_image_type);
+  UMA_HISTOGRAM_ENUMERATION("Blink.DecodedImageType", decoded_image_type);
 }
 
-void BitmapImageMetrics::CountImageOrientation(
-    const ImageOrientationEnum orientation) {
-  DEFINE_THREAD_SAFE_STATIC_LOCAL(
-      EnumerationHistogram, orientation_histogram,
-      ("Blink.DecodedImage.Orientation", kImageOrientationEnumEnd));
-  orientation_histogram.Count(orientation);
+void BitmapImageMetrics::CountImageDensityCorrection(bool density_correction_present) {
+  UMA_HISTOGRAM_BOOLEAN("Blink.DecodedImage.DensitySizeCorrectionDetected",
+                        density_correction_present);
 }
 
 void BitmapImageMetrics::CountImageJpegDensity(int image_min_side,
@@ -79,10 +79,7 @@ void BitmapImageMetrics::CountJpegArea(const IntSize& size) {
 }
 
 void BitmapImageMetrics::CountJpegColorSpace(JpegColorSpace color_space) {
-  DEFINE_THREAD_SAFE_STATIC_LOCAL(
-      EnumerationHistogram, color_space_histogram,
-      ("Blink.ImageDecoders.Jpeg.ColorSpace", JpegColorSpace::kMaxValue));
-  color_space_histogram.Count(color_space);
+  UMA_HISTOGRAM_ENUMERATION("Blink.ImageDecoders.Jpeg.ColorSpace", color_space);
 }
 
 }  // namespace blink

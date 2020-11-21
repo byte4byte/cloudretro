@@ -19,6 +19,7 @@ import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.os.Bundle;
+import android.text.TextUtils;
 
 import org.json.JSONArray;
 import org.junit.After;
@@ -38,15 +39,16 @@ import org.chromium.base.PathUtils;
 import org.chromium.base.task.PostTask;
 import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.base.test.util.JniMocker;
-import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.ShortcutHelper;
+import org.chromium.chrome.browser.app.ChromeActivity;
 import org.chromium.chrome.browser.background_task_scheduler.ChromeBackgroundTaskFactory;
+import org.chromium.chrome.browser.browserservices.BrowserServicesIntentDataProvider;
 import org.chromium.chrome.browser.lifecycle.ActivityLifecycleDispatcher;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.components.embedder_support.util.ShadowUrlUtilities;
-import org.chromium.content_public.common.ScreenOrientationValues;
+import org.chromium.components.webapk.lib.common.WebApkMetaDataKeys;
+import org.chromium.device.mojom.ScreenOrientationLockType;
 import org.chromium.webapk.lib.common.WebApkConstants;
-import org.chromium.webapk.lib.common.WebApkMetaDataKeys;
 import org.chromium.webapk.lib.common.splash.SplashLayout;
 import org.chromium.webapk.test.WebApkTestHelper;
 
@@ -84,7 +86,7 @@ public class WebApkUpdateManagerUnitTest {
     private static final String PRIMARY_ICON_URL = "/icon.png";
     private static final String PRIMARY_ICON_MURMUR2_HASH = "3";
     private static final @WebDisplayMode int DISPLAY_MODE = WebDisplayMode.UNDEFINED;
-    private static final int ORIENTATION = ScreenOrientationValues.DEFAULT;
+    private static final int ORIENTATION = ScreenOrientationLockType.DEFAULT;
     private static final long THEME_COLOR = 1L;
     private static final long BACKGROUND_COLOR = 2L;
     private static final int DEFAULT_BACKGROUND_COLOR = 3;
@@ -259,7 +261,8 @@ public class WebApkUpdateManagerUnitTest {
     }
 
     private void registerStorageForWebApkPackage(String webApkPackageName) {
-        WebappRegistry.getInstance().register(WebappRegistry.webApkIdForPackage(webApkPackageName),
+        WebappRegistry.getInstance().register(
+                WebappIntentUtils.getIdForWebApkPackage(webApkPackageName),
                 new WebappRegistry.FetchWebappDataStorageCallback() {
                     @Override
                     public void onWebappDataStorageRetrieved(WebappDataStorage storage) {}
@@ -268,7 +271,7 @@ public class WebApkUpdateManagerUnitTest {
 
     private static WebappDataStorage getStorage(String packageName) {
         return WebappRegistry.getInstance().getWebappDataStorage(
-                WebappRegistry.webApkIdForPackage(packageName));
+                WebappIntentUtils.getIdForWebApkPackage(packageName));
     }
 
     /**
@@ -368,29 +371,31 @@ public class WebApkUpdateManagerUnitTest {
         return manifestData;
     }
 
-    private static WebappInfo infoFromManifestData(ManifestData manifestData) {
+    private static BrowserServicesIntentDataProvider intentDataProviderFromManifestData(
+            ManifestData manifestData) {
         if (manifestData == null) return null;
 
         final String kPackageName = "org.random.webapk";
-        return WebApkInfo.create("", manifestData.scopeUrl,
-                new WebappIcon(manifestData.primaryIcon), null, manifestData.name,
-                manifestData.shortName, manifestData.displayMode, manifestData.orientation, -1,
-                manifestData.themeColor, manifestData.backgroundColor,
-                manifestData.defaultBackgroundColor, false /* isPrimaryIconMaskable */,
-                false /* isSplashIconMaskable*/, kPackageName, -1, WEB_MANIFEST_URL,
-                manifestData.startUrl, WebApkDistributor.BROWSER,
-                manifestData.iconUrlToMurmur2HashMap,
-                new WebApkInfo.ShareTarget(manifestData.shareTargetAction,
+        WebApkShareTarget shareTarget = TextUtils.isEmpty(manifestData.shareTargetAction)
+                ? null
+                : new WebApkShareTarget(manifestData.shareTargetAction,
                         manifestData.shareTargetParamTitle, null,
                         manifestData.shareTargetMethod != null
                                 && manifestData.shareTargetMethod.equals(SHARE_TARGET_METHOD_POST),
                         manifestData.shareTargetEncType != null
                                 && manifestData.shareTargetEncType.equals(
                                         SHARE_TARGET_ENC_TYPE_MULTIPART),
-                        manifestData.shareTargetFileNames, manifestData.shareTargetFileAccepts),
-                false /* forceNavigation */, false /* isSplashProvidedByWebApk */,
-                null /* shareData */, manifestData.shortcuts /* shortcutItems */,
-                1 /* webApkVersionCode */);
+                        manifestData.shareTargetFileNames, manifestData.shareTargetFileAccepts);
+        return WebApkIntentDataProviderFactory.create(new Intent(), "", manifestData.scopeUrl,
+                new WebappIcon(manifestData.primaryIcon), null, manifestData.name,
+                manifestData.shortName, manifestData.displayMode, manifestData.orientation, -1,
+                manifestData.themeColor, manifestData.backgroundColor,
+                manifestData.defaultBackgroundColor, false /* isPrimaryIconMaskable */,
+                false /* isSplashIconMaskable*/, kPackageName, -1, WEB_MANIFEST_URL,
+                manifestData.startUrl, WebApkDistributor.BROWSER,
+                manifestData.iconUrlToMurmur2HashMap, shareTarget, false /* forceNavigation */,
+                false /* isSplashProvidedByWebApk */, null /* shareData */,
+                manifestData.shortcuts /* shortcutItems */, 1 /* webApkVersionCode */);
     }
 
     /**
@@ -409,11 +414,12 @@ public class WebApkUpdateManagerUnitTest {
         Intent intent = new Intent();
         intent.putExtra(ShortcutHelper.EXTRA_URL, "");
         intent.putExtra(WebApkConstants.EXTRA_WEBAPK_PACKAGE_NAME, packageName);
-        WebappInfo info = WebApkInfo.create(intent);
-        info.getProvider().getWebApkExtras().shortcutItems.clear();
-        info.getProvider().getWebApkExtras().shortcutItems.addAll(shortcuts);
+        BrowserServicesIntentDataProvider intentDataProvider =
+                WebApkIntentDataProviderFactory.create(intent);
+        intentDataProvider.getWebApkExtras().shortcutItems.clear();
+        intentDataProvider.getWebApkExtras().shortcutItems.addAll(shortcuts);
 
-        updateManager.updateIfNeeded(getStorage(packageName), info);
+        updateManager.updateIfNeeded(getStorage(packageName), intentDataProvider);
     }
 
     private static void updateIfNeeded(String packageName, WebApkUpdateManager updateManager) {
@@ -434,8 +440,8 @@ public class WebApkUpdateManagerUnitTest {
             WebApkUpdateManager updateManager, ManifestData fetchedManifestData) {
         String primaryIconUrl = randomIconUrl(fetchedManifestData);
         String splashIconUrl = randomIconUrl(fetchedManifestData);
-        updateManager.onGotManifestData(
-                infoFromManifestData(fetchedManifestData), primaryIconUrl, splashIconUrl);
+        updateManager.onGotManifestData(intentDataProviderFromManifestData(fetchedManifestData),
+                primaryIconUrl, splashIconUrl);
     }
 
     /**
@@ -490,7 +496,7 @@ public class WebApkUpdateManagerUnitTest {
         TestWebApkUpdateManager updateManager = new TestWebApkUpdateManager();
         updateIfNeeded(WEBAPK_PACKAGE_NAME, updateManager, androidManifestData.shortcuts);
         assertTrue(updateManager.updateCheckStarted());
-        updateManager.onGotManifestData(infoFromManifestData(fetchedManifestData),
+        updateManager.onGotManifestData(intentDataProviderFromManifestData(fetchedManifestData),
                 fetchedManifestData.primaryIconUrl, null);
         return updateManager.updateRequested();
     }
@@ -972,10 +978,11 @@ public class WebApkUpdateManagerUnitTest {
      * AND
      * - "best" icon URL for the primary icon did not change.
      * AND
-     * - "best" icon URL for the badge icon did not change.
+     * - "best" icon URL for the monochrome icon did not change.
      */
     @Test
-    public void testIconUrlsChangeShouldNotUpgradeIfPrimaryIconUrlAndBadgeIconUrlDoNotChange() {
+    public void
+    testIconUrlsChangeShouldNotUpgradeIfPrimaryIconUrlAndMonochromeIconUrlDoNotChange() {
         ManifestData fetchedData = defaultManifestData();
         fetchedData.iconUrlToMurmur2HashMap.put("/icon2.png", null);
         assertFalse(checkUpdateNeededForFetchedManifest(defaultManifestData(), fetchedData));
@@ -993,8 +1000,8 @@ public class WebApkUpdateManagerUnitTest {
     public void testWebManifestSameButBestIconUrlChangedShouldNotUpgrade() {
         String iconUrl1 = "/icon1.png";
         String iconUrl2 = "/icon2.png";
-        String badgeUrl1 = "/badge1.png";
-        String badgeUrl2 = "/badge2.pgn";
+        String monochromeUrl1 = "/monochrome1.png";
+        String monochromeUrl2 = "/monochrome2.png";
         String hash1 = "11";
         String hash2 = "22";
         String hash3 = "33";
@@ -1005,16 +1012,16 @@ public class WebApkUpdateManagerUnitTest {
         androidManifestData.iconUrlToMurmur2HashMap.clear();
         androidManifestData.iconUrlToMurmur2HashMap.put(iconUrl1, hash1);
         androidManifestData.iconUrlToMurmur2HashMap.put(iconUrl2, hash2);
-        androidManifestData.iconUrlToMurmur2HashMap.put(badgeUrl1, hash3);
-        androidManifestData.iconUrlToMurmur2HashMap.put(badgeUrl2, hash4);
+        androidManifestData.iconUrlToMurmur2HashMap.put(monochromeUrl1, hash3);
+        androidManifestData.iconUrlToMurmur2HashMap.put(monochromeUrl2, hash4);
 
         ManifestData fetchedManifestData = defaultManifestData();
         fetchedManifestData.primaryIconUrl = iconUrl2;
         fetchedManifestData.iconUrlToMurmur2HashMap.clear();
         fetchedManifestData.iconUrlToMurmur2HashMap.put(iconUrl1, null);
         fetchedManifestData.iconUrlToMurmur2HashMap.put(iconUrl2, hash2);
-        fetchedManifestData.iconUrlToMurmur2HashMap.put(badgeUrl1, null);
-        fetchedManifestData.iconUrlToMurmur2HashMap.put(badgeUrl2, hash4);
+        fetchedManifestData.iconUrlToMurmur2HashMap.put(monochromeUrl1, null);
+        fetchedManifestData.iconUrlToMurmur2HashMap.put(monochromeUrl2, hash4);
 
         assertFalse(checkUpdateNeededForFetchedManifest(androidManifestData, fetchedManifestData));
     }
@@ -1049,9 +1056,9 @@ public class WebApkUpdateManagerUnitTest {
     @Test
     public void testManifestOrientationChangedShouldUpgrade() {
         ManifestData oldData = defaultManifestData();
-        oldData.orientation = ScreenOrientationValues.LANDSCAPE;
+        oldData.orientation = ScreenOrientationLockType.LANDSCAPE;
         ManifestData fetchedData = defaultManifestData();
-        fetchedData.orientation = ScreenOrientationValues.PORTRAIT;
+        fetchedData.orientation = ScreenOrientationLockType.PORTRAIT;
         assertTrue(checkUpdateNeededForFetchedManifest(oldData, fetchedData));
     }
 
@@ -1234,7 +1241,7 @@ public class WebApkUpdateManagerUnitTest {
     public void testUpdateIfShortcutIsAdded() {
         ManifestData fetchedData = defaultManifestData();
         fetchedData.shortcuts.add(new WebApkExtras.ShortcutItem(
-                "name", "shortName", "launchUrl", "iconUrl", "iconHash"));
+                "name", "shortName", "launchUrl", "iconUrl", "iconHash", new WebappIcon()));
         assertTrue(checkUpdateNeededForFetchedManifest(defaultManifestData(), fetchedData));
     }
 
@@ -1244,11 +1251,11 @@ public class WebApkUpdateManagerUnitTest {
     @Test
     public void testUpdateIfShortcutHasChangedName() {
         ManifestData androidData = defaultManifestData();
-        androidData.shortcuts.add(new WebApkExtras.ShortcutItem(
-                "name1", "shortName", "launchUrl", "iconUrl", "iconHash"));
+        androidData.shortcuts.add(new WebApkExtras.ShortcutItem("name1", "shortName", "launchUrl",
+                "iconUrl", "iconHash", new WebappIcon("appName", 42)));
         ManifestData fetchedData = defaultManifestData();
         fetchedData.shortcuts.add(new WebApkExtras.ShortcutItem(
-                "name2", "shortName", "launchUrl", "iconUrl", "iconHash"));
+                "name2", "shortName", "launchUrl", "iconUrl", "iconHash", new WebappIcon()));
         assertTrue(checkUpdateNeededForFetchedManifest(androidData, fetchedData));
     }
 
@@ -1258,11 +1265,11 @@ public class WebApkUpdateManagerUnitTest {
     @Test
     public void testUpdateIfShortcutHasChangedShortName() {
         ManifestData androidData = defaultManifestData();
-        androidData.shortcuts.add(new WebApkExtras.ShortcutItem(
-                "name", "shortName1", "launchUrl", "iconUrl", "iconHash"));
+        androidData.shortcuts.add(new WebApkExtras.ShortcutItem("name", "shortName1", "launchUrl",
+                "iconUrl", "iconHash", new WebappIcon("appName", 42)));
         ManifestData fetchedData = defaultManifestData();
         fetchedData.shortcuts.add(new WebApkExtras.ShortcutItem(
-                "name", "shortName2", "launchUrl", "iconUrl", "iconHash"));
+                "name", "shortName2", "launchUrl", "iconUrl", "iconHash", new WebappIcon()));
         assertTrue(checkUpdateNeededForFetchedManifest(androidData, fetchedData));
     }
 
@@ -1272,11 +1279,11 @@ public class WebApkUpdateManagerUnitTest {
     @Test
     public void testUpdateIfShortcutHasChangedLaunchUrl() {
         ManifestData androidData = defaultManifestData();
-        androidData.shortcuts.add(new WebApkExtras.ShortcutItem(
-                "name", "shortName", "launchUrl1", "iconUrl", "iconHash"));
+        androidData.shortcuts.add(new WebApkExtras.ShortcutItem("name", "shortName", "launchUrl1",
+                "iconUrl", "iconHash", new WebappIcon("appName", 42)));
         ManifestData fetchedData = defaultManifestData();
         fetchedData.shortcuts.add(new WebApkExtras.ShortcutItem(
-                "name", "shortName", "launchUrl2", "iconUrl", "iconHash"));
+                "name", "shortName", "launchUrl2", "iconUrl", "iconHash", new WebappIcon()));
         assertTrue(checkUpdateNeededForFetchedManifest(androidData, fetchedData));
     }
 
@@ -1286,11 +1293,11 @@ public class WebApkUpdateManagerUnitTest {
     @Test
     public void testUpdateIfShortcutHasChangedIconHash() {
         ManifestData androidData = defaultManifestData();
-        androidData.shortcuts.add(new WebApkExtras.ShortcutItem(
-                "name", "shortName", "launchUrl", "iconUrl", "iconHash1"));
+        androidData.shortcuts.add(new WebApkExtras.ShortcutItem("name", "shortName", "launchUrl",
+                "iconUrl", "iconHash1", new WebappIcon("appName", 42)));
         ManifestData fetchedData = defaultManifestData();
         fetchedData.shortcuts.add(new WebApkExtras.ShortcutItem(
-                "name", "shortName", "launchUrl", "iconUrl", "iconHash2"));
+                "name", "shortName", "launchUrl", "iconUrl", "iconHash2", new WebappIcon()));
         assertTrue(checkUpdateNeededForFetchedManifest(androidData, fetchedData));
     }
 
@@ -1300,11 +1307,11 @@ public class WebApkUpdateManagerUnitTest {
     @Test
     public void testNoUpdateIfShortcutHasOnlyIconUrlChanges() {
         ManifestData androidData = defaultManifestData();
-        androidData.shortcuts.add(new WebApkExtras.ShortcutItem(
-                "name", "shortName", "launchUrl", "iconUrl1", "iconHash"));
+        androidData.shortcuts.add(new WebApkExtras.ShortcutItem("name", "shortName", "launchUrl",
+                "iconUrl1", "iconHash", new WebappIcon("appName", 42)));
         ManifestData fetchedData = defaultManifestData();
         fetchedData.shortcuts.add(new WebApkExtras.ShortcutItem(
-                "name", "shortName", "launchUrl", "iconUrl2", "iconHash"));
+                "name", "shortName", "launchUrl", "iconUrl2", "iconHash", new WebappIcon()));
         assertFalse(checkUpdateNeededForFetchedManifest(androidData, fetchedData));
     }
 }

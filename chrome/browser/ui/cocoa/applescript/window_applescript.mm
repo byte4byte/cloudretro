@@ -6,9 +6,9 @@
 
 #include <memory>
 
-#include "base/logging.h"
 #import "base/mac/foundation_util.h"
 #import "base/mac/scoped_nsobject.h"
+#include "base/notreached.h"
 #include "base/time/time.h"
 #import "chrome/browser/app_controller_mac.h"
 #import "chrome/browser/chrome_browser_application_mac.h"
@@ -55,7 +55,7 @@
 
   Profile* profile;
   if ([mode isEqualToString:AppleScript::kIncognitoWindowMode]) {
-    profile = lastProfile->GetOffTheRecordProfile();
+    profile = lastProfile->GetPrimaryOTRProfile();
   }
   else if ([mode isEqualToString:AppleScript::kNormalWindowMode] || !mode) {
     profile = lastProfile;
@@ -77,7 +77,15 @@
   }
 
   if ((self = [super init])) {
-    _browser = new Browser(Browser::CreateParams(aProfile, false));
+    // TODO(https://crbug.com/1144992): If crash fixed, investigate why browser
+    // cannot be created here.
+    if (Browser::GetBrowserCreationStatusForProfile(aProfile) !=
+        Browser::BrowserCreationStatus::kOk) {
+      NOTREACHED();
+      [self release];
+      return nil;
+    }
+    _browser = Browser::Create(Browser::CreateParams(aProfile, false));
     chrome::NewTab(_browser);
     _browser->window()->Show();
     base::scoped_nsobject<NSNumber> numID(

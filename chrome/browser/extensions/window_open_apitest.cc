@@ -25,6 +25,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/result_codes.h"
 #include "content/public/common/url_constants.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "extensions/browser/extension_host.h"
@@ -39,12 +40,12 @@
 #include "ui/base/base_window.h"
 
 #if defined(OS_CHROMEOS)
-#include "ash/public/cpp/window_pin_type.h"
-#include "ash/public/cpp/window_properties.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/extensions/window_controller.h"
 #include "chrome/browser/extensions/window_controller_list.h"
 #include "chrome/browser/ui/browser_command_controller.h"
+#include "chromeos/ui/base/window_pin_type.h"
+#include "chromeos/ui/base/window_properties.h"
 #include "ui/aura/window.h"
 #endif
 
@@ -65,27 +66,16 @@ class WindowOpenApiTest : public ExtensionApiTest {
   }
 };
 
-// The test uses the chrome.browserAction.openPopup API, which requires that the
-// window can automatically be activated.
-// See comments at BrowserActionInteractiveTest::ShouldRunPopupTest
-// Fails flakily on all platforms. https://crbug.com/477691
-IN_PROC_BROWSER_TEST_F(WindowOpenApiTest, DISABLED_WindowOpen) {
-  extensions::ResultCatcher catcher;
-  ASSERT_TRUE(LoadExtensionIncognito(test_data_dir_
-      .AppendASCII("window_open").AppendASCII("spanning")));
-  EXPECT_TRUE(catcher.GetNextResult()) << catcher.message();
-}
-
 bool WaitForTabsPopupsApps(Browser* browser,
                            int num_tabs,
                            int num_popups,
-                           int num_apps) {
-  SCOPED_TRACE(
-      base::StringPrintf("WaitForTabsPopupsApps tabs:%d, popups:%d, apps:%d",
-                         num_tabs, num_popups, num_apps));
+                           int num_app_popups) {
+  SCOPED_TRACE(base::StringPrintf(
+      "WaitForTabsPopupsApps tabs:%d, popups:%d, app_popups:%d", num_tabs,
+      num_popups, num_app_popups));
   // We start with one tab and one browser already open.
   ++num_tabs;
-  size_t num_browsers = static_cast<size_t>(num_popups + num_apps) + 1;
+  size_t num_browsers = static_cast<size_t>(num_popups + num_app_popups) + 1;
 
   const base::TimeDelta kWaitTime = base::TimeDelta::FromSeconds(10);
   base::TimeTicks end_time = base::TimeTicks::Now() + kWaitTime;
@@ -101,23 +91,24 @@ bool WaitForTabsPopupsApps(Browser* browser,
   EXPECT_EQ(num_tabs, browser->tab_strip_model()->count());
 
   int num_popups_seen = 0;
-  int num_apps_seen = 0;
+  int num_app_popups_seen = 0;
   for (auto* b : *BrowserList::GetInstance()) {
     if (b == browser)
       continue;
 
-    EXPECT_TRUE(b->is_type_popup() || b->is_type_app());
+    EXPECT_TRUE(b->is_type_popup() || b->is_type_app_popup());
     if (b->is_type_popup())
       ++num_popups_seen;
-    else if (b->is_type_app())
-      ++num_apps_seen;
+    else if (b->is_type_app_popup())
+      ++num_app_popups_seen;
   }
   EXPECT_EQ(num_popups, num_popups_seen);
-  EXPECT_EQ(num_apps, num_apps_seen);
+  EXPECT_EQ(num_app_popups, num_app_popups_seen);
 
   return ((num_browsers == chrome::GetBrowserCount(browser->profile())) &&
           (num_tabs == browser->tab_strip_model()->count()) &&
-          (num_popups == num_popups_seen) && (num_apps == num_apps_seen));
+          (num_popups == num_popups_seen) &&
+          (num_app_popups == num_app_popups_seen));
 }
 
 IN_PROC_BROWSER_TEST_F(WindowOpenApiTest, BrowserIsApp) {
@@ -129,9 +120,9 @@ IN_PROC_BROWSER_TEST_F(WindowOpenApiTest, BrowserIsApp) {
 
   for (auto* b : *BrowserList::GetInstance()) {
     if (b == browser())
-      ASSERT_FALSE(b->is_type_app());
+      ASSERT_FALSE(b->is_type_app_popup());
     else
-      ASSERT_TRUE(b->is_type_app());
+      ASSERT_TRUE(b->is_type_app_popup());
   }
 }
 
@@ -173,13 +164,7 @@ IN_PROC_BROWSER_TEST_F(WindowOpenApiTest, WindowOpenPopupSmall) {
   EXPECT_TRUE(WaitForTabsPopupsApps(browser(), 0, 0, 1));
 }
 
-// Disabled on Windows. Often times out or fails: crbug.com/177530
-#if defined(OS_WIN)
-#define MAYBE_PopupBlockingExtension DISABLED_PopupBlockingExtension
-#else
-#define MAYBE_PopupBlockingExtension PopupBlockingExtension
-#endif
-IN_PROC_BROWSER_TEST_F(WindowOpenApiTest, MAYBE_PopupBlockingExtension) {
+IN_PROC_BROWSER_TEST_F(WindowOpenApiTest, PopupBlockingExtension) {
   ASSERT_TRUE(StartEmbeddedTestServer());
 
   ASSERT_TRUE(LoadExtension(
@@ -226,19 +211,13 @@ IN_PROC_BROWSER_TEST_F(WindowOpenApiTest, WindowArgumentsOverflow) {
   ASSERT_TRUE(RunExtensionTest("window_open/argument_overflow")) << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(WindowOpenApiTest, DISABLED_WindowOpener) {
+IN_PROC_BROWSER_TEST_F(WindowOpenApiTest, WindowOpener) {
   ASSERT_TRUE(RunExtensionTest("window_open/opener")) << message_;
 }
 
-#if defined(OS_MACOSX)
-// Extension popup windows are incorrectly sized on OSX, crbug.com/225601
-#define MAYBE_WindowOpenSized DISABLED_WindowOpenSized
-#else
-#define MAYBE_WindowOpenSized WindowOpenSized
-#endif
 // Ensure that the width and height properties of a window opened with
 // chrome.windows.create match the creation parameters. See crbug.com/173831.
-IN_PROC_BROWSER_TEST_F(WindowOpenApiTest, MAYBE_WindowOpenSized) {
+IN_PROC_BROWSER_TEST_F(WindowOpenApiTest, WindowOpenSized) {
   ASSERT_TRUE(RunExtensionTest("window_open/window_size")) << message_;
   EXPECT_TRUE(WaitForTabsPopupsApps(browser(), 0, 0, 1));
 }
@@ -398,14 +377,14 @@ aura::Window* GetCurrentWindow() {
   return controller->window()->GetNativeWindow();
 }
 
-ash::WindowPinType GetCurrentWindowPinType() {
-  ash::WindowPinType type =
-      GetCurrentWindow()->GetProperty(ash::kWindowPinTypeKey);
+chromeos::WindowPinType GetCurrentWindowPinType() {
+  chromeos::WindowPinType type =
+      GetCurrentWindow()->GetProperty(chromeos::kWindowPinTypeKey);
   return type;
 }
 
-void SetCurrentWindowPinType(ash::WindowPinType type) {
-  GetCurrentWindow()->SetProperty(ash::kWindowPinTypeKey, type);
+void SetCurrentWindowPinType(chromeos::WindowPinType type) {
+  GetCurrentWindow()->SetProperty(chromeos::kWindowPinTypeKey, type);
 }
 
 }  // namespace
@@ -417,7 +396,7 @@ IN_PROC_BROWSER_TEST_F(WindowOpenApiTest, OpenLockedFullscreenWindow) {
 
   // Make sure the newly created window is "trusted pinned" (which means that
   // it's in locked fullscreen mode).
-  EXPECT_EQ(ash::WindowPinType::kTrustedPinned, GetCurrentWindowPinType());
+  EXPECT_EQ(chromeos::WindowPinType::kTrustedPinned, GetCurrentWindowPinType());
 }
 
 IN_PROC_BROWSER_TEST_F(WindowOpenApiTest, UpdateWindowToLockedFullscreen) {
@@ -426,13 +405,13 @@ IN_PROC_BROWSER_TEST_F(WindowOpenApiTest, UpdateWindowToLockedFullscreen) {
       << message_;
 
   // Make sure the current window is put into the "trusted pinned" state.
-  EXPECT_EQ(ash::WindowPinType::kTrustedPinned, GetCurrentWindowPinType());
+  EXPECT_EQ(chromeos::WindowPinType::kTrustedPinned, GetCurrentWindowPinType());
 }
 
 IN_PROC_BROWSER_TEST_F(WindowOpenApiTest, RemoveLockedFullscreenFromWindow) {
   // After locking the window, do a LockedFullscreenStateChanged so the
   // command_controller state catches up as well.
-  SetCurrentWindowPinType(ash::WindowPinType::kTrustedPinned);
+  SetCurrentWindowPinType(chromeos::WindowPinType::kTrustedPinned);
   browser()->command_controller()->LockedFullscreenStateChanged();
 
   ASSERT_TRUE(RunExtensionTestWithArg("locked_fullscreen/with_permission",
@@ -440,7 +419,7 @@ IN_PROC_BROWSER_TEST_F(WindowOpenApiTest, RemoveLockedFullscreenFromWindow) {
       << message_;
 
   // Make sure the current window is removed from locked-fullscreen state.
-  EXPECT_EQ(ash::WindowPinType::kNone, GetCurrentWindowPinType());
+  EXPECT_EQ(chromeos::WindowPinType::kNone, GetCurrentWindowPinType());
 }
 
 // Make sure that commands disabling code works in locked fullscreen mode.
@@ -460,7 +439,7 @@ IN_PROC_BROWSER_TEST_F(WindowOpenApiTest, VerifyCommandsInLockedFullscreen) {
   EXPECT_FALSE(
       browser()->command_controller()->IsCommandEnabled(IDC_ZOOM_PLUS));
 
-  // Verify some whitelisted commands.
+  // Verify some allowlisted commands.
   EXPECT_TRUE(browser()->command_controller()->IsCommandEnabled(IDC_COPY));
   EXPECT_TRUE(browser()->command_controller()->IsCommandEnabled(IDC_PASTE));
 }
@@ -486,12 +465,12 @@ IN_PROC_BROWSER_TEST_F(WindowOpenApiTest,
 
   // chrome.windows.update call fails since this extension doesn't have the
   // correct permission and hence the current window has NONE as WindowPinType.
-  EXPECT_EQ(ash::WindowPinType::kNone, GetCurrentWindowPinType());
+  EXPECT_EQ(chromeos::WindowPinType::kNone, GetCurrentWindowPinType());
 }
 
 IN_PROC_BROWSER_TEST_F(WindowOpenApiTest,
                        RemoveLockedFullscreenFromWindowWithoutPermission) {
-  SetCurrentWindowPinType(ash::WindowPinType::kTrustedPinned);
+  SetCurrentWindowPinType(chromeos::WindowPinType::kTrustedPinned);
   browser()->command_controller()->LockedFullscreenStateChanged();
 
   ASSERT_TRUE(RunExtensionTestWithArg("locked_fullscreen/without_permission",
@@ -499,7 +478,7 @@ IN_PROC_BROWSER_TEST_F(WindowOpenApiTest,
       << message_;
 
   // The current window is still locked-fullscreen.
-  EXPECT_EQ(ash::WindowPinType::kTrustedPinned, GetCurrentWindowPinType());
+  EXPECT_EQ(chromeos::WindowPinType::kTrustedPinned, GetCurrentWindowPinType());
 }
 #endif  // defined(OS_CHROMEOS)
 

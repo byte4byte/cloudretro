@@ -8,6 +8,7 @@
 #include "third_party/blink/renderer/core/layout/layout_object.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
 #include "third_party/blink/renderer/platform/fonts/shaping/shape_result_buffer.h"
+#include "third_party/blink/renderer/platform/wtf/size_assertions.h"
 
 namespace blink {
 namespace {
@@ -18,8 +19,7 @@ struct SameSizeAsNGInlineItem {
   unsigned bit_fields : 32;
 };
 
-static_assert(sizeof(NGInlineItem) == sizeof(SameSizeAsNGInlineItem),
-              "NGInlineItem should stay small");
+ASSERT_SIZE(NGInlineItem, SameSizeAsNGInlineItem);
 
 const char* kNGInlineItemTypeStrings[] = {
     "Text",     "Control",  "AtomicInline",        "OpenTag",
@@ -69,8 +69,7 @@ bool IsInlineBoxEndEmpty(const ComputedStyle& style,
 NGInlineItem::NGInlineItem(NGInlineItemType type,
                            unsigned start,
                            unsigned end,
-                           LayoutObject* layout_object,
-                           bool is_first_for_node)
+                           LayoutObject* layout_object)
     : start_offset_(start),
       end_offset_(end),
       layout_object_(layout_object),
@@ -83,8 +82,7 @@ NGInlineItem::NGInlineItem(NGInlineItemType type,
       is_empty_item_(false),
       is_block_level_(false),
       is_end_collapsible_newline_(false),
-      is_generated_for_line_break_(false),
-      is_first_for_node_(is_first_for_node) {
+      is_generated_for_line_break_(false) {
   DCHECK_GE(end, start);
   ComputeBoxProperties();
 }
@@ -106,8 +104,7 @@ NGInlineItem::NGInlineItem(const NGInlineItem& other,
       is_empty_item_(other.is_empty_item_),
       is_block_level_(other.is_block_level_),
       is_end_collapsible_newline_(other.is_end_collapsible_newline_),
-      is_generated_for_line_break_(other.is_generated_for_line_break_),
-      is_first_for_node_(other.is_first_for_node_) {
+      is_generated_for_line_break_(other.is_generated_for_line_break_) {
   DCHECK_GE(end, start);
 }
 
@@ -171,19 +168,37 @@ unsigned NGInlineItem::SetBidiLevel(Vector<NGInlineItem>& items,
                                     UBiDiLevel level) {
   for (; items[index].end_offset_ < end_offset; index++)
     items[index].SetBidiLevel(level);
-  items[index].SetBidiLevel(level);
+  NGInlineItem* item = &items[index];
+  item->SetBidiLevel(level);
 
-  if (items[index].end_offset_ == end_offset) {
+  if (item->end_offset_ == end_offset) {
     // Let close items have the same bidi-level as the previous item.
     while (index + 1 < items.size() &&
            items[index + 1].Type() == NGInlineItem::kCloseTag) {
       items[++index].SetBidiLevel(level);
     }
   } else {
+    // If a reused item needs to split, |SetNeedsLayout| to ensure the line is
+    // not reused.
+    LayoutObject* layout_object = item->GetLayoutObject();
+    if (layout_object->EverHadLayout() && !layout_object->NeedsLayout())
+      layout_object->SetNeedsLayout(layout_invalidation_reason::kStyleChange);
+
     Split(items, index, end_offset);
   }
 
   return index + 1;
+}
+
+void NGInlineItemsData::GetOpenTagItems(wtf_size_t size,
+                                        OpenTagItems* open_items) const {
+  DCHECK_LE(size, items.size());
+  for (const NGInlineItem& item : base::make_span(items.data(), size)) {
+    if (item.Type() == NGInlineItem::kOpenTag)
+      open_items->push_back(&item);
+    else if (item.Type() == NGInlineItem::kCloseTag)
+      open_items->pop_back();
+  }
 }
 
 String NGInlineItem::ToString() const {
@@ -207,7 +222,6 @@ void NGInlineItem::Split(Vector<NGInlineItem>& items,
   items.insert(index + 1, items[index]);
   items[index].end_offset_ = offset;
   items[index + 1].start_offset_ = offset;
-  items[index + 1].is_first_for_node_ = false;
 }
 
 }  // namespace blink

@@ -25,7 +25,7 @@ class ModuleScriptLoader;
 class CORE_EXPORT ModuleScriptFetcher : public ResourceClient {
  public:
   // ModuleScriptFetcher should only be called from ModuleScriptLoader.
-  explicit ModuleScriptFetcher(util::PassKey<ModuleScriptLoader>);
+  explicit ModuleScriptFetcher(base::PassKey<ModuleScriptLoader>);
 
   class CORE_EXPORT Client : public GarbageCollectedMixin {
    public:
@@ -49,7 +49,7 @@ class CORE_EXPORT ModuleScriptFetcher : public ResourceClient {
                      ModuleGraphLevel,
                      Client*) = 0;
 
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
 
  protected:
   static bool WasModuleLoadSuccessful(

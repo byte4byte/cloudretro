@@ -20,10 +20,8 @@ js_type_check("closure_compile_module") {
     ":button_strip",
     ":color_settings",
     ":copies_settings",
-    ":destination_dialog",
     ":destination_list",
     ":destination_list_item",
-    ":destination_select",
     ":destination_settings",
     ":dpi_settings",
     ":duplex_settings",
@@ -53,7 +51,17 @@ js_type_check("closure_compile_module") {
   ]
 
   if (is_chromeos) {
-    deps += [ ":pin_settings" ]
+    deps += [
+      ":destination_dialog_cros",
+      ":destination_dropdown_cros",
+      ":destination_select_cros",
+      ":pin_settings",
+    ]
+  } else {
+    deps += [
+      ":destination_dialog",
+      ":destination_select",
+    ]
   }
 }
 
@@ -113,6 +121,7 @@ js_library("button_strip") {
     "../data:destination",
     "../data:state",
     "//third_party/polymer/v3_0/components-chromium/polymer:polymer_bundled",
+    "//ui/webui/resources/js:plural_string_proxy",
   ]
 
   if (is_chromeos) {
@@ -127,13 +136,12 @@ js_library("header") {
     "../data:state",
     "//third_party/polymer/v3_0/components-chromium/polymer:polymer_bundled",
     "//ui/webui/resources/js:load_time_data.m",
+    "//ui/webui/resources/js:plural_string_proxy",
   ]
 }
 
 js_library("destination_settings") {
   deps = [
-    ":destination_dialog",
-    ":destination_select",
     ":settings_behavior",
     "..:cloud_print_interface_impl",
     "../data:destination",
@@ -146,27 +154,62 @@ js_library("destination_settings") {
     "//ui/webui/resources/js:i18n_behavior.m",
     "//ui/webui/resources/js:web_ui_listener_behavior.m",
   ]
-}
 
-js_library("destination_select") {
-  deps = [
-    ":select_behavior",
-    "..:print_preview_utils",
-    "../data:destination",
-    "//third_party/polymer/v3_0/components-chromium/iron-iconset-svg:iron-iconset-svg",
-    "//third_party/polymer/v3_0/components-chromium/iron-meta:iron-meta",
-    "//third_party/polymer/v3_0/components-chromium/polymer:polymer_bundled",
-    "//ui/webui/resources/js:i18n_behavior.m",
-  ]
+  if (is_chromeos) {
+    deps += [
+      ":destination_dialog_cros",
+      ":destination_select_cros",
+    ]
+  } else {
+    deps += [
+      ":destination_dialog",
+      ":destination_select",
+    ]
+  }
 }
 
 if (is_chromeos) {
+  js_library("destination_select_cros") {
+    deps = [
+      ":destination_dropdown_cros",
+      ":select_behavior",
+      "..:print_preview_utils",
+      "../data:destination",
+      "../data:printer_status_cros",
+      "//third_party/polymer/v3_0/components-chromium/iron-iconset-svg:iron-iconset-svg",
+      "//third_party/polymer/v3_0/components-chromium/iron-meta:iron-meta",
+      "//third_party/polymer/v3_0/components-chromium/polymer:polymer_bundled",
+      "//ui/webui/resources/js:i18n_behavior.m",
+    ]
+  }
+
   js_library("pin_settings") {
     deps = [
       ":input_behavior",
       ":settings_behavior",
       "../data:state",
       "//third_party/polymer/v3_0/components-chromium/polymer:polymer_bundled",
+    ]
+  }
+
+  js_library("destination_dropdown_cros") {
+    deps = [
+      "..:print_preview_utils",
+      "//third_party/polymer/v3_0/components-chromium/iron-dropdown:iron-dropdown",
+      "//third_party/polymer/v3_0/components-chromium/polymer:polymer_bundled",
+      "//ui/webui/resources/cr_elements/cr_input:cr_input.m",
+    ]
+  }
+} else {
+  js_library("destination_select") {
+    deps = [
+      ":select_behavior",
+      "..:print_preview_utils",
+      "../data:destination",
+      "//third_party/polymer/v3_0/components-chromium/iron-iconset-svg:iron-iconset-svg",
+      "//third_party/polymer/v3_0/components-chromium/iron-meta:iron-meta",
+      "//third_party/polymer/v3_0/components-chromium/polymer:polymer_bundled",
+      "//ui/webui/resources/js:i18n_behavior.m",
     ]
   }
 }
@@ -266,9 +309,11 @@ js_library("duplex_settings") {
     ":settings_behavior",
     "..:print_preview_utils",
     "../data:model",
+    "//third_party/polymer/v3_0/components-chromium/iron-collapse:iron-collapse",
     "//third_party/polymer/v3_0/components-chromium/iron-iconset-svg:iron-iconset-svg",
     "//third_party/polymer/v3_0/components-chromium/iron-meta:iron-meta",
     "//third_party/polymer/v3_0/components-chromium/polymer:polymer_bundled",
+    "//ui/webui/resources/cr_elements/cr_checkbox:cr_checkbox.m",
   ]
 }
 
@@ -391,23 +436,53 @@ js_library("plugin_proxy") {
   ]
 }
 
-js_library("destination_dialog") {
+js_library("invitation_promo") {
   deps = [
-    ":destination_list",
-    ":print_preview_search_box",
-    ":provisional_destination_resolver",
     "..:metrics",
-    "..:native_layer",
-    "../data:destination",
-    "../data:destination_store",
     "../data:invitation",
     "../data:invitation_store",
     "//third_party/polymer/v3_0/components-chromium/polymer:polymer_bundled",
-    "//ui/webui/resources/cr_elements/cr_dialog:cr_dialog.m",
     "//ui/webui/resources/js:event_tracker.m",
     "//ui/webui/resources/js:i18n_behavior.m",
-    "//ui/webui/resources/js:list_property_update_behavior.m",
   ]
+}
+
+if (is_chromeos) {
+  js_library("destination_dialog_cros") {
+    deps = [
+      ":destination_list",
+      ":invitation_promo",
+      ":print_preview_search_box",
+      ":provisional_destination_resolver",
+      "..:metrics",
+      "..:native_layer",
+      "../data:destination",
+      "../data:destination_store",
+      "../data:invitation_store",
+      "//third_party/polymer/v3_0/components-chromium/polymer:polymer_bundled",
+      "//ui/webui/resources/cr_elements/cr_dialog:cr_dialog.m",
+      "//ui/webui/resources/js:event_tracker.m",
+      "//ui/webui/resources/js:list_property_update_behavior.m",
+    ]
+  }
+} else {
+  js_library("destination_dialog") {
+    deps = [
+      ":destination_list",
+      ":invitation_promo",
+      ":print_preview_search_box",
+      ":provisional_destination_resolver",
+      "..:metrics",
+      "..:native_layer",
+      "../data:destination",
+      "../data:destination_store",
+      "../data:invitation_store",
+      "//third_party/polymer/v3_0/components-chromium/polymer:polymer_bundled",
+      "//ui/webui/resources/cr_elements/cr_dialog:cr_dialog.m",
+      "//ui/webui/resources/js:event_tracker.m",
+      "//ui/webui/resources/js:list_property_update_behavior.m",
+    ]
+  }
 }
 
 js_library("destination_list") {
@@ -490,15 +565,16 @@ html_to_js("web_components") {
     "button_strip.js",
     "color_settings.js",
     "copies_settings.js",
-    "destination_dialog.js",
+    "destination_dialog_css.js",
     "destination_list_item.js",
     "destination_list.js",
-    "destination_select.js",
+    "destination_select_css.js",
     "destination_settings.js",
     "dpi_settings.js",
     "duplex_settings.js",
     "header.js",
     "icons.js",
+    "invitation_promo.js",
     "layout_settings.js",
     "link_container.js",
     "margin_control_container.js",
@@ -510,7 +586,6 @@ html_to_js("web_components") {
     "other_options_settings.js",
     "pages_per_sheet_settings.js",
     "pages_settings.js",
-    "pin_settings.js",
     "preview_area.js",
     "print_preview_search_box.js",
     "print_preview_shared_css.js",
@@ -522,4 +597,17 @@ html_to_js("web_components") {
     "sidebar.js",
     "throbber_css.js",
   ]
+  if (is_chromeos) {
+    js_files += [
+      "destination_dialog_cros.js",
+      "destination_dropdown_cros.js",
+      "destination_select_cros.js",
+      "pin_settings.js",
+    ]
+  } else {
+    js_files += [
+      "destination_dialog.js",
+      "destination_select.js",
+    ]
+  }
 }

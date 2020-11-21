@@ -13,31 +13,43 @@ import android.os.ParcelFileDescriptor;
 import android.os.RemoteException;
 import android.os.StrictMode;
 
+import androidx.annotation.IntDef;
+
+import com.google.protobuf.InvalidProtocolBufferException;
+
 import org.chromium.android_webview.common.AwSwitches;
 import org.chromium.android_webview.common.PlatformServiceBridge;
 import org.chromium.android_webview.common.services.ICrashReceiverService;
+import org.chromium.android_webview.common.services.IMetricsBridgeService;
 import org.chromium.android_webview.common.services.ServiceNames;
 import org.chromium.android_webview.metrics.AwMetricsServiceClient;
+import org.chromium.android_webview.metrics.AwNonembeddedUmaReplayer;
 import org.chromium.android_webview.policy.AwPolicyProvider;
+import org.chromium.android_webview.proto.MetricsBridgeRecords.HistogramRecord;
 import org.chromium.android_webview.safe_browsing.AwSafeBrowsingConfigHelper;
+import org.chromium.base.BaseSwitches;
 import org.chromium.base.CommandLine;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
 import org.chromium.base.PathUtils;
+import org.chromium.base.PowerMonitor;
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.TimeUtils;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
+import org.chromium.base.annotations.NativeMethods;
 import org.chromium.base.library_loader.LibraryLoader;
 import org.chromium.base.library_loader.LibraryProcessType;
+import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.ScopedSysTraceEvent;
 import org.chromium.base.task.PostTask;
 import org.chromium.base.task.TaskRunner;
 import org.chromium.base.task.TaskTraits;
 import org.chromium.components.minidump_uploader.CrashFileManager;
+import org.chromium.components.policy.CombinedPolicyProvider;
 import org.chromium.content_public.browser.BrowserStartupController;
 import org.chromium.content_public.browser.ChildProcessCreationParams;
 import org.chromium.content_public.browser.ChildProcessLauncherHelper;
-import org.chromium.policy.CombinedPolicyProvider;
 
 import java.io.File;
 import java.io.FileNotFoundException;
@@ -45,6 +57,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Wrapper for the steps needed to initialize the java and native sides of webview chromium.
@@ -54,6 +67,9 @@ public final class AwBrowserProcess {
     private static final String TAG = "AwBrowserProcess";
 
     private static final String WEBVIEW_DIR_BASENAME = "webview";
+
+    private static final int MINUTES_PER_DAY =
+            (int) TimeUnit.SECONDS.toMinutes(TimeUtils.SECONDS_PER_DAY);
 
     // To avoid any potential synchronization issues we post all minidump-copying actions to
     // the same sequence to be run serially.
@@ -112,6 +128,7 @@ public final class AwBrowserProcess {
     public static void start() {
         try (ScopedSysTraceEvent e1 = ScopedSysTraceEvent.scoped("AwBrowserProcess.start")) {
             final Context appContext = ContextUtils.getApplicationContext();
+            AwBrowserProcessJni.get().setProcessNameCrashKey(ContextUtils.getProcessName());
             AwDataDirLock.lock(appContext);
             // We must post to the UI thread to cover the case that the user
             // has invoked Chromium startup by using the (thread-safe)
@@ -138,6 +155,8 @@ public final class AwBrowserProcess {
                     BrowserStartupController.getInstance().startBrowserProcessesSync(
                             LibraryProcessType.PROCESS_WEBVIEW, !multiProcess);
                 }
+
+                PowerMonitor.create();
             });
         }
     }
@@ -170,7 +189,7 @@ public final class AwBrowserProcess {
         try (ScopedSysTraceEvent e1 = ScopedSysTraceEvent.scoped(
                      "AwBrowserProcess.handleMinidumpsAndSetMetricsConsent")) {
             final boolean enableMinidumpUploadingForTesting = CommandLine.getInstance().hasSwitch(
-                    AwSwitches.CRASH_UPLOADS_ENABLED_FOR_TESTING_SWITCH);
+                    BaseSwitches.ENABLE_CRASH_REPORTER_FOR_TESTING);
             if (enableMinidumpUploadingForTesting) {
                 handleMinidumps(true /* enabled */);
             }
@@ -278,49 +297,169 @@ public final class AwBrowserProcess {
      */
     public static void handleMinidumps(final boolean userApproved) {
         sSequencedTaskRunner.postTask(() -> {
-            final Context appContext = ContextUtils.getApplicationContext();
-            final File crashSpoolDir = new File(appContext.getCacheDir().getPath(), "WebView");
-            if (!crashSpoolDir.isDirectory()) return;
-            final CrashFileManager crashFileManager = new CrashFileManager(crashSpoolDir);
+            try {
+                final Context appContext = ContextUtils.getApplicationContext();
+                final File cacheDir = new File(PathUtils.getCacheDirectory());
+                final CrashFileManager crashFileManager = new CrashFileManager(cacheDir);
 
-            // The lifecycle of a minidump in the app directory is very simple: foo.dmpNNNNN --
-            // where NNNNN is a Process ID (PID) -- gets created, and is either deleted or
-            // copied over to the shared crash directory for all WebView-using apps.
-            Map<String, Map<String, String>> crashesInfoMap =
-                    crashFileManager.importMinidumpsCrashKeys();
-            final File[] minidumpFiles = crashFileManager.getCurrentMinidumpsSansLogcat();
-            if (minidumpFiles.length == 0) return;
+                // The lifecycle of a minidump in the app directory is very simple: foo.dmpNNNNN --
+                // where NNNNN is a Process ID (PID) -- gets created, and is either deleted or
+                // copied over to the shared crash directory for all WebView-using apps.
+                Map<String, Map<String, String>> crashesInfoMap =
+                        crashFileManager.importMinidumpsCrashKeys();
+                final File[] minidumpFiles = crashFileManager.getCurrentMinidumpsSansLogcat();
+                if (minidumpFiles.length == 0) return;
 
-            // Delete the minidumps if the user doesn't allow crash data uploading.
-            if (!userApproved) {
-                deleteMinidumps(minidumpFiles);
-                return;
-            }
-
-            final Intent intent = new Intent();
-            intent.setClassName(getWebViewPackageName(), ServiceNames.CRASH_RECEIVER_SERVICE);
-
-            ServiceConnection connection = new ServiceConnection() {
-                @Override
-                public void onServiceConnected(ComponentName className, IBinder service) {
-                    // onServiceConnected is called on the UI thread, so punt this back to the
-                    // background thread.
-                    sSequencedTaskRunner.postTask(() -> {
-                        transmitMinidumps(minidumpFiles, crashesInfoMap,
-                                ICrashReceiverService.Stub.asInterface(service));
-                        appContext.unbindService(this);
-                    });
+                // Delete the minidumps if the user doesn't allow crash data uploading.
+                if (!userApproved) {
+                    deleteMinidumps(minidumpFiles);
+                    return;
                 }
 
-                @Override
-                public void onServiceDisconnected(ComponentName className) {}
-            };
-            if (!appContext.bindService(intent, connection, Context.BIND_AUTO_CREATE)) {
-                Log.w(TAG, "Could not bind to Minidump-copying Service " + intent);
+                final Intent intent = new Intent();
+                intent.setClassName(getWebViewPackageName(), ServiceNames.CRASH_RECEIVER_SERVICE);
+
+                ServiceConnection connection = new ServiceConnection() {
+                    private boolean mHasConnected;
+
+                    @Override
+                    public void onServiceConnected(ComponentName className, IBinder service) {
+                        if (mHasConnected) return;
+                        mHasConnected = true;
+                        // onServiceConnected is called on the UI thread, so punt this back to
+                        // the background thread.
+                        sSequencedTaskRunner.postTask(() -> {
+                            transmitMinidumps(minidumpFiles, crashesInfoMap,
+                                    ICrashReceiverService.Stub.asInterface(service));
+                            appContext.unbindService(this);
+                        });
+                    }
+
+                    @Override
+                    public void onServiceDisconnected(ComponentName className) {}
+                };
+                if (!appContext.bindService(intent, connection, Context.BIND_AUTO_CREATE)) {
+                    Log.w(TAG, "Could not bind to Minidump-copying Service " + intent);
+                }
+            } catch (RuntimeException e) {
+                // We don't want to crash the app if we hit an unexpected exception during minidump
+                // uploading as this could potentially put the app into a persistently bad state.
+                // Just log it.
+                Log.e(TAG, "Exception during minidump uploading process!", e);
             }
         });
     }
 
+    // These values are persisted to logs. Entries should not be renumbered and
+    // numeric values should never be reused.
+    @IntDef({TransmissionResult.SUCCESS, TransmissionResult.MALFORMED_PROTOBUF,
+            TransmissionResult.REMOTE_EXCEPTION})
+    private @interface TransmissionResult {
+        int SUCCESS = 0;
+        int MALFORMED_PROTOBUF = 1;
+        int REMOTE_EXCEPTION = 2;
+        int COUNT = 3;
+    }
+
+    private static void logTransmissionResult(@TransmissionResult int sample) {
+        RecordHistogram.recordEnumeratedHistogram(
+                "Android.WebView.NonEmbeddedMetrics.TransmissionResult", sample,
+                TransmissionResult.COUNT);
+    }
+
+    /**
+     * Record very long times UMA histogram up to 4 days.
+     *
+     * @param name histogram name.
+     * @param time time sample in millis.
+     */
+    private static void recordVeryLongTimesHistogram(String name, long time) {
+        long timeMins = TimeUnit.MILLISECONDS.toMinutes(time);
+        int sample;
+        // Safely convert to int to avoid positive or negative overflow.
+        if (timeMins > Integer.MAX_VALUE) {
+            sample = Integer.MAX_VALUE;
+        } else if (timeMins < Integer.MIN_VALUE) {
+            sample = Integer.MIN_VALUE;
+        } else {
+            sample = (int) timeMins;
+        }
+        RecordHistogram.recordCustomCountHistogram(name, sample, 1, 4 * MINUTES_PER_DAY, 50);
+    }
+
+    /**
+     * Connect to {@link org.chromium.android_webview.services.MetricsBridgeService} to retrieve
+     * any recorded UMA metrics from nonembedded WebView services and transmit them back using
+     * UMA APIs.
+     */
+    public static void collectNonembeddedMetrics() {
+        final Context appContext = ContextUtils.getApplicationContext();
+        if (AwMetricsServiceClient.isAppOptedOut(appContext)) {
+            Log.d(TAG, "App opted out from metrics collection, not connecting to metrics service");
+            return;
+        }
+
+        final Intent intent = new Intent();
+        intent.setClassName(getWebViewPackageName(), ServiceNames.METRICS_BRIDGE_SERVICE);
+
+        ServiceConnection connection = new ServiceConnection() {
+            private boolean mHasConnected;
+
+            @Override
+            public void onServiceConnected(ComponentName className, IBinder service) {
+                if (mHasConnected) return;
+                mHasConnected = true;
+                // onServiceConnected is called on the UI thread, so punt this back to the
+                // background thread.
+                PostTask.postTask(TaskTraits.THREAD_POOL_BEST_EFFORT, () -> {
+                    try {
+                        IMetricsBridgeService metricsService =
+                                IMetricsBridgeService.Stub.asInterface(service);
+
+                        List<byte[]> data = metricsService.retrieveNonembeddedMetrics();
+                        // Subtract one to avoid skewing NumHistograms because of the meta
+                        // RetrieveMetricsTaskStatus histogram which is always added to the list.
+                        RecordHistogram.recordCount1000Histogram(
+                                "Android.WebView.NonEmbeddedMetrics.NumHistograms",
+                                data.size() - 1);
+                        long systemTime = System.currentTimeMillis();
+                        for (byte[] recordData : data) {
+                            HistogramRecord record = HistogramRecord.parseFrom(recordData);
+                            AwNonembeddedUmaReplayer.replayMethodCall(record);
+                            if (record.hasMetadata()) {
+                                long timeRecorded = record.getMetadata().getTimeRecorded();
+                                recordVeryLongTimesHistogram(
+                                        "Android.WebView.NonEmbeddedMetrics.HistogramRecordAge",
+                                        systemTime - timeRecorded);
+                            }
+                        }
+                        logTransmissionResult(TransmissionResult.SUCCESS);
+                    } catch (InvalidProtocolBufferException e) {
+                        Log.d(TAG, "Malformed metrics log proto", e);
+                        logTransmissionResult(TransmissionResult.MALFORMED_PROTOBUF);
+                    } catch (RemoteException e) {
+                        Log.d(TAG, "Remote Exception calling MetricsBridgeService#retrieveMetrics",
+                                e);
+                        logTransmissionResult(TransmissionResult.REMOTE_EXCEPTION);
+                    } finally {
+                        appContext.unbindService(this);
+                    }
+                });
+            }
+
+            @Override
+            public void onServiceDisconnected(ComponentName className) {}
+        };
+        if (!appContext.bindService(intent, connection, Context.BIND_AUTO_CREATE)) {
+            Log.d(TAG, "Could not bind to MetricsBridgeService " + intent);
+        }
+    }
+
     // Do not instantiate this class.
     private AwBrowserProcess() {}
+
+    @NativeMethods
+    interface Natives {
+        void setProcessNameCrashKey(String processName);
+    }
 }

@@ -6,7 +6,6 @@
 
 #include "base/bind.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_feature_list.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -16,6 +15,7 @@
 #include "components/password_manager/core/browser/password_manager_metrics_util.h"
 #include "components/safe_browsing/content/password_protection/password_protection_service.h"
 #include "components/safe_browsing/core/features.h"
+#include "content/public/test/browser_test.h"
 
 namespace safe_browsing {
 

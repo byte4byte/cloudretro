@@ -34,7 +34,7 @@ SendTabToSelfIconView::SendTabToSelfIconView(
 
 SendTabToSelfIconView::~SendTabToSelfIconView() {}
 
-views::BubbleDialogDelegateView* SendTabToSelfIconView::GetBubble() const {
+views::BubbleDialogDelegate* SendTabToSelfIconView::GetBubble() const {
   SendTabToSelfBubbleController* controller = GetController();
   if (!controller) {
     return nullptr;
@@ -143,6 +143,9 @@ void SendTabToSelfIconView::AnimationEnded(const gfx::Animation* animation) {
 }
 
 void SendTabToSelfIconView::UpdateOpacity() {
+  if (!GetVisible()) {
+    ResetSlideAnimation(false);
+  }
   if (!IsShrinking()) {
     DestroyLayer();
     SetTextSubpixelRenderingEnabled(true);

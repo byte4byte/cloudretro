@@ -8,8 +8,8 @@
 #include <string>
 #include <vector>
 
-#include "base/macros.h"
 #include "base/scoped_observer.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/common/renderer_configuration.mojom-forward.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/prefs/pref_change_registrar.h"
@@ -18,7 +18,7 @@
 #include "mojo/public/cpp/bindings/associated_remote.h"
 #include "mojo/public/cpp/bindings/remote.h"
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "chrome/browser/chromeos/login/signin/oauth2_login_manager.h"
 #endif
 
@@ -30,12 +30,14 @@ class RenderProcessHost;
 
 // The RendererUpdater is responsible for updating renderers about state change.
 class RendererUpdater : public KeyedService,
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
                         public chromeos::OAuth2LoginManager::Observer,
 #endif
                         public signin::IdentityManager::Observer {
  public:
   explicit RendererUpdater(Profile* profile);
+  RendererUpdater(const RendererUpdater&) = delete;
+  RendererUpdater& operator=(const RendererUpdater&) = delete;
   ~RendererUpdater() override;
 
   // KeyedService:
@@ -51,7 +53,7 @@ class RendererUpdater : public KeyedService,
   mojo::AssociatedRemote<chrome::mojom::RendererConfiguration>
   GetRendererConfiguration(content::RenderProcessHost* render_process_host);
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   // chromeos::OAuth2LoginManager::Observer:
   void OnSessionRestoreStateChanged(
       Profile* user_profile,
@@ -72,7 +74,7 @@ class RendererUpdater : public KeyedService,
 
   Profile* profile_;
   PrefChangeRegistrar pref_change_registrar_;
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   chromeos::OAuth2LoginManager* oauth2_login_manager_;
   bool merge_session_running_;
   std::vector<mojo::Remote<chrome::mojom::ChromeOSListener>>
@@ -87,8 +89,6 @@ class RendererUpdater : public KeyedService,
   ScopedObserver<signin::IdentityManager, signin::IdentityManager::Observer>
       identity_manager_observer_;
   signin::IdentityManager* identity_manager_;
-
-  DISALLOW_COPY_AND_ASSIGN(RendererUpdater);
 };
 
 #endif  // CHROME_BROWSER_PROFILES_RENDERER_UPDATER_H_

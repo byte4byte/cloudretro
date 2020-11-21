@@ -20,7 +20,7 @@ class PLATFORM_EXPORT NullResourceFetcherProperties final
   NullResourceFetcherProperties();
   ~NullResourceFetcherProperties() override = default;
 
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
 
   // ResourceFetcherProperties implementation
   const FetchClientSettingsObject& GetFetchClientSettingsObject()
@@ -37,6 +37,7 @@ class PLATFORM_EXPORT NullResourceFetcherProperties final
   }
   bool IsPaused() const override { return false; }
   bool IsDetached() const override { return true; }
+  bool IsLoadDeferred() const override { return false; }
   bool IsLoadComplete() const override { return true; }
   bool ShouldBlockLoadingSubResource() const override { return true; }
   bool IsSubframeDeprioritizationEnabled() const override { return false; }

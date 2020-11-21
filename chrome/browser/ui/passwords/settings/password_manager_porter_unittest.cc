@@ -298,7 +298,7 @@ class PasswordManagerPorterStoreTest
 MATCHER(FormHasDescription, "") {
   const auto& form = std::get<0>(arg);
   const auto& desc = std::get<1>(arg);
-  return form.origin == GURL(desc.origin) &&
+  return form.url == GURL(desc.origin) &&
          form.username_value == base::ASCIIToUTF16(desc.username) &&
          form.password_value == base::ASCIIToUTF16(desc.password);
 }
@@ -323,8 +323,7 @@ TEST_P(PasswordManagerPorterStoreTest, Import) {
 
   base::FilePath temp_file_path;
   ASSERT_TRUE(base::CreateTemporaryFile(&temp_file_path));
-  ASSERT_EQ(static_cast<int>(tc.csv.size()),
-            base::WriteFile(temp_file_path, tc.csv.data(), tc.csv.size()));
+  ASSERT_TRUE(base::WriteFile(temp_file_path, tc.csv));
 
   // No credential provider needed, because this |porter| won't be used for
   // exporting. No progress callback needed, because UI interaction will be
@@ -345,7 +344,7 @@ TEST_P(PasswordManagerPorterStoreTest, Import) {
   EXPECT_THAT(credentials.second,
               UnorderedPointwise(FormHasDescription(), tc.descriptions));
 
-  base::DeleteFile(temp_file_path, /*recursive=*/false);
+  base::DeleteFile(temp_file_path);
   store->ShutdownOnUIThread();
 }
 

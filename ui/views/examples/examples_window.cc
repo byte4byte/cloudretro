@@ -21,7 +21,6 @@
 #include "ui/base/ui_base_paths.h"
 #include "ui/views/background.h"
 #include "ui/views/controls/combobox/combobox.h"
-#include "ui/views/controls/combobox/combobox_listener.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/examples/create_examples.h"
 #include "ui/views/layout/fill_layout.h"
@@ -31,6 +30,8 @@
 
 namespace views {
 namespace examples {
+
+const char kExamplesWidgetName[] = "ExamplesWidget";
 
 namespace {
 
@@ -93,7 +94,7 @@ class ComboboxModelExampleList : public ui::ComboboxModel {
 
   // ui::ComboboxModel:
   int GetItemCount() const override { return example_list_.size(); }
-  base::string16 GetItemAt(int index) override {
+  base::string16 GetItemAt(int index) const override {
     return base::UTF8ToUTF16(example_list_[index]->example_title());
   }
 
@@ -107,18 +108,20 @@ class ComboboxModelExampleList : public ui::ComboboxModel {
   DISALLOW_COPY_AND_ASSIGN(ComboboxModelExampleList);
 };
 
-class ExamplesWindowContents : public WidgetDelegateView,
-                               public ComboboxListener {
+class ExamplesWindowContents : public WidgetDelegateView {
  public:
   ExamplesWindowContents(base::OnceClosure on_close, ExampleVector examples)
       : on_close_(std::move(on_close)) {
+    SetHasWindowSizeControls(true);
+
     auto combobox_model = std::make_unique<ComboboxModelExampleList>();
     combobox_model_ = combobox_model.get();
     combobox_model_->SetExamples(std::move(examples));
     auto combobox = std::make_unique<Combobox>(std::move(combobox_model));
 
     instance_ = this;
-    combobox->set_listener(this);
+    combobox->SetCallback(base::BindRepeating(
+        &ExamplesWindowContents::ComboboxChanged, base::Unretained(this)));
 
     SetBackground(CreateThemedSolidBackground(
         this, ui::NativeTheme::kColorId_DialogBackground));
@@ -127,7 +130,7 @@ class ExamplesWindowContents : public WidgetDelegateView,
     ColumnSet* column_set = layout->AddColumnSet(0);
     column_set->AddPaddingColumn(0, 5);
     column_set->AddColumn(GridLayout::FILL, GridLayout::FILL, 1,
-                          GridLayout::USE_PREF, 0, 0);
+                          GridLayout::ColumnSize::kUsePreferred, 0, 0);
     column_set->AddPaddingColumn(0, 5);
     layout->AddPaddingRow(0, 5);
     layout->StartRow(0 /* no expand */, 0);
@@ -159,9 +162,6 @@ class ExamplesWindowContents : public WidgetDelegateView,
 
  private:
   // WidgetDelegateView:
-  bool CanResize() const override { return true; }
-  bool CanMaximize() const override { return true; }
-  bool CanMinimize() const override { return true; }
   base::string16 GetWindowTitle() const override {
     return base::ASCIIToUTF16("Views Examples");
   }
@@ -180,10 +180,8 @@ class ExamplesWindowContents : public WidgetDelegateView,
     return size;
   }
 
-  // ComboboxListener:
-  void OnPerformAction(Combobox* combobox) override {
-    DCHECK_EQ(combobox, combobox_);
-    int index = combobox->GetSelectedIndex();
+  void ComboboxChanged() {
+    int index = combobox_->GetSelectedIndex();
     DCHECK_LT(index, combobox_model_->GetItemCount());
     example_shown_->RemoveAllChildViews(false);
     example_shown_->AddChildView(combobox_model_->GetItemViewAt(index));
@@ -206,6 +204,12 @@ class ExamplesWindowContents : public WidgetDelegateView,
 // static
 ExamplesWindowContents* ExamplesWindowContents::instance_ = nullptr;
 
+Widget* GetExamplesWidget() {
+  return ExamplesWindowContents::instance()
+             ? ExamplesWindowContents::instance()->GetWidget()
+             : nullptr;
+}
+
 void ShowExamplesWindow(base::OnceClosure on_close,
                         ExampleVector examples,
                         gfx::NativeWindow window_context) {
@@ -218,6 +222,7 @@ void ShowExamplesWindow(base::OnceClosure on_close,
     params.delegate =
         new ExamplesWindowContents(std::move(on_close), std::move(examples));
     params.context = window_context;
+    params.name = kExamplesWidgetName;
     widget->Init(std::move(params));
     widget->Show();
   }

@@ -19,6 +19,7 @@
 #include "components/prefs/scoped_user_pref_update.h"
 #include "components/sync/driver/profile_sync_service.h"
 #include "components/translate/core/browser/translate_prefs.h"
+#include "content/public/test/browser_test.h"
 
 using bookmarks_helper::AddURL;
 using bookmarks_helper::IndexedURL;
@@ -109,7 +110,7 @@ class MigrationTest : public SyncTest  {
     // Supervised user data types will be "unready" during this test, so we
     // should not request that they be migrated.
     preferred_data_types.Remove(syncer::SUPERVISED_USER_SETTINGS);
-    preferred_data_types.Remove(syncer::SUPERVISED_USER_WHITELISTS);
+    preferred_data_types.Remove(syncer::SUPERVISED_USER_ALLOWLISTS);
 
     // Autofill wallet will be unready during this test, so we should not
     // request that it be migrated.
@@ -148,7 +149,6 @@ class MigrationTest : public SyncTest  {
         // boolean pref clobbers the local value), so it doesn't work
         // for anything but single-client tests.
         ASSERT_EQ(1, num_clients());
-        ASSERT_TRUE(BooleanPrefMatches(prefs::kShowHomeButton));
         ChangeBooleanPref(0, prefs::kShowHomeButton);
         break;
       case MODIFY_BOOKMARK:

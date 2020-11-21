@@ -34,6 +34,11 @@ extern const char kShouldSendRlzPingValueTrue[];
 // allowed to be sent. It is in the format of "yyyy-mm-dd".
 COMPONENT_EXPORT(CHROMEOS_SYSTEM) extern const char kRlzEmbargoEndDateKey[];
 
+// The key present in VPD that indicates the date after which enterprise
+// management pings are allowed to be sent. It is in the format of "yyyy-mm-dd".
+COMPONENT_EXPORT(CHROMEOS_SYSTEM)
+extern const char kEnterpriseManagementEmbargoEndDateKey[];
+
 // Customization ID key.
 COMPONENT_EXPORT(CHROMEOS_SYSTEM) extern const char kCustomizationIdKey[];
 
@@ -111,6 +116,10 @@ COMPONENT_EXPORT(CHROMEOS_SYSTEM) extern const char kRegionKey[];
 COMPONENT_EXPORT(CHROMEOS_SYSTEM) extern const char kInitialLocaleKey[];
 COMPONENT_EXPORT(CHROMEOS_SYSTEM) extern const char kInitialTimezoneKey[];
 COMPONENT_EXPORT(CHROMEOS_SYSTEM) extern const char kKeyboardLayoutKey[];
+
+// The key that will be present in RO VPD to indicate what identifier is used
+// for attestation-based registration of a device.
+COMPONENT_EXPORT(CHROMEOS_SYSTEM) extern const char kAttestedDeviceIdKey[];
 
 // Serial number key (VPD v2+ devices, Samsung: caroline and later) for use in
 // tests. Outside of tests GetEnterpriseMachineID() is the backward-compatible

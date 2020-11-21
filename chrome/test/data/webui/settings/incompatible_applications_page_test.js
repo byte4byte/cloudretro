@@ -3,10 +3,10 @@
 // found in the LICENSE file.
 
 // clang-format off
-import {IncompatibleApplicationsBrowserProxyImpl, IncompatibleApplication} from 'chrome://settings/lazy_load.js';
-import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
-import {TestBrowserProxy} from 'chrome://test/test_browser_proxy.m.js';
 import {webUIListenerCallback} from 'chrome://resources/js/cr.m.js';
+import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+import {IncompatibleApplication, IncompatibleApplicationsBrowserProxyImpl} from 'chrome://settings/lazy_load.js';
+import {TestBrowserProxy} from 'chrome://test/test_browser_proxy.m.js';
 // clang-format on
 
 /** @implements {IncompatibleApplicationsBrowserProxy} */
@@ -109,10 +109,10 @@ suite('incompatibleApplicationsHandler', function() {
       const list =
           incompatibleApplicationsPage.$$('#incompatible-applications-list');
       assertEquals('none', list.style.display);
-      // The contents of a dom-if that is false no longer receive updates in
-      // Polymer 2. When there are no applications the parent dom-if becomes
-      // false, so only check that the list is hidden, but don't assert on
-      // number of DOM children.
+      // The contents of a dom-if that is false no longer receive updates. When
+      // there are no applications the parent dom-if becomes false, so only
+      // check that the list is hidden, but don't assert on number of DOM
+      // children.
       return;
     }
 

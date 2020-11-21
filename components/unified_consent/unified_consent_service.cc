@@ -4,9 +4,9 @@
 
 #include "components/unified_consent/unified_consent_service.h"
 
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/scoped_observer.h"
+#include "base/scoped_observation.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "build/build_config.h"
 #include "components/pref_registry/pref_registry_syncable.h"

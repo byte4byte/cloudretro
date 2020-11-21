@@ -9,6 +9,8 @@
 #include "base/no_destructor.h"
 #include "base/task/post_task.h"
 #include "base/time/time.h"
+#include "components/dom_distiller/core/url_constants.h"
+#include "components/history/core/browser/history_service.h"
 #include "components/keyed_service/core/service_access_type.h"
 #include "components/keyed_service/ios/browser_state_dependency_manager.h"
 #include "components/sync/driver/sync_service.h"
@@ -46,7 +48,8 @@ bool ShouldSyncURLImpl(const GURL& url) {
     return true;
   }
   return url.is_valid() && !url.SchemeIs(kChromeUIScheme) &&
-         !url.SchemeIsFile();
+         !url.SchemeIsFile() &&
+         !url.SchemeIs(dom_distiller::kDomDistillerScheme);
 }
 
 // iOS implementation of SyncSessionsClient. Needs to be in a separate class
@@ -69,12 +72,6 @@ class SyncSessionsClientImpl : public sync_sessions::SyncSessionsClient {
   ~SyncSessionsClientImpl() override {}
 
   // SyncSessionsClient implementation.
-  history::HistoryService* GetHistoryService() override {
-    DCHECK_CURRENTLY_ON(web::WebThread::UI);
-    return ios::HistoryServiceFactory::GetForBrowserState(
-        browser_state_, ServiceAccessType::EXPLICIT_ACCESS);
-  }
-
   sync_sessions::SessionSyncPrefs* GetSessionSyncPrefs() override {
     return &session_sync_prefs_;
   }
@@ -82,6 +79,16 @@ class SyncSessionsClientImpl : public sync_sessions::SyncSessionsClient {
   syncer::RepeatingModelTypeStoreFactory GetStoreFactory() override {
     return ModelTypeStoreServiceFactory::GetForBrowserState(browser_state_)
         ->GetStoreFactory();
+  }
+
+  void ClearAllOnDemandFavicons() override {
+    history::HistoryService* history_service =
+        ios::HistoryServiceFactory::GetForBrowserState(
+            browser_state_, ServiceAccessType::EXPLICIT_ACCESS);
+    if (!history_service) {
+      return;
+    }
+    history_service->ClearAllOnDemandFavicons();
   }
 
   bool ShouldSyncURL(const GURL& url) const override {

@@ -5,7 +5,7 @@
 #include "chrome/browser/sharing/sms/sms_fetch_request_handler.h"
 
 #include "base/run_loop.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "chrome/browser/sharing/proto/sharing_message.pb.h"
 #include "chrome/browser/sharing/sharing_message_handler.h"
 #include "content/public/browser/sms_fetcher.h"
@@ -18,6 +18,7 @@
 using base::BindLambdaForTesting;
 using chrome_browser_sharing::ResponseMessage;
 using chrome_browser_sharing::SharingMessage;
+using content::SmsFetcher;
 using ::testing::_;
 using ::testing::NiceMock;
 using ::testing::Return;
@@ -26,17 +27,20 @@ using ::testing::StrictMock;
 
 namespace {
 
-class MockSmsFetcher : public content::SmsFetcher {
+class MockSmsFetcher : public SmsFetcher {
  public:
   MockSmsFetcher() = default;
   ~MockSmsFetcher() = default;
 
   MOCK_METHOD2(Subscribe,
                void(const url::Origin& origin, Subscriber* subscriber));
+  MOCK_METHOD3(Subscribe,
+               void(const url::Origin& origin,
+                    Subscriber* subscriber,
+                    content::RenderFrameHost* rfh));
   MOCK_METHOD2(Unsubscribe,
                void(const url::Origin& origin, Subscriber* subscriber));
   MOCK_METHOD0(HasSubscribers, bool());
-  MOCK_METHOD0(CanReceiveSms, bool());
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockSmsFetcher);
@@ -58,7 +62,7 @@ TEST(SmsFetchRequestHandlerTest, Basic) {
 
   base::RunLoop loop;
 
-  content::SmsFetcher::Subscriber* subscriber;
+  SmsFetcher::Subscriber* subscriber;
   EXPECT_CALL(fetcher, Subscribe(_, _)).WillOnce(SaveArg<1>(&subscriber));
   EXPECT_CALL(fetcher, Unsubscribe(_, _));
 
@@ -70,7 +74,7 @@ TEST(SmsFetchRequestHandlerTest, Basic) {
         loop.Quit();
       }));
 
-  subscriber->OnReceive("123");
+  subscriber->OnReceive("123", SmsFetcher::UserConsent::kNotObtained);
   loop.Run();
 }
 
@@ -82,7 +86,7 @@ TEST(SmsFetchRequestHandlerTest, OutOfOrder) {
 
   base::RunLoop loop1;
 
-  content::SmsFetcher::Subscriber* request1;
+  SmsFetcher::Subscriber* request1;
   EXPECT_CALL(fetcher, Subscribe(_, _)).WillOnce(SaveArg<1>(&request1));
   EXPECT_CALL(fetcher, Unsubscribe(_, _)).Times(2);
 
@@ -96,7 +100,7 @@ TEST(SmsFetchRequestHandlerTest, OutOfOrder) {
 
   base::RunLoop loop2;
 
-  content::SmsFetcher::Subscriber* request2;
+  SmsFetcher::Subscriber* request2;
   EXPECT_CALL(fetcher, Subscribe(_, _)).WillOnce(SaveArg<1>(&request2));
 
   handler.OnMessage(
@@ -107,10 +111,10 @@ TEST(SmsFetchRequestHandlerTest, OutOfOrder) {
         loop2.Quit();
       }));
 
-  request2->OnReceive("2");
+  request2->OnReceive("2", SmsFetcher::UserConsent::kNotObtained);
   loop2.Run();
 
-  request1->OnReceive("1");
+  request1->OnReceive("1", SmsFetcher::UserConsent::kNotObtained);
   loop1.Run();
 }
 
@@ -120,7 +124,7 @@ TEST(SmsFetchRequestHandlerTest, HangingRequestUnsubscribedUponDestruction) {
 
   SmsFetchRequestHandler handler(&fetcher);
   SharingMessage message = CreateRequest("https://a.com");
-  content::SmsFetcher::Subscriber* subscriber;
+  SmsFetcher::Subscriber* subscriber;
   EXPECT_CALL(fetcher, Subscribe(_, _)).WillOnce(SaveArg<1>(&subscriber));
 
   // Expects Unsubscribe to be called when SmsFetchRequestHandler goes out of

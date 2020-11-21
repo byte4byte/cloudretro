@@ -24,7 +24,7 @@ import org.chromium.chrome.browser.feed.library.api.internal.actionparser.Action
 import org.chromium.chrome.browser.feed.library.basicstream.internal.pendingdismiss.ClusterPendingDismissHelper;
 import org.chromium.chrome.browser.feed.library.sharedstream.contextmenumanager.ContextMenuManager;
 import org.chromium.chrome.browser.feed.library.sharedstream.pendingdismiss.PendingDismissCallback;
-import org.chromium.chrome.browser.flags.ChromeFeatureList;
+import org.chromium.chrome.browser.feed.shared.FeedFeatures;
 import org.chromium.components.feed.core.proto.libraries.api.internal.StreamDataProto.StreamDataOperation;
 import org.chromium.components.feed.core.proto.ui.action.FeedActionProto.FeedActionMetadata.ElementType;
 import org.chromium.components.feed.core.proto.ui.action.FeedActionProto.LabelledFeedActionData;
@@ -130,12 +130,21 @@ public class StreamActionApiImpl implements StreamActionApi {
                 @Override
                 public void onDismissCommitted() {
                     dismiss(dataOperations);
-                    mActionManager.createAndUploadAction(mContentId, payload);
+                    mActionManager.createAndUploadAction(
+                            mContentId, payload, ActionManager.UploadActionType.MISC);
                     mBasicLoggingApi.onNotInterestedIn(
                             interestType, mContentLoggingData.get(), /* wasCommitted = */ true);
                 }
             });
         }
+    }
+
+    @Override
+    public void handleBlockContent(
+            List<StreamDataOperation> dataOperations, ActionPayload payload) {
+        dismiss(dataOperations);
+        mActionManager.createAndUploadAction(
+                mContentId, payload, ActionManager.UploadActionType.MISC);
     }
 
     @Override
@@ -157,7 +166,8 @@ public class StreamActionApiImpl implements StreamActionApi {
                 public void onDismissCommitted() {
                     dismissLocal(contentId, dataOperations);
                     dismiss(dataOperations);
-                    mActionManager.createAndUploadAction(contentId, payload);
+                    mActionManager.createAndUploadAction(
+                            contentId, payload, ActionManager.UploadActionType.MISC);
                     mBasicLoggingApi.onContentDismissed(
                             mContentLoggingData.get(), /* wasCommitted = */ true);
                 }
@@ -326,8 +336,23 @@ public class StreamActionApiImpl implements StreamActionApi {
 
     @Override
     public void reportClickAction(String contentId, ActionPayload payload) {
-        if (ChromeFeatureList.isEnabled(ChromeFeatureList.REPORT_FEED_USER_ACTIONS)) {
-            mActionManager.createAndStoreAction(contentId, payload);
+        if (FeedFeatures.isReportingUserActions()) {
+            mActionManager.createAndUploadAction(
+                    contentId, payload, ActionManager.UploadActionType.CLICK);
+        }
+    }
+
+    @Override
+    public void reportViewVisible(View view, String contentId, ActionPayload payload) {
+        if (FeedFeatures.isReportingUserActions()) {
+            mActionManager.onViewVisible(view, contentId, payload);
+        }
+    }
+
+    @Override
+    public void reportViewHidden(View view, String contentId) {
+        if (FeedFeatures.isReportingUserActions()) {
+            mActionManager.onViewHidden(view, contentId);
         }
     }
 }

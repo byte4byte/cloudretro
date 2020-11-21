@@ -8,7 +8,6 @@
 
 #include "base/bind.h"
 #include "base/memory/ptr_util.h"
-#include "base/task/post_task.h"
 #include "build/build_config.h"
 #include "chromecast/browser/cast_network_contexts.h"
 #include "chromecast/browser/extensions/cast_extension_host_delegate.h"
@@ -16,6 +15,7 @@
 #include "chromecast/browser/extensions/cast_extension_web_contents_observer.h"
 #include "chromecast/browser/extensions/cast_extensions_api_client.h"
 #include "chromecast/browser/extensions/cast_extensions_browser_api_provider.h"
+#include "chromecast/browser/extensions/cast_kiosk_delegate.h"
 #include "components/version_info/version_info.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_task_traits.h"
@@ -204,8 +204,7 @@ CastExtensionsBrowserClient::GetExtensionSystemFactory() {
 }
 
 void CastExtensionsBrowserClient::RegisterBrowserInterfaceBindersForFrame(
-    service_manager::BinderMapWithContext<content::RenderFrameHost*>*
-        binder_map,
+    mojo::BinderMapWithContext<content::RenderFrameHost*>* binder_map,
     content::RenderFrameHost* render_frame_host,
     const Extension* extension) const {
   PopulateExtensionFrameBinders(binder_map, render_frame_host, extension);
@@ -228,8 +227,8 @@ void CastExtensionsBrowserClient::BroadcastEventToRenderers(
     std::unique_ptr<base::ListValue> args,
     bool dispatch_to_off_the_record_profiles) {
   if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
-    base::PostTask(
-        FROM_HERE, {BrowserThread::UI},
+    content::GetUIThreadTaskRunner({})->PostTask(
+        FROM_HERE,
         base::BindOnce(&CastExtensionsBrowserClient::BroadcastEventToRenderers,
                        base::Unretained(this), histogram_value, event_name,
                        std::move(args), dispatch_to_off_the_record_profiles));
@@ -267,7 +266,9 @@ CastExtensionsBrowserClient::GetExtensionWebContentsObserver(
 }
 
 KioskDelegate* CastExtensionsBrowserClient::GetKioskDelegate() {
-  return nullptr;
+  if (!kiosk_delegate_)
+    kiosk_delegate_.reset(new CastKioskDelegate());
+  return kiosk_delegate_.get();
 }
 
 bool CastExtensionsBrowserClient::IsLockScreenContext(

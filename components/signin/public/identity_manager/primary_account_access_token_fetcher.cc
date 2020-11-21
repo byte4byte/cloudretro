@@ -7,7 +7,7 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "components/signin/public/identity_manager/access_token_info.h"
 #include "google_apis/gaia/core_account_id.h"
 #include "google_apis/gaia/google_service_auth_error.h"
@@ -36,7 +36,7 @@ PrimaryAccountAccessTokenFetcher::PrimaryAccountAccessTokenFetcher(
   // Start observing the IdentityManager. This observer will be removed either
   // when credentials are obtained and an access token request is started or
   // when this object is destroyed.
-  identity_manager_observer_.Add(identity_manager_);
+  identity_manager_observation_.Observe(identity_manager_);
 }
 
 PrimaryAccountAccessTokenFetcher::~PrimaryAccountAccessTokenFetcher() = default;
@@ -56,7 +56,7 @@ void PrimaryAccountAccessTokenFetcher::StartAccessTokenRequest() {
 
   // By the time of starting an access token request, we should no longer be
   // listening for signin-related events.
-  DCHECK(!identity_manager_observer_.IsObserving(identity_manager_));
+  DCHECK(!identity_manager_observation_.IsObservingSource(identity_manager_));
 
   // Note: We might get here even in cases where we know that there's no refresh
   // token. We're requesting an access token anyway, so that the token service
@@ -110,7 +110,8 @@ void PrimaryAccountAccessTokenFetcher::ProcessSigninStateChange() {
   if (!AreCredentialsAvailable())
     return;
 
-  identity_manager_observer_.Remove(identity_manager_);
+  DCHECK(identity_manager_observation_.IsObservingSource(identity_manager_));
+  identity_manager_observation_.RemoveObservation();
 
   StartAccessTokenRequest();
 }

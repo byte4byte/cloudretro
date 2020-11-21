@@ -47,21 +47,15 @@ VideoCaptureDeviceFactoryChromeOS::CreateDevice(
                                             camera_app_device_bridge_);
 }
 
-void VideoCaptureDeviceFactoryChromeOS::GetSupportedFormats(
-    const VideoCaptureDeviceDescriptor& device_descriptor,
-    VideoCaptureFormats* supported_formats) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  camera_hal_delegate_->GetSupportedFormats(device_descriptor,
-                                            supported_formats);
-}
-
-void VideoCaptureDeviceFactoryChromeOS::GetDeviceDescriptors(
-    VideoCaptureDeviceDescriptors* device_descriptors) {
+void VideoCaptureDeviceFactoryChromeOS::GetDevicesInfo(
+    GetDevicesInfoCallback callback) {
   DCHECK(thread_checker_.CalledOnValidThread());
   if (!initialized_) {
+    std::move(callback).Run({});
     return;
   }
-  camera_hal_delegate_->GetDeviceDescriptors(device_descriptors);
+
+  camera_hal_delegate_->GetDevicesInfo(std::move(callback));
 }
 
 // static
@@ -89,7 +83,10 @@ bool VideoCaptureDeviceFactoryChromeOS::Init() {
 
   camera_hal_delegate_ =
       new CameraHalDelegate(camera_hal_ipc_thread_.task_runner());
-  camera_hal_delegate_->RegisterCameraClient();
+  if (!camera_hal_delegate_->RegisterCameraClient()) {
+    LOG(ERROR) << "Failed to register camera client";
+    return false;
+  }
 
   // Since the |camera_hal_delegate_| is initialized on the constructor of this
   // object and is destroyed after |camera_app_device_bridge_| unsetting its

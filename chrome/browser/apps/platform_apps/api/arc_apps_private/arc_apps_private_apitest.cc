@@ -8,6 +8,7 @@
 #include "base/path_service.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "chrome/browser/chromeos/arc/arc_util.h"
+#include "chrome/browser/chromeos/arc/session/arc_session_manager.h"
 #include "chrome/browser/chromeos/login/demo_mode/demo_session.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_list_prefs.h"
@@ -18,6 +19,7 @@
 #include "components/arc/session/arc_bridge_service.h"
 #include "components/arc/test/connection_holder_util.h"
 #include "components/arc/test/fake_app_instance.h"
+#include "content/public/test/browser_test.h"
 #include "extensions/common/switches.h"
 #include "extensions/test/extension_test_message_listener.h"
 #include "extensions/test/result_catcher.h"
@@ -41,9 +43,9 @@ class ArcAppsPrivateApiTest : public extensions::ExtensionApiTest {
   void SetUpCommandLine(base::CommandLine* command_line) override {
     extensions::ExtensionApiTest::SetUpCommandLine(command_line);
     arc::SetArcAvailableCommandLineForTesting(command_line);
-    // Whitelist the test platform app.
+    // Allowlist the test platform app.
     command_line->AppendSwitchASCII(
-        extensions::switches::kWhitelistedExtensionID,
+        extensions::switches::kAllowlistedExtensionID,
         "fgkfegllpjfhppblcabhjjipnfelohej");
   }
 

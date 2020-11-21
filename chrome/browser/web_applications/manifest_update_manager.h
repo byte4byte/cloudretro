@@ -17,8 +17,6 @@
 #include "chrome/browser/web_applications/components/web_app_id.h"
 #include "chrome/browser/web_applications/manifest_update_task.h"
 
-class Profile;
-
 namespace content {
 class WebContents;
 }
@@ -42,7 +40,7 @@ class SystemWebAppManager;
 // of being triggered by page loads.
 class ManifestUpdateManager final : public AppRegistrarObserver {
  public:
-  explicit ManifestUpdateManager(Profile* profile);
+  ManifestUpdateManager();
   ~ManifestUpdateManager() override;
 
   void SetSubsystems(AppRegistrar* registrar,
@@ -83,7 +81,6 @@ class ManifestUpdateManager final : public AppRegistrarObserver {
                        ManifestUpdateResult result);
   void NotifyResult(const GURL& url, ManifestUpdateResult result);
 
-  Profile* const profile_ = nullptr;
   AppRegistrar* registrar_ = nullptr;
   AppIconManager* icon_manager_ = nullptr;
   WebAppUiManager* ui_manager_ = nullptr;
@@ -99,6 +96,7 @@ class ManifestUpdateManager final : public AppRegistrarObserver {
   base::Optional<base::Time> time_override_for_testing_;
   ResultCallback result_callback_for_testing_;
 
+  bool started_ = false;
   bool hang_update_checks_for_testing_ = false;
 };
 

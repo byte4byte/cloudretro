@@ -48,6 +48,7 @@
 #include "components/policy/policy_constants.h"
 #include "components/prefs/pref_service.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -79,6 +80,8 @@ class PolicyPrefsTest : public InProcessBrowserTest {
   void SetUpInProcessBrowserTestFixture() override {
     EXPECT_CALL(provider_, IsInitializationComplete(_))
         .WillRepeatedly(Return(true));
+    EXPECT_CALL(provider_, IsFirstPolicyLoadComplete(testing::_))
+        .WillRepeatedly(testing::Return(true));
     BrowserPolicyConnector::SetPolicyProviderForTesting(&provider_);
   }
 

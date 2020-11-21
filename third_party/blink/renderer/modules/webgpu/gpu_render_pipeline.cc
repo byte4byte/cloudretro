@@ -214,13 +214,15 @@ GPURenderPipeline* GPURenderPipeline::Create(
   DCHECK(device);
   DCHECK(webgpu_desc);
 
+  std::string label;
   WGPURenderPipelineDescriptor dawn_desc = {};
   dawn_desc.nextInChain = nullptr;
   if (webgpu_desc->hasLayout()) {
     dawn_desc.layout = AsDawnType(webgpu_desc->layout());
   }
   if (webgpu_desc->hasLabel()) {
-    dawn_desc.label = webgpu_desc->label().Utf8().data();
+    label = webgpu_desc->label().Utf8();
+    dawn_desc.label = label.c_str();
   }
 
   OwnedProgrammableStageDescriptor vertex_stage_info =
@@ -234,19 +236,21 @@ GPURenderPipeline* GPURenderPipeline::Create(
     dawn_desc.fragmentStage = nullptr;
   }
 
+  dawn_desc.primitiveTopology =
+      AsDawnEnum<WGPUPrimitiveTopology>(webgpu_desc->primitiveTopology());
+
   v8::Isolate* isolate = script_state->GetIsolate();
   ExceptionState exception_state(isolate, ExceptionState::kConstructionContext,
                                  "GPUVertexStateDescriptor");
   WGPUVertexStateInfo vertex_state_info = GPUVertexStateAsWGPUVertexState(
       isolate, webgpu_desc->vertexState(), exception_state);
-  dawn_desc.vertexState = &std::get<0>(vertex_state_info);
+  WGPUVertexStateDescriptor dawn_vertex_state = std::get<0>(vertex_state_info);
+
+  dawn_desc.vertexState = &dawn_vertex_state;
 
   if (exception_state.HadException()) {
     return nullptr;
   }
-
-  dawn_desc.primitiveTopology =
-      AsDawnEnum<WGPUPrimitiveTopology>(webgpu_desc->primitiveTopology());
 
   WGPURasterizationStateDescriptor rasterization_state;
   rasterization_state = AsDawnType(webgpu_desc->rasterizationState());

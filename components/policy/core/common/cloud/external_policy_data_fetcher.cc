@@ -7,9 +7,9 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
+#include "base/check_op.h"
 #include "base/location.h"
-#include "base/logging.h"
 #include "base/macros.h"
 #include "base/sequenced_task_runner.h"
 #include "base/stl_util.h"

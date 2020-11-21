@@ -6,9 +6,9 @@
 
 #include <cstddef>
 
-#include "base/logging.h"
 #include "components/metrics/metrics_provider.h"
 #import "ios/public/provider/chrome/browser/mailto/mailto_handler_provider.h"
+#import "ios/public/provider/chrome/browser/text_zoom_provider.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -31,7 +31,8 @@ ChromeBrowserProvider* GetChromeBrowserProvider() {
 // A dummy implementation of ChromeBrowserProvider.
 
 ChromeBrowserProvider::ChromeBrowserProvider()
-    : mailto_handler_provider_(std::make_unique<MailtoHandlerProvider>()) {}
+    : mailto_handler_provider_(std::make_unique<MailtoHandlerProvider>()),
+      text_zoom_provider_(std::make_unique<TextZoomProvider>()) {}
 
 ChromeBrowserProvider::~ChromeBrowserProvider() {
   for (auto& observer : observer_list_)
@@ -76,6 +77,10 @@ std::string ChromeBrowserProvider::GetRiskData() {
 void ChromeBrowserProvider::AddSerializableData(
     web::SerializableUserDataManager* user_data_manager,
     web::WebState* web_state) {}
+
+bool ChromeBrowserProvider::MightBlockUrlDuringRestore() {
+  return false;
+}
 
 bool ChromeBrowserProvider::ShouldBlockUrlDuringRestore(
     const GURL& url,
@@ -134,12 +139,20 @@ OverridesProvider* ChromeBrowserProvider::GetOverridesProvider() const {
   return nullptr;
 }
 
+DiscoverFeedProvider* ChromeBrowserProvider::GetDiscoverFeedProvider() const {
+  return nullptr;
+}
+
 MailtoHandlerProvider* ChromeBrowserProvider::GetMailtoHandlerProvider() const {
   return mailto_handler_provider_.get();
 }
 
 BrandedImageProvider* ChromeBrowserProvider::GetBrandedImageProvider() const {
   return nullptr;
+}
+
+TextZoomProvider* ChromeBrowserProvider::GetTextZoomProvider() const {
+  return text_zoom_provider_.get();
 }
 
 void ChromeBrowserProvider::HideModalViewStack() const {}

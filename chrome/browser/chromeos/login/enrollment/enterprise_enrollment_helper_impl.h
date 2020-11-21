@@ -59,6 +59,10 @@ class EnterpriseEnrollmentHelperImpl
   void OnDeviceAccountTokenError(policy::EnrollmentStatus status) override;
   void OnDeviceAccountClientError(
       policy::DeviceManagementStatus status) override;
+  enterprise_management::DeviceServiceApiAccessRequest::DeviceType
+  GetRobotAuthCodeDeviceType() override;
+  std::set<std::string> GetRobotOAuthScopes() override;
+  scoped_refptr<network::SharedURLLoaderFactory> GetURLLoaderFactory() override;
 
  private:
   FRIEND_TEST_ALL_PREFIXES(EnterpriseEnrollmentTest,
@@ -66,7 +70,7 @@ class EnterpriseEnrollmentHelperImpl
   FRIEND_TEST_ALL_PREFIXES(EnterpriseEnrollmentTest,
                            TestAttributePromptPageGetsLoaded);
 
-  // Attempt enrollment using |auth_data| for authentication.
+  // Attempt enrollment using `auth_data` for authentication.
   void DoEnroll(std::unique_ptr<policy::DMAuth> auth_data);
 
   // Handles completion of the OAuth2 token fetch attempt.
@@ -86,11 +90,11 @@ class EnterpriseEnrollmentHelperImpl
   void ReportEnrollmentStatus(policy::EnrollmentStatus status);
 
   // Logs an UMA event in the kMetricEnrollment or the kMetricEnrollmentRecovery
-  // histogram, depending on |enrollment_mode_|.
+  // histogram, depending on `enrollment_mode_`.
   void UMA(policy::MetricEnrollment sample);
 
   // Called by ProfileHelper when a signin profile clearance has finished.
-  // |callback| is a callback, that was passed to ClearAuth() before.
+  // `callback` is a callback, that was passed to ClearAuth() before.
   void OnSigninProfileCleared(base::OnceClosure callback);
 
   // Called when CloudPolicyClient exists, so device account can be initialized.

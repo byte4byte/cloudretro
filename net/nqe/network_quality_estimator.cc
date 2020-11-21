@@ -10,14 +10,16 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
+#include "base/check_op.h"
 #include "base/location.h"
-#include "base/logging.h"
+#include "base/metrics/field_trial_params.h"
 #include "base/metrics/histogram.h"
 #include "base/metrics/histogram_base.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/histogram_macros_local.h"
+#include "base/notreached.h"
 #include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
@@ -28,6 +30,8 @@
 #include "base/time/default_tick_clock.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
+#include "net/base/features.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/load_flags.h"
 #include "net/base/load_timing_info.h"
@@ -36,12 +40,12 @@
 #include "net/http/http_response_headers.h"
 #include "net/http/http_response_info.h"
 #include "net/http/http_status_code.h"
+#include "net/nqe/connectivity_monitor.h"
 #include "net/nqe/network_quality_estimator_util.h"
 #include "net/nqe/throughput_analyzer.h"
 #include "net/nqe/weighted_observation.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
-#include "net/url_request/url_request_status.h"
 #include "url/gurl.h"
 
 #if defined(OS_ANDROID)
@@ -55,7 +59,7 @@ class HostResolver;
 
 namespace {
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 // SequencedTaskRunner to get the network id. A SequencedTaskRunner is used
 // rather than parallel tasks to avoid having many threads getting the network
 // id concurrently.
@@ -83,7 +87,8 @@ bool RequestSchemeIsHTTPOrHTTPS(const URLRequest& request) {
   return request.url().is_valid() && request.url().SchemeIsHTTPOrHTTPS();
 }
 
-nqe::internal::NetworkID DoGetCurrentNetworkID() {
+nqe::internal::NetworkID DoGetCurrentNetworkID(
+    NetworkQualityEstimatorParams* params) {
   // It is possible that the connection type changed between when
   // GetConnectionType() was called and when the API to determine the
   // network name was called. Check if that happened and retry until the
@@ -94,6 +99,9 @@ nqe::internal::NetworkID DoGetCurrentNetworkID() {
     nqe::internal::NetworkID network_id(
         NetworkChangeNotifier::GetConnectionType(), std::string(), INT32_MIN);
 
+    if (!params || !params->get_signal_strength_and_detailed_network_id())
+      return network_id;
+
     switch (network_id.type) {
       case NetworkChangeNotifier::ConnectionType::CONNECTION_UNKNOWN:
       case NetworkChangeNotifier::ConnectionType::CONNECTION_NONE:
@@ -101,13 +109,15 @@ nqe::internal::NetworkID DoGetCurrentNetworkID() {
       case NetworkChangeNotifier::ConnectionType::CONNECTION_ETHERNET:
         break;
       case NetworkChangeNotifier::ConnectionType::CONNECTION_WIFI:
-#if defined(OS_ANDROID) || defined(OS_LINUX) || defined(OS_WIN)
+#if defined(OS_ANDROID) || defined(OS_LINUX) || defined(OS_CHROMEOS) || \
+    defined(OS_WIN)
         network_id.id = GetWifiSSID();
 #endif
         break;
       case NetworkChangeNotifier::ConnectionType::CONNECTION_2G:
       case NetworkChangeNotifier::ConnectionType::CONNECTION_3G:
       case NetworkChangeNotifier::ConnectionType::CONNECTION_4G:
+      case NetworkChangeNotifier::ConnectionType::CONNECTION_5G:
 #if defined(OS_ANDROID)
         network_id.id = android::GetTelephonyNetworkOperator();
 #endif
@@ -175,7 +185,8 @@ NetworkQualityEstimator::NetworkQualityEstimator(
       net_log_(NetLogWithSource::Make(
           net_log,
           net::NetLogSourceType::NETWORK_QUALITY_ESTIMATOR)),
-      event_creator_(net_log_) {
+      event_creator_(net_log_),
+      connectivity_monitor_(std::make_unique<ConnectivityMonitor>()) {
   DCHECK_EQ(nqe::internal::OBSERVATION_CATEGORY_COUNT,
             base::size(rtt_ms_observations_));
 
@@ -282,6 +293,7 @@ void NetworkQualityEstimator::NotifyStartTransaction(
   }
   throughput_analyzer_->NotifyStartTransaction(request);
   network_congestion_analyzer_.NotifyStartTransaction(request);
+  connectivity_monitor_->TrackNewRequest(request);
 }
 
 bool NetworkQualityEstimator::IsHangingRequest(
@@ -381,6 +393,7 @@ void NetworkQualityEstimator::NotifyHeadersReceived(
   throughput_analyzer_->NotifyBytesRead(request);
   throughput_analyzer_->NotifyExpectedResponseContentSize(
       request, request.GetExpectedContentSize());
+  connectivity_monitor_->NotifyRequestProgress(request);
 }
 
 void NetworkQualityEstimator::NotifyBytesRead(
@@ -388,6 +401,7 @@ void NetworkQualityEstimator::NotifyBytesRead(
     int64_t prefilter_total_bytes_read) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   throughput_analyzer_->NotifyBytesRead(request);
+  connectivity_monitor_->NotifyRequestProgress(request);
 }
 
 void NetworkQualityEstimator::NotifyRequestCompleted(
@@ -401,6 +415,7 @@ void NetworkQualityEstimator::NotifyRequestCompleted(
 
   throughput_analyzer_->NotifyRequestCompleted(request);
   network_congestion_analyzer_.NotifyRequestCompleted(request);
+  connectivity_monitor_->NotifyRequestCompleted(request);
 }
 
 void NetworkQualityEstimator::NotifyURLRequestDestroyed(
@@ -411,6 +426,7 @@ void NetworkQualityEstimator::NotifyURLRequestDestroyed(
     return;
 
   throughput_analyzer_->NotifyRequestCompleted(request);
+  connectivity_monitor_->NotifyRequestCompleted(request);
 }
 
 void NetworkQualityEstimator::AddRTTObserver(RTTObserver* rtt_observer) {
@@ -569,12 +585,13 @@ void NetworkQualityEstimator::OnConnectionTypeChanged(
 
   GatherEstimatesForNextConnectionType();
   throughput_analyzer_->OnConnectionTypeChanged();
+  connectivity_monitor_->NotifyConnectionTypeChanged(type);
 }
 
 void NetworkQualityEstimator::GatherEstimatesForNextConnectionType() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   if (get_network_id_asynchronously_) {
     // Doing PostTaskAndReplyWithResult by handle because it requires the result
     // type have a default constructor and nqe::internal::NetworkID does not
@@ -587,7 +604,7 @@ void NetworkQualityEstimator::GatherEstimatesForNextConnectionType() {
                    reply_callback) {
               reply_task_runner->PostTask(
                   FROM_HERE, base::BindOnce(std::move(reply_callback),
-                                            DoGetCurrentNetworkID()));
+                                            DoGetCurrentNetworkID(nullptr)));
             },
             base::ThreadTaskRunnerHandle::Get(),
             base::BindOnce(&NetworkQualityEstimator::
@@ -595,7 +612,7 @@ void NetworkQualityEstimator::GatherEstimatesForNextConnectionType() {
                            weak_ptr_factory_.GetWeakPtr())));
     return;
   }
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
   ContinueGatherEstimatesForNextConnectionType(GetCurrentNetworkID());
 }
@@ -615,40 +632,71 @@ void NetworkQualityEstimator::ContinueGatherEstimatesForNextConnectionType(
   ComputeEffectiveConnectionType();
 }
 
-int32_t NetworkQualityEstimator::GetCurrentSignalStrength() const {
+base::Optional<int32_t>
+NetworkQualityEstimator::GetCurrentSignalStrengthWithThrottling() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
-#if defined(OS_ANDROID)
+  if (!params_->get_signal_strength_and_detailed_network_id())
+    return base::nullopt;
+
   if (params_->weight_multiplier_per_signal_strength_level() >= 1.0)
-    return INT32_MIN;
-  if (params_->get_wifi_signal_strength() &&
-      current_network_id_.type == NetworkChangeNotifier::CONNECTION_WIFI) {
-    return android::GetWifiSignalLevel().value_or(INT32_MIN);
+    return base::nullopt;
+
+  if ((current_network_id_.type != NetworkChangeNotifier::CONNECTION_WIFI) &&
+      !NetworkChangeNotifier::IsConnectionCellular(current_network_id_.type)) {
+    return base::nullopt;
   }
 
-  if (NetworkChangeNotifier::IsConnectionCellular(current_network_id_.type))
-    return android::cellular_signal_strength::GetSignalStrengthLevel().value_or(
-        INT32_MIN);
-#endif  // OS_ANDROID
+  // Do not call more than once per |wifi_signal_strength_query_interval|
+  // duration.
+  if (last_signal_strength_check_timestamp_.has_value() &&
+      (tick_clock_->NowTicks() - last_signal_strength_check_timestamp_.value() <
+       params_->wifi_signal_strength_query_interval()) &&
+      (last_signal_strength_check_timestamp_.value() >
+       last_connection_change_)) {
+    return base::nullopt;
+  }
 
-  return INT32_MIN;
+  last_signal_strength_check_timestamp_ = tick_clock_->NowTicks();
+
+  if (current_network_id_.type == NetworkChangeNotifier::CONNECTION_WIFI) {
+    UMA_HISTOGRAM_BOOLEAN("NQE.SignalStrengthQueried.WiFi", true);
+
+#if defined(OS_ANDROID)
+    return android::GetWifiSignalLevel();
+#endif  // OS_ANDROID
+  }
+
+  if (NetworkChangeNotifier::IsConnectionCellular(current_network_id_.type)) {
+    UMA_HISTOGRAM_BOOLEAN("NQE.SignalStrengthQueried.Cellular", true);
+#if defined(OS_ANDROID)
+    return android::cellular_signal_strength::GetSignalStrengthLevel();
+#endif  // OS_ANDROID
+  }
+
+  return base::nullopt;
 }
 
 void NetworkQualityEstimator::UpdateSignalStrength() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   int32_t past_signal_strength = current_network_id_.signal_strength;
-  int32_t new_signal_strength = GetCurrentSignalStrength();
+  base::Optional<int32_t> new_signal_strength =
+      GetCurrentSignalStrengthWithThrottling();
+
+  // A fresh value is unavailable. So, return early.
+  if (!new_signal_strength)
+    return;
 
   // Check if there is no change in the signal strength.
-  if (past_signal_strength == new_signal_strength)
+  if (past_signal_strength == new_signal_strength.value())
     return;
 
   // Check if the signal strength is unavailable.
-  if (new_signal_strength == INT32_MIN)
+  if (new_signal_strength.value() == INT32_MIN)
     return;
 
-  DCHECK(new_signal_strength >= 0 && new_signal_strength <= 4);
+  DCHECK(new_signal_strength.value() >= 0 && new_signal_strength.value() <= 4);
 
   // Record the network quality we experienced for the previous signal strength
   // (for when we return to that signal strength).
@@ -657,7 +705,7 @@ void NetworkQualityEstimator::UpdateSignalStrength() {
                                   tick_clock_->NowTicks(), network_quality_,
                                   effective_connection_type_));
 
-  current_network_id_.signal_strength = new_signal_strength;
+  current_network_id_.signal_strength = new_signal_strength.value();
   // Update network quality from cached value for new signal strength.
   ReadCachedNetworkQualityEstimate();
 
@@ -929,6 +977,7 @@ NetworkQualityEstimator::GetCappedECTBasedOnSignalStrength() const {
         return std::min(effective_connection_type_,
                         EFFECTIVE_CONNECTION_TYPE_SLOW_2G);
       case NetworkChangeNotifier::CONNECTION_4G:
+      case NetworkChangeNotifier::CONNECTION_5G:
       case NetworkChangeNotifier::CONNECTION_WIFI:
         return std::min(effective_connection_type_,
                         EFFECTIVE_CONNECTION_TYPE_2G);
@@ -947,6 +996,7 @@ NetworkQualityEstimator::GetCappedECTBasedOnSignalStrength() const {
         return std::min(effective_connection_type_,
                         EFFECTIVE_CONNECTION_TYPE_2G);
       case NetworkChangeNotifier::CONNECTION_4G:
+      case NetworkChangeNotifier::CONNECTION_5G:
       case NetworkChangeNotifier::CONNECTION_WIFI:
         return std::min(effective_connection_type_,
                         EFFECTIVE_CONNECTION_TYPE_3G);
@@ -965,6 +1015,7 @@ NetworkQualityEstimator::GetCappedECTBasedOnSignalStrength() const {
         return std::min(effective_connection_type_,
                         EFFECTIVE_CONNECTION_TYPE_3G);
       case NetworkChangeNotifier::CONNECTION_4G:
+      case NetworkChangeNotifier::CONNECTION_5G:
       case NetworkChangeNotifier::CONNECTION_WIFI:
         return std::min(effective_connection_type_,
                         EFFECTIVE_CONNECTION_TYPE_4G);
@@ -1253,7 +1304,7 @@ nqe::internal::NetworkID NetworkQualityEstimator::GetCurrentNetworkID() const {
   // TODO(tbansal): crbug.com/498068 Add NetworkQualityEstimatorAndroid class
   // that overrides this method on the Android platform.
 
-  return DoGetCurrentNetworkID();
+  return DoGetCurrentNetworkID(params_.get());
 }
 
 bool NetworkQualityEstimator::ReadCachedNetworkQualityEstimate() {
@@ -1630,11 +1681,11 @@ void NetworkQualityEstimator::OnPrefsRead(
   ReadCachedNetworkQualityEstimate();
 }
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 void NetworkQualityEstimator::EnableGetNetworkIdAsynchronously() {
   get_network_id_asynchronously_ = true;
 }
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 base::Optional<base::TimeDelta> NetworkQualityEstimator::GetHttpRTT() const {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);

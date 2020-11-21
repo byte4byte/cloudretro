@@ -35,19 +35,18 @@ import org.chromium.chrome.browser.app.flags.ChromeCachedFlags;
 import org.chromium.chrome.browser.crash.LogcatExtractionRunnable;
 import org.chromium.chrome.browser.download.DownloadManagerService;
 import org.chromium.chrome.browser.flags.ChromeSwitches;
-import org.chromium.chrome.browser.services.GoogleServicesManager;
-import org.chromium.chrome.browser.webapps.ActivityAssigner;
+import org.chromium.chrome.browser.signin.SigninHelper;
 import org.chromium.chrome.browser.webapps.ChromeWebApkHost;
 import org.chromium.components.background_task_scheduler.BackgroundTaskSchedulerFactory;
 import org.chromium.components.crash.browser.ChildProcessCrashObserver;
 import org.chromium.components.minidump_uploader.CrashFileManager;
 import org.chromium.components.module_installer.util.ModuleUtil;
+import org.chromium.components.policy.CombinedPolicyProvider;
 import org.chromium.content_public.browser.BrowserStartupController;
 import org.chromium.content_public.browser.DeviceUtils;
 import org.chromium.content_public.browser.SpeechRecognition;
 import org.chromium.content_public.browser.UiThreadTaskTraits;
 import org.chromium.net.NetworkChangeNotifier;
-import org.chromium.policy.CombinedPolicyProvider;
 import org.chromium.ui.resources.ResourceExtractor;
 
 import java.io.File;
@@ -196,12 +195,10 @@ public class ChromeBrowserInitializer {
     private void warmUpSharedPrefs() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             PostTask.postTask(TaskTraits.BEST_EFFORT_MAY_BLOCK, () -> {
-                ActivityAssigner.warmUpSharedPrefs();
                 DownloadManagerService.warmUpSharedPrefs();
                 BackgroundTaskSchedulerFactory.warmUpSharedPrefs();
             });
         } else {
-            ActivityAssigner.warmUpSharedPrefs();
             DownloadManagerService.warmUpSharedPrefs();
             BackgroundTaskSchedulerFactory.warmUpSharedPrefs();
         }
@@ -260,7 +257,7 @@ public class ChromeBrowserInitializer {
         final ChainedTasks tasks = new ChainedTasks();
         // If full browser process is not going to be launched, it is up to individual service to
         // launch its required components.
-        if (!delegate.startServiceManagerOnly()
+        if (!delegate.startMinimalBrowser()
                 && !ProcessInitializationHandler.getInstance().postNativeInitializationComplete()) {
             tasks.add(UiThreadTaskTraits.BOOTSTRAP,
                     () -> ProcessInitializationHandler.getInstance().initializePostNative());
@@ -303,12 +300,12 @@ public class ChromeBrowserInitializer {
             tasks.add(UiThreadTaskTraits.DEFAULT, this::onFinishNativeInitialization);
         }
 
-        if (!delegate.startServiceManagerOnly()) {
+        if (!delegate.startMinimalBrowser()) {
             tasks.add(UiThreadTaskTraits.DEFAULT, this::onFinishFullBrowserInitialization);
         }
 
         int startupMode =
-                getBrowserStartupController().getStartupMode(delegate.startServiceManagerOnly());
+                getBrowserStartupController().getStartupMode(delegate.startMinimalBrowser());
         tasks.add(UiThreadTaskTraits.DEFAULT, () -> {
             BackgroundTaskSchedulerFactory.getUmaReporter().reportStartupMode(startupMode);
         });
@@ -318,8 +315,7 @@ public class ChromeBrowserInitializer {
             // C++ startup to run asynchonously, and set it up to start the Java queue once
             // it has finished.
             startChromeBrowserProcessesAsync(delegate.shouldStartGpuProcess(),
-                    delegate.startServiceManagerOnly(),
-                    new BrowserStartupController.StartupCallback() {
+                    delegate.startMinimalBrowser(), new BrowserStartupController.StartupCallback() {
                         @Override
                         public void onFailure() {
                             delegate.onStartupFailure(null);
@@ -334,14 +330,17 @@ public class ChromeBrowserInitializer {
             startChromeBrowserProcessesSync();
             tasks.start(true);
         }
+
+        ChromeStartupDelegate startupDelegate = AppHooks.get().createChromeStartupDelegate();
+        startupDelegate.init();
     }
 
     private void startChromeBrowserProcessesAsync(boolean startGpuProcess,
-            boolean startServiceManagerOnly, BrowserStartupController.StartupCallback callback) {
+            boolean startMinimalBrowser, BrowserStartupController.StartupCallback callback) {
         try {
             TraceEvent.begin("ChromeBrowserInitializer.startChromeBrowserProcessesAsync");
             getBrowserStartupController().startBrowserProcessesAsync(
-                    LibraryProcessType.PROCESS_BROWSER, startGpuProcess, startServiceManagerOnly,
+                    LibraryProcessType.PROCESS_BROWSER, startGpuProcess, startMinimalBrowser,
                     callback);
         } finally {
             TraceEvent.end("ChromeBrowserInitializer.startChromeBrowserProcessesAsync");
@@ -358,7 +357,7 @@ public class ChromeBrowserInitializer {
             LibraryPrefetcher.asyncPrefetchLibrariesToMemory();
             getBrowserStartupController().startBrowserProcessesSync(
                     LibraryProcessType.PROCESS_BROWSER, /*singleProcess=*/false);
-            GoogleServicesManager.get();
+            SigninHelper.get();
         } finally {
             TraceEvent.end("ChromeBrowserInitializer.startChromeBrowserProcessesSync");
         }
@@ -431,8 +430,8 @@ public class ChromeBrowserInitializer {
 
         MemoryPressureUma.initializeForBrowser();
 
-        // Needed for field trial metrics to be properly collected in ServiceManager only mode.
-        ChromeCachedFlags.getInstance().cacheServiceManagerOnlyFlags();
+        // Needed for field trial metrics to be properly collected in minimal browser mode.
+        ChromeCachedFlags.getInstance().cacheMinimalBrowserFlags();
 
         ModuleUtil.recordStartupTime();
     }

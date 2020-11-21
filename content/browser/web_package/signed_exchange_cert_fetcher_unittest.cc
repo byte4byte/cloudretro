@@ -50,7 +50,8 @@ class DeferringURLLoaderThrottle final : public blink::URLLoaderThrottle {
       const network::mojom::URLResponseHead& /* response_head */,
       bool* defer,
       std::vector<std::string>* /* to_be_removed_headers */,
-      net::HttpRequestHeaders* /* modified_headers */) override {
+      net::HttpRequestHeaders* /* modified_headers */,
+      net::HttpRequestHeaders* /* modified_cors_exempt_headers */) override {
     will_redirect_request_called_ = true;
     *defer = true;
   }
@@ -87,8 +88,9 @@ class MockURLLoader final : public network::mojom::URLLoader {
       : receiver_(this, std::move(url_loader_receiver)) {}
   ~MockURLLoader() override = default;
 
-  MOCK_METHOD3(FollowRedirect,
+  MOCK_METHOD4(FollowRedirect,
                void(const std::vector<std::string>&,
+                    const net::HttpRequestHeaders&,
                     const net::HttpRequestHeaders&,
                     const base::Optional<GURL>&));
   MOCK_METHOD2(SetPriority,
@@ -151,7 +153,8 @@ void ForwardCertificateCallback(
     SignedExchangeLoadResult* out_result,
     std::unique_ptr<SignedExchangeCertificateChain>* out_cert,
     SignedExchangeLoadResult result,
-    std::unique_ptr<SignedExchangeCertificateChain> cert_chain) {
+    std::unique_ptr<SignedExchangeCertificateChain> cert_chain,
+    net::IPAddress cert_server_ip_address) {
   *out_result = result;
   *called = true;
   *out_cert = std::move(cert_chain);
@@ -223,8 +226,8 @@ class SignedExchangeCertFetcherTest : public testing::Test {
         base::MakeRefCounted<network::WeakWrapperSharedURLLoaderFactory>(
             &mock_loader_factory_),
         std::move(throttles_), url, force_fetch, std::move(callback),
-        nullptr /* devtools_proxy */, nullptr /* reporter */,
-        base::nullopt /* throttling_profile_id */, net::IsolationInfo());
+        nullptr /* devtools_proxy */, base::nullopt /* throttling_profile_id */,
+        net::IsolationInfo());
   }
 
   void CallOnReceiveResponse() {

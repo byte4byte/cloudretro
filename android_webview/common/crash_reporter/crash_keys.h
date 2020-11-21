@@ -12,13 +12,14 @@ namespace crash_keys {
 // reporting server. Returns the size of the union of all keys.
 void InitCrashKeysForWebViewTesting();
 
-extern const char* const kWebViewCrashKeyWhiteList[];
+extern const char* const kWebViewCrashKeyAllowList[];
 
 // Crash Key Name Constants ////////////////////////////////////////////////////
 
 // Application information.
 extern const char kAppPackageName[];
 extern const char kAppPackageVersionCode[];
+extern const char kAppProcessName[];
 
 extern const char kAndroidSdkInt[];
 

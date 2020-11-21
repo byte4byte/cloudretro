@@ -20,11 +20,13 @@ class AppDistributionProvider;
 class BrandedImageProvider;
 class BrowserURLRewriterProvider;
 class ChromeBrowserState;
+class DiscoverFeedProvider;
 class FullscreenProvider;
 class MailtoHandlerProvider;
 class OmahaServiceProvider;
 class OverridesProvider;
 class SpotlightProvider;
+class TextZoomProvider;
 class UserFeedbackProvider;
 class VoiceSearchProvider;
 
@@ -117,6 +119,10 @@ class ChromeBrowserProvider {
   virtual void AddSerializableData(
       web::SerializableUserDataManager* user_data_manager,
       web::WebState* web_state);
+
+  // Whether the embedder might block specific URL.
+  virtual bool MightBlockUrlDuringRestore();
+
   // Allow embedders to block a specific URL.
   virtual bool ShouldBlockUrlDuringRestore(const GURL& url,
                                            web::WebState* web_state);
@@ -172,6 +178,11 @@ class ChromeBrowserProvider {
   // Returns an instance of the Overrides provider;
   virtual OverridesProvider* GetOverridesProvider() const;
 
+  // Returns an instance of the DiscoverFeed provider;
+  virtual DiscoverFeedProvider* GetDiscoverFeedProvider() const;
+
+  virtual TextZoomProvider* GetTextZoomProvider() const;
+
   // Adds and removes observers.
   void AddObserver(Observer* observer);
   void RemoveObserver(Observer* observer);
@@ -183,6 +194,7 @@ class ChromeBrowserProvider {
  private:
   base::ObserverList<Observer, true>::Unchecked observer_list_;
   std::unique_ptr<MailtoHandlerProvider> mailto_handler_provider_;
+  std::unique_ptr<TextZoomProvider> text_zoom_provider_;
 };
 
 }  // namespace ios

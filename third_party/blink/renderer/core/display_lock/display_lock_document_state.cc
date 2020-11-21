@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/core/display_lock/display_lock_document_state.h"
 
+#include "base/trace_event/trace_event.h"
 #include "third_party/blink/renderer/core/display_lock/display_lock_context.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element.h"
@@ -16,10 +17,11 @@ namespace blink {
 DisplayLockDocumentState::DisplayLockDocumentState(Document* document)
     : document_(document) {}
 
-void DisplayLockDocumentState::Trace(Visitor* visitor) {
+void DisplayLockDocumentState::Trace(Visitor* visitor) const {
   visitor->Trace(document_);
   visitor->Trace(intersection_observer_);
   visitor->Trace(display_lock_contexts_);
+  visitor->Trace(forced_node_info_);
 }
 
 void DisplayLockDocumentState::AddDisplayLockContext(
@@ -80,19 +82,25 @@ void DisplayLockDocumentState::UnregisterDisplayLockActivationObservation(
 
 IntersectionObserver& DisplayLockDocumentState::EnsureIntersectionObserver() {
   if (!intersection_observer_) {
-    // Use kDeliverDuringPostLifecycleSteps method, since we delay delivering
-    // the signal to the display lock context until the next frame's rAF
-    // callbacks have run. This means for the duration of the idle time that
-    // follows, we won't dirty layout.
+    // Use kDeliverDuringPostLayoutSteps method, since we will either notify the
+    // display lock synchronously and re-run layout, or delay delivering the
+    // signal to the display lock context until the next frame's rAF callbacks
+    // have run. This means for the duration of the idle time that follows, we
+    // should always have clean layout.
     //
-    // Note that we use 50% margin (on the viewport) so that we get the
+    // Note that we use 150% margin (on the viewport) so that we get the
     // observation before the element enters the viewport.
     intersection_observer_ = IntersectionObserver::Create(
-        {Length::Percent(50.f)}, {std::numeric_limits<float>::min()}, document_,
+        {Length::Percent(150.f)}, {std::numeric_limits<float>::min()},
+        document_,
         WTF::BindRepeating(
             &DisplayLockDocumentState::ProcessDisplayLockActivationObservation,
             WrapWeakPersistent(this)),
-        IntersectionObserver::kDeliverDuringPostLifecycleSteps);
+        LocalFrameUkmAggregator::kDisplayLockIntersectionObserver,
+        IntersectionObserver::kDeliverDuringPostLayoutSteps,
+        IntersectionObserver::kFractionOfTarget, 0 /* delay */,
+        false /* track_visibility */, false /* always report_root_bounds */,
+        IntersectionObserver::kApplyMarginToTarget);
   }
   return *intersection_observer_;
 }
@@ -101,20 +109,46 @@ void DisplayLockDocumentState::ProcessDisplayLockActivationObservation(
     const HeapVector<Member<IntersectionObserverEntry>>& entries) {
   DCHECK(document_);
   DCHECK(document_->View());
+  bool had_asynchronous_notifications = false;
   for (auto& entry : entries) {
     auto* context = entry->target()->GetDisplayLockContext();
     DCHECK(context);
-    if (entry->isIntersecting()) {
-      document_->View()->EnqueueStartOfLifecycleTask(
-          WTF::Bind(&DisplayLockContext::NotifyIsIntersectingViewport,
-                    WrapWeakPersistent(context)));
+    if (context->HadAnyViewportIntersectionNotifications()) {
+      if (entry->isIntersecting()) {
+        document_->View()->EnqueueStartOfLifecycleTask(
+            WTF::Bind(&DisplayLockContext::NotifyIsIntersectingViewport,
+                      WrapWeakPersistent(context)));
+      } else {
+        document_->View()->EnqueueStartOfLifecycleTask(
+            WTF::Bind(&DisplayLockContext::NotifyIsNotIntersectingViewport,
+                      WrapWeakPersistent(context)));
+      }
+      had_asynchronous_notifications = true;
     } else {
-      document_->View()->EnqueueStartOfLifecycleTask(
-          WTF::Bind(&DisplayLockContext::NotifyIsNotIntersectingViewport,
-                    WrapWeakPersistent(context)));
+      if (entry->isIntersecting())
+        context->NotifyIsIntersectingViewport();
+      else
+        context->NotifyIsNotIntersectingViewport();
     }
   }
-  document_->View()->ScheduleAnimation();
+
+  // If we had any asynchronous notifications, they would be delivered before
+  // the next lifecycle. Ensure to schedule a frame so that this process
+  // happens.
+  if (had_asynchronous_notifications) {
+    // Note that since we're processing this from within the lifecycle, post a
+    // task to schedule a new frame (direct call would be ignored inside a
+    // lifecycle).
+    document_->GetTaskRunner(TaskType::kInternalFrameLifecycleControl)
+        ->PostTask(FROM_HERE,
+                   WTF::Bind(&DisplayLockDocumentState::ScheduleAnimation,
+                             WrapWeakPersistent(this)));
+  }
+}
+
+void DisplayLockDocumentState::ScheduleAnimation() {
+  if (document_ && document_->View())
+    document_->View()->ScheduleAnimation();
 }
 
 DisplayLockDocumentState::ScopedForceActivatableDisplayLocks
@@ -134,14 +168,14 @@ void DisplayLockDocumentState::NotifySelectionRemoved() {
 void DisplayLockDocumentState::BeginNodeForcedScope(
     const Node* node,
     bool self_was_forced,
-    DisplayLockUtilities::ScopedChainForcedUpdate* scope) {
-  forced_node_info_.emplace_back(node, self_was_forced, scope);
+    DisplayLockUtilities::ScopedForcedUpdate::Impl* impl) {
+  forced_node_info_.push_back(ForcedNodeInfo(node, self_was_forced, impl));
 }
 
 void DisplayLockDocumentState::EndNodeForcedScope(
-    DisplayLockUtilities::ScopedChainForcedUpdate* scope) {
+    DisplayLockUtilities::ScopedForcedUpdate::Impl* impl) {
   for (wtf_size_t i = 0; i < forced_node_info_.size(); ++i) {
-    if (forced_node_info_[i].scope == scope) {
+    if (forced_node_info_[i].chain == impl) {
       forced_node_info_.EraseAt(i);
       return;
     }
@@ -165,7 +199,7 @@ void DisplayLockDocumentState::ForceLockIfNeededForInfo(
           : FlatTreeTraversal::AncestorsOf(*forced_node_info->node);
   for (Node& ancestor : ancestor_view) {
     if (element == &ancestor) {
-      forced_node_info->scope->AddScopedForcedUpdate(
+      forced_node_info->chain->AddForcedUpdateScopeForContext(
           element->GetDisplayLockContext());
       break;
     }

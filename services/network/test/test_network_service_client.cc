@@ -33,14 +33,15 @@ void TestNetworkServiceClient::OnRawRequest(
     int32_t process_id,
     int32_t routing_id,
     const std::string& devtools_request_id,
-    const net::CookieStatusList& cookies_with_status,
-    std::vector<network::mojom::HttpRawHeaderPairPtr> headers) {}
+    const net::CookieAccessResultList& cookies_with_access_result,
+    std::vector<network::mojom::HttpRawHeaderPairPtr> headers,
+    network::mojom::ClientSecurityStatePtr client_security_state) {}
 
 void TestNetworkServiceClient::OnRawResponse(
     int32_t process_id,
     int32_t routing_id,
     const std::string& devtools_request_id,
-    const net::CookieAndLineStatusList& cookies_with_status,
+    const net::CookieAndLineAccessResultList& cookies_with_access_result,
     std::vector<network::mojom::HttpRawHeaderPairPtr> headers,
     const base::Optional<std::string>& raw_response_headers) {}
 
@@ -63,8 +64,5 @@ void TestNetworkServiceClient::OnCorsPreflightRequestCompleted(
     int32_t routing_id,
     const base::UnguessableToken& devtool_request_id,
     const network::URLLoaderCompletionStatus& status) {}
-
-void TestNetworkServiceClient::LogCrossOriginFetchFromContentScript3(
-    const std::string& isolated_world_host) {}
 
 }  // namespace network

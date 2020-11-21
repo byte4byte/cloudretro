@@ -38,6 +38,7 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/browser/bookmark_utils.h"
+#include "content/public/test/browser_test.h"
 #include "ui/views/focus/focus_manager.h"
 #include "ui/views/test/widget_test.h"
 #include "ui/views/view.h"
@@ -151,7 +152,8 @@ void ToolbarViewInteractiveUITest::SetUpOnMainThread() {
 }
 
 // TODO(pkasting): https://crbug.com/939621 Fails on Mac.
-#if defined(OS_MACOSX)
+// Also flaky on linux-chromeos-chrome crbug.com/1076875.
+#if defined(OS_MAC) || defined(OS_LINUX) || defined(OS_CHROMEOS)
 #define MAYBE_TestAppMenuOpensOnDrag DISABLED_TestAppMenuOpensOnDrag
 #else
 #define MAYBE_TestAppMenuOpensOnDrag TestAppMenuOpensOnDrag
@@ -166,11 +168,13 @@ IN_PROC_BROWSER_TEST_F(ToolbarViewInteractiveUITest,
   // Set up observers that will drive the test along.
   AppMenuButton* const app_menu_button = GetAppMenuButton();
   EXPECT_FALSE(app_menu_button->IsMenuShowing());
-  ScopedObserver<views::Widget, views::WidgetObserver> widget_observer(this);
-  widget_observer.Add(
+  base::ScopedObservation<views::Widget, views::WidgetObserver>
+      widget_observation(this);
+  widget_observation.Observe(
       BrowserView::GetBrowserViewForBrowser(browser())->GetWidget());
-  ScopedObserver<AppMenuButton, AppMenuButtonObserver> button_observer(this);
-  button_observer.Add(app_menu_button);
+  base::ScopedObservation<AppMenuButton, AppMenuButtonObserver>
+      button_observation(this);
+  button_observation.Observe(app_menu_button);
 
   // Set up the task runner to use for posting drag actions.
   // TODO(devlin): This is basically ViewEventTestBase::GetDragTaskRunner().  In

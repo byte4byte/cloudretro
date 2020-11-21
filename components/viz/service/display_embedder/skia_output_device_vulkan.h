@@ -9,8 +9,9 @@
 #include <vector>
 
 #include "base/macros.h"
+#include "base/memory/weak_ptr.h"
 #include "base/optional.h"
-#include "base/util/type_safety/pass_key.h"
+#include "base/types/pass_key.h"
 #include "build/build_config.h"
 #include "components/viz/service/display_embedder/skia_output_device.h"
 #include "gpu/ipc/common/surface_handle.h"
@@ -27,7 +28,7 @@ class VulkanContextProvider;
 class SkiaOutputDeviceVulkan final : public SkiaOutputDevice {
  public:
   SkiaOutputDeviceVulkan(
-      util::PassKey<SkiaOutputDeviceVulkan>,
+      base::PassKey<SkiaOutputDeviceVulkan>,
       VulkanContextProvider* context_provider,
       gpu::SurfaceHandle surface_handle,
       gpu::MemoryTracker* memory_tracker,
@@ -44,6 +45,7 @@ class SkiaOutputDeviceVulkan final : public SkiaOutputDevice {
   gpu::SurfaceHandle GetChildSurfaceHandle();
 #endif
   // SkiaOutputDevice implementation:
+  void Submit(base::OnceClosure callback) override;
   bool Reshape(const gfx::Size& size,
                float device_scale_factor,
                const gfx::ColorSpace& color_space,
@@ -69,7 +71,11 @@ class SkiaOutputDeviceVulkan final : public SkiaOutputDevice {
   };
 
   bool Initialize();
-  void CreateSkSurface();
+  bool RecreateSwapChain(const gfx::Size& size,
+                         sk_sp<SkColorSpace> color_space,
+                         gfx::OverlayTransform transform);
+  void OnPostSubBufferFinished(std::vector<ui::LatencyInfo> latency_info,
+                               gfx::SwapResult result);
 
   VulkanContextProvider* const context_provider_;
 
@@ -85,7 +91,15 @@ class SkiaOutputDeviceVulkan final : public SkiaOutputDevice {
   // SkSurfaces for swap chain images.
   std::vector<SkSurfaceSizePair> sk_surface_size_pairs_;
 
-  sk_sp<SkColorSpace> sk_color_space_;
+  sk_sp<SkColorSpace> color_space_;
+
+  // The swapchain is new created without a frame which convers the whole area
+  // of it.
+  bool is_new_swap_chain_ = true;
+
+  std::vector<gfx::Rect> damage_of_images_;
+
+  base::WeakPtrFactory<SkiaOutputDeviceVulkan> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(SkiaOutputDeviceVulkan);
 };

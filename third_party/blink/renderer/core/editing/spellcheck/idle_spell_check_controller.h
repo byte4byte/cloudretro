@@ -31,10 +31,9 @@ class CORE_EXPORT IdleSpellCheckController final
     : public GarbageCollected<IdleSpellCheckController>,
       public ExecutionContextLifecycleObserver {
   DISALLOW_COPY_AND_ASSIGN(IdleSpellCheckController);
-  USING_GARBAGE_COLLECTED_MIXIN(IdleSpellCheckController);
 
  public:
-  explicit IdleSpellCheckController(LocalDOMWindow&);
+  explicit IdleSpellCheckController(LocalDOMWindow&, SpellCheckRequester&);
   ~IdleSpellCheckController();
 
   enum class State {
@@ -60,17 +59,15 @@ class CORE_EXPORT IdleSpellCheckController final
   void SkipColdModeTimerForTesting();
   int IdleCallbackHandle() const { return idle_callback_handle_; }
 
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
 
  private:
   class IdleCallback;
 
   LocalDOMWindow& GetWindow() const;
 
-  // Returns whether there is an active document to work on.
-  bool IsAvailable() const { return GetExecutionContext(); }
-
-  // Return the document to work on. Callable only when IsAvailable() is true.
+  // Return the document to work on. Callable only when GetExecutionContext()
+  // is non-null.
   Document& GetDocument() const;
 
   // Returns whether spell checking is globally enabled.
@@ -99,6 +96,7 @@ class CORE_EXPORT IdleSpellCheckController final
   int idle_callback_handle_;
   uint64_t last_processed_undo_step_sequence_;
   const Member<ColdModeSpellCheckRequester> cold_mode_requester_;
+  Member<SpellCheckRequester> spell_check_requeseter_;
   TaskHandle cold_mode_timer_;
 
   friend class IdleSpellCheckControllerTest;

@@ -5,10 +5,12 @@
 #include "base/test/scoped_feature_list.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/common/content_features.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/content_browser_test_utils.h"
 #include "content/shell/browser/shell.h"
+#include "third_party/blink/public/common/input/synthetic_web_input_event_builders.h"
 #include "third_party/blink/public/common/input/web_input_event.h"
 
 using blink::WebInputEvent;
@@ -81,7 +83,7 @@ class WheelEventListenerBrowserTest : public ContentBrowserTest {
     double x = 10;
     double y = 10;
     blink::WebMouseWheelEvent wheel_event =
-        SyntheticWebMouseWheelEventBuilder::Build(
+        blink::SyntheticWebMouseWheelEventBuilder::Build(
             x, y, x, y, -20, -20, 0,
             ui::ScrollGranularity::kScrollByPrecisePixel);
     wheel_event.phase = blink::WebMouseWheelEvent::kPhaseBegan;

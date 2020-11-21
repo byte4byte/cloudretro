@@ -7,14 +7,15 @@
 
 #include <vulkan/vulkan.h>
 
+#include "base/component_export.h"
 #include "base/files/scoped_file.h"
 #include "base/optional.h"
-#include "base/util/type_safety/pass_key.h"
+#include "base/types/pass_key.h"
 #include "build/build_config.h"
 #include "gpu/ipc/common/vulkan_ycbcr_info.h"
-#include "gpu/vulkan/vulkan_export.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/gpu_memory_buffer.h"
+#include "ui/gfx/native_pixmap.h"
 
 #if defined(OS_WIN)
 #include "base/win/scoped_handle.h"
@@ -28,9 +29,9 @@ namespace gpu {
 
 class VulkanDeviceQueue;
 
-class VULKAN_EXPORT VulkanImage {
+class COMPONENT_EXPORT(VULKAN) VulkanImage {
  public:
-  explicit VulkanImage(util::PassKey<VulkanImage> pass_key);
+  explicit VulkanImage(base::PassKey<VulkanImage> pass_key);
   ~VulkanImage();
 
   VulkanImage(VulkanImage&) = delete;
@@ -74,7 +75,9 @@ class VULKAN_EXPORT VulkanImage {
       VkImageTiling image_tiling,
       VkDeviceSize device_size,
       uint32_t memory_type_index,
-      base::Optional<VulkanYCbCrInfo>& ycbcr_info);
+      base::Optional<VulkanYCbCrInfo>& ycbcr_info,
+      VkImageUsageFlags usage,
+      VkImageCreateFlags flags);
 
   void Destroy();
 
@@ -97,6 +100,7 @@ class VULKAN_EXPORT VulkanImage {
   const gfx::Size& size() const { return size_; }
   VkFormat format() const { return format_; }
   VkImageCreateFlags flags() const { return flags_; }
+  VkImageUsageFlags usage() const { return usage_; }
   VkDeviceSize device_size() const { return device_size_; }
   uint32_t memory_type_index() const { return memory_type_index_; }
   VkImageTiling image_tiling() const { return image_tiling_; }
@@ -110,6 +114,12 @@ class VULKAN_EXPORT VulkanImage {
   VkImage image() const { return image_; }
   VkDeviceMemory device_memory() const { return device_memory_; }
   VkExternalMemoryHandleTypeFlags handle_types() const { return handle_types_; }
+  void set_native_pixmap(scoped_refptr<gfx::NativePixmap> pixmap) {
+    native_pixmap_ = std::move(pixmap);
+  }
+  const scoped_refptr<gfx::NativePixmap>& native_pixmap() const {
+    return native_pixmap_;
+  }
 
  private:
   bool Initialize(VulkanDeviceQueue* device_queue,
@@ -140,6 +150,7 @@ class VULKAN_EXPORT VulkanImage {
   gfx::Size size_;
   VkFormat format_ = VK_FORMAT_UNDEFINED;
   VkImageCreateFlags flags_ = 0;
+  VkImageUsageFlags usage_ = 0;
   VkDeviceSize device_size_ = 0;
   uint32_t memory_type_index_ = 0;
   VkImageTiling image_tiling_ = VK_IMAGE_TILING_OPTIMAL;
@@ -149,6 +160,7 @@ class VULKAN_EXPORT VulkanImage {
   VkImage image_ = VK_NULL_HANDLE;
   VkDeviceMemory device_memory_ = VK_NULL_HANDLE;
   VkExternalMemoryHandleTypeFlags handle_types_ = 0;
+  scoped_refptr<gfx::NativePixmap> native_pixmap_;
 };
 
 }  // namespace gpu

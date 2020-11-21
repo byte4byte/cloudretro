@@ -6,9 +6,7 @@
 
 #include <utility>
 
-#include "base/logging.h"
 #include "mojo/public/cpp/bindings/associated_interface_ptr_info.h"
-#include "mojo/public/cpp/bindings/associated_interface_request.h"
 
 namespace mojo {
 

@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_NAVIGATOR_UA_DATA_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_NAVIGATOR_UA_DATA_H_
 
+#include "third_party/blink/public/common/user_agent/user_agent_metadata.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_navigator_ua_brand_version.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context_lifecycle_observer.h"
@@ -18,7 +19,6 @@ class ScriptState;
 
 class NavigatorUAData : public ScriptWrappable, ExecutionContextClient {
   DEFINE_WRAPPERTYPEINFO();
-  USING_GARBAGE_COLLECTED_MIXIN(NavigatorUAData);
 
  public:
   static NavigatorUAData* Create(ExecutionContext* context) {
@@ -27,7 +27,7 @@ class NavigatorUAData : public ScriptWrappable, ExecutionContextClient {
 
   explicit NavigatorUAData(ExecutionContext* context);
 
-  void AddBrand(const String& brand, const String& version);
+  void SetBrandVersionList(const UserAgentBrandList& brand_version_list);
   void SetMobile(bool mobile);
   void SetPlatform(const String& brand, const String& version);
   void SetArchitecture(const String& architecture);
@@ -39,7 +39,7 @@ class NavigatorUAData : public ScriptWrappable, ExecutionContextClient {
   bool mobile() const;
   ScriptPromise getHighEntropyValues(ScriptState*, Vector<String>&) const;
 
-  void Trace(Visitor* visitor) final;
+  void Trace(Visitor* visitor) const final;
 
  private:
   HeapVector<Member<NavigatorUABrandVersion>> brand_set_;
@@ -50,6 +50,8 @@ class NavigatorUAData : public ScriptWrappable, ExecutionContextClient {
   String architecture_;
   String model_;
   String ua_full_version_;
+
+  void AddBrandVersion(const String& brand, const String& version);
 };
 
 }  // namespace blink

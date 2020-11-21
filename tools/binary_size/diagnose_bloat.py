@@ -17,7 +17,6 @@ from contextlib import contextmanager
 import distutils.spawn
 import json
 import logging
-import multiprocessing
 import os
 import re
 import shutil
@@ -40,7 +39,6 @@ _LLVM_TOOLS_DIR = os.path.join(
 _CLANG_UPDATE_PATH = os.path.join(_SRC_ROOT, 'tools', 'clang', 'scripts',
                                   'update.py')
 _GN_PATH = os.path.join(_SRC_ROOT, 'third_party', 'depot_tools', 'gn')
-_NINJA_PATH = os.path.join(_SRC_ROOT, 'third_party', 'depot_tools', 'ninja')
 
 
 _DiffResult = collections.namedtuple('DiffResult', ['name', 'value', 'units'])
@@ -129,8 +127,7 @@ class ResourceSizesDiff(BaseDiff):
   _AGGREGATE_SECTIONS = (
       'InstallBreakdown', 'Breakdown', 'MainLibInfo', 'Uncompressed')
 
-  def __init__(self, apk_name, filename='results-chart.json'):
-    self._apk_name = apk_name
+  def __init__(self, filename='results-chart.json'):
     self._diff = None  # Set by |ProduceDiff()|
     self._filename = filename
     super(ResourceSizesDiff, self).__init__('Resource Sizes Diff')
@@ -224,8 +221,6 @@ class _BuildHelper(object):
     self.enable_chrome_android_internal = args.enable_chrome_android_internal
     self.extra_gn_args_str = args.gn_args
     self.apply_patch = args.extra_rev
-    self.max_jobs = args.max_jobs
-    self.max_load_average = args.max_load_average
     self.output_directory = args.output_directory
     self.target = args.target
     self.target_os = args.target_os
@@ -289,10 +284,18 @@ class _BuildHelper(object):
     return self.apk_name + '.size'
 
   def _SetDefaults(self):
-    has_goma_dir = os.path.exists(os.path.join(os.path.expanduser('~'), 'goma'))
-    self.use_goma = self.use_goma and has_goma_dir
-    self.max_load_average = (self.max_load_average or
-                             str(multiprocessing.cpu_count()))
+    if self.use_goma:
+      try:
+        goma_is_running = not subprocess.call(['goma_ctl', 'status'],
+                                              stdout=subprocess.DEVNULL,
+                                              stderr=subprocess.DEVNULL)
+        self.use_goma = self.use_goma and goma_is_running
+      except Exception:
+        # goma_ctl not in PATH.
+        self.use_goma = False
+
+      if not self.use_goma:
+        logging.warning('GOMA not running. Setting use_goma=false.')
 
     has_internal = os.path.exists(
         os.path.join(os.path.dirname(_SRC_ROOT), 'src-internal'))
@@ -307,14 +310,6 @@ class _BuildHelper(object):
       self.extra_gn_args_str = (
           'is_cfi=false generate_linker_map=true ' + self.extra_gn_args_str)
     self.extra_gn_args_str = ' ' + self.extra_gn_args_str.strip()
-
-    if not self.max_jobs:
-      if self.use_goma:
-        self.max_jobs = '10000'
-      elif has_internal:
-        self.max_jobs = '500'
-      else:
-        self.max_jobs = '50'
 
     if not self.target:
       if self.IsLinux():
@@ -345,9 +340,7 @@ class _BuildHelper(object):
     return [_GN_PATH, 'gen', self.output_directory, '--args=%s' % gn_args]
 
   def _GenNinjaCmd(self):
-    cmd = [_NINJA_PATH, '-C', self.output_directory]
-    cmd += ['-j', self.max_jobs] if self.max_jobs else []
-    cmd += ['-l', self.max_load_average] if self.max_load_average else []
+    cmd = ['autoninja', '-C', self.output_directory]
     cmd += [self.target]
     return cmd
 
@@ -428,15 +421,17 @@ class _BuildArchive(object):
       logging.info('Found existing .size file')
       shutil.copy(existing_size_file, self.archived_size_path)
     else:
-      supersize_cmd = [
-          supersize_path, 'archive', self.archived_size_path, '--elf-file',
-          self.build.abs_main_lib_path, '--output-directory',
-          self.build.output_directory
-      ]
+      supersize_cmd = [supersize_path, 'archive', self.archived_size_path]
+      if self.build.IsAndroid():
+        supersize_cmd += [
+            '-f', self.build.abs_apk_path, '--aux-elf-file',
+            self.build.abs_main_lib_path
+        ]
+      else:
+        supersize_cmd += ['--elf-file', self.build.abs_main_lib_path]
+      supersize_cmd += ['--output-directory', self.build.output_directory]
       if tool_prefix:
         supersize_cmd += ['--tool-prefix', tool_prefix]
-      if self.build.IsAndroid():
-        supersize_cmd += ['-f', self.build.abs_apk_path]
       logging.info('Creating .size file')
       _RunCmd(supersize_cmd)
 
@@ -484,7 +479,7 @@ class _DiffArchiveManager(object):
     logging.info('See detailed diff results here: %s',
                  os.path.relpath(diff_path))
 
-  def GenerateHtmlReport(self, before_id, after_id):
+  def GenerateHtmlReport(self, before_id, after_id, is_internal=False):
     """Generate HTML report given two build archives."""
     before = self.build_archives[before_id]
     after = self.build_archives[after_id]
@@ -505,10 +500,29 @@ class _DiffArchiveManager(object):
 
     logging.info('Creating .sizediff')
     _RunCmd(supersize_cmd)
+    oneoffs_dir = 'oneoffs'
+    visibility = '-a public-read '
+    if is_internal:
+      oneoffs_dir = 'private-oneoffs'
+      visibility = ''
 
-    logging.info('View using a local server via: %s start_server %s',
-      os.path.relpath(supersize_path),
-      os.path.relpath(report_path))
+    unique_name = '{}_{}.sizediff'.format(before.rev, after.rev)
+    msg = (
+        '\n=====================\n'
+        'Saved locally to {local}. To view, upload to '
+        'https://chrome-supersize.firebaseapp.com/viewer.html.\n'
+        'To share, run:\n'
+        '> gsutil.py cp {visibility}{local} '
+        'gs://chrome-supersize/{oneoffs_dir}/{unique_name}\n\n'
+        'Then view it at https://chrome-supersize.firebaseapp.com/viewer.html'
+        '?load_url=https://storage.googleapis.com/chrome-supersize/'
+        '{oneoffs_dir}/{unique_name}'
+        '\n=====================\n')
+    msg = msg.format(local=os.path.relpath(report_path),
+                     unique_name=unique_name,
+                     visibility=visibility,
+                     oneoffs_dir=oneoffs_dir)
+    logging.info(msg)
 
   def Summarize(self):
     path = os.path.join(self.archive_dir, 'last_diff_summary.txt')
@@ -837,13 +851,6 @@ def main():
                            ', and Ninja/GN output.')
 
   build_group = parser.add_argument_group('build arguments')
-  build_group.add_argument('-j',
-                           dest='max_jobs',
-                           help='Run N jobs in parallel.')
-  build_group.add_argument('-l',
-                           dest='max_load_average',
-                           help='Do not start new jobs if the load average is '
-                           'greater than N.')
   build_group.add_argument('--no-goma',
                            action='store_false',
                            dest='use_goma',
@@ -897,9 +904,7 @@ def main():
     supersize_path, tool_prefix = paths
     diffs = [NativeDiff(build.size_name, supersize_path)]
     if build.IsAndroid():
-      diffs +=  [
-          ResourceSizesDiff(build.apk_name)
-      ]
+      diffs += [ResourceSizesDiff()]
     diff_mngr = _DiffArchiveManager(revs, args.archive_directory, diffs, build,
                                     subrepo, args.unstripped)
     consecutive_failures = 0
@@ -928,7 +933,8 @@ def main():
       if i != 0:
         diff_mngr.MaybeDiff(i - 1, i)
 
-    diff_mngr.GenerateHtmlReport(0, i)
+    diff_mngr.GenerateHtmlReport(
+        0, i, is_internal=args.enable_chrome_android_internal)
     diff_mngr.Summarize()
 
 

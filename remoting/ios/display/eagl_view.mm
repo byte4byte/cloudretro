@@ -14,8 +14,8 @@
 
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
-#include "base/logging.h"
+#include "base/callback_helpers.h"
+#include "base/check_op.h"
 #include "base/threading/thread_checker.h"
 #include "base/threading/thread_task_runner_handle.h"
 

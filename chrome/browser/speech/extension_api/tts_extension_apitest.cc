@@ -16,11 +16,11 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/speech/extension_api/tts_engine_extension_api.h"
 #include "chrome/browser/speech/extension_api/tts_extension_api.h"
-#include "chrome/browser/speech/tts_controller_delegate_impl.h"
 #include "chrome/common/chrome_switches.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/tts_controller.h"
 #include "content/public/browser/tts_platform.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_system.h"
@@ -50,7 +50,8 @@ class MockTtsPlatformImpl : public content::TtsPlatform {
  public:
   MockTtsPlatformImpl() : should_fake_get_voices_(false) {}
 
-  bool PlatformImplAvailable() override { return true; }
+  bool PlatformImplSupported() override { return true; }
+  bool PlatformImplInitialized() override { return true; }
 
   void WillSpeakUtteranceWithVoice(
       content::TtsUtterance* utterance,
@@ -115,6 +116,8 @@ class MockTtsPlatformImpl : public content::TtsPlatform {
     voice.events.insert(content::TTS_EVENT_END);
     voices->push_back(voice);
   }
+
+  void Shutdown() override {}
 
   void set_should_fake_get_voices(bool val) { should_fake_get_voices_ = val; }
 
@@ -256,6 +259,7 @@ class TtsApiTest : public ExtensionApiTest {
     content::TtsController* tts_controller =
         content::TtsController::GetInstance();
     tts_controller->SetTtsPlatform(&mock_platform_impl_);
+    TtsExtensionEngine::GetInstance()->DisableBuiltInTTSEngineForTesting();
     tts_controller->SetTtsEngineDelegate(TtsExtensionEngine::GetInstance());
   }
 
@@ -309,6 +313,10 @@ IN_PROC_BROWSER_TEST_F(TtsApiTest, PlatformSpeakOptionalArgs) {
       .WillOnce(Return(true));
   EXPECT_CALL(mock_platform_impl_, DoSpeak(_, "Echo", _, _, _))
       .WillOnce(Return());
+
+  // Called when the extension unloads.
+  EXPECT_CALL(mock_platform_impl_, StopSpeaking()).WillOnce(Return(false));
+
   ASSERT_TRUE(RunExtensionTest("tts/optional_args")) << message_;
 }
 
@@ -445,9 +453,11 @@ IN_PROC_BROWSER_TEST_F(TtsApiTest, PlatformPauseResume) {
 
 IN_PROC_BROWSER_TEST_F(TtsApiTest, PlatformPauseSpeakNoEnqueue) {
   // While paused, one utterance is enqueued, and then a second utterance that
-  // cannot be enqueued cancels both.
+  // cannot be enqueued cancels only the first.
   InSequence s;
   EXPECT_CALL(mock_platform_impl_, StopSpeaking()).WillOnce(Return(true));
+  EXPECT_CALL(mock_platform_impl_, DoSpeak(_, "text 2", _, _, _));
+  EXPECT_CALL(mock_platform_impl_, StopSpeaking()).WillOnce(Return(false));
   ASSERT_TRUE(RunExtensionTest("tts/pause_speak_no_enqueue")) << message_;
 }
 

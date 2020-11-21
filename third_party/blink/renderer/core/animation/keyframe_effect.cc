@@ -34,6 +34,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/v8_object_builder.h"
 #include "third_party/blink/renderer/core/animation/animation_input_helpers.h"
 #include "third_party/blink/renderer/core/animation/animation_utils.h"
+#include "third_party/blink/renderer/core/animation/compositor_animations.h"
 #include "third_party/blink/renderer/core/animation/css/compositor_keyframe_transform.h"
 #include "third_party/blink/renderer/core/animation/effect_input.h"
 #include "third_party/blink/renderer/core/animation/element_animations.h"
@@ -48,6 +49,7 @@
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
 #include "third_party/blink/renderer/core/svg/svg_element.h"
+#include "third_party/blink/renderer/platform/animation/compositor_animation.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
@@ -122,8 +124,8 @@ KeyframeEffect* KeyframeEffect::Create(
     effect->target_pseudo_ = pseudo;
     if (element) {
       element->GetDocument().UpdateStyleAndLayoutTreeForNode(element);
-      effect->effect_target_ =
-          element->GetPseudoElement(CSSSelector::ParsePseudoId(pseudo));
+      effect->effect_target_ = element->GetPseudoElement(
+          CSSSelector::ParsePseudoId(pseudo, element));
     }
   }
   return effect;
@@ -172,6 +174,8 @@ KeyframeEffect::KeyframeEffect(Element* target,
     DCHECK(!target_element_->IsPseudoElement());
     target_pseudo_ = target->tagName();
   }
+
+  CountAnimatedProperties();
 }
 
 KeyframeEffect::~KeyframeEffect() = default;
@@ -208,7 +212,8 @@ void KeyframeEffect::RefreshTarget() {
   } else {
     target_element_->GetDocument().UpdateStyleAndLayoutTreeForNode(
         target_element_);
-    PseudoId pseudoId = CSSSelector::ParsePseudoId(target_pseudo_);
+    PseudoId pseudoId =
+        CSSSelector::ParsePseudoId(target_pseudo_, target_element_);
     new_target = target_element_->GetPseudoElement(pseudoId);
   }
 
@@ -246,21 +251,9 @@ HeapVector<ScriptValue> KeyframeEffect::getKeyframes(
   // the given keyframe.
   //
   // https://w3c.github.io/web-animations/#dom-keyframeeffectreadonly-getkeyframes
-  const KeyframeVector& keyframes = model_->GetFrames();
-
-  // Lazy resolution of values for missing properties.
-  // TODO(crbug.com/1070627): Consider using a specialized model for CSS
-  // animations, and moving this handling to an overloaded version of
-  // getKeyframes.
-  PropertyHandleSet all_properties = model_->Properties();
-  MissingPropertyValueMap missing_property_value_map;
-  for (wtf_size_t i = 0; i < keyframes.size(); i++) {
-    if (keyframes[i]->HasMissingProperties()) {
-      ResolveUnderlyingPropertyValues(all_properties,
-                                      missing_property_value_map);
-      break;
-    }
-  }
+  KeyframeVector keyframes = ignore_css_keyframes_
+                                 ? model_->GetFrames()
+                                 : model_->GetComputedKeyframes(EffectTarget());
 
   Vector<double> computed_offsets =
       KeyframeEffectModelBase::GetComputedOffsets(keyframes);
@@ -270,10 +263,6 @@ HeapVector<ScriptValue> KeyframeEffect::getKeyframes(
     V8ObjectBuilder object_builder(script_state);
     keyframes[i]->AddKeyframePropertiesToV8Object(object_builder, target());
     object_builder.Add("computedOffset", computed_offsets[i]);
-    if (keyframes[i]->HasMissingProperties()) {
-      AddMissingProperties(missing_property_value_map, all_properties,
-                           keyframes[i]->Properties(), object_builder);
-    }
     computed_keyframes.push_back(object_builder.GetScriptValue());
   }
 
@@ -307,6 +296,7 @@ void KeyframeEffect::SetKeyframes(StringKeyframeVector keyframes) {
   // potentially affect the effect owner.
   ClearEffects();
   InvalidateAndNotifyOwner();
+  CountAnimatedProperties();
 }
 
 bool KeyframeEffect::Affects(const PropertyHandle& property) const {
@@ -324,7 +314,8 @@ void KeyframeEffect::NotifySampledEffectRemovedFromEffectStack() {
 CompositorAnimations::FailureReasons
 KeyframeEffect::CheckCanStartAnimationOnCompositor(
     const PaintArtifactCompositor* paint_artifact_compositor,
-    double animation_playback_rate) const {
+    double animation_playback_rate,
+    PropertyHandleSet* unsupported_properties) const {
   CompositorAnimations::FailureReasons reasons =
       CompositorAnimations::kNoFailure;
 
@@ -349,7 +340,8 @@ KeyframeEffect::CheckCanStartAnimationOnCompositor(
 
     reasons |= CompositorAnimations::CheckCanStartAnimationOnCompositor(
         SpecifiedTiming(), *effect_target_, GetAnimation(), *Model(),
-        paint_artifact_compositor, animation_playback_rate);
+        paint_artifact_compositor, animation_playback_rate,
+        unsupported_properties);
   }
 
   return reasons;
@@ -394,10 +386,12 @@ bool KeyframeEffect::CancelAnimationOnCompositor(
     return false;
   if (!effect_target_ || !effect_target_->GetLayoutObject())
     return false;
+  DCHECK(Model());
   for (const auto& compositor_keyframe_model_id :
        compositor_keyframe_model_ids_) {
     CompositorAnimations::CancelAnimationOnCompositor(
-        *effect_target_, compositor_animation, compositor_keyframe_model_id);
+        *effect_target_, compositor_animation, compositor_keyframe_model_id,
+        *Model());
   }
   compositor_keyframe_model_ids_.clear();
   return true;
@@ -405,6 +399,7 @@ bool KeyframeEffect::CancelAnimationOnCompositor(
 
 void KeyframeEffect::CancelIncompatibleAnimationsOnCompositor() {
   if (effect_target_ && GetAnimation() && model_->HasFrames()) {
+    DCHECK(Model());
     CompositorAnimations::CancelIncompatibleAnimationsOnCompositor(
         *effect_target_, *GetAnimation(), *Model());
   }
@@ -416,19 +411,33 @@ void KeyframeEffect::PauseAnimationForTestingOnCompositor(
   if (!effect_target_ || !effect_target_->GetLayoutObject())
     return;
   DCHECK(GetAnimation());
+  DCHECK(Model());
   for (const auto& compositor_keyframe_model_id :
        compositor_keyframe_model_ids_) {
     CompositorAnimations::PauseAnimationForTestingOnCompositor(
         *effect_target_, *GetAnimation(), compositor_keyframe_model_id,
-        pause_time);
+        pause_time, *Model());
   }
 }
 
 void KeyframeEffect::AttachCompositedLayers() {
   DCHECK(effect_target_);
   DCHECK(GetAnimation());
-  CompositorAnimations::AttachCompositedLayers(
-      *effect_target_, GetAnimation()->GetCompositorAnimation());
+  CompositorAnimation* compositor_animation =
+      GetAnimation()->GetCompositorAnimation();
+  // If this is a paint worklet element and it is animating custom property
+  // only, it doesn't require an element id to run on the compositor thread.
+  // However, our compositor animation system requires the element to be on the
+  // property tree in order to keep ticking the animation. Therefore, we give a
+  // very special element id for this animation so that the compositor animation
+  // system recognize it. We do not use 0 as the element id because 0 is
+  // kInvalidElementId.
+  if (compositor_animation && !Model()->HasNonVariableProperty()) {
+    compositor_animation->AttachNoElement();
+    return;
+  }
+  CompositorAnimations::AttachCompositedLayers(*effect_target_,
+                                               compositor_animation);
 }
 
 bool KeyframeEffect::HasAnimation() const {
@@ -439,30 +448,12 @@ bool KeyframeEffect::HasPlayingAnimation() const {
   return owner_ && owner_->Playing();
 }
 
-void KeyframeEffect::Trace(Visitor* visitor) {
+void KeyframeEffect::Trace(Visitor* visitor) const {
   visitor->Trace(effect_target_);
   visitor->Trace(target_element_);
   visitor->Trace(model_);
   visitor->Trace(sampled_effect_);
   AnimationEffect::Trace(visitor);
-}
-
-bool KeyframeEffect::AnimationsPreserveAxisAlignment(
-    const PropertyHandle& property) const {
-  const auto* keyframes = Model()->GetPropertySpecificKeyframes(property);
-  if (!keyframes)
-    return true;
-  for (const auto& keyframe : *keyframes) {
-    const auto* value = keyframe->GetCompositorKeyframeValue();
-    if (!value)
-      continue;
-    DCHECK(value->IsTransform());
-    const auto& transform_operations =
-        To<CompositorKeyframeTransform>(value)->GetTransformOperations();
-    if (!transform_operations.PreservesAxisAlignment())
-      return false;
-  }
-  return true;
 }
 
 namespace {
@@ -478,14 +469,52 @@ const CSSProperty** TransformProperties() {
 
 }  // namespace
 
-bool KeyframeEffect::AnimationsPreserveAxisAlignment() const {
+bool KeyframeEffect::UpdateBoxSizeAndCheckTransformAxisAlignment(
+    const FloatSize& box_size) {
   static const auto** properties = TransformProperties();
+  bool preserves_axis_alignment = true;
+  bool has_transform = false;
+  TransformOperation::BoxSizeDependency size_dependencies =
+      TransformOperation::kDependsNone;
   for (size_t i = 0; i < num_transform_properties; i++) {
-    if (!AnimationsPreserveAxisAlignment(PropertyHandle(*properties[i])))
-      return false;
+    const auto* keyframes =
+        Model()->GetPropertySpecificKeyframes(PropertyHandle(*properties[i]));
+    if (!keyframes)
+      continue;
+
+    has_transform = true;
+    for (const auto& keyframe : *keyframes) {
+      const auto* value = keyframe->GetCompositorKeyframeValue();
+      if (!value)
+        continue;
+      const auto& transform_operations =
+          To<CompositorKeyframeTransform>(value)->GetTransformOperations();
+      if (!transform_operations.PreservesAxisAlignment())
+        preserves_axis_alignment = false;
+      size_dependencies = TransformOperation::CombineDependencies(
+          size_dependencies, transform_operations.BoxSizeDependencies());
+    }
   }
 
-  return true;
+  if (!has_transform)
+    return true;
+
+  if (HasAnimation()) {
+    if (effect_target_size_) {
+      if ((size_dependencies & TransformOperation::kDependsWidth) &&
+          (effect_target_size_->Width() != box_size.Width()))
+        GetAnimation()->RestartAnimationOnCompositor();
+      else if ((size_dependencies & TransformOperation::kDependsHeight) &&
+               (effect_target_size_->Width() != box_size.Height()))
+        GetAnimation()->RestartAnimationOnCompositor();
+    } else if (size_dependencies) {
+      GetAnimation()->RestartAnimationOnCompositor();
+    }
+  }
+
+  effect_target_size_ = box_size;
+
+  return preserves_axis_alignment;
 }
 
 EffectModel::CompositeOperation KeyframeEffect::CompositeInternal() const {
@@ -542,7 +571,8 @@ void KeyframeEffect::ClearEffects() {
   sampled_effect_ = nullptr;
   if (GetAnimation())
     GetAnimation()->RestartAnimationOnCompositor();
-  effect_target_->SetNeedsAnimationStyleRecalc();
+  if (!effect_target_->GetDocument().Lifecycle().InDetach())
+    effect_target_->SetNeedsAnimationStyleRecalc();
   auto* svg_element = DynamicTo<SVGElement>(effect_target_.Get());
   if (RuntimeEnabledFeatures::WebAnimationsSVGEnabled() && svg_element)
     svg_element->ClearWebAnimatedAttributes();
@@ -607,9 +637,10 @@ AnimationTimeDelta KeyframeEffect::CalculateTimeToEffectChange(
     case Timing::kPhaseNone:
       return AnimationTimeDelta::Max();
     case Timing::kPhaseBefore:
-      DCHECK_GE(start_time, local_time.value());
-      return forwards ? AnimationTimeDelta::FromSecondsD(start_time -
-                                                         local_time.value())
+      // Return value is clamped at 0 to prevent unexpected results that could
+      // be caused by returning negative values.
+      return forwards ? AnimationTimeDelta::FromSecondsD(std::max<double>(
+                            start_time - local_time.value(), 0))
                       : AnimationTimeDelta::Max();
     case Timing::kPhaseActive:
       if (forwards) {
@@ -696,37 +727,27 @@ ActiveInterpolationsMap KeyframeEffect::InterpolationsForCommitStyles() {
   return results;
 }
 
-void KeyframeEffect::ResolveUnderlyingPropertyValues(
-    const PropertyHandleSet& properties,
-    KeyframeEffect::MissingPropertyValueMap& map) {
-  // TODO(crbug.com/1069235): Should sample the underlying animation.
-  ActiveInterpolationsMap empty_interpolations_map;
-  AnimationUtils::ForEachInterpolatedPropertyValue(
-      effect_target_, properties, empty_interpolations_map,
-      WTF::BindRepeating(
-          [](KeyframeEffect::MissingPropertyValueMap* map,
-             PropertyHandle property, const CSSValue* value) {
-            String property_name =
-                AnimationInputHelpers::PropertyHandleToKeyframeAttribute(
-                    property);
-            map->Set(property_name, value->CssText());
-          },
-          WTF::Unretained(&map)));
+void KeyframeEffect::SetLogicalPropertyResolutionContext(
+    TextDirection text_direction,
+    WritingMode writing_mode) {
+  if (auto* model = DynamicTo<StringKeyframeEffectModel>(Model())) {
+    if (model->SetLogicalPropertyResolutionContext(text_direction,
+                                                   writing_mode)) {
+      ClearEffects();
+      InvalidateAndNotifyOwner();
+    }
+  }
 }
 
-void KeyframeEffect::AddMissingProperties(
-    const KeyframeEffect::MissingPropertyValueMap& property_map,
-    const PropertyHandleSet& all_properties,
-    const PropertyHandleSet& keyframe_properties,
-    V8ObjectBuilder& object_builder) {
-  for (const auto& property : all_properties) {
-    if (keyframe_properties.Contains(property))
-      continue;
-
-    String property_name =
-        AnimationInputHelpers::PropertyHandleToKeyframeAttribute(property);
-    if (property_map.Contains(property_name))
-      object_builder.Add(property_name, property_map.at(property_name));
+void KeyframeEffect::CountAnimatedProperties() const {
+  if (target_element_) {
+    Document& document = target_element_->GetDocument();
+    for (const auto& property : model_->Properties()) {
+      if (property.IsCSSProperty()) {
+        DCHECK(isValidCSSPropertyID(property.GetCSSProperty().PropertyID()));
+        document.CountAnimatedProperty(property.GetCSSProperty().PropertyID());
+      }
+    }
   }
 }
 

@@ -23,6 +23,7 @@
 #import "content/browser/renderer_host/render_widget_host_view_mac_editcommand_helper.h"
 #import "content/public/browser/render_widget_host_view_mac_delegate.h"
 #include "content/public/common/content_features.h"
+#include "third_party/blink/public/mojom/input/input_handler.mojom.h"
 #include "third_party/blink/public/platform/web_text_input_type.h"
 #include "ui/accessibility/platform/ax_platform_node.h"
 #import "ui/base/clipboard/clipboard_util_mac.h"
@@ -35,10 +36,9 @@
 #include "ui/events/event_utils.h"
 #include "ui/events/keycodes/dom/dom_code.h"
 #include "ui/events/keycodes/dom/keycode_converter.h"
+#include "ui/events/platform/platform_event_source.h"
 #include "ui/gfx/mac/coordinate_conversion.h"
 
-using content::EditCommand;
-using content::InputEvent;
 using content::NativeWebKeyboardEvent;
 using content::RenderWidgetHostViewMacEditCommandHelper;
 using content::WebGestureEventBuilder;
@@ -78,7 +78,7 @@ class DummyHostHelper : public RenderWidgetHostNSViewHostHelper {
   void ForwardKeyboardEventWithCommands(
       const NativeWebKeyboardEvent& key_event,
       const ui::LatencyInfo& latency_info,
-      const std::vector<EditCommand>& commands) override {}
+      const std::vector<blink::mojom::EditCommandPtr> commands) override {}
   void RouteOrProcessMouseEvent(
       const blink::WebMouseEvent& web_event) override {}
   void RouteOrProcessTouchEvent(
@@ -678,6 +678,8 @@ void ExtractUnderlines(NSAttributedString* string,
     if (handled)
       return;
   }
+  if (ui::PlatformEventSource::ShouldIgnoreNativePlatformEvents())
+    return;
 
   // Set the pointer type when we are receiving a NSMouseEntered event and the
   // following NSMouseExited event should have the same pointer type.
@@ -783,8 +785,10 @@ void ExtractUnderlines(NSAttributedString* string,
   }
 
   if (!send_touch) {
-    WebMouseEvent event =
-        WebMouseEventBuilder::Build(theEvent, self, _pointerType);
+    bool unaccelerated_movement =
+        _mouse_locked && _mouse_lock_unaccelerated_movement;
+    WebMouseEvent event = WebMouseEventBuilder::Build(
+        theEvent, self, _pointerType, unaccelerated_movement);
 
     if (_mouse_locked &&
         base::FeatureList::IsEnabled(features::kConsolidatedMovementXY)) {
@@ -864,6 +868,10 @@ void ExtractUnderlines(NSAttributedString* string,
   }
 }
 
+- (void)setCursorLockedUnacceleratedMovement:(BOOL)unaccelerated {
+  _mouse_lock_unaccelerated_movement = unaccelerated;
+}
+
 // CommandDispatcherTarget implementation:
 - (BOOL)isKeyLocked:(NSEvent*)event {
   int keyCode = [event keyCode];
@@ -875,14 +883,18 @@ void ExtractUnderlines(NSAttributedString* string,
 }
 
 - (BOOL)performKeyEquivalent:(NSEvent*)theEvent {
+  // TODO(bokan): Tracing added temporarily to diagnose crbug.com/1039833.
+  TRACE_EVENT0("browser", "RenderWidgetHostViewCocoa::performKeyEquivalent");
   // |performKeyEquivalent:| is sent to all views of a window, not only down the
   // responder chain (cf. "Handling Key Equivalents" in
   // http://developer.apple.com/mac/library/documentation/Cocoa/Conceptual/EventOverview/HandlingKeyEvents/HandlingKeyEvents.html
   // ). A |performKeyEquivalent:| may also bubble up from a dialog child window
   // to perform browser commands such as switching tabs. We only want to handle
   // key equivalents if we're first responder in the keyWindow.
-  if (![[self window] isKeyWindow] || [[self window] firstResponder] != self)
+  if (![[self window] isKeyWindow] || [[self window] firstResponder] != self) {
+    TRACE_EVENT_INSTANT0("browser", "NotKeyWindow", TRACE_EVENT_SCOPE_THREAD);
     return NO;
+  }
 
   // If the event is reserved by the system, then do not pass it to web content.
   if (EventIsReservedBySystem(theEvent))
@@ -920,7 +932,8 @@ void ExtractUnderlines(NSAttributedString* string,
 }
 
 - (void)keyEvent:(NSEvent*)theEvent wasKeyEquivalent:(BOOL)equiv {
-  TRACE_EVENT0("browser", "RenderWidgetHostViewCocoa::keyEvent");
+  TRACE_EVENT1("browser", "RenderWidgetHostViewCocoa::keyEvent", "WindowNum",
+               [[self window] windowNumber]);
   NSEventType eventType = [theEvent type];
   NSEventModifierFlags modifierFlags = [theEvent modifierFlags];
   int keyCode = [theEvent keyCode];
@@ -1055,7 +1068,7 @@ void ExtractUnderlines(NSAttributedString* string,
       delayEventUntilAfterImeCompostion = YES;
   } else {
     _hostHelper->ForwardKeyboardEventWithCommands(event, latency_info,
-                                                  _editCommands);
+                                                  std::move(_editCommands));
   }
 
   // Then send keypress and/or composition related events.
@@ -1115,7 +1128,7 @@ void ExtractUnderlines(NSAttributedString* string,
     fake_event_latency_info.set_source_event_type(ui::SourceEventType::OTHER);
     _hostHelper->ForwardKeyboardEvent(fakeEvent, fake_event_latency_info);
     _hostHelper->ForwardKeyboardEventWithCommands(
-        event, fake_event_latency_info, _editCommands);
+        event, fake_event_latency_info, std::move(_editCommands));
   }
 
   const NSUInteger kCtrlCmdKeyMask = NSControlKeyMask | NSCommandKeyMask;
@@ -1996,7 +2009,7 @@ extern NSString* NSTextInputReplacementRangeAttributeName;
     // the next field on the page).
     if (!base::StartsWith(command, "insert",
                           base::CompareCase::INSENSITIVE_ASCII))
-      _editCommands.push_back(EditCommand(command, ""));
+      _editCommands.push_back(blink::mojom::EditCommand::New(command, ""));
   } else {
     _host->ExecuteEditCommand(command);
   }

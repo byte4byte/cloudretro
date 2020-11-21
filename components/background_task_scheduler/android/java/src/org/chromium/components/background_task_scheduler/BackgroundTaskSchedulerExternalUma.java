@@ -35,40 +35,43 @@ public abstract class BackgroundTaskSchedulerExternalUma {
     public static final int BACKGROUND_TASK_NOTIFICATION_SCHEDULER = 20;
     public static final int BACKGROUND_TASK_NOTIFICATION_TRIGGER = 21;
     public static final int BACKGROUND_TASK_PERIODIC_SYNC_WAKE_UP = 22;
+    public static final int BACKGROUND_TASK_QUERY_TILE = 23;
+    public static final int BACKGROUND_TASK_FEEDV2_REFRESH = 24;
+    public static final int BACKGROUND_TASK_DOWNLOAD_LATER = 25;
     // Keep this one at the end and increment appropriately when adding new tasks.
-    public static final int BACKGROUND_TASK_COUNT = 23;
+    public static final int BACKGROUND_TASK_COUNT = 26;
 
     protected BackgroundTaskSchedulerExternalUma() {}
 
     /**
      * Reports metrics for when a NativeBackgroundTask loads the native library.
      * @param taskId An id from {@link TaskIds}.
-     * @param serviceManagerOnlyMode Whether the task will start native in Service Manager Only Mode
+     * @param minimalBrowserMode Whether the task will start native in Minimal Browser Mode
      *                              (Reduced Mode) instead of Full Browser Mode.
      */
-    public abstract void reportTaskStartedNative(int taskId, boolean serviceManagerOnlyMode);
+    public abstract void reportTaskStartedNative(int taskId, boolean minimalBrowserMode);
 
     /**
      * Report metrics for starting a NativeBackgroundTask. This does not consider tasks that are
      * short-circuited before any work is done.
      * @param taskId An id from {@link TaskIds}.
-     * @param serviceManagerOnlyMode Whether the task will run in Service Manager Only Mode (Reduced
+     * @param minimalBrowserMode Whether the task will run in Minimal Browser Mode (Reduced
      *                               Mode) instead of Full Browser Mode.
      */
-    public abstract void reportNativeTaskStarted(int taskId, boolean serviceManagerOnlyMode);
+    public abstract void reportNativeTaskStarted(int taskId, boolean minimalBrowserMode);
 
     /**
      * Reports metrics that a NativeBackgroundTask has been finished cleanly (i.e., no unexpected
      * exits because of chrome crash or OOM). This includes tasks that have been stopped due to
      * timeout.
      * @param taskId An id from {@link TaskIds}.
-     * @param serviceManagerOnlyMode Whether the task will run in Service Manager Only Mode (Reduced
+     * @param minimalBrowserMode Whether the task will run in Minimal Browser Mode (Reduced
      *                               Mode) instead of Full Browser Mode.
      */
-    public abstract void reportNativeTaskFinished(int taskId, boolean serviceManagerOnlyMode);
+    public abstract void reportNativeTaskFinished(int taskId, boolean minimalBrowserMode);
 
     /**
-     * Reports metrics of how Chrome is launched, either in ServiceManager only mode or as full
+     * Reports metrics of how Chrome is launched, either in minimal browser mode or as full
      * browser, as well as either cold start or warm start.
      * See {@link org.chromium.content.browser.ServicificationStartupUma} for more details.
      * @param startupMode Chrome's startup mode.
@@ -92,7 +95,7 @@ public abstract class BackgroundTaskSchedulerExternalUma {
         }
     }
 
-    @VisibleForTesting
+    @VisibleForTesting(otherwise = VisibleForTesting.PROTECTED)
     public static int toUmaEnumValueFromTaskId(int taskId) {
         switch (taskId) {
             case TaskIds.TEST:
@@ -117,6 +120,8 @@ public abstract class BackgroundTaskSchedulerExternalUma {
                 return BACKGROUND_TASK_DOWNLOAD_CLEANUP;
             case TaskIds.DOWNLOAD_AUTO_RESUMPTION_JOB_ID:
                 return BACKGROUND_TASK_DOWNLOAD_AUTO_RESUMPTION;
+            case TaskIds.DOWNLOAD_LATER_JOB_ID:
+                return BACKGROUND_TASK_DOWNLOAD_LATER;
             case TaskIds.WEBVIEW_VARIATIONS_SEED_FETCH_JOB_ID:
                 return BACKGROUND_TASK_WEBVIEW_VARIATIONS;
             case TaskIds.OFFLINE_PAGES_PREFETCH_NOTIFICATION_JOB_ID:
@@ -141,6 +146,10 @@ public abstract class BackgroundTaskSchedulerExternalUma {
                 return BACKGROUND_TASK_NOTIFICATION_TRIGGER;
             case TaskIds.PERIODIC_BACKGROUND_SYNC_CHROME_WAKEUP_TASK_JOB_ID:
                 return BACKGROUND_TASK_PERIODIC_SYNC_WAKE_UP;
+            case TaskIds.QUERY_TILE_JOB_ID:
+                return BACKGROUND_TASK_QUERY_TILE;
+            case TaskIds.FEEDV2_REFRESH_JOB_ID:
+                return BACKGROUND_TASK_FEEDV2_REFRESH;
             default:
                 assert false;
         }

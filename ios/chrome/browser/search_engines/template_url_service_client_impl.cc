@@ -4,7 +4,7 @@
 
 #include "ios/chrome/browser/search_engines/template_url_service_client_impl.h"
 
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "base/time/time.h"
 #include "components/history/core/browser/history_service.h"
 #include "components/history/core/browser/history_types.h"
@@ -63,8 +63,10 @@ void TemplateURLServiceClientImpl::SetKeywordSearchTermsForURL(
 void TemplateURLServiceClientImpl::AddKeywordGeneratedVisit(const GURL& url) {
   if (history_service_) {
     history_service_->AddPage(
-        url, base::Time::Now(), nullptr, 0, GURL(), history::RedirectList(),
-        ui::PAGE_TRANSITION_KEYWORD_GENERATED, history::SOURCE_BROWSED, false);
+        url, base::Time::Now(), /*context_id=*/nullptr, /*nav_entry_id=*/0,
+        /*referrer=*/GURL(), history::RedirectList(),
+        ui::PAGE_TRANSITION_KEYWORD_GENERATED, history::SOURCE_BROWSED,
+        /*did_replace_entry=*/false, /*publicly_routable=*/false);
   }
 }
 

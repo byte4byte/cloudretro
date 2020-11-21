@@ -15,6 +15,14 @@
 // define the matchers in the app process.
 @interface ChromeMatchersAppInterface : NSObject
 
+// Matcher for a window with a given number.
+// Window numbers are assigned at scene creation. Normally, each EGTest will
+// start with exactly one window with number 0. Each time a window is created,
+// it is assigned an accessibility identifier equal to the number of connected
+// scenes (stored as NSString). This means typically any windows created in a
+// test will have consecutive numbers.
++ (id<GREYMatcher>)windowWithNumber:(int)windowNumber;
+
 // Matcher for element with accessibility label corresponding to |label| and
 // accessibility trait UIAccessibilityTraitButton.
 + (id<GREYMatcher>)buttonWithAccessibilityLabel:(NSString*)label;
@@ -43,7 +51,11 @@
 
 // Matcher for element with accessibility label corresponding to |messageID|
 // and accessibility trait UIAccessibilityTraitHeader.
-+ (id<GREYMatcher>)headerWithAccessibilityLabelID:(int)messageID;
++ (id<GREYMatcher>)headerWithAccessibilityLabelID:(int)labelID;
+
+// Matcher for navigation bar title element with accessibility label
+// corresponding to |titleID|.
++ (id<GREYMatcher>)navigationBarTitleWithAccessibilityLabelID:(int)titleID;
 
 // Matcher for text field of a cell with |messageID|.
 + (id<GREYMatcher>)textFieldForCellWithLabelID:(int)messageID;
@@ -106,11 +118,11 @@
 // Matcher for Tools menu button.
 + (id<GREYMatcher>)toolsMenuButton;
 
-// Matcher for the Share menu button.
+// Matcher for the Share... button.
 + (id<GREYMatcher>)shareButton;
 
-// Returns the GREYMatcher for the button that opens the tab switcher.
-+ (id<GREYMatcher>)tabletTabSwitcherOpenButton;
+// Matcher for the tab Share button (either in the omnibox or the toolbar).
++ (id<GREYMatcher>)tabShareButton;
 
 // Matcher for show tabs button.
 + (id<GREYMatcher>)showTabsButton;
@@ -132,6 +144,14 @@
 // a link.
 + (id<GREYMatcher>)openLinkInNewTabButton;
 
+// Matcher for the Open in Incognito option in the context menu when long
+// pressing a link. |useNewString| determines which string to use.
++ (id<GREYMatcher>)openLinkInIncognitoButtonWithUseNewString:(BOOL)useNewString;
+
+// Matcher for the Open in New Window option in the context menu when long
+// pressing a link.
++ (id<GREYMatcher>)openLinkInNewWindowButton;
+
 // Matcher for the done button on the navigation bar.
 + (id<GREYMatcher>)navigationBarDoneButton;
 
@@ -140,12 +160,6 @@
 
 // Matcher for the back button on the Bookmarks navigation bar.
 + (id<GREYMatcher>)bookmarksNavigationBarBackButton;
-
-// Returns matcher for the account consistency confirmation button.
-+ (id<GREYMatcher>)accountConsistencyConfirmationOKButton;
-
-// Returns matcher for "ADD ACCOUNT" button in unified consent dialog.
-+ (id<GREYMatcher>)unifiedConsentAddAccountButton;
 
 // Returns matcher for the add account accounts button.
 + (id<GREYMatcher>)addAccountButton;
@@ -176,12 +190,21 @@
 // settings' navigation bar.
 + (id<GREYMatcher>)syncSettingsConfirmButton;
 
+// Returns matcher for the Autofill Credit Card "Payment Methods" edit view.
++ (id<GREYMatcher>)autofillCreditCardEditTableView;
+
 // Returns matcher for the Autofill Credit Card "Payment Methods" view in the
 // settings menu.
 + (id<GREYMatcher>)autofillCreditCardTableView;
 
+// Returns matcher for the "Addresses and More" button in the settings menu.
++ (id<GREYMatcher>)addressesAndMoreButton;
+
 // Returns matcher for the "Payment Methods" button in the settings menu.
 + (id<GREYMatcher>)paymentMethodsButton;
+
+// Returns matcher for the "Languages" button in the settings menu.
++ (id<GREYMatcher>)languagesButton;
 
 // Returns matcher for the "Add Credit Card" view in the Settings menu.
 + (id<GREYMatcher>)addCreditCardView;
@@ -197,9 +220,6 @@
 // Returns matcher for the "Cancel" button in the Payment Methods add credit
 // card view.
 + (id<GREYMatcher>)addCreditCardCancelButton;
-
-// Returns matcher for the "Credit Card Scanner" view.
-+ (id<GREYMatcher>)creditCardScannerView;
 
 // Returns matcher for the tools menu table view.
 + (id<GREYMatcher>)toolsMenuView;
@@ -303,6 +323,9 @@
 // Returns matcher for the payment request search bar.
 + (id<GREYMatcher>)paymentRequestPickerSearchBar;
 
+// Returns matcher for the New Window button on the Tools menu.
++ (id<GREYMatcher>)openNewWindowMenuButton;
+
 // Returns matcher for the reading list button on the Tools menu.
 + (id<GREYMatcher>)readingListMenuButton;
 
@@ -315,10 +338,37 @@
 // Returns matcher for the system selection callout.
 + (id<GREYMatcher>)systemSelectionCallout;
 
+// Returns a matcher for the Link to text button in the edit menu.
++ (id<GREYMatcher>)systemSelectionCalloutLinkToTextButton;
+
 // Returns matcher for the copy button on the system selection callout.
 + (id<GREYMatcher>)systemSelectionCalloutCopyButton;
 
-// Returns matcher for the Copy item on the context menu.
+// Matcher for a Copy button, such as the one in the Activity View. This matcher
+// is very broad and will look for any button with a matching string.
++ (id<GREYMatcher>)copyActivityButton API_AVAILABLE(ios(13));
+
+// Matcher for the Copy Link option in the updated context menus when long
+// pressing on a link. |useNewString| determines which string to use.
++ (id<GREYMatcher>)copyLinkButtonWithUseNewString:(BOOL)useNewString;
+
+// Matcher for the Edit option on the updated context menus. |useNewString|
+// determines which string to use.
++ (id<GREYMatcher>)editButtonWithUseNewString:(BOOL)useNewString;
+
+// Matcher for the Move option on the updated context menus.
++ (id<GREYMatcher>)moveButton;
+
+// Matcher for the Mark as Read option on the Reading List's context menus.
++ (id<GREYMatcher>)readingListMarkAsReadButton;
+
+// Matcher for the Mark as Unread option on the Reading List's context menus.
++ (id<GREYMatcher>)readingListMarkAsUnreadButton;
+
+// Matcher for the Share option on the updated context menus.
++ (id<GREYMatcher>)deleteButton;
+
+// Returns matcher for the Copy item on the old-style context menu.
 + (id<GREYMatcher>)contextMenuCopyButton;
 
 // Returns matcher for defoucesed omnibox on a new tab.
@@ -338,9 +388,6 @@
 
 // Returns a matcher for "Open In..." button.
 + (id<GREYMatcher>)openInButton;
-
-// Returns the GREYMatcher for the button that opens the tab grid.
-+ (id<GREYMatcher>)tabGridOpenButton;
 
 // Returns the GREYMatcher for the cell at |index| in the tab grid.
 + (id<GREYMatcher>)tabGridCellAtIndex:(unsigned int)index;
@@ -482,6 +529,9 @@
 
 // Returns a matcher for the CreditCardTableView window.
 + (id<GREYMatcher>)manualFallbackCreditCardTableViewWindowMatcher;
+
+// Returns the matcher for the Activity View header.
++ (id<GREYMatcher>)activityViewHeaderWithTitle:(NSString*)pageTitle;
 
 @end
 

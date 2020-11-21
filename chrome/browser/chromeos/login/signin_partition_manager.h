@@ -40,6 +40,9 @@ class SigninPartitionManager : public KeyedService {
   using GetSystemNetworkContextTask =
       base::RepeatingCallback<network::mojom::NetworkContext*()>;
 
+  using OnCreateNewStoragePartition =
+      base::RepeatingCallback<void(content::StoragePartition*)>;
+
   using StartSigninSessionDoneCallback =
       base::OnceCallback<void(const std::string& partition_name)>;
 
@@ -49,16 +52,16 @@ class SigninPartitionManager : public KeyedService {
   // Creates a new StoragePartition for a sign-in attempt. If a previous
   // StoragePartition has been created by this SigninPartitionManager, it is
   // closed (and cleared).
-  // |embedder_web_contents| is the WebContents instance embedding the webview
+  // `embedder_web_contents` is the WebContents instance embedding the webview
   // which will display the sign-in pages.
-  // |signin_session_started| will be invoked with the partition name of the
+  // `signin_session_started` will be invoked with the partition name of the
   // started signin session on completion.
   void StartSigninSession(
       content::WebContents* embedder_web_contents,
       StartSigninSessionDoneCallback signin_session_started);
 
   // Closes the current StoragePartition. All cached data in the
-  // StoragePartition is cleared. |partition_data_cleared| will be called when
+  // StoragePartition is cleared. `partition_data_cleared` will be called when
   // clearing of cached data is finished.
   void CloseCurrentSigninSession(base::OnceClosure partition_data_cleared);
 
@@ -67,7 +70,7 @@ class SigninPartitionManager : public KeyedService {
   bool IsInSigninSession() const;
 
   // Returns the current StoragePartition name. This can be used as a webview's
-  // |partition| attribute. May only be called when a sign-in session is active,
+  // `partition` attribute. May only be called when a sign-in session is active,
   // that is between StartSigninSession and CloseCurrentSigninSession calls.
   const std::string& GetCurrentStoragePartitionName() const;
 
@@ -76,7 +79,7 @@ class SigninPartitionManager : public KeyedService {
   // CloseCurrentSigninSession calls.
   content::StoragePartition* GetCurrentStoragePartition();
 
-  // Returns true if |storage_partition| is the partition in use by the current
+  // Returns true if `storage_partition` is the partition in use by the current
   // sign-in session. Returns false if no sign-in session is active.
   bool IsCurrentSigninStoragePartition(
       const content::StoragePartition* storage_partition) const;
@@ -85,6 +88,8 @@ class SigninPartitionManager : public KeyedService {
       ClearStoragePartitionTask clear_storage_partition_task);
   void SetGetSystemNetworkContextForTesting(
       GetSystemNetworkContextTask get_system_network_context_task);
+  void SetOnCreateNewStoragePartitionForTesting(
+      OnCreateNewStoragePartition on_create_new_storage_partition);
 
   class Factory : public BrowserContextKeyedServiceFactory {
    public:
@@ -113,6 +118,7 @@ class SigninPartitionManager : public KeyedService {
 
   ClearStoragePartitionTask clear_storage_partition_task_;
   GetSystemNetworkContextTask get_system_network_context_task_;
+  OnCreateNewStoragePartition on_create_new_storage_partition_;
 
   // GuestView StoragePartitions use the host of the embedder site's URL as the
   // domain of their StoragePartition.
@@ -120,8 +126,8 @@ class SigninPartitionManager : public KeyedService {
   // The random and unique name of the StoragePartition to be used, is generated
   // by SigninPartitionManager.
   std::string current_storage_partition_name_;
-  // The StoragePartition identified by |storage_partition_domain_| and
-  // |current_storage_partition_name_|.
+  // The StoragePartition identified by `storage_partition_domain_` and
+  // `current_storage_partition_name_`.
   content::StoragePartition* current_storage_partition_ = nullptr;
 
   DISALLOW_COPY_AND_ASSIGN(SigninPartitionManager);

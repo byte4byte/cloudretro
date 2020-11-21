@@ -8,17 +8,17 @@
 
 #include "base/base64url.h"
 #include "base/bind.h"
-#include "base/bind_helpers.h"
 #include "base/callback.h"
+#include "base/callback_helpers.h"
 #include "base/files/file_util.h"
 #include "base/files/important_file_writer.h"
 #include "base/hash/sha1.h"
-#include "base/logging.h"
 #include "base/mac/foundation_util.h"
 #include "base/mac/mac_util.h"
 #include "base/mac/scoped_cftyperef.h"
 #include "base/mac/scoped_ioobject.h"
 #include "base/no_destructor.h"
+#include "base/notreached.h"
 #include "base/optional.h"
 #include "base/path_service.h"
 #include "base/strings/string16.h"
@@ -149,22 +149,17 @@ base::Optional<bool> IsEnrollmentMandatoryByFile() {
 
 }  // namespace
 
-// static
-BrowserDMTokenStorage* BrowserDMTokenStorage::Get() {
-  if (storage_for_testing_)
-    return storage_for_testing_;
-
-  static base::NoDestructor<BrowserDMTokenStorageMac> storage;
-  return storage.get();
-}
-
 BrowserDMTokenStorageMac::BrowserDMTokenStorageMac()
     : task_runner_(base::ThreadPool::CreateTaskRunner({base::MayBlock()})) {}
 
 BrowserDMTokenStorageMac::~BrowserDMTokenStorageMac() {}
 
 std::string BrowserDMTokenStorageMac::InitClientId() {
-  return base::mac::GetPlatformSerialNumber();
+  if (client_id_.empty()) {
+    client_id_ = base::mac::GetPlatformSerialNumber();
+  }
+
+  return client_id_;
 }
 
 std::string BrowserDMTokenStorageMac::InitEnrollmentToken() {
@@ -180,7 +175,7 @@ std::string BrowserDMTokenStorageMac::InitEnrollmentToken() {
 
 std::string BrowserDMTokenStorageMac::InitDMToken() {
   base::FilePath token_file_path;
-  if (!GetDmTokenFilePath(&token_file_path, RetrieveClientId(), false))
+  if (!GetDmTokenFilePath(&token_file_path, InitClientId(), false))
     return std::string();
 
   std::string token;

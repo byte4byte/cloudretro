@@ -4,6 +4,10 @@
 
 #include "chromecast/common/activity_filtering_url_loader_throttle.h"
 
+#include "net/base/net_errors.h"
+#include "net/url_request/redirect_info.h"
+#include "services/network/public/cpp/resource_request.h"
+
 namespace chromecast {
 namespace {
 
@@ -29,7 +33,8 @@ void ActivityFilteringURLLoaderThrottle::WillRedirectRequest(
     const network::mojom::URLResponseHead& /* response_head */,
     bool* /* defer */,
     std::vector<std::string>* /* to_be_removed_request_headers */,
-    net::HttpRequestHeaders* /* modified_request_headers */) {
+    net::HttpRequestHeaders* /* modified_request_headers */,
+    net::HttpRequestHeaders* /* modified_cors_exempt_request_headers */) {
   FilterURL(redirect_info->new_url);
 }
 

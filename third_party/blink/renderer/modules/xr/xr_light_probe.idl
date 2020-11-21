@@ -6,6 +6,8 @@
     SecureContext,
     Exposed=Window,
     RuntimeEnabled=WebXRLightEstimation
-] interface XRLightProbe {
+] interface XRLightProbe : EventTarget {
+    [SameObject] readonly attribute XRSpace probeSpace;
+    attribute EventHandler onreflectionchange;
 };
 

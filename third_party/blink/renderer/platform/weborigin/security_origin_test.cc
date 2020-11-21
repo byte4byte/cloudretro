@@ -63,7 +63,7 @@ TEST_F(SecurityOriginTest, ValidPortsCreateTupleOrigins) {
 
   for (size_t i = 0; i < base::size(ports); ++i) {
     scoped_refptr<const SecurityOrigin> origin =
-        SecurityOrigin::Create("http", "example.com", ports[i]);
+        SecurityOrigin::CreateFromValidTuple("http", "example.com", ports[i]);
     EXPECT_FALSE(origin->IsOpaque())
         << "Port " << ports[i] << " should have generated a tuple origin.";
   }
@@ -545,25 +545,21 @@ TEST_F(SecurityOriginTest, PunycodeNotUnicode) {
   EXPECT_FALSE(origin->CanRequest(unicode_url));
 }
 
-TEST_F(SecurityOriginTest, PortAndEffectivePortMethod) {
+TEST_F(SecurityOriginTest, Port) {
   struct TestCase {
     uint16_t port;
-    uint16_t effective_port;
     const char* origin;
   } cases[] = {
-      {0, 80, "http://example.com"},
-      {0, 80, "http://example.com:80"},
-      {81, 81, "http://example.com:81"},
-      {0, 443, "https://example.com"},
-      {0, 443, "https://example.com:443"},
-      {444, 444, "https://example.com:444"},
+      {80, "http://example.com"},       {80, "http://example.com:80"},
+      {81, "http://example.com:81"},    {443, "https://example.com"},
+      {443, "https://example.com:443"}, {444, "https://example.com:444"},
+      {0, "https://example.com:0"},     {0, "file:///"},
   };
 
   for (const auto& test : cases) {
     scoped_refptr<const SecurityOrigin> origin =
         SecurityOrigin::CreateFromString(test.origin);
     EXPECT_EQ(test.port, origin->Port());
-    EXPECT_EQ(test.effective_port, origin->EffectivePort());
   }
 }
 
@@ -575,6 +571,7 @@ TEST_F(SecurityOriginTest, CreateFromTuple) {
     const char* origin;
   } cases[] = {
       {"http", "example.com", 80, "http://example.com"},
+      {"http", "example.com", 0, "http://example.com:0"},
       {"http", "example.com", 81, "http://example.com:81"},
       {"https", "example.com", 443, "https://example.com"},
       {"https", "example.com", 444, "https://example.com:444"},
@@ -584,7 +581,7 @@ TEST_F(SecurityOriginTest, CreateFromTuple) {
 
   for (const auto& test : cases) {
     scoped_refptr<const SecurityOrigin> origin =
-        SecurityOrigin::Create(test.scheme, test.host, test.port);
+        SecurityOrigin::CreateFromValidTuple(test.scheme, test.host, test.port);
     EXPECT_EQ(test.origin, origin->ToString()) << test.origin;
   }
 }
@@ -692,6 +689,7 @@ TEST_F(SecurityOriginTest, UrlOriginConversions) {
       {"http://example.com:123/?query", "http", "example.com", 123},
       {"https://example.com/#1234", "https", "example.com", 443},
       {"https://u:p@example.com:123/?query#1234", "https", "example.com", 123},
+      {"https://example.com:0/", "https", "example.com", 0},
 
       // Nonstandard schemes.
       {"unrecognized-scheme://localhost/", "", "", 0, true},
@@ -739,10 +737,8 @@ TEST_F(SecurityOriginTest, UrlOriginConversions) {
     EXPECT_EQ(test_case.scheme, security_origin_via_kurl->Protocol());
     EXPECT_EQ(test_case.host, security_origin_via_gurl->Host());
     EXPECT_EQ(test_case.host, security_origin_via_kurl->Host());
-    EXPECT_EQ(security_origin_via_gurl->Port(),
-              security_origin_via_kurl->Port());
-    EXPECT_EQ(test_case.port, security_origin_via_gurl->EffectivePort());
-    EXPECT_EQ(test_case.port, security_origin_via_kurl->EffectivePort());
+    EXPECT_EQ(test_case.port, security_origin_via_gurl->Port());
+    EXPECT_EQ(test_case.port, security_origin_via_kurl->Port());
     EXPECT_EQ(test_case.opaque, security_origin_via_gurl->IsOpaque());
     EXPECT_EQ(test_case.opaque, security_origin_via_kurl->IsOpaque());
     EXPECT_EQ(!test_case.opaque, security_origin_via_kurl->IsSameOriginWith(
@@ -752,8 +748,8 @@ TEST_F(SecurityOriginTest, UrlOriginConversions) {
 
     if (!test_case.opaque) {
       scoped_refptr<const SecurityOrigin> security_origin =
-          SecurityOrigin::Create(test_case.scheme, test_case.host,
-                                 test_case.port);
+          SecurityOrigin::CreateFromValidTuple(test_case.scheme, test_case.host,
+                                               test_case.port);
       EXPECT_TRUE(
           security_origin->IsSameOriginWith(security_origin_via_gurl.get()));
       EXPECT_TRUE(
@@ -1167,6 +1163,18 @@ TEST_F(SecurityOriginTest, IsSameOriginDomainWithWithLocalScheme) {
   a->GrantUniversalAccess();
   EXPECT_FALSE(a->IsSameOriginDomainWith(b.get()));
   EXPECT_FALSE(b->IsSameOriginDomainWith(a.get()));
+}
+
+// Non-canonical hosts provided to the string constructor should end up
+// canonicalized:
+TEST_F(SecurityOriginTest, PercentEncodesHost) {
+  EXPECT_EQ(
+      SecurityOrigin::CreateFromString("http://foo,.example.test/")->Host(),
+      "foo%2C.example.test");
+
+  EXPECT_EQ(
+      SecurityOrigin::CreateFromString("http://foo%2C.example.test/")->Host(),
+      "foo%2C.example.test");
 }
 
 }  // namespace blink

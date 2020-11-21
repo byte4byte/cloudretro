@@ -28,7 +28,6 @@
 #include "base/auto_reset.h"
 #include "base/memory/weak_ptr.h"
 #include "chromeos/audio/chromeos_sounds.h"
-#include "chromeos/constants/chromeos_switches.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/compositor/layer.h"
 #include "ui/compositor/layer_animation_element.h"
@@ -397,9 +396,7 @@ void BackdropController::UpdateBackdropInternal() {
 
   // Updating the back drop widget should not affect the shelf's auto hide
   // state.
-  base::Optional<Shelf::ScopedAutoHideLock> auto_hide_lock;
-  if (chromeos::switches::ShouldShowShelfHotseat())
-    auto_hide_lock.emplace(ash::Shelf::ForWindow(container_));
+  Shelf::ScopedAutoHideLock auto_hide_lock(ash::Shelf::ForWindow(container_));
 
   // We are either destroying the backdrop widget or changing the order of
   // windows which will cause recursion.
@@ -429,15 +426,8 @@ void BackdropController::UpdateBackdropInternal() {
 
 void BackdropController::EnsureBackdropWidget() {
   DCHECK(window_having_backdrop_);
-
-  const SkColor backdrop_color =
-      WindowBackdrop::Get(window_having_backdrop_)->GetBackdropColor();
-
-  if (backdrop_) {
-    if (backdrop_window_->layer()->GetTargetColor() != backdrop_color)
-      backdrop_window_->layer()->SetColor(backdrop_color);
+  if (backdrop_)
     return;
-  }
 
   backdrop_ = std::make_unique<views::Widget>();
   views::Widget::InitParams params(
@@ -459,7 +449,8 @@ void BackdropController::EnsureBackdropWidget() {
   // The backdrop window in always on top container can be reparented without
   // this when the window is set to fullscreen.
   AlwaysOnTopController::SetDisallowReparent(backdrop_window_);
-  backdrop_window_->layer()->SetColor(backdrop_color);
+  backdrop_window_->layer()->SetColor(
+      WindowBackdrop::Get(window_having_backdrop_)->GetBackdropColor());
 
   WindowState::Get(backdrop_window_)->set_allow_set_bounds_direct(true);
   UpdateAccessibilityMode();
@@ -470,7 +461,7 @@ void BackdropController::UpdateAccessibilityMode() {
     return;
 
   const bool enabled =
-      Shell::Get()->accessibility_controller()->spoken_feedback_enabled();
+      Shell::Get()->accessibility_controller()->spoken_feedback().enabled();
   if (enabled) {
     if (!backdrop_event_handler_) {
       backdrop_event_handler_ = std::make_unique<BackdropEventHandler>();
@@ -499,7 +490,7 @@ bool BackdropController::WindowShouldHaveBackdrop(aura::Window* window) {
   if (window->GetProperty(aura::client::kAppType) ==
           static_cast<int>(AppType::ARC_APP) &&
       wm::IsActiveWindow(window) &&
-      Shell::Get()->accessibility_controller()->spoken_feedback_enabled()) {
+      Shell::Get()->accessibility_controller()->spoken_feedback().enabled()) {
     return true;
   }
 
@@ -537,6 +528,12 @@ void BackdropController::Show() {
     return;
 
   Layout();
+
+  // Update backdrop color.
+  const SkColor backdrop_color =
+      WindowBackdrop::Get(window_having_backdrop_)->GetBackdropColor();
+  if (backdrop_window_->layer()->GetTargetColor() != backdrop_color)
+    backdrop_window_->layer()->SetColor(backdrop_color);
 
   // Update the stcking, only after we determine we can show the backdrop. The
   // backdrop needs to be immediately behind the window that needs a backdrop.

@@ -13,6 +13,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_split.h"
+#include "base/strings/string_util.h"
 #include "base/task/post_task.h"
 #include "base/task/thread_pool.h"
 #include "chrome/browser/chromeos/login/screens/recommend_apps/recommend_apps_fetcher_delegate.h"
@@ -256,12 +257,6 @@ void RecordUmaResponseParseResult(RecommendAppsResponseParseResult result) {
                             result);
 }
 
-void RecordUmaResponseSize(unsigned long responseSize) {
-  UMA_HISTOGRAM_COUNTS_1M(
-      "OOBE.RecommendApps.Fetcher.ResponseSize",
-      static_cast<base::HistogramBase::Sample>(responseSize));
-}
-
 }  // namespace
 
 RecommendAppsFetcherImpl::RecommendAppsFetcherImpl(
@@ -487,10 +482,9 @@ void RecommendAppsFetcherImpl::OnDownloaded(
   //
   // The response starts with a prefix ")]}'". This needs to be removed before
   // further parsing.
-  RecordUmaResponseSize(response_body->size());
   constexpr base::StringPiece json_xss_prevention_prefix(")]}'");
   base::StringPiece response_body_json(*response_body);
-  if (response_body_json.starts_with(json_xss_prevention_prefix))
+  if (base::StartsWith(response_body_json, json_xss_prevention_prefix))
     response_body_json.remove_prefix(json_xss_prevention_prefix.length());
   base::Optional<base::Value> output = ParseResponse(response_body_json);
   if (!output.has_value()) {
@@ -518,14 +512,12 @@ base::Optional<base::Value> RecommendAppsFetcherImpl::ParseResponse(
     base::StringPiece response) {
   base::Value output(base::Value::Type::LIST);
 
-  int error_code;
-  std::string error_msg;
-  std::unique_ptr<base::Value> json_value =
-      base::JSONReader::ReadAndReturnErrorDeprecated(
-          response, base::JSON_PARSE_RFC, &error_code, &error_msg);
+  base::JSONReader::ValueWithError parsed_json =
+      base::JSONReader::ReadAndReturnValueWithError(response);
 
-  if (!json_value || (!json_value->is_list() && !json_value->is_dict())) {
-    LOG(ERROR) << "Error parsing response JSON: " << error_msg;
+  if (!parsed_json.value ||
+      (!parsed_json.value->is_list() && !parsed_json.value->is_dict())) {
+    LOG(ERROR) << "Error parsing response JSON: " << parsed_json.error_message;
     RecordUmaResponseParseResult(
         RECOMMEND_APPS_RESPONSE_PARSE_RESULT_INVALID_JSON);
     return base::nullopt;
@@ -534,9 +526,10 @@ base::Optional<base::Value> RecommendAppsFetcherImpl::ParseResponse(
   // If the response is a dictionary, it is an error message in the
   // following format:
   //   {"Error code":"error code","Error message":"Error message"}
-  if (json_value->is_dict()) {
+  if (parsed_json.value->is_dict()) {
     const base::Value* response_error_code_value =
-        json_value->FindKeyOfType("Error code", base::Value::Type::STRING);
+        parsed_json.value->FindKeyOfType("Error code",
+                                         base::Value::Type::STRING);
 
     if (!response_error_code_value) {
       LOG(ERROR) << "Unable to find error code: response="
@@ -571,7 +564,7 @@ base::Optional<base::Value> RecommendAppsFetcherImpl::ParseResponse(
   }
 
   // Otherwise, the response should return a list of apps.
-  base::Value::ConstListView app_list = json_value->GetList();
+  base::Value::ConstListView app_list = parsed_json.value->GetList();
   if (app_list.empty()) {
     DVLOG(1) << "No app in the response.";
     RecordUmaResponseParseResult(RECOMMEND_APPS_RESPONSE_PARSE_RESULT_NO_APP);

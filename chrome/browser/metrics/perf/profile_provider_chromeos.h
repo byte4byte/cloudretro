@@ -12,7 +12,7 @@
 #include "chrome/browser/sessions/session_restore.h"
 #include "chromeos/dbus/power/power_manager_client.h"
 #include "chromeos/login/login_state/login_state.h"
-#include "content/browser/scheduler/responsiveness/jank_monitor.h"
+#include "content/public/browser/jank_monitor.h"
 
 namespace metrics {
 
@@ -24,7 +24,7 @@ class SampledProfile;
 // mode, or user logging in, which it forwards to the registered collectors.
 class ProfileProvider : public chromeos::PowerManagerClient::Observer,
                         public chromeos::LoginState::Observer,
-                        public content::responsiveness::JankMonitor::Observer {
+                        public content::JankMonitor::Observer {
  public:
   ProfileProvider();
   ~ProfileProvider() override;
@@ -34,6 +34,11 @@ class ProfileProvider : public chromeos::PowerManagerClient::Observer,
   // Stores collected perf data protobufs in |sampled_profiles|. Clears all the
   // stored profile data. Returns true if it wrote to |sampled_profiles|.
   bool GetSampledProfiles(std::vector<SampledProfile>* sampled_profiles);
+
+  // Called when the metrics recording state changes and the corresponding
+  // callback in ChromeOSMetricsProvider is invoked.
+  void OnRecordingEnabled();
+  void OnRecordingDisabled();
 
  protected:
   // Called when either the login state or the logged in user type changes.
@@ -55,7 +60,7 @@ class ProfileProvider : public chromeos::PowerManagerClient::Observer,
   void OnJankStopped() override;
 
   // For testing.
-  scoped_refptr<content::responsiveness::JankMonitor> jank_monitor() const {
+  scoped_refptr<content::JankMonitor> jank_monitor() const {
     return jank_monitor_;
   }
   // For testing.
@@ -75,7 +80,7 @@ class ProfileProvider : public chromeos::PowerManagerClient::Observer,
   SessionRestore::CallbackSubscription
       on_session_restored_callback_subscription_;
 
-  scoped_refptr<content::responsiveness::JankMonitor> jank_monitor_;
+  scoped_refptr<content::JankMonitor> jank_monitor_;
 
   // Timestamp of the most recent jank observed.
   base::TimeTicks last_jank_start_time_;

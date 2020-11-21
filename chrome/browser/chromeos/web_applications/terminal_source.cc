@@ -7,6 +7,7 @@
 #include "base/containers/flat_map.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
+#include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/no_destructor.h"
 #include "base/strings/string_util.h"
@@ -20,15 +21,13 @@
 #include "components/prefs/pref_service.h"
 #include "net/base/escape.h"
 #include "net/base/mime_util.h"
+#include "services/network/public/mojom/content_security_policy.mojom.h"
 #include "third_party/zlib/google/compression_utils.h"
+#include "ui/webui/webui_allowlist.h"
 
 namespace {
-// TODO(crbug.com/846546): Initially set to load crosh, but change to
-// terminal when it is available.
 constexpr base::FilePath::CharType kTerminalRoot[] =
     FILE_PATH_LITERAL("/usr/share/chromeos-assets/crosh_builtin");
-constexpr base::FilePath::CharType kDefaultFile[] =
-    FILE_PATH_LITERAL("html/crosh.html");
 constexpr char kDefaultMime[] = "text/html";
 
 void ReadFile(const std::string& relative_path,
@@ -50,16 +49,6 @@ void ReadFile(const std::string& relative_path,
   if (!result) {
     static const base::NoDestructor<base::flat_map<std::string, std::string>>
         kTestFiles({
-            {"html/pwa.html",
-             "<html><head><link rel='manifest' "
-             "href='/manifest.json'></head></html>"},
-            {"manifest.json", R"({
-               "name": "Test Terminal",
-               "icons": [{ "src": "/icon.svg", "sizes": "any" }],
-               "start_url": "/html/terminal.html"})"},
-            {"icon.svg",
-             "<svg xmlns='http://www.w3.org/2000/svg'><rect "
-             "fill='red'/></svg>"},
             {"html/terminal.html", "<script src='/js/terminal.js'></script>"},
             {"js/terminal.js",
              "chrome.terminalPrivate.openVmshellProcess([], () => {})"},
@@ -79,12 +68,37 @@ void ReadFile(const std::string& relative_path,
 }
 }  // namespace
 
-TerminalSource::TerminalSource(Profile* profile) : profile_(profile) {}
+// static
+std::unique_ptr<TerminalSource> TerminalSource::ForCrosh(Profile* profile) {
+  return base::WrapUnique(new TerminalSource(
+      profile, chrome::kChromeUIUntrustedCroshURL, "html/crosh.html"));
+}
+
+// static
+std::unique_ptr<TerminalSource> TerminalSource::ForTerminal(Profile* profile) {
+  return base::WrapUnique(new TerminalSource(
+      profile, chrome::kChromeUIUntrustedTerminalURL, "html/terminal.html"));
+}
+
+TerminalSource::TerminalSource(Profile* profile,
+                               std::string source,
+                               std::string default_file)
+    : profile_(profile), source_(source), default_file_(default_file) {
+  auto* webui_allowlist = WebUIAllowlist::GetOrCreate(profile);
+  const url::Origin terminal_origin = url::Origin::Create(GURL(source));
+  CHECK(!terminal_origin.opaque());
+  for (auto permission :
+       {ContentSettingsType::JAVASCRIPT, ContentSettingsType::NOTIFICATIONS,
+        ContentSettingsType::CLIPBOARD_READ_WRITE, ContentSettingsType::COOKIES,
+        ContentSettingsType::IMAGES, ContentSettingsType::SOUND}) {
+    webui_allowlist->RegisterAutoGrantedPermission(terminal_origin, permission);
+  }
+}
 
 TerminalSource::~TerminalSource() = default;
 
 std::string TerminalSource::GetSource() {
-  return chrome::kChromeUIUntrustedTerminalURL;
+  return source_;
 }
 
 #if !BUILDFLAG(OPTIMIZE_WEBUI)
@@ -100,7 +114,7 @@ void TerminalSource::StartDataRequest(
   // skip first '/' in path.
   std::string path = url.path().substr(1);
   if (path.empty())
-    path = kDefaultFile;
+    path = default_file_;
 
   // Replace $i8n{themeColor} in *.html.
   if (base::EndsWith(path, ".html", base::CompareCase::INSENSITIVE_ASCII)) {
@@ -128,4 +142,25 @@ bool TerminalSource::ShouldServeMimeTypeAsContentTypeHeader() {
 
 const ui::TemplateReplacements* TerminalSource::GetReplacements() {
   return &replacements_;
+}
+
+std::string TerminalSource::GetContentSecurityPolicy(
+    network::mojom::CSPDirectiveName directive) {
+  switch (directive) {
+    case network::mojom::CSPDirectiveName::ImgSrc:
+      return "img-src * data: blob:;";
+    case network::mojom::CSPDirectiveName::MediaSrc:
+      return "media-src data:;";
+    case network::mojom::CSPDirectiveName::StyleSrc:
+      return "style-src * 'unsafe-inline'; font-src *;";
+    case network::mojom::CSPDirectiveName::RequireTrustedTypesFor:
+      FALLTHROUGH;
+    case network::mojom::CSPDirectiveName::TrustedTypes:
+      // TODO(crbug.com/1098685): Trusted Type remaining WebUI
+      // This removes require-trusted-types-for and trusted-types directives
+      // from the CSP header.
+      return std::string();
+    default:
+      return content::URLDataSource::GetContentSecurityPolicy(directive);
+  }
 }

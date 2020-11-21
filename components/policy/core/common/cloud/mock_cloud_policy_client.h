@@ -67,6 +67,7 @@ class MockCloudPolicyClient : public CloudPolicyClient {
                     const enterprise_management::ChildStatusReportRequest*,
                     StatusCallback&));
   MOCK_METHOD0(CancelAppInstallReportUpload, void(void));
+  MOCK_METHOD0(CancelExtensionInstallReportUpload, void(void));
   void UpdateGcmId(const std::string& id, StatusCallback callback) override {
     UpdateGcmId_(id, callback);
   }
@@ -98,29 +99,44 @@ class MockCloudPolicyClient : public CloudPolicyClient {
                void(enterprise_management::ChromeOsUserReportRequest*,
                     StatusCallback&));
 
-  void UploadRealtimeReport(base::Value value,
-                            StatusCallback callback) override {
-    UploadRealtimeReport_(value, callback);
+  void UploadSecurityEventReport(base::Value value,
+                                 StatusCallback callback) override {
+    UploadSecurityEventReport_(value, callback);
   }
-  MOCK_METHOD2(UploadRealtimeReport_, void(base::Value&, StatusCallback&));
+  MOCK_METHOD2(UploadSecurityEventReport_, void(base::Value&, StatusCallback&));
 
-  MOCK_METHOD4(ClientCertProvisioningStartCsr,
+  void UploadAppInstallReport(base::Value value,
+                              StatusCallback callback) override {
+    UploadAppInstallReport_(value, callback);
+  }
+  MOCK_METHOD2(UploadAppInstallReport_, void(base::Value&, StatusCallback&));
+  void UploadExtensionInstallReport(base::Value value,
+                                    StatusCallback callback) override {
+    UploadExtensionInstallReport_(value, callback);
+  }
+  MOCK_METHOD2(UploadExtensionInstallReport_,
+               void(base::Value&, StatusCallback&));
+
+  MOCK_METHOD5(ClientCertProvisioningStartCsr,
                void(const std::string& cert_scope,
                     const std::string& cert_profile_id,
+                    const std::string& cert_profile_version,
                     const std::string& public_key,
                     ClientCertProvisioningStartCsrCallback callback));
 
-  MOCK_METHOD6(ClientCertProvisioningFinishCsr,
+  MOCK_METHOD7(ClientCertProvisioningFinishCsr,
                void(const std::string& cert_scope,
                     const std::string& cert_profile_id,
+                    const std::string& cert_profile_version,
                     const std::string& public_key,
                     const std::string& va_challenge_response,
                     const std::string& signature,
                     ClientCertProvisioningFinishCsrCallback callback));
 
-  MOCK_METHOD4(ClientCertProvisioningDownloadCert,
+  MOCK_METHOD5(ClientCertProvisioningDownloadCert,
                void(const std::string& cert_scope,
                     const std::string& cert_profile_id,
+                    const std::string& cert_profile_version,
                     const std::string& public_key,
                     ClientCertProvisioningDownloadCertCallback callback));
 

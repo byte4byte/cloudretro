@@ -24,8 +24,6 @@ class ResizeObserver;
 class CORE_EXPORT ResizeObserverController final
     : public GarbageCollected<ResizeObserverController>,
       public Supplement<LocalDOMWindow> {
-  USING_GARBAGE_COLLECTED_MIXIN(ResizeObserverController);
-
  public:
   static const size_t kDepthBottom = 4096;
 
@@ -48,7 +46,14 @@ class CORE_EXPORT ResizeObserverController final
 
   void ClearMinDepth() { min_depth_ = 0; }
 
-  void Trace(Visitor*) override;
+  bool IsLoopLimitErrorDispatched() const {
+    return loop_limit_error_dispatched;
+  }
+  void SetLoopLimitErrorDispatched(bool is_dispatched) {
+    loop_limit_error_dispatched = is_dispatched;
+  }
+
+  void Trace(Visitor*) const override;
 
   // For testing only.
   const HeapLinkedHashSet<WeakMember<ResizeObserver>>& Observers() {
@@ -60,6 +65,9 @@ class CORE_EXPORT ResizeObserverController final
   HeapLinkedHashSet<WeakMember<ResizeObserver>> observers_;
   // Minimum depth for observations to be active
   size_t min_depth_ = 0;
+  // Used to prevent loop limit errors from being dispatched twice for the
+  // same lifecycle update
+  bool loop_limit_error_dispatched = false;
 };
 
 }  // namespace blink

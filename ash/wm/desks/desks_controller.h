@@ -10,8 +10,9 @@
 #include <vector>
 
 #include "ash/ash_export.h"
+#include "ash/public/cpp/autotest_desks_api.h"
 #include "ash/public/cpp/desks_helper.h"
-#include "ash/session/session_observer.h"
+#include "ash/public/cpp/session/session_observer.h"
 #include "ash/wm/desks/desks_histogram_enums.h"
 #include "ash/wm/desks/root_window_desk_switch_animator.h"
 #include "base/containers/flat_map.h"
@@ -27,6 +28,7 @@ class Window;
 namespace ash {
 
 class Desk;
+class DeskAnimationBase;
 
 // Defines a controller for creating, destroying and managing virtual desks and
 // their windows.
@@ -67,13 +69,21 @@ class ASH_EXPORT DesksController : public DesksHelper,
   // instance is created and owned by Shell.
   static DesksController* Get();
 
+  // Returns the default name for a desk at |desk_index|.
+  static base::string16 GetDeskDefaultName(size_t desk_index);
+
   const std::vector<std::unique_ptr<Desk>>& desks() const { return desks_; }
 
   const Desk* active_desk() const { return active_desk_; }
 
+  DeskAnimationBase* animation() const { return animation_.get(); }
+
   // Returns the current |active_desk()| or the soon-to-be active desk if a desk
   // switch animation is in progress.
   const Desk* GetTargetActiveDesk() const;
+
+  // Restores the primary user's activate desk at active_desk_index.
+  void RestorePrimaryUserActiveDeskIndex(int active_desk_index);
 
   // Destroys any pending animations in preparation for shutdown.
   void Shutdown();
@@ -122,6 +132,14 @@ class ASH_EXPORT DesksController : public DesksHelper,
   // do nothing, no desk switch or hit the wall animation.
   bool ActivateAdjacentDesk(bool going_left, DesksSwitchSource source);
 
+  // Functions used by WmGestureHandler to modify the current touchpad desk
+  // animation, if it exists. StartSwipeAnimation starts a new animation to
+  // an adjacent desk, or replaces an existing swipe animation. It returns
+  // true if either of those were successful, false otherwise.
+  bool StartSwipeAnimation(bool move_left);
+  void UpdateSwipeAnimation(float scroll_delta_x);
+  void EndSwipeAnimation();
+
   // Moves |window| (which must belong to the currently active desk) to
   // |target_desk| (which must be a different desk).
   // |target_root| is provided if |window| is desired to be moved to another
@@ -151,6 +169,8 @@ class ASH_EXPORT DesksController : public DesksHelper,
   void OnRootWindowAdded(aura::Window* root_window);
   void OnRootWindowClosing(aura::Window* root_window);
 
+  int GetDeskIndex(const Desk* desk) const;
+
   // DesksHelper:
   bool BelongsToActiveDesk(aura::Window* window) override;
 
@@ -167,15 +187,14 @@ class ASH_EXPORT DesksController : public DesksHelper,
   void OnFirstSessionStarted() override;
 
  private:
-  class DeskAnimationBase;
-  class DeskActivationAnimation;
-  class DeskRemovalAnimation;
+  class DeskTraversalsMetricsHelper;
+  friend class DeskAnimationBase;
+  friend class DeskActivationAnimation;
+  friend class DeskRemovalAnimation;
 
   void OnAnimationFinished(DeskAnimationBase* animation);
 
   bool HasDesk(const Desk* desk) const;
-
-  int GetDeskIndex(const Desk* desk) const;
 
   // Activates the given |desk| and deactivates the currently active one. |desk|
   // has to be an existing desk. If |update_window_activation| is true,
@@ -221,13 +240,20 @@ class ASH_EXPORT DesksController : public DesksHelper,
   // mode as a result of desks modifications.
   bool are_desks_being_modified_ = false;
 
-  // List of on-going desks animations.
-  std::vector<std::unique_ptr<DeskAnimationBase>> animations_;
+  // Not null if there is an on-going desks animation.
+  std::unique_ptr<DeskAnimationBase> animation_;
 
   // A free list of desk container IDs to be used for newly-created desks. New
   // desks pops from this queue and removed desks's associated container IDs are
   // re-pushed on this queue.
   std::queue<int> available_container_ids_;
+
+  // True when the enhanced desk animations feature is enabled.
+  const bool is_enhanced_desk_animations_;
+
+  // Responsible for tracking and writing number of desk traversals one has
+  // done within a span of X seconds.
+  std::unique_ptr<DeskTraversalsMetricsHelper> metrics_helper_;
 
   base::ObserverList<Observer>::Unchecked observers_;
 

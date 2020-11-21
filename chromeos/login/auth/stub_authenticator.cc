@@ -6,7 +6,7 @@
 
 #include "base/bind.h"
 #include "base/location.h"
-#include "base/logging.h"
+#include "base/notreached.h"
 #include "base/threading/thread_task_runner_handle.h"
 
 namespace chromeos {
@@ -78,10 +78,6 @@ void StubAuthenticator::AuthenticateToLogin(content::BrowserContext* context,
   task_runner_->PostTask(
       FROM_HERE, base::BindOnce(&StubAuthenticator::OnAuthFailure, this,
                                 AuthFailure::FromNetworkAuthFailure(error)));
-}
-
-void StubAuthenticator::AuthenticateToUnlock(const UserContext& user_context) {
-  AuthenticateToLogin(NULL /* not used */, user_context);
 }
 
 void StubAuthenticator::LoginAsSupervisedUser(const UserContext& user_context) {
@@ -193,7 +189,7 @@ UserContext StubAuthenticator::ExpectedUserContextWithTransformedKey() const {
 }
 
 void StubAuthenticator::OnPasswordChangeDetected() {
-  consumer_->OnPasswordChangeDetected();
+  consumer_->OnPasswordChangeDetected(expected_user_context_);
 }
 
 void StubAuthenticator::OnOldEncryptionDetected() {

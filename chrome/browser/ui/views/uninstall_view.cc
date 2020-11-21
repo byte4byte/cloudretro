@@ -4,9 +4,9 @@
 
 #include "chrome/browser/ui/views/uninstall_view.h"
 
-#include "base/message_loop/message_loop_current.h"
 #include "base/process/launch.h"
 #include "base/run_loop.h"
+#include "base/task/current_thread.h"
 #include "chrome/browser/shell_integration.h"
 #include "chrome/browser/ui/uninstall_browser_prompt.h"
 #include "chrome/browser/ui/views/chrome_layout_provider.h"
@@ -22,21 +22,21 @@
 
 UninstallView::UninstallView(int* user_selection,
                              const base::Closure& quit_closure)
-    : confirm_label_(NULL),
-      delete_profile_(NULL),
-      change_default_browser_(NULL),
-      browsers_combo_(NULL),
+    : confirm_label_(nullptr),
+      delete_profile_(nullptr),
+      change_default_browser_(nullptr),
+      browsers_combo_(nullptr),
       user_selection_(*user_selection),
       quit_closure_(quit_closure) {
-  DialogDelegate::SetButtonLabel(
-      ui::DIALOG_BUTTON_OK,
-      l10n_util::GetStringUTF16(IDS_UNINSTALL_BUTTON_TEXT));
-  DialogDelegate::SetAcceptCallback(
+  SetButtonLabel(ui::DIALOG_BUTTON_OK,
+                 l10n_util::GetStringUTF16(IDS_UNINSTALL_BUTTON_TEXT));
+  SetTitle(IDS_UNINSTALL_CHROME);
+  SetAcceptCallback(
       base::BindOnce(&UninstallView::OnDialogAccepted, base::Unretained(this)));
-  DialogDelegate::SetCancelCallback(base::BindOnce(
-      &UninstallView::OnDialogCancelled, base::Unretained(this)));
-  DialogDelegate::SetCloseCallback(base::BindOnce(
-      &UninstallView::OnDialogCancelled, base::Unretained(this)));
+  SetCancelCallback(base::BindOnce(&UninstallView::OnDialogCancelled,
+                                   base::Unretained(this)));
+  SetCloseCallback(base::BindOnce(&UninstallView::OnDialogCancelled,
+                                  base::Unretained(this)));
   set_margins(ChromeLayoutProvider::Get()->GetDialogInsetsForContentType(
       views::TEXT, views::TEXT));
   SetupControls();
@@ -61,7 +61,7 @@ void UninstallView::SetupControls() {
   ColumnSet* column_set = layout->AddColumnSet(column_set_id);
   column_set->AddColumn(views::GridLayout::LEADING, views::GridLayout::CENTER,
                         views::GridLayout::kFixedSize,
-                        views::GridLayout::USE_PREF, 0, 0);
+                        views::GridLayout::ColumnSize::kUsePreferred, 0, 0);
   layout->StartRow(views::GridLayout::kFixedSize, column_set_id);
   auto confirm_label = std::make_unique<views::Label>(
       l10n_util::GetStringUTF16(IDS_UNINSTALL_VERIFY));
@@ -90,7 +90,7 @@ void UninstallView::SetupControls() {
   column_set->AddPaddingColumn(views::GridLayout::kFixedSize, checkbox_indent);
   column_set->AddColumn(views::GridLayout::LEADING, views::GridLayout::CENTER,
                         views::GridLayout::kFixedSize,
-                        views::GridLayout::USE_PREF, 0, 0);
+                        views::GridLayout::ColumnSize::kUsePreferred, 0, 0);
   layout->StartRow(views::GridLayout::kFixedSize, column_set_id);
   delete_profile_ = layout->AddView(std::make_unique<views::Checkbox>(
       l10n_util::GetStringUTF16(IDS_UNINSTALL_DELETE_PROFILE)));
@@ -111,19 +111,26 @@ void UninstallView::SetupControls() {
       column_set = layout->AddColumnSet(column_set_id);
       column_set->AddPaddingColumn(views::GridLayout::kFixedSize,
                                    checkbox_indent);
-      column_set->AddColumn(
-          views::GridLayout::LEADING, views::GridLayout::CENTER,
-          views::GridLayout::kFixedSize, views::GridLayout::USE_PREF, 0, 0);
+      column_set->AddColumn(views::GridLayout::LEADING,
+                            views::GridLayout::CENTER,
+                            views::GridLayout::kFixedSize,
+                            views::GridLayout::ColumnSize::kUsePreferred, 0, 0);
       column_set->AddPaddingColumn(views::GridLayout::kFixedSize,
                                    related_horizontal_spacing);
-      column_set->AddColumn(
-          views::GridLayout::LEADING, views::GridLayout::CENTER,
-          views::GridLayout::kFixedSize, views::GridLayout::USE_PREF, 0, 0);
+      column_set->AddColumn(views::GridLayout::LEADING,
+                            views::GridLayout::CENTER,
+                            views::GridLayout::kFixedSize,
+                            views::GridLayout::ColumnSize::kUsePreferred, 0, 0);
       layout->StartRow(views::GridLayout::kFixedSize, column_set_id);
       change_default_browser_ =
           layout->AddView(std::make_unique<views::Checkbox>(
               l10n_util::GetStringUTF16(IDS_UNINSTALL_SET_DEFAULT_BROWSER),
-              this));
+              base::BindRepeating(
+                  [](UninstallView* view) {
+                    view->browsers_combo_->SetEnabled(
+                        view->change_default_browser_->GetChecked());
+                  },
+                  this)));
       browsers_combo_ =
           layout->AddView(std::make_unique<views::Combobox>(this));
       browsers_combo_->SetEnabled(false);
@@ -134,7 +141,7 @@ void UninstallView::SetupControls() {
 }
 
 void UninstallView::OnDialogAccepted() {
-  user_selection_ = service_manager::RESULT_CODE_NORMAL_EXIT;
+  user_selection_ = content::RESULT_CODE_NORMAL_EXIT;
   if (delete_profile_->GetChecked())
     user_selection_ = chrome::RESULT_CODE_UNINSTALL_DELETE_PROFILE;
   if (change_default_browser_ && change_default_browser_->GetChecked()) {
@@ -150,25 +157,12 @@ void UninstallView::OnDialogCancelled() {
   user_selection_ = chrome::RESULT_CODE_UNINSTALL_USER_CANCEL;
 }
 
-void UninstallView::ButtonPressed(views::Button* sender,
-                                  const ui::Event& event) {
-  if (change_default_browser_ == sender) {
-    // Disable the browsers combobox if the user unchecks the checkbox.
-    DCHECK(browsers_combo_);
-    browsers_combo_->SetEnabled(change_default_browser_->GetChecked());
-  }
-}
-
-base::string16 UninstallView::GetWindowTitle() const {
-  return l10n_util::GetStringUTF16(IDS_UNINSTALL_CHROME);
-}
-
 int UninstallView::GetItemCount() const {
   DCHECK(!browsers_->empty());
   return browsers_->size();
 }
 
-base::string16 UninstallView::GetItemAt(int index) {
+base::string16 UninstallView::GetItemAt(int index) const {
   DCHECK_LT(index, static_cast<int>(browsers_->size()));
   BrowsersMap::const_iterator i = browsers_->begin();
   std::advance(i, index);
@@ -178,8 +172,8 @@ base::string16 UninstallView::GetItemAt(int index) {
 namespace chrome {
 
 int ShowUninstallBrowserPrompt() {
-  DCHECK(base::MessageLoopCurrentForUI::IsSet());
-  int result = service_manager::RESULT_CODE_NORMAL_EXIT;
+  DCHECK(base::CurrentUIThread::IsSet());
+  int result = content::RESULT_CODE_NORMAL_EXIT;
 
   base::RunLoop run_loop;
   UninstallView* view = new UninstallView(&result,

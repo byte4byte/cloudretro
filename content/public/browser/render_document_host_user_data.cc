@@ -4,7 +4,7 @@
 
 #include "content/public/browser/render_document_host_user_data.h"
 
-#include "content/browser/frame_host/render_frame_host_impl.h"
+#include "content/browser/renderer_host/render_frame_host_impl.h"
 
 namespace content {
 
@@ -21,6 +21,10 @@ void SetRenderDocumentHostUserData(
     std::unique_ptr<base::SupportsUserData::Data> data) {
   static_cast<RenderFrameHostImpl*>(rfh)->SetRenderDocumentHostUserData(
       key, std::move(data));
+}
+
+void RemoveRenderDocumentHostUserData(RenderFrameHost* rfh, const void* key) {
+  static_cast<RenderFrameHostImpl*>(rfh)->RemoveRenderDocumentHostUserData(key);
 }
 
 }  // namespace content

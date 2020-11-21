@@ -14,6 +14,7 @@
 #include "components/feed/core/v2/feed_network.h"
 #include "components/feed/core/v2/public/types.h"
 #include "components/feed/core/v2/tasks/load_stream_from_store_task.h"
+#include "components/feed/core/v2/tasks/upload_actions_task.h"
 #include "components/offline_pages/task/task.h"
 #include "components/version_info/channel.h"
 
@@ -39,8 +40,8 @@ class LoadStreamTask : public offline_pages::Task {
     Result();
     explicit Result(LoadStreamStatus status);
     ~Result();
-    Result(const Result&);
-    Result& operator=(const Result&);
+    Result(Result&&);
+    Result& operator=(Result&&);
 
     // Final status of loading the stream.
     LoadStreamStatus final_status = LoadStreamStatus::kNoStatus;
@@ -48,8 +49,14 @@ class LoadStreamTask : public offline_pages::Task {
     // was attempted.
     LoadStreamStatus load_from_store_status = LoadStreamStatus::kNoStatus;
     LoadType load_type;
+
     // Information about the network request, if one was made.
     base::Optional<NetworkResponseInfo> network_response_info;
+    bool loaded_new_content_from_network = false;
+    std::unique_ptr<LoadLatencyTimes> latencies;
+
+    // Result of the upload actions task.
+    std::unique_ptr<UploadActionsTask::Result> upload_actions_result;
   };
 
   LoadStreamTask(LoadType load_type,
@@ -66,6 +73,7 @@ class LoadStreamTask : public offline_pages::Task {
   }
 
   void LoadFromStoreComplete(LoadStreamFromStoreTask::Result result);
+  void UploadActionsComplete(UploadActionsTask::Result result);
   void QueryRequestComplete(FeedNetwork::QueryRequestResult result);
   void Done(LoadStreamStatus status);
 
@@ -76,9 +84,14 @@ class LoadStreamTask : public offline_pages::Task {
   // Information to be stuffed in |Result|.
   LoadStreamStatus load_from_store_status_ = LoadStreamStatus::kNoStatus;
   base::Optional<NetworkResponseInfo> network_response_info_;
+  bool loaded_new_content_from_network_ = false;
 
+  std::unique_ptr<LoadLatencyTimes> latencies_;
+  base::TimeTicks task_creation_time_;
   base::TimeTicks fetch_start_time_;
   base::OnceCallback<void(Result)> done_callback_;
+  std::unique_ptr<UploadActionsTask> upload_actions_task_;
+  std::unique_ptr<UploadActionsTask::Result> upload_actions_result_;
   base::WeakPtrFactory<LoadStreamTask> weak_ptr_factory_{this};
 };
 }  // namespace feed

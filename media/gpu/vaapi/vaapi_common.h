@@ -8,6 +8,15 @@
 #include "media/gpu/vaapi/va_surface.h"
 #include "media/gpu/vp8_picture.h"
 #include "media/gpu/vp9_picture.h"
+#include "media/media_buildflags.h"
+
+#if BUILDFLAG(ENABLE_PLATFORM_HEVC)
+#include "media/gpu/h265_dpb.h"
+#endif
+
+#if BUILDFLAG(IS_ASH)
+#include "media/gpu/av1_picture.h"
+#endif  // BUILDFLAG(IS_ASH)
 
 namespace media {
 
@@ -32,6 +41,27 @@ class VaapiH264Picture : public H264Picture {
 
   DISALLOW_COPY_AND_ASSIGN(VaapiH264Picture);
 };
+
+#if BUILDFLAG(ENABLE_PLATFORM_HEVC)
+class VaapiH265Picture : public H265Picture {
+ public:
+  explicit VaapiH265Picture(scoped_refptr<VASurface> va_surface);
+
+  VaapiH265Picture(const VaapiH265Picture&) = delete;
+  VaapiH265Picture& operator=(const VaapiH265Picture&) = delete;
+
+  VaapiH265Picture* AsVaapiH265Picture() override;
+
+  scoped_refptr<VASurface> va_surface() const { return va_surface_; }
+  VASurfaceID GetVASurfaceID() const { return va_surface_->id(); }
+
+ protected:
+  ~VaapiH265Picture() override;
+
+ private:
+  scoped_refptr<VASurface> va_surface_;
+};
+#endif  // BUILDFLAG(ENABLE_PLATFORM_HEVC)
 
 class VaapiVP8Picture : public VP8Picture {
  public:
@@ -71,6 +101,38 @@ class VaapiVP9Picture : public VP9Picture {
   DISALLOW_COPY_AND_ASSIGN(VaapiVP9Picture);
 };
 
+#if BUILDFLAG(IS_ASH)
+class VaapiAV1Picture : public AV1Picture {
+ public:
+  VaapiAV1Picture(scoped_refptr<VASurface> display_va_surface,
+                  scoped_refptr<VASurface> reconstruct_va_surface);
+  VaapiAV1Picture(const VaapiAV1Picture&) = delete;
+  VaapiAV1Picture& operator=(const VaapiAV1Picture&) = delete;
+
+  const scoped_refptr<VASurface>& display_va_surface() const {
+    return display_va_surface_;
+  }
+  const scoped_refptr<VASurface>& reconstruct_va_surface() const {
+    return reconstruct_va_surface_;
+  }
+
+ protected:
+  ~VaapiAV1Picture() override;
+
+ private:
+  scoped_refptr<AV1Picture> CreateDuplicate() override;
+
+  // |display_va_surface_| refers to the final decoded frame, both when using
+  // film grain synthesis and when not using film grain.
+  // |reconstruct_va_surface_| is only useful when using film grain synthesis:
+  // it's the decoded frame prior to applying the film grain.
+  // When not using film grain synthesis, |reconstruct_va_surface_| is equal to
+  // |display_va_surface_|. This is necessary to simplify the reference frame
+  // code when filling the VA-API structures.
+  scoped_refptr<VASurface> display_va_surface_;
+  scoped_refptr<VASurface> reconstruct_va_surface_;
+};
+#endif  // BUILDFLAG(IS_ASH)
 }  // namespace media
 
 #endif  // MEDIA_GPU_VAAPI_VAAPI_COMMON_H_

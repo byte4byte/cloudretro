@@ -10,7 +10,7 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/containers/queue.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
@@ -120,15 +120,8 @@ class TestingCloudPolicyClientForRemoteCommands : public CloudPolicyClient {
  public:
   explicit TestingCloudPolicyClientForRemoteCommands(
       TestingRemoteCommandsServer* server)
-      : CloudPolicyClient(std::string() /* machine_id */,
-                          std::string() /* machine_model */,
-                          std::string() /* brand_code */,
-                          std::string() /* ethernet_mac_address */,
-                          std::string() /* dock_mac_address */,
-                          std::string() /* manufacture_date */,
-                          nullptr /* service */,
+      : CloudPolicyClient(nullptr /* service */,
                           nullptr /* url_loader_factory */,
-                          nullptr /* signing_service */,
                           CloudPolicyClient::DeviceDMTokenCallback()),
         server_(server) {
     dm_token_ = kDMToken;

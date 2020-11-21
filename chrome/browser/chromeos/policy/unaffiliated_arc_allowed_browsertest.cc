@@ -22,6 +22,7 @@
 #include "chromeos/settings/cros_settings_names.h"
 #include "components/arc/arc_util.h"
 #include "components/policy/proto/chrome_device_policy.pb.h"
+#include "content/public/test/browser_test.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace em = enterprise_management;
@@ -31,7 +32,7 @@ namespace policy {
 namespace {
 
 constexpr char kAffiliatedUserEmail[] = "affiliated-user@example.com";
-constexpr char kAffiliatedUserGaiaId[] = "affiliated-user@example.com";
+constexpr char kAffiliatedUserGaiaId[] = "affiliated-user_example.com";
 constexpr char kAffiliationID[] = "some-affiliation-id";
 constexpr char kAnotherAffiliationID[] = "another-affiliation-id";
 

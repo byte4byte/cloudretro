@@ -122,6 +122,10 @@ class FileSystemURL;
 namespace file_manager {
 namespace file_tasks {
 
+extern const char kActionIdView[];
+extern const char kActionIdSend[];
+extern const char kActionIdSendMultiple[];
+
 // Task types as explained in the comment above. Search for <task-type>.
 enum TaskType {
   TASK_TYPE_UNKNOWN = 0,  // Used only for handling errors.
@@ -131,6 +135,7 @@ enum TaskType {
   TASK_TYPE_ARC_APP,
   TASK_TYPE_CROSTINI_APP,
   TASK_TYPE_WEB_APP,
+  TASK_TYPE_PLUGIN_VM_APP,
   // The enum values must be kept in sync with FileManagerTaskType in
   // tools/metrics/histograms/enums.xml. Since enums for histograms are
   // append-only (for keeping the number consistent across versions), new values
@@ -335,11 +340,8 @@ void ChooseAndSetDefaultTask(const PrefService& pref_service,
                              const std::vector<extensions::EntryInfo>& entries,
                              std::vector<FullTaskDescriptor>* tasks);
 
-// Returns whether |path| is a RAW image file according to its extension. Note
-// that since none of the extensions of interest are "known" mime types (per
-// net/mime_util.cc), it's enough to simply check the extension rather than
-// using MimeTypeCollector. TODO(crbug/1030935): Remove this.
-bool IsRawImage(const base::FilePath& path);
+// Returns whether |path| is an HTML file according to its extension.
+bool IsHtmlFile(const base::FilePath& path);
 
 }  // namespace file_tasks
 }  // namespace file_manager

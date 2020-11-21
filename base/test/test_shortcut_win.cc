@@ -45,7 +45,8 @@ void ValidatePathsAreEqual(const FilePath& expected_path,
   EXPECT_FALSE(long_expected_path.empty());
   EXPECT_FALSE(long_actual_path.empty());
 
-  EXPECT_EQ(long_expected_path, long_actual_path);
+  EXPECT_TRUE(base::FilePath::CompareEqualIgnoreCase(long_expected_path.value(),
+                                                     long_actual_path.value()));
 }
 
 void ValidateShortcut(const FilePath& shortcut_path,
@@ -69,8 +70,7 @@ void ValidateShortcut(const FilePath& shortcut_path,
   if (FAILED(hr))
     return;
 
-  EXPECT_TRUE(
-      SUCCEEDED(hr = i_shell_link.CopyTo(i_persist_file.GetAddressOf())));
+  EXPECT_TRUE(SUCCEEDED(hr = i_shell_link.As(&i_persist_file)));
   if (FAILED(hr))
     return;
 
@@ -113,8 +113,7 @@ void ValidateShortcut(const FilePath& shortcut_path,
   }
 
   Microsoft::WRL::ComPtr<IPropertyStore> property_store;
-  EXPECT_TRUE(
-      SUCCEEDED(hr = i_shell_link.CopyTo(property_store.GetAddressOf())));
+  EXPECT_TRUE(SUCCEEDED(hr = i_shell_link.As(&property_store)));
   if (FAILED(hr))
     return;
 

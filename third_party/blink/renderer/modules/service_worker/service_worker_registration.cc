@@ -132,7 +132,7 @@ ServiceWorkerRegistration* ServiceWorkerRegistration::Take(
     ScriptPromiseResolver* resolver,
     WebServiceWorkerRegistrationObjectInfo info) {
   return ServiceWorkerContainer::From(
-             To<LocalDOMWindow>(resolver->GetExecutionContext())->document())
+             *To<LocalDOMWindow>(resolver->GetExecutionContext()))
       ->GetOrCreateServiceWorkerRegistration(std::move(info));
 }
 
@@ -312,7 +312,7 @@ void ServiceWorkerRegistration::Dispose() {
   receiver_.reset();
 }
 
-void ServiceWorkerRegistration::Trace(Visitor* visitor) {
+void ServiceWorkerRegistration::Trace(Visitor* visitor) const {
   visitor->Trace(installing_);
   visitor->Trace(waiting_);
   visitor->Trace(active_);

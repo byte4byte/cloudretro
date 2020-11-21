@@ -5,7 +5,6 @@
 #ifndef CONTENT_PUBLIC_TEST_NESTED_MESSAGE_PUMP_ANDROID_H_
 #define CONTENT_PUBLIC_TEST_NESTED_MESSAGE_PUMP_ANDROID_H_
 
-#include "base/android/jni_android.h"
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "base/message_loop/message_pump_android.h"
@@ -19,18 +18,41 @@ class NestedMessagePumpAndroid : public base::MessagePumpForUI {
   NestedMessagePumpAndroid();
   ~NestedMessagePumpAndroid() override;
 
-  void Run(Delegate* delegate) override;
+  void Run(Delegate*) override;
   void Quit() override;
-  void ScheduleWork() override;
-  void ScheduleDelayedWork(const base::TimeTicks& delayed_work_time) override;
-  void Attach(Delegate* delegate) override;
+  void Attach(Delegate*) override;
+  void DoDelayedLooperWork() override;
+  void DoNonDelayedLooperWork(bool do_idle_work) override;
 
  private:
-  // We may make recursive calls to Run, so we save state that needs to be
-  // separate between them in this structure type.
-  struct RunState;
+  // Returns true if the work should be deferred.
+  bool ShouldDeferWork() const { return inside_run_message_handler_; }
 
-  RunState* state_;
+  // Calls Java_NestedSystemMessageHandler_dispatchOneMessage() to service the
+  // native looper, dispatch a pending Java message, or wait until a Java
+  // message or looper event arrives.
+  void RunJavaSystemMessageHandler();
+
+  // Sends a signal that causes the current RunMessageHandler() call to return
+  // as soon as possible.
+  void QuitJavaSystemMessageHandler();
+
+  // Tracks whether a RunMessageHandler() call is currently on the stack.
+  bool inside_run_message_handler_ = false;
+
+  // Tracks whether a signal has been sent to trigger the current
+  // RunMessageHandler() call to return.
+  bool quit_message_handler_ = false;
+
+  // Keeps track of the work that needs to be dispatched after
+  // RunJavaSystemMessageHandler() returns.
+  enum DeferredWorkType {
+    kNone,
+    kDelayed,
+    kNonDelayed,
+  };
+  DeferredWorkType deferred_work_type_ = kNone;
+  bool deferred_do_idle_work_ = true;
 
   DISALLOW_COPY_AND_ASSIGN(NestedMessagePumpAndroid);
 };

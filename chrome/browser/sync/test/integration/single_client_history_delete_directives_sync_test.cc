@@ -7,7 +7,7 @@
 #include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/task/cancelable_task_tracker.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/history/web_history_service_factory.h"
 #include "chrome/browser/sync/test/integration/single_client_status_change_checker.h"
@@ -18,6 +18,7 @@
 #include "components/sync/engine_impl/loopback_server/persistent_unique_client_entity.h"
 #include "components/sync/protocol/sync.pb.h"
 #include "components/sync/test/fake_server/fake_server.h"
+#include "content/public/test/browser_test.h"
 
 namespace {
 

@@ -17,6 +17,8 @@ per-file *.xtb=file://tools/translation/TRANSLATION_OWNERS
 per-file *_android.*=file://chrome/browser/android/OWNERS
 per-file *.java=file://chrome/browser/android/OWNERS
 
+per-file *_lacros*=file://chrome/browser/lacros/OWNERS
+
 per-file browser_resources.grd=file://ui/webui/PLATFORM_OWNERS
 per-file dev_ui_browser_resources.grd=file://ui/webui/PLATFORM_OWNERS
 
@@ -45,6 +47,7 @@ per-file chrome_service_worker_browsertest.cc=file://content/browser/service_wor
 per-file chrome_webusb_browser_client*=file://chrome/browser/usb/OWNERS
 
 per-file chrome_worker_browsertest.cc=file://content/browser/worker_host/OWNERS
+per-file ukm_worker_browsertest.cc=file://content/browser/worker_host/OWNERS
 
 per-file exo_parts.*=dcastagna@chromium.org
 per-file exo_parts.*=oshima@chromium.org
@@ -76,10 +79,17 @@ per-file chrome_browser_interface_binders.*=file://ipc/SECURITY_OWNERS
 per-file chrome_content_browser_client_receiver_bindings.*=set noparent
 per-file chrome_content_browser_client_receiver_bindings.*=file://ipc/SECURITY_OWNERS
 
+# Changes to service sandbox configuration require a security review.
+per-file service_sandbox_type.h=file://ipc/SECURITY_OWNERS
+
 # BackForwardCache
 per-file chrome_back_forward_cache_browsertest.cc=arthursonzogni@chromium.org
 per-file chrome_back_forward_cache_browsertest.cc=altimin@chromium.org
 per-file chrome_back_forward_cache_browsertest.cc=file://content/OWNERS
+
+# Cross-Origin-Opener-Policy:
+per-file chrome_cross_origin_opener_policy_browsertest.cc=file://content/OWNERS
+per-file chrome_cross_origin_opener_policy_browsertest.cc=arthursonzogni@chromium.org
 
 # COMPONENT: UI>Browser
 # TEAM: chromium-reviews@chromium.org

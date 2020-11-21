@@ -11,11 +11,12 @@
 #include "base/base_paths.h"
 #include "base/base_switches.h"
 #include "base/bind.h"
+#include "base/check.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/lazy_instance.h"
-#include "base/logging.h"
 #include "base/memory/ref_counted.h"
+#include "base/notreached.h"
 #include "base/path_service.h"
 #include "base/process/kill.h"
 #include "base/process/process_handle.h"
@@ -66,7 +67,7 @@ int RunClientFunction(base::OnceCallback<int(MojoHandle)> handler,
 
 }  // namespace
 
-MultiprocessTestHelper::MultiprocessTestHelper() {}
+MultiprocessTestHelper::MultiprocessTestHelper() = default;
 
 MultiprocessTestHelper::~MultiprocessTestHelper() {
   CHECK(!test_child_.IsValid());
@@ -121,7 +122,7 @@ ScopedMessagePipeHandle MultiprocessTestHelper::StartChildWithExtraSwitch(
 #if !defined(OS_FUCHSIA)
     case LaunchType::NAMED_CHILD:
     case LaunchType::NAMED_PEER: {
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
       server_name = NamedPlatformChannel::ServerNameFromUTF8(
           "mojo.test." + base::NumberToString(base::RandUint64()));
 #elif defined(OS_POSIX)

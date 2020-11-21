@@ -9,7 +9,8 @@
 
 #include <tuple>
 
-#include "base/logging.h"
+#include "base/check_op.h"
+#include "base/notreached.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
@@ -127,14 +128,12 @@ bool IsValidInput(const base::StringPiece& scheme,
 
 }  // namespace
 
-SchemeHostPort::SchemeHostPort() : port_(0) {
-}
+SchemeHostPort::SchemeHostPort() = default;
 
 SchemeHostPort::SchemeHostPort(std::string scheme,
                                std::string host,
                                uint16_t port,
-                               ConstructPolicy policy)
-    : port_(0) {
+                               ConstructPolicy policy) {
   if (!IsValidInput(scheme, host, port, policy)) {
     DCHECK(!IsValid());
     return;
@@ -155,7 +154,7 @@ SchemeHostPort::SchemeHostPort(base::StringPiece scheme,
                      port,
                      ConstructPolicy::CHECK_CANONICALIZATION) {}
 
-SchemeHostPort::SchemeHostPort(const GURL& url) : port_(0) {
+SchemeHostPort::SchemeHostPort(const GURL& url) {
   if (!url.is_valid())
     return;
 
@@ -242,9 +241,6 @@ std::string SchemeHostPort::SerializeInternal(url::Parsed* parsed) const {
     parsed->host = Component(result.length(), host_.length());
     result.append(host_);
   }
-
-  if (port_ == 0)
-    return result;
 
   // Omit the port component if the port matches with the default port
   // defined for the scheme, if any.

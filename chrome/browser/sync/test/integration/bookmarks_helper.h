@@ -31,6 +31,10 @@
 class BookmarkUndoService;
 class GURL;
 
+namespace base {
+class GUID;
+}  // namespace base
+
 namespace bookmarks {
 class BookmarkModel;
 }  // namespace bookmarks
@@ -223,8 +227,8 @@ size_t CountFoldersWithTitlesMatching(int profile, const std::string& title)
     WARN_UNUSED_RESULT;
 
 // Returns whether there exists a BookmarkNode in the bookmark model of
-// profile |profile| whose GUID matches the string |guid|.
-bool ContainsBookmarkNodeWithGUID(int profile, const std::string& guid);
+// profile |profile| whose GUID matches |guid|.
+bool ContainsBookmarkNodeWithGUID(int profile, const base::GUID& guid);
 
 // Creates a favicon of |color| with image reps of the platform's supported
 // scale factors (eg MacOS) in addition to 1x.
@@ -443,10 +447,11 @@ class BookmarkFaviconLoadedChecker
 };
 
 // Checker used to block until the bookmarks on the server match a given set of
-// expected bookmarks.
+// expected bookmarks. The |title| is comapred to both legacy and full titles.
 class ServerBookmarksEqualityChecker : public SingleClientStatusChangeChecker {
  public:
   struct ExpectedBookmark {
+    // Used to check both legacy and full titles in specifics.
     std::string title;
     GURL url;
   };
@@ -454,10 +459,11 @@ class ServerBookmarksEqualityChecker : public SingleClientStatusChangeChecker {
   // If a |cryptographer| is provided (i.e. is not nullptr), it is assumed that
   // the server-side data should be encrypted, and the provided cryptographer
   // will be used to decrypt the data prior to checking for equality.
+  // |fake_server| must not be nullptr and must outlive this object.
   ServerBookmarksEqualityChecker(
       syncer::ProfileSyncService* service,
       fake_server::FakeServer* fake_server,
-      const std::vector<ExpectedBookmark>& expected_bookmarks,
+      std::vector<ExpectedBookmark> expected_bookmarks,
       syncer::Cryptographer* cryptographer);
 
   bool IsExitConditionSatisfied(std::ostream* os) override;
@@ -489,7 +495,7 @@ class BookmarksUrlChecker : public SingleBookmarkModelStatusChangeChecker {
 // Checker used to block until there exists a bookmark with the given GUID.
 class BookmarksGUIDChecker : public SingleBookmarksModelMatcherChecker {
  public:
-  BookmarksGUIDChecker(int profile, const std::string& guid);
+  BookmarksGUIDChecker(int profile, const base::GUID& guid);
   ~BookmarksGUIDChecker() override;
 };
 

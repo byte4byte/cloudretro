@@ -3,11 +3,12 @@
 ## Can I apply commandline flags on my device?
 
 *** note
-**Note:** WebView only permits toggling arbitrary commandline flags on devices/emulators
-running a debuggable Android OS image. **Most users cannot follow these
-instructions**, because they're using devices with production Android images.
+**Note:** this guide only applies to userdebug/eng devices and emulators. Most
+users and app developers **do not** have debuggable devices, and therefore
+cannot follow this guide.
 
-If you need to toggle flags on **production devices**, see [this guide](flag-ui.md).
+If you need to toggle flags on production Android devices, you can use [WebView
+DevTools](developer-ui.md).
 ***
 
 You can check which Android image you have on your device with the following:
@@ -18,15 +19,17 @@ You can check which Android image you have on your device with the following:
 $ source build/android/envsetup.sh
 
 # If this outputs "userdebug" or "eng" then you can apply flags following this
-# guide. If it outputs "user" then you cannot apply flags on this device.
+# guide. If it outputs "user" then you can only use WebView DevTools.
 $ adb shell getprop ro.build.type
 userdebug
 ```
 
-If the above outputs "user," then you **cannot** apply flags on the
-device/emulator. If you intend to use this device for chromium development, then
-you may consider [re-flashing the device or creating a debuggable Android
-emulator](device-setup.md).
+If the above outputs "user," then you have two options:
+
+* Try using [WebView DevTools](developer-ui.md) to toggle flags (also works on
+  userdebug and eng devices)
+* Reflash your device or create a debuggable emulator (see [device
+  setup](device-setup.md))
 
 ## Applying flags
 
@@ -93,10 +96,13 @@ adb shell "cat ${FLAG_FILE}"
 
 ## Verifying flags are applied
 
-You can confirm you've applied commandline flags correctly by dumping the full
-state of the commandline flags with the [WebView Log Verbosifier
-app](/android_webview/tools/webview_log_verbosifier/README.md) and starting up a
-WebView app.
+You can add the `--webview-verbose-logging` flag, which tells WebView to dump
+its full commandline and variations state to logs during startup. You can filter
+device logs with:
+
+```shell
+adb logcat | grep -iE 'Active field trial|WebViewCommandLine'
+```
 
 ## Applying Features with flags
 
@@ -135,12 +141,16 @@ Some interesting flags and Features:
 
 WebView also defines its own flags and Features:
 
- * [AwSwitches.java](https://cs.chromium.org/chromium/src/android_webview/java/src/org/chromium/android_webview/common/AwSwitches.java)
-   (and its [native
-   counterpart](https://cs.chromium.org/chromium/src/android_webview/common/aw_switches.h))
- * [AwFeatureList.java](https://cs.chromium.org/chromium/src/android_webview/java/src/org/chromium/android_webview/AwFeatureList.java)
-   (and its [native
-   counterpart](https://cs.chromium.org/chromium/src/android_webview/common/aw_features.h))
+ * C++ switches are defined in
+   [`aw_switches.cc`](/android_webview/common/aw_switches.cc). We use
+   [`java_cpp_strings`](/docs/android_accessing_cpp_switches_in_java.md) to
+   automatically generate Java switch constants from the C++ switches (see
+   [`AwSwitches.java`](https://source.chromium.org/chromium/chromium/src/+/master:out/android-Debug/gen/android_webview/common_java/generated_java/input_srcjars/org/chromium/android_webview/common/AwSwitches.java)).
+ * C++ `base::Features` are defined in
+   [`aw_features.cc`](/android_webview/common/aw_features.cc). We use
+   [`java_cpp_features`](/docs/android_accessing_cpp_features_in_java.md) to
+   automatically generate Java constants from the C++ Features (see
+   [`AwFeatures.java`](https://source.chromium.org/chromium/chromium/src/+/master:out/android-Debug/gen/android_webview/common_java/generated_java/input_srcjars/org/chromium/android_webview/common/AwFeatures.java)).
 
 ## Implementation
 

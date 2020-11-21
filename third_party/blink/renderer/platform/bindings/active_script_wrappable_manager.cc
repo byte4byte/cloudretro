@@ -31,22 +31,27 @@ bool ScriptWrappableIsActive(const ActiveScriptWrappableBase& asw) {
 
 }  // namespace
 
-void ActiveScriptWrappableManager::RecomputeActiveScriptWrappables() {
+void ActiveScriptWrappableManager::RecomputeActiveScriptWrappables(
+    RecomputeMode mode) {
+  if (mode == RecomputeMode::kOpportunistic && recomputed_cnt_ > 0)
+    return;
   ThreadState::NoAllocationScope no_allocations(ThreadState::Current());
   for (auto& pair : active_script_wrappables_) {
     if (!ScriptWrappableIsActive(*pair.first) || pair.second)
       continue;
     pair.second = pair.first.Get();
   }
+  recomputed_cnt_++;
 }
 
 void ActiveScriptWrappableManager::IterateActiveScriptWrappables(
     Visitor* visitor) {
-  RecomputeActiveScriptWrappables();
+  RecomputeActiveScriptWrappables(RecomputeMode::kRequired);
   for (auto& pair : active_script_wrappables_) {
     visitor->Trace(pair.second);
     pair.second = nullptr;
   }
+  recomputed_cnt_ = 0;
 }
 
 void ActiveScriptWrappableManager::
@@ -63,9 +68,10 @@ void ActiveScriptWrappableManager::
             return !broker.IsHeapObjectAlive(pair.first);
           }),
       active_script_wrappables_.end());
+  recomputed_cnt_ = 0;
 }
 
-void ActiveScriptWrappableManager::Trace(Visitor* visitor) {
+void ActiveScriptWrappableManager::Trace(Visitor* visitor) const {
   visitor->Trace(active_script_wrappables_);
   visitor->RegisterWeakCallbackMethod<
       ActiveScriptWrappableManager,

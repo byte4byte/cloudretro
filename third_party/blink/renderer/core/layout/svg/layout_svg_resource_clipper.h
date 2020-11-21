@@ -34,14 +34,20 @@ class LayoutSVGResourceClipper final : public LayoutSVGResourceContainer {
   explicit LayoutSVGResourceClipper(SVGClipPathElement*);
   ~LayoutSVGResourceClipper() override;
 
-  const char* GetName() const override { return "LayoutSVGResourceClipper"; }
+  const char* GetName() const override {
+    NOT_DESTROYED();
+    return "LayoutSVGResourceClipper";
+  }
 
   void RemoveAllClientsFromCache() override;
 
   FloatRect ResourceBoundingBox(const FloatRect& reference_box);
 
   static const LayoutSVGResourceType kResourceType = kClipperResourceType;
-  LayoutSVGResourceType ResourceType() const override { return kResourceType; }
+  LayoutSVGResourceType ResourceType() const override {
+    NOT_DESTROYED();
+    return kResourceType;
+  }
 
   bool HitTestClipContent(const FloatRect&, const HitTestLocation&) const;
 
@@ -73,8 +79,12 @@ class LayoutSVGResourceClipper final : public LayoutSVGResourceContainer {
   FloatRect local_clip_bounds_;
 };
 
-DEFINE_LAYOUT_SVG_RESOURCE_TYPE_CASTS(LayoutSVGResourceClipper,
-                                      kClipperResourceType);
+template <>
+struct DowncastTraits<LayoutSVGResourceClipper> {
+  static bool AllowFrom(const LayoutSVGResourceContainer& container) {
+    return container.ResourceType() == kClipperResourceType;
+  }
+};
 
 inline LayoutSVGResourceClipper* GetSVGResourceAsType(
     const ClipPathOperation* clip_path_operation) {

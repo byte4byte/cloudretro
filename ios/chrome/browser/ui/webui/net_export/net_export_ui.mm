@@ -165,8 +165,8 @@ void NetExportMessageHandler::OnStopNetLog(const base::ListValue* list) {
 
 void NetExportMessageHandler::OnSendNetLog(const base::ListValue* list) {
   DCHECK_CURRENTLY_ON(web::WebThread::UI);
-  file_writer_->GetFilePathToCompletedLog(
-      base::Bind(&NetExportMessageHandler::SendEmail, base::Unretained(this)));
+  file_writer_->GetFilePathToCompletedLog(base::BindOnce(
+      &NetExportMessageHandler::SendEmail, base::Unretained(this)));
 }
 
 void NetExportMessageHandler::OnNewState(const base::DictionaryValue& state) {
@@ -209,8 +209,8 @@ void NetExportMessageHandler::NotifyUIWithState(
 
 }  // namespace
 
-NetExportUI::NetExportUI(web::WebUIIOS* web_ui)
-    : web::WebUIIOSController(web_ui) {
+NetExportUI::NetExportUI(web::WebUIIOS* web_ui, const std::string& host)
+    : web::WebUIIOSController(web_ui, host) {
   web_ui->AddMessageHandler(std::make_unique<NetExportMessageHandler>());
   web::WebUIIOSDataSource::Add(ChromeBrowserState::FromWebUIIOS(web_ui),
                                CreateNetExportHTMLSource());

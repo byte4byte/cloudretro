@@ -6,12 +6,12 @@
 
 #import <Foundation/Foundation.h>
 
+#include "base/check_op.h"
 #import "base/ios/ns_error_util.h"
-#include "base/logging.h"
+#include "base/notreached.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/values.h"
 #include "components/error_page/common/error.h"
-#include "components/error_page/common/error_page_params.h"
 #include "components/error_page/common/localized_error.h"
 #include "components/grit/components_resources.h"
 #include "ios/chrome/browser/application_context.h"
@@ -56,8 +56,7 @@ NSString* GetErrorPage(const GURL& url,
           /*offline_content_feature_enabled=*/false,
           /*auto_fetch_feature_enabled=*/false,
           /*is_kiosk_mode=*/false,
-          GetApplicationContext()->GetApplicationLocale(),
-          /*params=*/nullptr);
+          GetApplicationContext()->GetApplicationLocale());
 
   ui::ScaleFactor scale_factor =
       ui::ResourceBundle::GetSharedInstance().GetMaxScaleFactor();

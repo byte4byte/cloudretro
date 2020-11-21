@@ -5,10 +5,10 @@
 
 #import "ios/chrome/browser/ui/tabs/tab_view.h"
 
-#include "base/i18n/rtl.h"
-#include "base/logging.h"
+#import <MaterialComponents/MaterialActivityIndicator.h>
 
 #include "base/feature_list.h"
+#include "base/i18n/rtl.h"
 #include "base/ios/ios_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "ios/chrome/browser/drag_and_drop/drag_and_drop_flag.h"
@@ -24,7 +24,6 @@
 #import "ios/chrome/common/ui/elements/highlight_button.h"
 #import "ios/chrome/common/ui/util/constraints_ui_util.h"
 #include "ios/chrome/grit/ios_strings.h"
-#import "ios/third_party/material_components_ios/src/components/ActivityIndicator/src/MaterialActivityIndicator.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -64,6 +63,11 @@ UIImage* DefaultFaviconImage() {
 }
 }
 
+#if defined(__IPHONE_13_4)
+@interface TabView (PointerInteraction) <UIPointerInteractionDelegate>
+@end
+#endif  // defined(__IPHONE_13_4)
+
 @interface TabView ()<DropAndNavigateDelegate> {
   __weak id<TabViewDelegate> _delegate;
 
@@ -89,6 +93,11 @@ UIImage* DefaultFaviconImage() {
   MDCActivityIndicator* _activityIndicator;
 
   API_AVAILABLE(ios(11.0)) DropAndNavigateInteraction* _dropInteraction;
+
+#if defined(__IPHONE_13_4)
+  // Adds hover interaction to background tabs.
+  API_AVAILABLE(ios(13.4)) UIPointerInteraction* _pointerInteraction;
+#endif  // defined(__IPHONE_13_4)
 }
 @end
 
@@ -129,7 +138,10 @@ UIImage* DefaultFaviconImage() {
                   action:@selector(tabWasTapped)
         forControlEvents:UIControlEventTouchUpInside];
 
-    if (DragAndDropIsEnabled()) {
+    // TODO(crbug.com/1101363): A new and improved drop interaction in the tab
+    // strip controller supercedes this interaction. Remove this codepath once
+    // the experimental flag is removed.
+    if (!DragAndDropIsEnabled()) {
       _dropInteraction =
           [[DropAndNavigateInteraction alloc] initWithDelegate:self];
       [self addInteraction:_dropInteraction];
@@ -198,6 +210,7 @@ UIImage* DefaultFaviconImage() {
   [_activityIndicator startAnimating];
   [_activityIndicator setHidden:NO];
   [_faviconView setHidden:YES];
+  [_faviconView setImage:DefaultFaviconImage()];
 }
 
 - (void)stopProgressSpinner {
@@ -386,6 +399,22 @@ UIImage* DefaultFaviconImage() {
       StretchableImageFromUIImage(resolvedImage, leftInset, 0);
   _backgroundImageView.image = backgroundImage;
 
+#if defined(__IPHONE_13_4)
+  if (@available(iOS 13.4, *)) {
+    if (!base::FeatureList::IsEnabled(kPointerSupport))
+      return;
+    if (selected) {
+      if (_pointerInteraction)
+        [self removeInteraction:_pointerInteraction];
+    } else {
+      if (!_pointerInteraction)
+        _pointerInteraction =
+            [[UIPointerInteraction alloc] initWithDelegate:self];
+      [self addInteraction:_pointerInteraction];
+    }
+  }
+#endif  // defined(__IPHONE_13_4)
+
   // Style the close button tint color.
   NSString* closeButtonColorName;
   if (selected) {
@@ -425,16 +454,101 @@ UIImage* DefaultFaviconImage() {
   [_titleLabel setAccessibilityValue:(selected ? @"active" : @"inactive")];
 }
 
+// Bezier path for the border shape of the tab. While the shape of the tab is an
+// illusion achieved with a background image, the actual border path is required
+// for the hover pointer interaction.
+- (UIBezierPath*)borderPath {
+  CGFloat margin = 15;
+  CGFloat width = self.frame.size.width - margin * 2;
+  CGFloat height = self.frame.size.height;
+  CGFloat cornerRadius = 12;
+  UIBezierPath* path = [UIBezierPath bezierPath];
+  [path moveToPoint:CGPointMake(margin - cornerRadius, height)];
+  // Lower left arc.
+  [path
+      addArcWithCenter:CGPointMake(margin - cornerRadius, height - cornerRadius)
+                radius:cornerRadius
+            startAngle:M_PI / 2
+              endAngle:0
+             clockwise:NO];
+  // Left vertical line.
+  [path addLineToPoint:CGPointMake(margin, cornerRadius)];
+  // Upper left arc.
+  [path addArcWithCenter:CGPointMake(margin + cornerRadius, cornerRadius)
+                  radius:cornerRadius
+              startAngle:M_PI
+                endAngle:3 * M_PI / 2
+               clockwise:YES];
+  // Top horizontal line.
+  [path addLineToPoint:CGPointMake(width + margin - cornerRadius, 0)];
+  // Upper right arc.
+  [path
+      addArcWithCenter:CGPointMake(width + margin - cornerRadius, cornerRadius)
+                radius:cornerRadius
+            startAngle:3 * M_PI / 2
+              endAngle:0
+             clockwise:YES];
+  // Right vertical line.
+  [path addLineToPoint:CGPointMake(width + margin, height - cornerRadius)];
+  // Lower right arc.
+  [path addArcWithCenter:CGPointMake(width + margin + cornerRadius,
+                                     height - cornerRadius)
+                  radius:cornerRadius
+              startAngle:M_PI
+                endAngle:M_PI / 2
+               clockwise:NO];
+  [path closePath];
+  return path;
+}
+
 #pragma mark - DropAndNavigateDelegate
 
 - (void)URLWasDropped:(GURL const&)url {
   [_delegate tabView:self receivedDroppedURL:url];
 }
 
+#pragma mark UIPointerInteractionDelegate
+#if defined(__IPHONE_13_4)
+- (UIPointerRegion*)pointerInteraction:(UIPointerInteraction*)interaction
+                      regionForRequest:(UIPointerRegionRequest*)request
+                         defaultRegion:(UIPointerRegion*)defaultRegion
+    API_AVAILABLE(ios(13.4)) {
+  return defaultRegion;
+}
+
+- (UIPointerStyle*)pointerInteraction:(UIPointerInteraction*)interaction
+                       styleForRegion:(UIPointerRegion*)region
+    API_AVAILABLE(ios(13.4)) {
+  // Hovering over this tab view and closing the tab simultaneously could result
+  // in this tab view having been removed from the window at the beginning of
+  // this method. If this tab view has already been removed from the view
+  // hierarchy, a nil pointer style should be returned so that the pointer
+  // remains with a default style. Attempting to construct a UITargetedPreview
+  // with a tab view that has already been removed from the hierarchy will
+  // result in a crash with an exception stating that the view has no window.
+  if (!_backgroundImageView.window) {
+    return nil;
+  }
+
+  UIPreviewParameters* parameters = [[UIPreviewParameters alloc] init];
+  parameters.visiblePath = [self borderPath];
+
+  // Use the background view for the preview so that z-order of overlapping tabs
+  // is respected.
+  UIPointerHoverEffect* effect = [UIPointerHoverEffect
+      effectWithPreview:[[UITargetedPreview alloc]
+                            initWithView:_backgroundImageView
+                              parameters:parameters]];
+  effect.prefersScaledContent = NO;
+  effect.prefersShadow = NO;
+  return [UIPointerStyle styleWithEffect:effect shape:nil];
+}
+#endif  // defined(__IPHONE_13_4)
+
 #pragma mark - Touch events
 
 - (void)closeButtonPressed {
-  [_delegate tabViewcloseButtonPressed:self];
+  [_delegate tabViewCloseButtonPressed:self];
 }
 
 - (void)tabWasTapped {

@@ -11,6 +11,7 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/interactive_test_utils.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/test_utils.h"
 
 namespace metrics {
@@ -45,7 +46,7 @@ IN_PROC_BROWSER_TEST_F(ChromeVisibilityObserverInteractiveTest,
   EXPECT_TRUE(is_active());
 
 // BrowserWindow::Deactivate() not implemented on Mac (https://crbug.com/51364).
-#if !defined(OS_MACOSX)
+#if !defined(OS_MAC)
   // Deactivating and activating the browser should affect the observer
   // accordingly.
   browser()->window()->Deactivate();
@@ -53,7 +54,7 @@ IN_PROC_BROWSER_TEST_F(ChromeVisibilityObserverInteractiveTest,
   browser()->window()->Activate();
   ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser()));
   EXPECT_TRUE(is_active());
-#endif  // !defined(OS_MACOSX)
+#endif  // !defined(OS_MAC)
 
   // Creating and closing new browsers should keep the observer active.
   Browser* new_browser = CreateBrowser(browser()->profile());

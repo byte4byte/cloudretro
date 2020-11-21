@@ -7,7 +7,7 @@
 
 #include <memory>
 
-#include "base/util/type_safety/pass_key.h"
+#include "base/types/pass_key.h"
 #include "build/build_config.h"
 #include "content/public/browser/xr_integration_client.h"
 
@@ -18,7 +18,7 @@ namespace vr {
 class ChromeXrIntegrationClient : public content::XrIntegrationClient {
  public:
   explicit ChromeXrIntegrationClient(
-      util::PassKey<ChromeContentBrowserClient>) {}
+      base::PassKey<ChromeContentBrowserClient>) {}
   ~ChromeXrIntegrationClient() override = default;
   ChromeXrIntegrationClient(const ChromeXrIntegrationClient&) = delete;
   ChromeXrIntegrationClient& operator=(const ChromeXrIntegrationClient&) =
@@ -26,8 +26,6 @@ class ChromeXrIntegrationClient : public content::XrIntegrationClient {
 
   // XrIntegrationClient
   std::unique_ptr<content::XrInstallHelper> GetInstallHelper(
-      device::mojom::XRDeviceId device_id) override;
-  std::unique_ptr<content::XrConsentHelper> GetConsentHelper(
       device::mojom::XRDeviceId device_id) override;
   content::XRProviderList GetAdditionalProviders() override;
 

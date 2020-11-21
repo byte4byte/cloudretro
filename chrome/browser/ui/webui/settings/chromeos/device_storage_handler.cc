@@ -67,7 +67,7 @@ StorageHandler::StorageHandler(Profile* profile,
       source_name_(html_source->GetSource()),
       arc_observer_(this),
       special_volume_path_pattern_("[a-z]+://.*") {
-  // TODO(khorimoto): Set kAndroidEnabled within DeviceStringsProvider, and
+  // TODO(khorimoto): Set kAndroidEnabled within DeviceSection, and
   // updates this value accordingly (see OnArcPlayStoreEnabledChanged()).
   html_source->AddBoolean(kAndroidEnabled,
                           features::ShouldShowExternalStorageSettings(profile));
@@ -132,6 +132,9 @@ int64_t StorageHandler::RoundByteSize(int64_t bytes) {
     NOTREACHED() << "Negative bytes value";
     return -1;
   }
+
+  if (bytes == 0)
+    return 0;
 
   // Subtract one to the original number of bytes.
   bytes--;

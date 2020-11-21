@@ -9,6 +9,7 @@
 #include "chrome/browser/apps/platform_apps/app_browsertest_util.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/browser/api/file_system/file_system_api.h"
 #include "extensions/browser/api/file_system/saved_file_entry.h"
@@ -147,7 +148,7 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, FileAccessIsSavedToPrefs) {
 }
 
 // Flaky: crbug.com/269613
-#if defined(OS_LINUX) || defined(OS_WIN)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_WIN)
 #define MAYBE_FileAccessIsRestored DISABLED_FileAccessIsRestored
 #else
 #define MAYBE_FileAccessIsRestored FileAccessIsRestored

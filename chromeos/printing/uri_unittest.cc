@@ -141,6 +141,26 @@ TEST(UriTest, EncodingInHostComponent) {
             "example._!_%40_%23_$_%25_%5E_._!_%40_%23_$_%25_%5E_");
 }
 
+TEST(UriTest, SetPortFromString) {
+  Uri uri1;
+  Uri uri2;
+
+  EXPECT_TRUE(uri1.SetPort(1234));
+  EXPECT_TRUE(uri2.SetPort("1234"));
+  EXPECT_EQ(uri1, uri2);
+
+  // -1 and empty string mean "unspecified port".
+  EXPECT_TRUE(uri1.SetPort(-1));
+  EXPECT_TRUE(uri2.SetPort(""));
+  EXPECT_EQ(uri1, uri2);
+
+  EXPECT_FALSE(uri2.SetPort("65536"));
+  EXPECT_FALSE(uri2.SetPort("-2"));
+  EXPECT_FALSE(uri2.SetPort("+2"));
+  EXPECT_FALSE(uri2.SetPort(" 2133"));
+  EXPECT_FALSE(uri2.SetPort("0x123"));
+}
+
 TEST(UriTest, UriWithAllPrintableASCII) {
   Uri uri;
   std::string host = kPrintableASCII;
@@ -310,6 +330,15 @@ TEST(UriTest, ParserErrorEmptyParameterNameInQuery) {
   EXPECT_EQ(pe1.parsed_strings, 2u);
 }
 
+// Port number cannot have non-digit characters.
+TEST(UriTest, ParserErrorInvalidPortNumber) {
+  Uri uri("http://my.weird.port.number:+123");
+  const Uri::ParserError pe = uri.GetLastParsingError();
+  EXPECT_EQ(pe.status, Uri::ParserStatus::kInvalidPortNumber);
+  EXPECT_EQ(pe.parsed_chars, 28u);
+  EXPECT_EQ(pe.parsed_strings, 0u);
+}
+
 // Path cannot have empty segments.
 TEST(UriTest, ParserErrorEmptySegmentInPath) {
   Uri uri;
@@ -318,6 +347,39 @@ TEST(UriTest, ParserErrorEmptySegmentInPath) {
   EXPECT_EQ(pe2.status, Uri::ParserStatus::kEmptySegmentInPath);
   EXPECT_EQ(pe2.parsed_chars, 10u);
   EXPECT_EQ(pe2.parsed_strings, 0u);
+}
+
+TEST(UriTest, ParserErrorInPath) {
+  // Non-printable character (0xBA) inside the path.
+  Uri uri(
+      "  HTTP://example.org/aa/\xba_d/cc"
+      "?name1&name2=param2&\xba_d=character#here\xba ");
+  const Uri::ParserError pe = uri.GetLastParsingError();
+  EXPECT_EQ(pe.status, Uri::ParserStatus::kDisallowedASCIICharacter);
+  EXPECT_EQ(pe.parsed_chars, 24u);
+  EXPECT_EQ(pe.parsed_strings, 0u);
+}
+
+TEST(UriTest, ParserErrorInQuery) {
+  // Non-printable character (0xBA) inside the query.
+  Uri uri(
+      "  HTTP://example.org/aa/bb/cc"
+      "?name1&name2=param2&\xba_d=character#here\xba ");
+  const Uri::ParserError pe = uri.GetLastParsingError();
+  EXPECT_EQ(pe.status, Uri::ParserStatus::kDisallowedASCIICharacter);
+  EXPECT_EQ(pe.parsed_chars, 49u);
+  EXPECT_EQ(pe.parsed_strings, 0u);
+}
+
+TEST(UriTest, ParserErrorInFragment) {
+  // Non-printable character (0xBA) inside the fragment.
+  Uri uri(
+      "  HTTP://example.org/aa/bb/cc"
+      "?name1&name2=param2&good=character#here\xba ");
+  const Uri::ParserError pe = uri.GetLastParsingError();
+  EXPECT_EQ(pe.status, Uri::ParserStatus::kDisallowedASCIICharacter);
+  EXPECT_EQ(pe.parsed_chars, 68u);
+  EXPECT_EQ(pe.parsed_strings, 0u);
 }
 
 }  // namespace

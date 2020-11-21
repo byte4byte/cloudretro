@@ -6,19 +6,22 @@
 #include <iterator>
 #include <string>
 
+#include "ash/public/cpp/login_screen_test_api.h"
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/files/file_util.h"
 #include "base/guid.h"
+#include "base/hash/sha1.h"
 #include "base/json/json_writer.h"
 #include "base/macros.h"
+#include "base/memory/scoped_refptr.h"
 #include "base/run_loop.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task/post_task.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/threading/platform_thread.h"
 #include "base/threading/thread_restrictions.h"
@@ -33,9 +36,12 @@
 #include "chrome/browser/chromeos/login/test/https_forwarder.h"
 #include "chrome/browser/chromeos/login/test/js_checker.h"
 #include "chrome/browser/chromeos/login/test/local_policy_test_server_mixin.h"
+#include "chrome/browser/chromeos/login/test/login_manager_mixin.h"
 #include "chrome/browser/chromeos/login/test/oobe_base_test.h"
+#include "chrome/browser/chromeos/login/test/oobe_screen_exit_waiter.h"
 #include "chrome/browser/chromeos/login/test/oobe_screen_waiter.h"
 #include "chrome/browser/chromeos/login/test/session_manager_state_waiter.h"
+#include "chrome/browser/chromeos/login/test/webview_content_extractor.h"
 #include "chrome/browser/chromeos/login/ui/login_display_host.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
@@ -49,6 +55,7 @@
 #include "chrome/browser/ui/webui/chromeos/login/error_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/eula_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/gaia_screen_handler.h"
+#include "chrome/browser/ui/webui/chromeos/login/user_creation_screen_handler.h"
 #include "chrome/browser/ui/webui/signin/signin_utils.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "chromeos/constants/chromeos_features.h"
@@ -71,6 +78,7 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "content/public/test/test_utils.h"
@@ -81,7 +89,9 @@
 #include "media/base/media_switches.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "net/base/net_errors.h"
+#include "net/cert/x509_certificate.h"
 #include "net/cookies/canonical_cookie.h"
+#include "net/cookies/cookie_access_result.h"
 #include "net/cookies/cookie_util.h"
 #include "net/http/http_status_code.h"
 #include "net/test/cert_test_util.h"
@@ -90,6 +100,7 @@
 #include "net/test/spawned_test_server/spawned_test_server.h"
 #include "net/test/test_data_directory.h"
 #include "services/network/public/mojom/cookie_manager.mojom.h"
+#include "third_party/boringssl/src/include/openssl/pool.h"
 
 namespace em = enterprise_management;
 
@@ -101,20 +112,21 @@ constexpr char kTestGuid[] = "cccccccc-cccc-4ccc-0ccc-ccccccccccc1";
 constexpr char kTestCookieName[] = "TestCookie";
 constexpr char kTestCookieValue[] = "present";
 constexpr char kTestCookieHost[] = "host1.com";
+constexpr char kClientCert1Name[] = "client_1";
+constexpr char kClientCert2Name[] = "client_2";
 
 constexpr std::initializer_list<base::StringPiece> kPrimaryButton = {
     "gaia-signin", "primary-action-button"};
 constexpr std::initializer_list<base::StringPiece> kSecondaryButton = {
     "gaia-signin", "secondary-action-button"};
 
-void InjectCookieDoneCallback(
-    base::OnceClosure done_closure,
-    net::CanonicalCookie::CookieInclusionStatus status) {
-  ASSERT_TRUE(status.IsInclude());
+void InjectCookieDoneCallback(base::OnceClosure done_closure,
+                              net::CookieAccessResult result) {
+  ASSERT_TRUE(result.status.IsInclude());
   std::move(done_closure).Run();
 }
 
-// Injects a cookie into |storage_partition|, so we can test for cookie presence
+// Injects a cookie into `storage_partition`, so we can test for cookie presence
 // later to infer if the StoragePartition has been cleared.
 void InjectCookie(content::StoragePartition* storage_partition) {
   mojo::Remote<network::mojom::CookieManager> cookie_manager;
@@ -124,7 +136,8 @@ void InjectCookie(content::StoragePartition* storage_partition) {
   net::CanonicalCookie cookie(
       kTestCookieName, kTestCookieValue, kTestCookieHost, "/", base::Time(),
       base::Time(), base::Time(), true /* secure */, false /* httponly*/,
-      net::CookieSameSite::NO_RESTRICTION, net::COOKIE_PRIORITY_MEDIUM);
+      net::CookieSameSite::NO_RESTRICTION, net::COOKIE_PRIORITY_MEDIUM,
+      false /* same_party */);
   base::RunLoop run_loop;
   cookie_manager->SetCanonicalCookie(
       cookie, net::cookie_util::SimulatedCookieSource(cookie, "https"),
@@ -140,7 +153,7 @@ void GetAllCookiesCallback(std::string* cookies_out,
   std::move(done_closure).Run();
 }
 
-// Returns all cookies present in |storage_partition| as a HTTP header cookie
+// Returns all cookies present in `storage_partition` as a HTTP header cookie
 // line. Will be an empty string if there are no cookies.
 std::string GetAllCookies(content::StoragePartition* storage_partition) {
   mojo::Remote<network::mojom::CookieManager> cookie_manager;
@@ -161,8 +174,8 @@ void PolicyChangedCallback(base::RepeatingClosure callback,
   callback.Run();
 }
 
-// Spins the loop until a notification is received from |prefs| that the value
-// of |pref_name| has changed. If the notification is received before Wait()
+// Spins the loop until a notification is received from `prefs` that the value
+// of `pref_name` has changed. If the notification is received before Wait()
 // has been called, Wait() returns immediately and no loop is spun.
 class PrefChangeWatcher {
  public:
@@ -235,12 +248,29 @@ class ErrorScreenWatcher : public OobeUI::Observer {
   bool has_error_screen_been_shown_ = false;
 };
 
+std::string GetCertSha1Fingerprint(const std::string& cert_name) {
+  const std::string cert_file_name =
+      base::StringPrintf("%s.pem", cert_name.c_str());
+  scoped_refptr<net::X509Certificate> cert =
+      net::ImportCertFromFile(net::GetTestCertsDirectory(), cert_file_name);
+  if (!cert) {
+    ADD_FAILURE() << "Failed to read certificate " << cert_name;
+    return std::string();
+  }
+  unsigned char hash[base::kSHA1Length];
+  base::SHA1HashBytes(CRYPTO_BUFFER_data(cert->cert_buffer()),
+                      CRYPTO_BUFFER_len(cert->cert_buffer()), hash);
+  return base::ToLowerASCII(base::HexEncode(hash, base::kSHA1Length));
+}
+
 }  // namespace
 
 class WebviewLoginTest : public OobeBaseTest {
  public:
   WebviewLoginTest() {
-    scoped_feature_list_.InitWithFeatures({features::kGaiaActionButtons}, {});
+    // TODO(https://crbug.com/1121910) Migrate to the kChildSpecificSignin
+    // enabled.
+    scoped_feature_list_.InitWithFeatures({}, {features::kChildSpecificSignin});
   }
   ~WebviewLoginTest() override = default;
 
@@ -281,7 +311,7 @@ class WebviewLoginTest : public OobeBaseTest {
   }
 
   // Returns true if a webview which has a WebContents associated with
-  // |storage_partition| currently exists in the login UI's main WebContents.
+  // `storage_partition` currently exists in the login UI's main WebContents.
   bool IsLoginScreenHasWebviewWithStoragePartition(
       content::StoragePartition* storage_partition) {
     bool web_view_found = false;
@@ -303,9 +333,9 @@ class WebviewLoginTest : public OobeBaseTest {
  protected:
   chromeos::ScopedTestingCrosSettings scoped_testing_cros_settings_;
   FakeGaiaMixin fake_gaia_{&mixin_host_, embedded_test_server()};
+  base::test::ScopedFeatureList scoped_feature_list_;
 
  private:
-  base::test::ScopedFeatureList scoped_feature_list_;
   DISALLOW_COPY_AND_ASSIGN(WebviewLoginTest);
 };
 
@@ -397,18 +427,22 @@ IN_PROC_BROWSER_TEST_F(WebviewLoginTest, BackButton) {
   ExpectIdentifierPage();
 
   // Move to password page.
+  auto back_button_waiter = CreateGaiaPageEventWaiter("backButton");
   SigninFrameJS().TypeIntoPath(FakeGaiaMixin::kFakeUserEmail, {"identifier"});
   test::OobeJS().ClickOnPath(kPrimaryButton);
-  WaitForGaiaPageBackButtonUpdate();
+  back_button_waiter->Wait();
   ExpectPasswordPage();
 
   // Click back to identifier page.
+  back_button_waiter = CreateGaiaPageEventWaiter("backButton");
   test::OobeJS().ClickOnPath({"gaia-signin", "signin-back-button"});
-  WaitForGaiaPageBackButtonUpdate();
+  back_button_waiter->Wait();
   ExpectIdentifierPage();
+
+  back_button_waiter = CreateGaiaPageEventWaiter("backButton");
   // Click next to password page, user id is remembered.
   test::OobeJS().ClickOnPath(kPrimaryButton);
-  WaitForGaiaPageBackButtonUpdate();
+  back_button_waiter->Wait();
   ExpectPasswordPage();
 
   // Finish sign-up.
@@ -419,18 +453,28 @@ IN_PROC_BROWSER_TEST_F(WebviewLoginTest, BackButton) {
   test::WaitForPrimaryUserSessionStart();
 }
 
-IN_PROC_BROWSER_TEST_F(WebviewLoginTest, ErrorScreenOnGaiaError) {
+class WebviewLoginTestWithChildSigninEnabled : public WebviewLoginTest {
+ public:
+  WebviewLoginTestWithChildSigninEnabled() {
+    scoped_feature_list_.Reset();
+    scoped_feature_list_.InitWithFeatures({features::kChildSpecificSignin}, {});
+  }
+};
+
+IN_PROC_BROWSER_TEST_F(WebviewLoginTestWithChildSigninEnabled,
+                       BackToUserCreationScreen) {
   WaitForGaiaPageLoadAndPropertyUpdate();
+
+  // Start with identifier page.
   ExpectIdentifierPage();
 
-  // Make gaia landing page unreachable
-  fake_gaia_.fake_gaia()->SetErrorResponse(
-      GaiaUrls::GetInstance()->embedded_setup_chromeos_url(2),
-      net::HTTP_NOT_FOUND);
-
-  // Click back to reload (unreachable) identifier page.
+  // Back button reloads the gaia page since user creation screen is skipped.
+  // TODO(https://crbug.com/1121910) Fix this so back button brings back to
+  // user creation screen.
+  auto back_button_waiter = CreateGaiaPageEventWaiter("backButton");
   test::OobeJS().ClickOnPath({"gaia-signin", "signin-back-button"});
-  OobeScreenWaiter(ErrorScreenView::kScreenId).Wait();
+  back_button_waiter->Wait();
+  ExpectIdentifierPage();
 }
 
 // Create new account option should be available only if the settings allow it.
@@ -441,7 +485,7 @@ IN_PROC_BROWSER_TEST_F(WebviewLoginTest, AllowNewUser) {
   // New users are allowed.
   test::OobeJS().ExpectTrue(frame_url + ".search('flow=nosignup') == -1");
 
-  // Disallow new users - we also need to set a whitelist due to weird logic.
+  // Disallow new users - we also need to set an allowlist due to weird logic.
   scoped_testing_cros_settings_.device_settings()->Set(kAccountsPrefUsers,
                                                        base::ListValue());
   scoped_testing_cros_settings_.device_settings()->Set(
@@ -452,11 +496,26 @@ IN_PROC_BROWSER_TEST_F(WebviewLoginTest, AllowNewUser) {
   test::OobeJS().ExpectTrue(frame_url + ".search('flow=nosignup') != -1");
 }
 
-IN_PROC_BROWSER_TEST_F(WebviewLoginTest, EmailPrefill) {
+class ReauthWebviewLoginTest : public WebviewLoginTest {
+ protected:
+  LoginManagerMixin::TestUserInfo reauth_user_{
+      AccountId::FromUserEmailGaiaId(FakeGaiaMixin::kFakeUserEmail,
+                                     FakeGaiaMixin::kFakeUserGaiaId),
+      user_manager::USER_TYPE_REGULAR,
+      /* invalid token status to force online signin */
+      user_manager::User::OAUTH2_TOKEN_STATUS_INVALID};
+  LoginManagerMixin login_manager_mixin_{&mixin_host_, {reauth_user_}};
+};
+
+IN_PROC_BROWSER_TEST_F(ReauthWebviewLoginTest, EmailPrefill) {
+  EXPECT_TRUE(
+      ash::LoginScreenTestApi::IsForcedOnlineSignin(reauth_user_.account_id));
+  // Focus triggers online signin.
+  EXPECT_TRUE(ash::LoginScreenTestApi::FocusUser(reauth_user_.account_id));
   WaitForGaiaPageLoad();
-  test::OobeJS().ExecuteAsync("Oobe.showSigninUI('user@example.com')");
-  WaitForGaiaPageReload();
-  EXPECT_EQ(fake_gaia_.fake_gaia()->prefilled_email(), "user@example.com");
+  EXPECT_TRUE(ash::LoginScreenTestApi::IsOobeDialogVisible());
+  EXPECT_EQ(fake_gaia_.fake_gaia()->prefilled_email(),
+            reauth_user_.account_id.GetUserEmail());
 }
 
 IN_PROC_BROWSER_TEST_F(WebviewLoginTest, StoragePartitionHandling) {
@@ -625,7 +684,6 @@ IN_PROC_BROWSER_TEST_P(WebviewLoginWithIframeTest, GaiaWithIframe) {
   ErrorScreenWatcher error_screen_watcher;
 
   content::TestNavigationObserver navigation_observer(frame_url_);
-  navigation_observer.set_ignore_other_urls(true);
   navigation_observer.StartWatchingNewWebContents();
 
   WaitForGaiaPageLoadAndPropertyUpdate();
@@ -647,7 +705,7 @@ IN_PROC_BROWSER_TEST_P(WebviewLoginWithIframeTest, GaiaWithIframe) {
   EXPECT_FALSE(error_screen_watcher.has_error_screen_been_shown());
 }
 
-INSTANTIATE_TEST_SUITE_P(WebviewLoginWithIframe,
+INSTANTIATE_TEST_SUITE_P(All,
                          WebviewLoginWithIframeTest,
                          testing::Values(FrameUrlOrigin::kSameOrigin,
                                          FrameUrlOrigin::kDifferentOrigin));
@@ -655,7 +713,11 @@ INSTANTIATE_TEST_SUITE_P(WebviewLoginWithIframe,
 // Base class for tests of the client certificates in the sign-in frame.
 class WebviewClientCertsLoginTestBase : public WebviewLoginTest {
  public:
-  WebviewClientCertsLoginTestBase() = default;
+  WebviewClientCertsLoginTestBase() {
+    // TODO(crbug.com/1101318): Fix tests when kChildSpecificSignin is enabled.
+    scoped_feature_list_.Reset();
+    scoped_feature_list_.InitWithFeatures({}, {features::kChildSpecificSignin});
+  }
   WebviewClientCertsLoginTestBase(const WebviewClientCertsLoginTestBase&) =
       delete;
   WebviewClientCertsLoginTestBase& operator=(
@@ -681,7 +743,7 @@ class WebviewClientCertsLoginTestBase : public WebviewLoginTest {
     watcher.Wait();
   }
 
-  // Adds the certificate from |authority_file_path| (PEM) as untrusted
+  // Adds the certificate from `authority_file_path` (PEM) as untrusted
   // authority in device OpenNetworkConfiguration policy.
   void SetIntermediateAuthorityInDeviceOncPolicy(
       const base::FilePath& authority_file_path) {
@@ -708,15 +770,15 @@ class WebviewClientCertsLoginTestBase : public WebviewLoginTest {
     watcher.Wait();
   }
 
-  // Starts the Test HTTPS server with |ssl_options|.
+  // Starts the Test HTTPS server with `ssl_options`.
   void StartHttpsServer(const net::SpawnedTestServer::SSLOptions& ssl_options) {
     https_server_ = std::make_unique<net::SpawnedTestServer>(
         net::SpawnedTestServer::TYPE_HTTPS, ssl_options, base::FilePath());
     ASSERT_TRUE(https_server_->Start());
   }
 
-  // Requests |http_server_|'s client-cert test page in the webview specified by
-  // the given |webview_path|. Returns the content of the client-cert test page.
+  // Requests `http_server_`'s client-cert test page in the webview specified by
+  // the given `webview_path`. Returns the content of the client-cert test page.
   std::string RequestClientCertTestPageInFrame(
       std::initializer_list<base::StringPiece> webview_path) {
     const GURL url = https_server_->GetURL("client-cert");
@@ -724,29 +786,23 @@ class WebviewClientCertsLoginTestBase : public WebviewLoginTest {
     navigation_observer.WatchExistingWebContents();
     navigation_observer.StartWatchingNewWebContents();
 
-    // TODO(https://crbug.com/830337): Remove the logs if flakiness is gone.
+    // TODO(https://crbug.com/1092562): Remove the logs if flakiness is gone.
     // If you see this after April 2019, please ping the owner of the above bug.
-    LOG(INFO) << "Triggering navigation to " << url.spec() << ".";
     test::OobeJS().Evaluate(base::StringPrintf(
         "%s.src='%s'", test::GetOobeElementPath(webview_path).c_str(),
         url.spec().c_str()));
     navigation_observer.Wait();
     LOG(INFO) << "Navigation done.";
 
-    content::WebContents* main_web_contents = GetLoginUI()->GetWebContents();
-    const std::string webview_id = std::prev(webview_path.end())->as_string();
-    content::WebContents* frame_web_contents =
-        signin::GetAuthFrameWebContents(main_web_contents, webview_id);
-    test::JSChecker frame_js_checker(frame_web_contents);
     const std::string https_reply_content =
-        frame_js_checker.GetString("document.body.textContent");
-    // TODO(https://crbug.com/830337): Remove this is if flakiness does not
+        test::GetWebViewContents(webview_path);
+    // TODO(https://crbug.com/1092562): Remove this is if flakiness does not
     // reproduce.
-    // If you see this after April 2019, please ping the owner of the above bug.
+    // If you see this after October 2020, please ping the above bug.
     if (https_reply_content.empty()) {
       base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(1000));
       const std::string https_reply_content_after_sleep =
-          frame_js_checker.GetString("document.body.textContent");
+          test::GetWebViewContents(webview_path);
       if (!https_reply_content_after_sleep.empty())
         LOG(INFO) << "Magic - textContent appeared after sleep.";
     }
@@ -770,13 +826,22 @@ class WebviewClientCertsLoginTestBase : public WebviewLoginTest {
     WebviewLoginTest::SetUpInProcessBrowserTestFixture();
   }
 
-  bool ImportSystemSlotClientCert(PK11SlotInfo* system_slot) {
+  void ImportSystemSlotClientCerts(
+      const std::vector<std::string>& client_cert_names,
+      PK11SlotInfo* system_slot) {
     base::ScopedAllowBlockingForTesting allow_io;
-    scoped_refptr<net::X509Certificate> client_cert =
-        net::ImportClientCertAndKeyFromFile(net::GetTestCertsDirectory(),
-                                            "client_1.pem", "client_1.pk8",
-                                            system_slot);
-    return client_cert.get() != nullptr;
+    for (const auto& client_cert_name : client_cert_names) {
+      const std::string pem_file_name =
+          base::StringPrintf("%s.pem", client_cert_name.c_str());
+      const std::string pk8_file_name =
+          base::StringPrintf("%s.pk8", client_cert_name.c_str());
+      scoped_refptr<net::X509Certificate> client_cert =
+          net::ImportClientCertAndKeyFromFile(net::GetTestCertsDirectory(),
+                                              pem_file_name, pk8_file_name,
+                                              system_slot);
+      if (!client_cert)
+        ADD_FAILURE() << "Failed to import cert from " << client_cert_name;
+    }
   }
 
  private:
@@ -816,9 +881,11 @@ class WebviewClientCertsLoginTest : public WebviewClientCertsLoginTestBase {
  public:
   WebviewClientCertsLoginTest() = default;
 
-  // Imports a client certificate into the system slot.
-  bool SetUpClientCertInSystemSlot() {
-    return ImportSystemSlotClientCert(system_nss_key_slot_mixin_.slot());
+  // Imports specified client certificates into the system slot.
+  void SetUpClientCertsInSystemSlot(
+      const std::vector<std::string>& client_cert_names) {
+    ImportSystemSlotClientCerts(client_cert_names,
+                                system_nss_key_slot_mixin_.slot());
   }
 
  private:
@@ -830,12 +897,10 @@ class WebviewClientCertsLoginTest : public WebviewClientCertsLoginTestBase {
 // Test that client certificate authentication using certificates from the
 // system slot is enabled in the sign-in frame. The server does not request
 // certificates signed by a specific authority.
-// TODO(crbug.com/949511) The test is flaky (timeout) on MSAN.
-// Flaky (timeout), especially (but not only) in debug builds or under
-// ASAN/LSAN. crbug.com/1022034
 IN_PROC_BROWSER_TEST_F(WebviewClientCertsLoginTest,
-                       DISABLED_SigninFrameNoAuthorityGiven) {
-  ASSERT_TRUE(SetUpClientCertInSystemSlot());
+                       SigninFrameNoAuthorityGiven) {
+  ASSERT_NO_FATAL_FAILURE(
+      SetUpClientCertsInSystemSlot({kClientCert1Name, kClientCert2Name}));
   net::SpawnedTestServer::SSLOptions ssl_options;
   ssl_options.request_client_certificate = true;
   ASSERT_NO_FATAL_FAILURE(StartHttpsServer(ssl_options));
@@ -848,20 +913,17 @@ IN_PROC_BROWSER_TEST_F(WebviewClientCertsLoginTest,
 
   const std::string https_reply_content =
       RequestClientCertTestPageInFrame({"gaia-signin", gaia_frame_parent_});
-  EXPECT_EQ(
-      "got client cert with fingerprint: "
-      "c66145f49caca4d1325db96ace0f12f615ba4981",
-      https_reply_content);
+  EXPECT_EQ("got client cert with fingerprint: " +
+                GetCertSha1Fingerprint(kClientCert1Name),
+            https_reply_content);
 }
 
 // Test that client certificate autoselect selects the right certificate even
 // with multiple filters for the same pattern.
-// TODO(crbug.com/949511) The test is flaky (timeout) on MSAN.
-// Flaky (timeout), especially (but not only) in debug builds or under
-// ASAN/LSAN. crbug.com/1022034
 IN_PROC_BROWSER_TEST_F(WebviewClientCertsLoginTest,
-                       DISABLED_SigninFrameCertMultipleFiltersAutoSelected) {
-  ASSERT_TRUE(SetUpClientCertInSystemSlot());
+                       SigninFrameCertMultipleFiltersAutoSelected) {
+  ASSERT_NO_FATAL_FAILURE(
+      SetUpClientCertsInSystemSlot({kClientCert1Name, kClientCert2Name}));
   net::SpawnedTestServer::SSLOptions ssl_options;
   ssl_options.request_client_certificate = true;
   ASSERT_NO_FATAL_FAILURE(StartHttpsServer(ssl_options));
@@ -875,20 +937,16 @@ IN_PROC_BROWSER_TEST_F(WebviewClientCertsLoginTest,
 
   const std::string https_reply_content =
       RequestClientCertTestPageInFrame({"gaia-signin", gaia_frame_parent_});
-  EXPECT_EQ(
-      "got client cert with fingerprint: "
-      "c66145f49caca4d1325db96ace0f12f615ba4981",
-      https_reply_content);
+  EXPECT_EQ("got client cert with fingerprint: " +
+                GetCertSha1Fingerprint(kClientCert1Name),
+            https_reply_content);
 }
 
 // Test that if no client certificate is auto-selected using policy on the
 // sign-in frame, the client does not send up any client certificate.
-// TODO(crbug.com/949511) The test is flaky (timeout) on MSAN.
-// Flaky (timeout), especially (but not only) in debug builds or under
-// ASAN/LSAN. crbug.com/1022034
 IN_PROC_BROWSER_TEST_F(WebviewClientCertsLoginTest,
-                       DISABLED_SigninFrameCertNotAutoSelected) {
-  ASSERT_TRUE(SetUpClientCertInSystemSlot());
+                       SigninFrameCertNotAutoSelected) {
+  ASSERT_NO_FATAL_FAILURE(SetUpClientCertsInSystemSlot({kClientCert1Name}));
   net::SpawnedTestServer::SSLOptions ssl_options;
   ssl_options.request_client_certificate = true;
   ASSERT_NO_FATAL_FAILURE(StartHttpsServer(ssl_options));
@@ -904,12 +962,9 @@ IN_PROC_BROWSER_TEST_F(WebviewClientCertsLoginTest,
 // Test that client certificate authentication using certificates from the
 // system slot is enabled in the sign-in frame. The server requests
 // a certificate signed by a specific authority.
-// TODO(crbug.com/949511) The test is flaky (timeout) on MSAN.
-// Flaky (timeout), especially (but not only) in debug builds or under
-// ASAN/LSAN. crbug.com/1022034
-IN_PROC_BROWSER_TEST_F(WebviewClientCertsLoginTest,
-                       DISABLED_SigninFrameAuthorityGiven) {
-  ASSERT_TRUE(SetUpClientCertInSystemSlot());
+IN_PROC_BROWSER_TEST_F(WebviewClientCertsLoginTest, SigninFrameAuthorityGiven) {
+  ASSERT_NO_FATAL_FAILURE(
+      SetUpClientCertsInSystemSlot({kClientCert1Name, kClientCert2Name}));
   net::SpawnedTestServer::SSLOptions ssl_options;
   ssl_options.request_client_certificate = true;
   base::FilePath ca_path =
@@ -925,22 +980,18 @@ IN_PROC_BROWSER_TEST_F(WebviewClientCertsLoginTest,
 
   const std::string https_reply_content =
       RequestClientCertTestPageInFrame({"gaia-signin", gaia_frame_parent_});
-  EXPECT_EQ(
-      "got client cert with fingerprint: "
-      "c66145f49caca4d1325db96ace0f12f615ba4981",
-      https_reply_content);
+  EXPECT_EQ("got client cert with fingerprint: " +
+                GetCertSha1Fingerprint(kClientCert1Name),
+            https_reply_content);
 }
 
 // Test that client certificate authentication using certificates from the
 // system slot is enabled in the sign-in frame. The server requests
 // a certificate signed by a specific authority. The client doesn't have a
 // matching certificate.
-// TODO(crbug.com/949511) The test is flaky (timeout) on MSAN.
-// Flaky (timeout), especially (but not only) in debug builds or under
-// ASAN/LSAN. crbug.com/1022034
 IN_PROC_BROWSER_TEST_F(WebviewClientCertsLoginTest,
-                       DISABLED_SigninFrameAuthorityGivenNoMatchingCert) {
-  ASSERT_TRUE(SetUpClientCertInSystemSlot());
+                       SigninFrameAuthorityGivenNoMatchingCert) {
+  ASSERT_NO_FATAL_FAILURE(SetUpClientCertsInSystemSlot({kClientCert1Name}));
   net::SpawnedTestServer::SSLOptions ssl_options;
   ssl_options.request_client_certificate = true;
   base::FilePath ca_path =
@@ -964,10 +1015,10 @@ IN_PROC_BROWSER_TEST_F(WebviewClientCertsLoginTest,
 // issued by an intermediate authority, and the intermediate authority is not
 // known on the device (it has not been made available through device ONC
 // policy).
-// TODO(crbug.com/949511) The test is flaky (timeout) on MSAN.
 IN_PROC_BROWSER_TEST_F(WebviewClientCertsLoginTest,
-                       DISABLED_SigninFrameIntermediateAuthorityUnknown) {
-  ASSERT_TRUE(SetUpClientCertInSystemSlot());
+                       SigninFrameIntermediateAuthorityUnknown) {
+  ASSERT_NO_FATAL_FAILURE(
+      SetUpClientCertsInSystemSlot({kClientCert1Name, kClientCert2Name}));
   net::SpawnedTestServer::SSLOptions ssl_options;
   ssl_options.request_client_certificate = true;
   base::FilePath ca_path = net::GetTestCertsDirectory().Append(
@@ -990,12 +1041,10 @@ IN_PROC_BROWSER_TEST_F(WebviewClientCertsLoginTest,
 // certificates signed by a root authority, the installed certificate has been
 // issued by an intermediate authority, and the intermediate authority is
 // known on the device (it has been made available through device ONC policy).
-// TODO(crbug.com/949511) The test is flaky (timeout) on MSAN.
-// Flaky (timeout), especially (but not only) in debug builds or under
-// ASAN/LSAN. crbug.com/1022034
 IN_PROC_BROWSER_TEST_F(WebviewClientCertsLoginTest,
-                       DISABLED_SigninFrameIntermediateAuthorityKnown) {
-  ASSERT_TRUE(SetUpClientCertInSystemSlot());
+                       SigninFrameIntermediateAuthorityKnown) {
+  ASSERT_NO_FATAL_FAILURE(
+      SetUpClientCertsInSystemSlot({kClientCert1Name, kClientCert2Name}));
   net::SpawnedTestServer::SSLOptions ssl_options;
   ssl_options.request_client_certificate = true;
   base::FilePath ca_path = net::GetTestCertsDirectory().Append(
@@ -1016,10 +1065,9 @@ IN_PROC_BROWSER_TEST_F(WebviewClientCertsLoginTest,
 
   const std::string https_reply_content =
       RequestClientCertTestPageInFrame({"gaia-signin", gaia_frame_parent_});
-  EXPECT_EQ(
-      "got client cert with fingerprint: "
-      "c66145f49caca4d1325db96ace0f12f615ba4981",
-      https_reply_content);
+  EXPECT_EQ("got client cert with fingerprint: " +
+                GetCertSha1Fingerprint(kClientCert1Name),
+            https_reply_content);
 }
 
 // Tests that client certificate authentication is not enabled in a webview on
@@ -1029,7 +1077,7 @@ IN_PROC_BROWSER_TEST_F(WebviewClientCertsLoginTest,
 // deprecated and removed. https://crbug.com/849710.
 IN_PROC_BROWSER_TEST_F(WebviewClientCertsLoginTest,
                        DISABLED_ClientCertRequestedInOtherWebView) {
-  ASSERT_TRUE(SetUpClientCertInSystemSlot());
+  ASSERT_NO_FATAL_FAILURE(SetUpClientCertsInSystemSlot({kClientCert1Name}));
   net::SpawnedTestServer::SSLOptions ssl_options;
   ssl_options.request_client_certificate = true;
   ASSERT_NO_FATAL_FAILURE(StartHttpsServer(ssl_options));
@@ -1040,7 +1088,7 @@ IN_PROC_BROWSER_TEST_F(WebviewClientCertsLoginTest,
 
   ShowEulaScreen();
 
-  // Use |watch_new_webcontents| because the EULA webview has not navigated yet.
+  // Use `watch_new_webcontents` because the EULA webview has not navigated yet.
   const std::string https_reply_content =
       RequestClientCertTestPageInFrame({"cros-eula-frame"});
   EXPECT_EQ("got no client cert", https_reply_content);
@@ -1068,8 +1116,8 @@ class WebviewClientCertsTokenLoadingLoginTest
   void PrepareSystemSlot() {
     bool out_system_slot_prepared_successfully = false;
     base::RunLoop loop;
-    base::PostTaskAndReply(
-        FROM_HERE, {content::BrowserThread::IO},
+    content::GetIOThreadTaskRunner({})->PostTaskAndReply(
+        FROM_HERE,
         base::BindOnce(
             &WebviewClientCertsTokenLoadingLoginTest::PrepareSystemSlotOnIO,
             base::Unretained(this), &out_system_slot_prepared_successfully),
@@ -1077,7 +1125,8 @@ class WebviewClientCertsTokenLoadingLoginTest
     loop.Run();
     ASSERT_TRUE(out_system_slot_prepared_successfully);
 
-    ASSERT_TRUE(ImportSystemSlotClientCert(test_system_slot_nss_db_->slot()));
+    ASSERT_NO_FATAL_FAILURE(ImportSystemSlotClientCerts(
+        {kClientCert1Name}, test_system_slot_nss_db_->slot()));
   }
 
  protected:
@@ -1104,8 +1153,8 @@ class WebviewClientCertsTokenLoadingLoginTest
 
   void TearDownTestSystemSlot() {
     base::RunLoop loop;
-    base::PostTaskAndReply(
-        FROM_HERE, {content::BrowserThread::IO},
+    content::GetIOThreadTaskRunner({})->PostTaskAndReply(
+        FROM_HERE,
         base::BindOnce(&WebviewClientCertsTokenLoadingLoginTest::
                            TearDownTestSystemSlotOnIO,
                        base::Unretained(this)),
@@ -1129,8 +1178,8 @@ namespace {
 bool IsTpmTokenReady() {
   base::RunLoop run_loop;
   bool is_ready = false;
-  base::PostTaskAndReplyWithResult(
-      FROM_HERE, {content::BrowserThread::IO},
+  content::GetIOThreadTaskRunner({})->PostTaskAndReplyWithResult(
+      FROM_HERE,
       base::BindOnce(&crypto::IsTPMTokenReady,
                      /*callback=*/base::OnceClosure()),
       base::BindOnce(
@@ -1149,14 +1198,8 @@ bool IsTpmTokenReady() {
 // Test that the system slot becomes initialized and the client certificate
 // authentication works in the sign-in frame after the TPM gets reported as
 // ready.
-// Flaky (timeout), in ASAN/LSAN. crbug.com/1022034
-#if defined(ADDRESS_SANITIZER)
-#define MAYBE_SystemSlotInitialization DISABLED_SystemSlotInitialization
-#else
-#define MAYBE_SystemSlotInitialization SystemSlotInitialization
-#endif
 IN_PROC_BROWSER_TEST_F(WebviewClientCertsTokenLoadingLoginTest,
-                       MAYBE_SystemSlotInitialization) {
+                       SystemSlotInitialization) {
   ASSERT_NO_FATAL_FAILURE(PrepareSystemSlot());
   net::SpawnedTestServer::SSLOptions ssl_options;
   ssl_options.request_client_certificate = true;
@@ -1180,10 +1223,9 @@ IN_PROC_BROWSER_TEST_F(WebviewClientCertsTokenLoadingLoginTest,
 
   const std::string https_reply_content =
       RequestClientCertTestPageInFrame({"gaia-signin", gaia_frame_parent_});
-  EXPECT_EQ(
-      "got client cert with fingerprint: "
-      "c66145f49caca4d1325db96ace0f12f615ba4981",
-      https_reply_content);
+  EXPECT_EQ("got client cert with fingerprint: " +
+                GetCertSha1Fingerprint(kClientCert1Name),
+            https_reply_content);
 
   EXPECT_TRUE(IsTpmTokenReady());
 }
@@ -1201,15 +1243,6 @@ class WebviewProxyAuthLoginTest : public WebviewLoginTest {
     auth_proxy_server_->set_redirect_connect_to_localhost(true);
     ASSERT_TRUE(auth_proxy_server_->Start());
 
-    // Prepare device policy which will be used for two purposes:
-    // - given to FakeSessionManagerClient, so the device appears to have
-    //   registered for policy.
-    // - the payload is given to |policy_test_server_|, so we can download fresh
-    //   policy.
-    device_policy_builder()->policy_data().set_public_key_version(1);
-    device_policy_builder()->Build();
-
-    UpdateServedPolicyFromDevicePolicyTestHelper();
     WebviewLoginTest::SetUp();
   }
 
@@ -1223,6 +1256,15 @@ class WebviewProxyAuthLoginTest : public WebviewLoginTest {
   void SetUpInProcessBrowserTestFixture() override {
     WebviewLoginTest::SetUpInProcessBrowserTestFixture();
 
+    // Prepare device policy which will be used for two purposes:
+    // - given to FakeSessionManagerClient, so the device appears to have
+    //   registered for policy.
+    // - the payload is given to `policy_test_server_`, so we can download fresh
+    //   policy.
+    device_policy_builder()->policy_data().set_public_key_version(1);
+    device_policy_builder()->Build();
+
+    UpdateServedPolicyFromDevicePolicyTestHelper();
     FakeSessionManagerClient::Get()->set_device_policy(
         device_policy_builder()->GetBlob());
 
@@ -1314,7 +1356,7 @@ IN_PROC_BROWSER_TEST_F(WebviewProxyAuthLoginTest, DISABLED_ProxyAuthTransfer) {
 
   LoginHandler* login_handler = WaitForAuthRequested();
 
-  // Before entering auth data, make |policy_test_server_| serve a policy that
+  // Before entering auth data, make `policy_test_server_` serve a policy that
   // we can use to detect if policies have been fetched.
   em::ChromeDeviceSettingsProto& device_policy =
       device_policy_builder()->payload();
@@ -1348,6 +1390,23 @@ IN_PROC_BROWSER_TEST_F(WebviewProxyAuthLoginTest, DISABLED_ProxyAuthTransfer) {
   // Expect that we got back to the identifier page, as there are no known users
   // so the sign-in screen will not display user pods.
   ExpectIdentifierPage();
+}
+
+using WebviewLoginTestWithChildSigninDisabled = WebviewLoginTest;
+
+IN_PROC_BROWSER_TEST_F(WebviewLoginTestWithChildSigninDisabled,
+                       ErrorScreenOnGaiaError) {
+  WaitForGaiaPageLoadAndPropertyUpdate();
+  ExpectIdentifierPage();
+
+  // Make gaia landing page unreachable
+  fake_gaia_.fake_gaia()->SetErrorResponse(
+      GaiaUrls::GetInstance()->embedded_setup_chromeos_url(2),
+      net::HTTP_NOT_FOUND);
+
+  // Click back to reload (unreachable) identifier page.
+  test::OobeJS().ClickOnPath({"gaia-signin", "signin-back-button"});
+  OobeScreenWaiter(ErrorScreenView::kScreenId).Wait();
 }
 
 }  // namespace chromeos

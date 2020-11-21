@@ -21,7 +21,24 @@ class ArcTermsOfServiceScreenView;
 class ArcTermsOfServiceScreen : public BaseScreen,
                                 public ArcTermsOfServiceScreenViewObserver {
  public:
-  enum class Result { ACCEPTED, BACK };
+  enum class Result { ACCEPTED, BACK, NOT_APPLICABLE };
+
+  // This enum is tied directly to a UMA enum defined in
+  // //tools/metrics/histograms/enums.xml, and should always reflect it (do not
+  // change one without changing the other). Entries should be never modified
+  // or deleted. Only additions possible.
+  enum class UserAction {
+    kAcceptButtonClicked = 0,
+    kNextButtonClicked = 1,
+    kRetryButtonClicked = 2,
+    kBackButtonClicked = 3,
+    kMetricsLearnMoreClicked = 4,
+    kBackupRestoreLearnMoreClicked = 5,
+    kLocationServiceLearnMoreClicked = 6,
+    kPlayAutoInstallLearnMoreClicked = 7,
+    kPolicyLinkClicked = 8,
+    kMaxValue = kPolicyLinkClicked
+  };
 
   static std::string GetResultString(Result result);
 
@@ -34,16 +51,21 @@ class ArcTermsOfServiceScreen : public BaseScreen,
                           const ScreenExitCallback& exit_callback);
   ~ArcTermsOfServiceScreen() override;
 
+  void set_exit_callback_for_testing(const ScreenExitCallback& exit_callback) {
+    exit_callback_ = exit_callback;
+  }
+
+  const ScreenExitCallback& get_exit_callback_for_testing() {
+    return exit_callback_;
+  }
+
   // ArcTermsOfServiceScreenViewObserver:
   void OnAccept(bool review_arc_settings) override;
   void OnViewDestroyed(ArcTermsOfServiceScreenView* view) override;
 
-  void set_exit_callback_for_testing(ScreenExitCallback exit_callback) {
-    exit_callback_ = exit_callback;
-  }
-
  protected:
   // BaseScreen:
+  bool MaybeSkip(WizardContext* context) override;
   void ShowImpl() override;
   void HideImpl() override;
   void OnUserAction(const std::string& action_id) override;

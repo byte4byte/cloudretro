@@ -8,22 +8,25 @@
 
 #include "apps/launcher.h"
 #include "ash/public/cpp/app_list/internal_app_id_constants.h"
-#include "ash/public/cpp/arc_custom_tab.h"
 #include "ash/public/cpp/ash_features.h"
 #include "ash/public/cpp/keyboard_shortcut_viewer.h"
 #include "ash/public/cpp/shelf_model.h"
 #include "ash/public/cpp/shelf_types.h"
 #include "base/macros.h"
+#include "chrome/browser/apps/app_service/app_service_metrics.h"
 #include "chrome/browser/apps/app_service/app_service_proxy.h"
 #include "chrome/browser/apps/app_service/app_service_proxy_factory.h"
 #include "chrome/browser/apps/app_service/launch_utils.h"
+#include "chrome/browser/chromeos/apps/apk_web_app_service.h"
 #include "chrome/browser/chromeos/apps/metrics/intent_handling_metrics.h"
 #include "chrome/browser/chromeos/arc/arc_util.h"
 #include "chrome/browser/chromeos/arc/arc_web_contents_data.h"
 #include "chrome/browser/chromeos/arc/fileapi/arc_content_file_system_url_util.h"
 #include "chrome/browser/chromeos/arc/intent_helper/custom_tab_session_impl.h"
 #include "chrome/browser/chromeos/file_manager/app_id.h"
+#include "chrome/browser/chromeos/file_manager/path_util.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
+#include "chrome/browser/chromeos/web_applications/chrome_camera_app_ui_delegate.h"
 #include "chrome/browser/extensions/api/terminal/terminal_extension_helper.h"
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
@@ -44,14 +47,17 @@
 #include "chrome/browser/ui/settings_window_manager_chromeos.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/webui/chrome_web_contents_handler.h"
+#include "chrome/browser/ui/webui/settings/chromeos/constants/routes.mojom.h"
 #include "chrome/browser/web_applications/components/app_registrar.h"
 #include "chrome/browser/web_applications/components/web_app_helpers.h"
 #include "chrome/browser/web_applications/components/web_app_provider_base.h"
+#include "chrome/browser/web_applications/system_web_app_manager.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/common/webui_url_constants.h"
 #include "components/arc/arc_util.h"
 #include "components/arc/intent_helper/arc_intent_helper_bridge.h"
+#include "components/arc/intent_helper/custom_tab.h"
 #include "components/sessions/core/tab_restore_service.h"
 #include "components/sessions/core/tab_restore_service_observer.h"
 #include "components/url_formatter/url_fixer.h"
@@ -62,7 +68,6 @@
 #include "extensions/browser/extension_registry.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
-#include "mojo/public/cpp/bindings/interface_ptr.h"
 #include "ui/aura/window.h"
 #include "ui/base/base_window.h"
 #include "ui/base/page_transition_types.h"
@@ -75,64 +80,104 @@ using arc::mojom::ChromePage;
 namespace {
 
 constexpr std::pair<arc::mojom::ChromePage, const char*> kOSSettingsMapping[] =
-    {{ChromePage::ACCOUNTS, chrome::kAccountSubPage},
-     {ChromePage::ACCOUNTMANAGER, chrome::kAccountManagerSubPage},
-     {ChromePage::AMBIENTMODE, chrome::kAmbientModeSubPage},
-     {ChromePage::ANDROIDAPPSDETAILS, chrome::kAndroidAppsDetailsSubPage},
+    {{ChromePage::ACCOUNTS,
+      chromeos::settings::mojom::kManageOtherPeopleSubpagePath},
+     {ChromePage::ACCOUNTMANAGER,
+      chromeos::settings::mojom::kMyAccountsSubpagePath},
+     {ChromePage::AMBIENTMODE,
+      chromeos::settings::mojom::kAmbientModeSubpagePath},
+     {ChromePage::ANDROIDAPPSDETAILS,
+      chromeos::settings::mojom::kGooglePlayStoreSubpagePath},
      {ChromePage::ANDROIDAPPSDETAILSINBROWSERSETTINGS,
-      chrome::kAndroidAppsDetailsSubPageInBrowserSettings},
-     {ChromePage::APPMANAGEMENT, chrome::kAppManagementSubPage},
-     {ChromePage::APPMANAGEMENTDETAILS, chrome::kAppManagementDetailSubPage},
-     {ChromePage::ASSISTANT, chrome::kAssistantSubPage},
-     {ChromePage::BLUETOOTH, chrome::kBluetoothSubPage},
-     {ChromePage::BLUETOOTHDEVICES, chrome::kBluetoothSubPage},
-     {ChromePage::CELLULAR, chrome::kCellularSettingsSubPage},
-     {ChromePage::CHANGEPICTURE, chrome::kChangePictureSubPage},
-     {ChromePage::CROSTINIDISKRESIZE, chrome::kCrostiniDiskResizeSubPage},
-     {ChromePage::CONNECTEDDEVICES, chrome::kConnectedDevicesSubPage},
-     {ChromePage::CROSTINISHAREDPATHS, chrome::kCrostiniSharedPathsSubPage},
+      chromeos::settings::mojom::kGooglePlayStoreSubpagePath},
+     {ChromePage::APPMANAGEMENT,
+      chromeos::settings::mojom::kAppManagementSubpagePath},
+     {ChromePage::APPMANAGEMENTDETAILS,
+      chromeos::settings::mojom::kAppDetailsSubpagePath},
+     {ChromePage::ASSISTANT, chromeos::settings::mojom::kAssistantSubpagePath},
+     {ChromePage::BLUETOOTH,
+      chromeos::settings::mojom::kBluetoothDevicesSubpagePath},
+     {ChromePage::BLUETOOTHDEVICES,
+      chromeos::settings::mojom::kBluetoothDevicesSubpagePath},
+     {ChromePage::CELLULAR,
+      chromeos::settings::mojom::kMobileDataNetworksSubpagePath},
+     {ChromePage::CHANGEPICTURE,
+      chromeos::settings::mojom::kChangePictureSubpagePath},
+     {ChromePage::CONNECTEDDEVICES,
+      chromeos::settings::mojom::kMultiDeviceFeaturesSubpagePath},
+     {ChromePage::CROSTINISHAREDPATHS,
+      chromeos::settings::mojom::kCrostiniManageSharedFoldersSubpagePath},
      {ChromePage::CROSTINISHAREDUSBDEVICES,
-      chrome::kCrostiniSharedUsbDevicesSubPage},
-     {ChromePage::CROSTINIEXPORTIMPORT, chrome::kCrostiniExportImportSubPage},
-     {ChromePage::CUPSPRINTERS, chrome::kNativePrintingSettingsSubPage},
-     {ChromePage::DATETIME, chrome::kDateTimeSubPage},
-     {ChromePage::DISPLAY, chrome::kDisplaySubPage},
-     {ChromePage::ETHERNET, chrome::kEthernetSettingsSubPage},
-     {ChromePage::EXTERNALSTORAGE, chrome::kExternalStorageSubPage},
-     {ChromePage::HELP, chrome::kHelpSubPage},
-     {ChromePage::INTERNET, chrome::kInternetSubPage},
-     {ChromePage::KERBEROSACCOUNTS, chrome::kKerberosAccountsSubPage},
-     {ChromePage::KEYBOARDOVERLAY, chrome::kKeyboardOverlaySubPage},
-     {ChromePage::KNOWNNETWORKS, chrome::kKnownNetworksSubPage},
-     {ChromePage::OSLANGUAGES, chrome::kOsLanguagesSubPage},
-     {ChromePage::OSLANGUAGESDETAILS, chrome::kOsLanguagesDetailsSubPage},
+      chromeos::settings::mojom::kCrostiniUsbPreferencesSubpagePath},
+     {ChromePage::CROSTINIEXPORTIMPORT,
+      chromeos::settings::mojom::kCrostiniBackupAndRestoreSubpagePath},
+     {ChromePage::CUPSPRINTERS,
+      chromeos::settings::mojom::kPrintingDetailsSubpagePath},
+     {ChromePage::DATETIME, chromeos::settings::mojom::kDateAndTimeSectionPath},
+     {ChromePage::DISPLAY, chromeos::settings::mojom::kDisplaySubpagePath},
+     {ChromePage::ETHERNET,
+      chromeos::settings::mojom::kEthernetDetailsSubpagePath},
+     {ChromePage::EXTERNALSTORAGE,
+      chromeos::settings::mojom::kExternalStorageSubpagePath},
+     {ChromePage::HELP, chromeos::settings::mojom::kAboutChromeOsSectionPath},
+     {ChromePage::INTERNET, chromeos::settings::mojom::kNetworkSectionPath},
+     {ChromePage::KERBEROSACCOUNTS,
+      chromeos::settings::mojom::kKerberosAccountsSubpagePath},
+     {ChromePage::KEYBOARDOVERLAY,
+      chromeos::settings::mojom::kKeyboardSubpagePath},
+     {ChromePage::KNOWNNETWORKS,
+      chromeos::settings::mojom::kKnownNetworksSubpagePath},
+     {ChromePage::OSLANGUAGES,
+      chromeos::settings::mojom::kLanguagesAndInputSectionPath},
+     {ChromePage::OSLANGUAGESDETAILS,
+      chromeos::settings::mojom::kLanguagesAndInputDetailsSubpagePath},
+     {ChromePage::OSLANGUAGESEDITDICTIONARY,
+      chromeos::settings::mojom::kEditDictionarySubpagePath},
+     {ChromePage::OSLANGUAGESINPUT,
+      chromeos::settings::mojom::kInputSubpagePath},
      {ChromePage::OSLANGUAGESINPUTMETHODS,
-      chrome::kOsLanguagesInputMethodsSubPage},
+      chromeos::settings::mojom::kManageInputMethodsSubpagePath},
+     {ChromePage::OSLANGUAGESLANGUAGES,
+      chromeos::settings::mojom::kLanguagesSubpagePath},
      {ChromePage::OSLANGUAGESSMARTINPUTS,
-      chrome::kOsLanguagesSmartInputsSubPage},
-     {ChromePage::LOCKSCREEN, chrome::kLockScreenSubPage},
+      chromeos::settings::mojom::kSmartInputsSubpagePath},
+     {ChromePage::LOCKSCREEN,
+      chromeos::settings::mojom::kSecurityAndSignInSubpagePath},
      {ChromePage::MAIN, ""},
-     {ChromePage::MANAGEACCESSIBILITY, chrome::kManageAccessibilitySubPage},
+     {ChromePage::MANAGEACCESSIBILITY,
+      chromeos::settings::mojom::kManageAccessibilitySubpagePath},
      {ChromePage::MANAGEACCESSIBILITYTTS,
-      chrome::kManageAccessibilityTtsSubPage},
-     {ChromePage::MULTIDEVICE, chrome::kMultideviceSubPage},
-     {ChromePage::NETWORKSTYPEVPN, chrome::kVPNSettingsSubPage},
-     {ChromePage::PLUGINVMDETAILS, chrome::kPluginVmDetailsSubPage},
-     {ChromePage::PLUGINVMSHAREDPATHS, chrome::kPluginVmSharedPathsSubPage},
-     {ChromePage::OSACCESSIBILITY, chrome::kOsAccessibilitySubPage},
-     {ChromePage::OSPEOPLE, chrome::kOsPeopleSubPage},
-     {ChromePage::OSPRINTING, chrome::kOsPrintingSubPage},
-     {ChromePage::OSPRIVACY, chrome::kOsPrivacySubPage},
-     {ChromePage::OSRESET, chrome::kOsResetSubPage},
-     {ChromePage::OSSEARCH, chrome::kOsSearchSubPage},
-     {ChromePage::POINTEROVERLAY, chrome::kPointerOverlaySubPage},
-     {ChromePage::POWER, chrome::kPowerSubPage},
-     {ChromePage::SMARTLOCKSETTINGS, chrome::kSmartLockSettingsSubPage},
-     {ChromePage::STORAGE, chrome::kStorageSubPage},
-     {ChromePage::STYLUS, chrome::kStylusSubPage},
-     {ChromePage::SWITCHACCESS, chrome::kSwitchAccessSubPage},
-     {ChromePage::TETHERSETTINGS, chrome::kTetherSettingsSubPage},
-     {ChromePage::WIFI, chrome::kWiFiSettingsSubPage}};
+      chromeos::settings::mojom::kTextToSpeechSubpagePath},
+     {ChromePage::MULTIDEVICE,
+      chromeos::settings::mojom::kMultiDeviceSectionPath},
+     {ChromePage::NETWORKSTYPEVPN,
+      chromeos::settings::mojom::kVpnDetailsSubpagePath},
+     {ChromePage::PLUGINVMSHAREDPATHS,
+      chromeos::settings::mojom::kPluginVmSharedPathsSubpagePath},
+     {ChromePage::OSACCESSIBILITY,
+      chromeos::settings::mojom::kAccessibilitySectionPath},
+     {ChromePage::OSPEOPLE, chromeos::settings::mojom::kPeopleSectionPath},
+     {ChromePage::OSPRINTING, chromeos::settings::mojom::kPrintingSectionPath},
+     {ChromePage::OSPRIVACY,
+      chromeos::settings::mojom::kPrivacyAndSecuritySectionPath},
+     {ChromePage::OSRESET, chromeos::settings::mojom::kResetSectionPath},
+     {ChromePage::OSSEARCH,
+      chromeos::settings::mojom::kSearchAndAssistantSectionPath},
+     {ChromePage::POINTEROVERLAY,
+      chromeos::settings::mojom::kPointersSubpagePath},
+     {ChromePage::POWER, chromeos::settings::mojom::kPowerSubpagePath},
+     {ChromePage::SMARTLOCKSETTINGS,
+      chromeos::settings::mojom::kSmartLockSubpagePath},
+     {ChromePage::STORAGE, chromeos::settings::mojom::kStorageSubpagePath},
+     {ChromePage::STYLUS, chromeos::settings::mojom::kStylusSubpagePath},
+     {ChromePage::SWITCHACCESS,
+      chromeos::settings::mojom::kSwitchAccessOptionsSubpagePath},
+     {ChromePage::TETHERSETTINGS,
+      chromeos::settings::mojom::kMobileDataNetworksSubpagePath},
+     {ChromePage::WIFI, chromeos::settings::mojom::kWifiNetworksSubpagePath},
+     {ChromePage::KERBEROS, chromeos::settings::mojom::kKerberosSectionPath},
+     {ChromePage::KERBEROSACCOUNTSV2,
+      chromeos::settings::mojom::kKerberosAccountsV2SubpagePath}};
 
 constexpr std::pair<arc::mojom::ChromePage, const char*>
     kBrowserSettingsMapping[] = {
@@ -154,13 +199,19 @@ constexpr std::pair<arc::mojom::ChromePage, const char*>
 
 constexpr std::pair<arc::mojom::ChromePage, const char*> kAboutPagesMapping[] =
     {{ChromePage::ABOUTBLANK, url::kAboutBlankURL},
-     {ChromePage::ABOUTDOWNLOADS, "about:downloads"},
-     {ChromePage::ABOUTHISTORY, "about:history"}};
+     {ChromePage::ABOUTDOWNLOADS, "chrome://downloads/"},
+     {ChromePage::ABOUTHISTORY, "chrome://history/"}};
+
+constexpr arc::mojom::ChromePage kDeprecatedPages[] = {
+    ChromePage::DEPRECATED_DOWNLOADEDCONTENT,
+    ChromePage::DEPRECATED_PLUGINVMDETAILS,
+    ChromePage::DEPRECATED_CROSTINIDISKRESIZE};
 
 // mojom::ChromePage::LAST returns the amount of valid entries - 1.
 static_assert(base::size(kOSSettingsMapping) +
                       base::size(kBrowserSettingsMapping) +
-                      base::size(kAboutPagesMapping) ==
+                      base::size(kAboutPagesMapping) +
+                      base::size(kDeprecatedPages) ==
                   static_cast<size_t>(arc::mojom::ChromePage::LAST) + 1,
               "ChromePage mapping is out of sync");
 
@@ -299,7 +350,7 @@ void ChromeNewWindowClient::NewWindow(bool is_incognito) {
   Profile* profile = (browser && browser->profile())
                          ? browser->profile()->GetOriginalProfile()
                          : ProfileManager::GetActiveUserProfile();
-  chrome::NewEmptyWindow(is_incognito ? profile->GetOffTheRecordProfile()
+  chrome::NewEmptyWindow(is_incognito ? profile->GetPrimaryOTRProfile()
                                       : profile);
 }
 
@@ -308,18 +359,59 @@ void ChromeNewWindowClient::OpenFileManager() {
   apps::AppServiceProxy* proxy =
       apps::AppServiceProxyFactory::GetForProfile(profile);
   DCHECK(proxy);
-  proxy->AppRegistryCache().ForOneApp(
-      file_manager::kFileManagerAppId, [proxy](const apps::AppUpdate& update) {
-        if (update.Readiness() == apps::mojom::Readiness::kReady) {
-          proxy->Launch(update.AppId(),
-                        apps::GetEventFlags(
-                            apps::mojom::LaunchContainer::kLaunchContainerNone,
+
+  auto launch_files_app = [proxy](const apps::AppUpdate& update) {
+    if (update.Readiness() != apps::mojom::Readiness::kReady) {
+      LOG(WARNING)
+          << "Couldn't launch Files app because it isn't ready, readiness: "
+          << update.Readiness();
+      return;
+    }
+
+    proxy->Launch(
+        update.AppId(),
+        apps::GetEventFlags(apps::mojom::LaunchContainer::kLaunchContainerNone,
                             WindowOpenDisposition::NEW_FOREGROUND_TAB,
-                            true /* preferred_containner */),
-                        apps::mojom::LaunchSource::kFromKeyboard,
-                        display::kInvalidDisplayId);
-        }
-      });
+                            /*preferred_containner=*/true),
+        apps::mojom::LaunchSource::kFromKeyboard, display::kInvalidDisplayId);
+  };
+
+  bool result = proxy->AppRegistryCache().ForOneApp(
+      file_manager::kFileManagerAppId, std::move(launch_files_app));
+  DCHECK(result);
+}
+
+void ChromeNewWindowClient::OpenDownloadsFolder() {
+  Profile* const profile = ProfileManager::GetActiveUserProfile();
+  apps::AppServiceProxy* proxy =
+      apps::AppServiceProxyFactory::GetForProfile(profile);
+  auto downloads_path =
+      file_manager::util::GetDownloadsFolderForProfile(profile);
+  DCHECK(proxy);
+
+  auto launch_files_app = [proxy,
+                           downloads_path](const apps::AppUpdate& update) {
+    if (update.Readiness() != apps::mojom::Readiness::kReady) {
+      LOG(WARNING)
+          << "Couldn't launch Files app because it isn't ready, readiness: "
+          << update.Readiness();
+      return;
+    }
+
+    apps::mojom::FilePathsPtr launch_files = apps::mojom::FilePaths::New();
+    launch_files->file_paths.push_back(downloads_path);
+
+    proxy->LaunchAppWithFiles(
+        update.AppId(), apps::mojom::LaunchContainer::kLaunchContainerNone,
+        apps::GetEventFlags(apps::mojom::LaunchContainer::kLaunchContainerNone,
+                            WindowOpenDisposition::NEW_FOREGROUND_TAB,
+                            /*preferred_containner=*/true),
+        apps::mojom::LaunchSource::kFromKeyboard, std::move(launch_files));
+  };
+
+  bool result = proxy->AppRegistryCache().ForOneApp(
+      file_manager::kFileManagerAppId, launch_files_app);
+  DCHECK(result);
 }
 
 void ChromeNewWindowClient::OpenCrosh() {
@@ -441,35 +533,51 @@ void ChromeNewWindowClient::OpenWebAppFromArc(const GURL& url) {
 
   apps::AppServiceProxy* proxy =
       apps::AppServiceProxyFactory::GetForProfile(profile);
-  DCHECK(proxy);
   proxy->LaunchAppWithUrl(*app_id, event_flags, url,
                           apps::mojom::LaunchSource::kFromArc,
                           display::kInvalidDisplayId);
+
+  chromeos::ApkWebAppService* apk_web_app_service =
+      chromeos::ApkWebAppService::Get(profile);
+  if (!apk_web_app_service ||
+      !apk_web_app_service->IsWebAppInstalledFromArc(app_id.value())) {
+    return;
+  }
+
+  ArcAppListPrefs* prefs = ArcAppListPrefs::Get(profile);
+  if (!prefs)
+    return;
+
+  base::Optional<std::string> package_name =
+      apk_web_app_service->GetPackageNameForWebApp(app_id.value());
+  if (!package_name.has_value())
+    return;
+
+  for (const auto& app_id : prefs->GetAppsForPackage(package_name.value())) {
+    proxy->StopApp(app_id);
+  }
 }
 
 void ChromeNewWindowClient::OpenArcCustomTab(
     const GURL& url,
     int32_t task_id,
-    int32_t surface_id,
-    int32_t top_margin,
     arc::mojom::IntentHelperHost::OnOpenCustomTabCallback callback) {
   GURL url_to_open = ConvertArcUrlToExternalFileUrlIfNeeded(url);
   Profile* profile = ProfileManager::GetActiveUserProfile();
 
   aura::Window* arc_window = arc::GetArcWindow(task_id);
   if (!arc_window) {
-    std::move(callback).Run(nullptr);
+    std::move(callback).Run(mojo::NullRemote());
     return;
   }
 
-  auto custom_tab =
-      ash::ArcCustomTab::Create(arc_window, surface_id, top_margin);
+  auto custom_tab = std::make_unique<arc::CustomTab>(arc_window);
   auto web_contents = arc::CreateArcCustomTabWebContents(profile, url);
 
   // |custom_tab_browser| will be destroyed when its tab strip becomes empty,
   // either due to the user opening the custom tab page in a tabbed browser or
   // because of the CustomTabSessionImpl object getting destroyed.
-  auto* custom_tab_browser = new Browser(Browser::CreateParams(
+  auto* custom_tab_browser = Browser::Create(Browser::CreateParams(
       Browser::TYPE_CUSTOM_TAB, profile, /* user_gesture= */ true));
 
   custom_tab_browser->tab_strip_model()->AppendWebContents(
@@ -478,9 +586,9 @@ void ChromeNewWindowClient::OpenArcCustomTab(
   // TODO(crbug.com/955171): Remove this temporary conversion to InterfacePtr
   // once OnOpenCustomTab from //components/arc/mojom/intent_helper.mojom could
   // take pending_remote directly. Refer to crrev.com/c/1868870.
-  mojo::InterfacePtr<arc::mojom::CustomTabSession> custom_tab_ptr(
+  auto custom_tab_remote(
       CustomTabSessionImpl::Create(std::move(custom_tab), custom_tab_browser));
-  std::move(callback).Run(std::move(custom_tab_ptr));
+  std::move(callback).Run(std::move(custom_tab_remote));
 }
 
 content::WebContents* ChromeNewWindowClient::OpenUrlImpl(
@@ -550,6 +658,16 @@ void ChromeNewWindowClient::OpenChromePageFromArc(ChromePage page) {
 
 void ChromeNewWindowClient::LaunchCameraApp(const std::string& queries,
                                             int32_t task_id) {
+  apps::RecordAppLaunch(extension_misc::kCameraAppId,
+                        apps::mojom::LaunchSource::kFromArc);
+
+  if (web_app::SystemWebAppManager::IsAppEnabled(
+          web_app::SystemAppType::CAMERA)) {
+    ChromeCameraAppUIDelegate::CameraAppDialog::ShowIntent(
+        queries, arc::GetArcWindow(task_id));
+    return;
+  }
+
   Profile* const profile = ProfileManager::GetActiveUserProfile();
   const extensions::ExtensionRegistry* registry =
       extensions::ExtensionRegistry::Get(profile);
@@ -583,6 +701,8 @@ void ChromeNewWindowClient::CloseCameraApp() {
 bool ChromeNewWindowClient::IsCameraAppEnabled() {
   return extensions::ExtensionRegistry::Get(
              ProfileManager::GetActiveUserProfile())
-             ->enabled_extensions()
-             .GetByID(extension_misc::kCameraAppId) != nullptr;
+                 ->enabled_extensions()
+                 .GetByID(extension_misc::kCameraAppId) != nullptr ||
+         web_app::SystemWebAppManager::IsAppEnabled(
+             web_app::SystemAppType::CAMERA);
 }

@@ -6,9 +6,10 @@
 
 #include <stddef.h>
 
+#include "base/ranges/algorithm.h"
 #include "base/stl_util.h"
 #include "base/strings/string_util.h"
-#include "content/browser/frame_host/debug_urls.h"
+#include "content/browser/renderer_host/debug_urls.h"
 #include "content/browser/webui/web_ui_impl.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/common/content_client.h"
@@ -92,8 +93,7 @@ BrowserURLHandlerImpl* BrowserURLHandlerImpl::GetInstance() {
   return base::Singleton<BrowserURLHandlerImpl>::get();
 }
 
-BrowserURLHandlerImpl::BrowserURLHandlerImpl() :
-    fixup_handler_(nullptr) {
+BrowserURLHandlerImpl::BrowserURLHandlerImpl() {
   AddHandlerPair(&DebugURLHandler, BrowserURLHandlerImpl::null_handler());
 
   // view-source: should take precedence over other rewriters, so it's
@@ -104,11 +104,6 @@ BrowserURLHandlerImpl::BrowserURLHandlerImpl() :
 }
 
 BrowserURLHandlerImpl::~BrowserURLHandlerImpl() {
-}
-
-void BrowserURLHandlerImpl::SetFixupHandler(URLHandler handler) {
-  DCHECK(fixup_handler_ == nullptr);
-  fixup_handler_ = handler;
 }
 
 void BrowserURLHandlerImpl::AddHandlerPair(URLHandler handler,
@@ -125,11 +120,21 @@ void BrowserURLHandlerImpl::RewriteURLIfNecessary(
   RewriteURLIfNecessary(url, browser_context, &ignored_reverse_on_redirect);
 }
 
-void BrowserURLHandlerImpl::FixupURLBeforeRewrite(
-    GURL* url,
+std::vector<GURL> BrowserURLHandlerImpl::GetPossibleRewrites(
+    const GURL& url,
     BrowserContext* browser_context) {
-  if (fixup_handler_)
-    fixup_handler_(url, browser_context);
+  std::vector<GURL> rewrites;
+  for (const auto& it : url_handlers_) {
+    const URLHandler& handler = it.first;
+    if (!handler)
+      continue;
+
+    GURL mutable_url(url);
+    if (handler(&mutable_url, browser_context))
+      rewrites.push_back(std::move(mutable_url));
+  }
+
+  return rewrites;
 }
 
 void BrowserURLHandlerImpl::RewriteURLIfNecessary(
@@ -139,6 +144,11 @@ void BrowserURLHandlerImpl::RewriteURLIfNecessary(
   DCHECK(url);
   DCHECK(browser_context);
   DCHECK(reverse_on_redirect);
+
+  if (!url->is_valid()) {
+    *reverse_on_redirect = false;
+    return;
+  }
 
   for (const auto& it : url_handlers_) {
     const URLHandler& handler = it.first;
@@ -168,8 +178,11 @@ bool BrowserURLHandlerImpl::ReverseURLRewrite(
   return false;
 }
 
-void BrowserURLHandlerImpl::SetFixupHandlerForTesting(URLHandler handler) {
-  fixup_handler_ = handler;
+void BrowserURLHandlerImpl::RemoveHandlerForTesting(URLHandler handler) {
+  const auto it =
+      base::ranges::find(url_handlers_, handler, &HandlerPair::first);
+  DCHECK(url_handlers_.end() != it);
+  url_handlers_.erase(it);
 }
 
 }  // namespace content

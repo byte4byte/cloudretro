@@ -4,16 +4,16 @@
 
 package org.chromium.chrome.browser.tasks.tab_management;
 
-import static android.support.test.espresso.Espresso.onView;
-import static android.support.test.espresso.Espresso.pressBack;
-import static android.support.test.espresso.action.ViewActions.click;
-import static android.support.test.espresso.assertion.ViewAssertions.doesNotExist;
-import static android.support.test.espresso.assertion.ViewAssertions.matches;
-import static android.support.test.espresso.matcher.RootMatchers.withDecorView;
-import static android.support.test.espresso.matcher.ViewMatchers.isDisplayed;
-import static android.support.test.espresso.matcher.ViewMatchers.withId;
-import static android.support.test.espresso.matcher.ViewMatchers.withParent;
-import static android.support.test.espresso.matcher.ViewMatchers.withText;
+import static androidx.test.espresso.Espresso.onView;
+import static androidx.test.espresso.Espresso.pressBack;
+import static androidx.test.espresso.action.ViewActions.click;
+import static androidx.test.espresso.assertion.ViewAssertions.doesNotExist;
+import static androidx.test.espresso.assertion.ViewAssertions.matches;
+import static androidx.test.espresso.matcher.RootMatchers.withDecorView;
+import static androidx.test.espresso.matcher.ViewMatchers.isDisplayed;
+import static androidx.test.espresso.matcher.ViewMatchers.withId;
+import static androidx.test.espresso.matcher.ViewMatchers.withParent;
+import static androidx.test.espresso.matcher.ViewMatchers.withText;
 
 import static org.hamcrest.CoreMatchers.allOf;
 import static org.hamcrest.Matchers.not;
@@ -21,41 +21,44 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
+import static org.chromium.chrome.browser.tasks.tab_management.TabUiTestHelper.clickFirstCardFromTabSwitcher;
 import static org.chromium.chrome.browser.tasks.tab_management.TabUiTestHelper.closeFirstTabInTabSwitcher;
 import static org.chromium.chrome.browser.tasks.tab_management.TabUiTestHelper.enterTabSwitcher;
 import static org.chromium.chrome.browser.tasks.tab_management.TabUiTestHelper.getSwipeToDismissAction;
 import static org.chromium.chrome.browser.tasks.tab_management.TabUiTestHelper.rotateDeviceToOrientation;
 import static org.chromium.chrome.browser.tasks.tab_management.TabUiTestHelper.verifyTabSwitcherCardCount;
+import static org.chromium.chrome.test.util.ViewUtils.onViewWaiting;
 
 import android.content.pm.ActivityInfo;
 import android.content.res.Configuration;
 import android.graphics.drawable.Animatable;
 import android.support.test.InstrumentationRegistry;
-import android.support.test.espresso.NoMatchingRootException;
-import android.support.test.espresso.contrib.RecyclerViewActions;
-import android.support.test.filters.MediumTest;
 import android.support.test.uiautomator.UiDevice;
 import android.view.View;
 import android.widget.ImageView;
 import android.widget.TextView;
 
 import androidx.recyclerview.widget.RecyclerView;
+import androidx.test.espresso.NoMatchingRootException;
+import androidx.test.espresso.contrib.RecyclerViewActions;
+import androidx.test.filters.MediumTest;
 
 import org.junit.After;
 import org.junit.Before;
 import org.junit.ClassRule;
 import org.junit.Rule;
 import org.junit.Test;
-import org.junit.rules.TestRule;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.test.util.CommandLineFlags;
+import org.chromium.base.test.util.CriteriaHelper;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.Restriction;
 import org.chromium.chrome.browser.ChromeTabbedActivity;
 import org.chromium.chrome.browser.compositor.layouts.Layout;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.flags.ChromeSwitches;
+import org.chromium.chrome.browser.multiwindow.MultiWindowUtils;
 import org.chromium.chrome.features.start_surface.StartSurfaceLayout;
 import org.chromium.chrome.tab_ui.R;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
@@ -63,7 +66,7 @@ import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
 import org.chromium.chrome.test.util.ChromeRenderTestRule;
 import org.chromium.chrome.test.util.ChromeTabUtils;
 import org.chromium.chrome.test.util.browser.Features;
-import org.chromium.content_public.browser.test.util.CriteriaHelper;
+import org.chromium.content_public.browser.test.util.TestThreadUtils;
 import org.chromium.ui.modaldialog.ModalDialogManager;
 import org.chromium.ui.modaldialog.ModalDialogProperties;
 import org.chromium.ui.test.util.DisableAnimationsTestRule;
@@ -74,7 +77,18 @@ import java.io.IOException;
 /** End-to-end tests for TabGridIph component. */
 @RunWith(ChromeJUnit4ClassRunner.class)
 // clang-format off
-@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
+        "enable-features=IPH_TabGroupsDragAndDrop<TabGroupsDragAndDrop",
+        "force-fieldtrials=TabGroupsDragAndDrop/Enabled",
+        "force-fieldtrial-params=TabGroupsDragAndDrop.Enabled:availability/any/" +
+        "event_trigger/" +
+        "name%3Aiph_tabgroups_drag_and_drop;comparator%3A==0;window%3A30;storage%3A365/" +
+        "event_trigger2/" +
+        "name%3Aiph_tabgroups_drag_and_drop;comparator%3A<2;window%3A90;storage%3A365/" +
+        "event_used/" +
+        "name%3Atab_drag_and_drop_to_group;comparator%3A==0;window%3A365;storage%3A365/" +
+        "session_rate/<1"
+})
 @Restriction(UiRestriction.RESTRICTION_TYPE_PHONE)
 @Features.EnableFeatures({ChromeFeatureList.TAB_GROUPS_ANDROID})
 @Features.DisableFeatures(ChromeFeatureList.CLOSE_TAB_SUGGESTIONS)
@@ -90,21 +104,18 @@ public class TabGridIphTest {
     public ChromeTabbedActivityTestRule mActivityTestRule = new ChromeTabbedActivityTestRule();
 
     @Rule
-    public TestRule mProcessor = new Features.InstrumentationProcessor();
-
-    @Rule
-    public ChromeRenderTestRule mRenderTestRule = new ChromeRenderTestRule();
+    public ChromeRenderTestRule mRenderTestRule =
+            ChromeRenderTestRule.Builder.withPublicCorpus().build();
 
     @Before
     public void setUp() {
         mActivityTestRule.startMainActivityOnBlankPage();
         Layout layout = mActivityTestRule.getActivity().getLayoutManager().getOverviewLayout();
         assertTrue(layout instanceof StartSurfaceLayout);
-        CriteriaHelper.pollUiThread(mActivityTestRule.getActivity()
-                                            .getTabModelSelector()
-                                            .getTabModelFilterProvider()
-                                            .getCurrentTabModelFilter()::isTabModelRestored);
-        mModalDialogManager = mActivityTestRule.getActivity().getModalDialogManager();
+        CriteriaHelper.pollUiThread(
+                mActivityTestRule.getActivity().getTabModelSelector()::isTabStateInitialized);
+        mModalDialogManager = TestThreadUtils.runOnUiThreadBlockingNoException(
+                mActivityTestRule.getActivity()::getModalDialogManager);
     }
 
     @After
@@ -323,6 +334,27 @@ public class TabGridIphTest {
                         1, getSwipeToDismissAction(true)));
 
         onView(withId(R.id.tab_grid_message_item)).check(doesNotExist());
+    }
+
+    @Test
+    @MediumTest
+    public void testNotShowIPHInMultiWindowMode() {
+        ChromeTabbedActivity cta = mActivityTestRule.getActivity();
+        enterTabSwitcher(cta);
+        onView(withId(R.id.tab_grid_message_item)).check(matches(isDisplayed()));
+
+        // Mock that user enters multi-window mode, and the IPH message should not show in tab
+        // switcher.
+        clickFirstCardFromTabSwitcher(cta);
+        MultiWindowUtils.getInstance().setIsInMultiWindowModeForTesting(true);
+        enterTabSwitcher(cta);
+        CriteriaHelper.pollUiThread(() -> cta.findViewById(R.id.tab_grid_message_item) == null);
+
+        // Mock that user exits multi-window mode, and the IPH message should show in tab switcher.
+        clickFirstCardFromTabSwitcher(cta);
+        MultiWindowUtils.getInstance().setIsInMultiWindowModeForTesting(false);
+        enterTabSwitcher(cta);
+        onViewWaiting(allOf(withId(R.id.tab_grid_message_item), isDisplayed()));
     }
 
     private void verifyIphDialogShowing(ChromeTabbedActivity cta) {

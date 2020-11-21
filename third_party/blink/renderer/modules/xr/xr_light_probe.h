@@ -17,28 +17,55 @@
 
 namespace blink {
 
+class TransformationMatrix;
+class XRCubeMap;
 class XRLightEstimate;
+class XRLightProbeInit;
 class XRSession;
+class XRSpace;
 
-class XRLightProbe : public ScriptWrappable {
+class XRLightProbe : public EventTargetWithInlineData {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  explicit XRLightProbe(XRSession* session);
+  explicit XRLightProbe(XRSession* session, XRLightProbeInit* options);
+
+  enum XRReflectionFormat {
+    kReflectionFormatSRGBA8 = 0,
+    kReflectionFormatRGBA16F = 1
+  };
 
   XRSession* session() const { return session_; }
+
+  XRSpace* probeSpace() const;
+
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(reflectionchange, kReflectionchange)
+
+  base::Optional<TransformationMatrix> MojoFromObject() const;
 
   void ProcessLightEstimationData(
       const device::mojom::blink::XRLightEstimationData* data,
       double timestamp);
 
   XRLightEstimate* getLightEstimate() { return light_estimate_; }
+  XRCubeMap* getReflectionCubeMap() { return cube_map_.get(); }
 
-  void Trace(Visitor* visitor) override;
+  XRReflectionFormat ReflectionFormat() const { return reflection_format_; }
+
+  // EventTarget overrides.
+  ExecutionContext* GetExecutionContext() const override;
+  const AtomicString& InterfaceName() const override;
+
+  void Trace(Visitor* visitor) const override;
 
  private:
   Member<XRSession> session_;
+  mutable Member<XRSpace> probe_space_;
   Member<XRLightEstimate> light_estimate_;
+
+  XRReflectionFormat reflection_format_;
+  double last_reflection_change_ = 0.0;
+  std::unique_ptr<XRCubeMap> cube_map_;
 };
 
 }  // namespace blink

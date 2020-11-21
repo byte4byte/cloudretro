@@ -7,9 +7,17 @@
 #include <map>
 
 #include "base/containers/adapters.h"
+#include "base/logging.h"
 #include "chrome/browser/ui/app_list/app_context_menu.h"
-#include "chrome/common/string_matching/tokenized_string.h"
-#include "chrome/common/string_matching/tokenized_string_match.h"
+#include "chromeos/components/string_matching/tokenized_string.h"
+#include "chromeos/components/string_matching/tokenized_string_match.h"
+
+namespace {
+
+using chromeos::string_matching::TokenizedString;
+using chromeos::string_matching::TokenizedStringMatch;
+
+}  // namespace
 
 ChromeSearchResult::ChromeSearchResult()
     : metadata_(std::make_unique<ash::SearchResultMetadata>()) {}
@@ -77,6 +85,11 @@ void ChromeSearchResult::SetResultType(ResultType result_type) {
   SetSearchResultMetadata();
 }
 
+void ChromeSearchResult::SetMetricsType(MetricsType metrics_type) {
+  metadata_->metrics_type = metrics_type;
+  SetSearchResultMetadata();
+}
+
 void ChromeSearchResult::SetDisplayIndex(DisplayIndex display_index) {
   metadata_->display_index = display_index;
   SetSearchResultMetadata();
@@ -97,10 +110,9 @@ void ChromeSearchResult::SetIsRecommendation(bool is_recommendation) {
   SetSearchResultMetadata();
 }
 
-void ChromeSearchResult::SetPercentDownloaded(int percent_downloaded) {
-  AppListModelUpdater* updater = model_updater();
-  if (updater)
-    updater->SetSearchResultPercentDownloaded(id(), percent_downloaded);
+void ChromeSearchResult::SetIsAnswer(bool is_answer) {
+  metadata_->is_answer = is_answer;
+  SetSearchResultMetadata();
 }
 
 void ChromeSearchResult::SetQueryUrl(const GURL& url) {
@@ -141,19 +153,13 @@ void ChromeSearchResult::SetNotifyVisibilityChange(
   metadata_->notify_visibility_change = notify_visibility_change;
 }
 
-void ChromeSearchResult::NotifyItemInstalled() {
-  AppListModelUpdater* updater = model_updater();
-  if (updater)
-    updater->NotifySearchResultItemInstalled(id());
-}
-
 void ChromeSearchResult::SetSearchResultMetadata() {
   AppListModelUpdater* updater = model_updater();
   if (updater)
     updater->SetSearchResultMetadata(id(), CloneMetadata());
 }
 
-void ChromeSearchResult::InvokeAction(int action_index, int event_flags) {}
+void ChromeSearchResult::InvokeAction(int action_index) {}
 
 void ChromeSearchResult::OnVisibilityChanged(bool visibility) {
   VLOG(1) << " Visibility change to " << visibility << " and ID is " << id();

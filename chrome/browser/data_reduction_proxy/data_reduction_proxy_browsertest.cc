@@ -13,13 +13,12 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/lock.h"
 #include "base/task/thread_pool/thread_pool_instance.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
 #include "chrome/browser/data_reduction_proxy/data_reduction_proxy_chrome_settings.h"
 #include "chrome/browser/data_reduction_proxy/data_reduction_proxy_chrome_settings_factory.h"
-#include "chrome/browser/metrics/subprocess_metrics_provider.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/test/base/in_process_browser_test.h"
@@ -34,6 +33,7 @@
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_switches.h"
 #include "components/data_reduction_proxy/core/common/uma_util.h"
 #include "components/data_reduction_proxy/proto/client_config.pb.h"
+#include "components/metrics/content/subprocess_metrics_provider.h"
 #include "components/page_load_metrics/browser/page_load_metrics_test_waiter.h"
 #include "components/prefs/pref_service.h"
 #include "components/previews/core/previews_experiments.h"
@@ -45,6 +45,7 @@
 #include "content/public/browser/network_service_instance.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/common/network_service_util.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/test_navigation_observer.h"
@@ -127,7 +128,7 @@ class TestSettingsObserver : public DataReductionProxySettingsObserver {
 
 }  // namespace
 
-#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_CHROMEOS)
+#if defined(OS_WIN) || defined(OS_MAC) || defined(OS_CHROMEOS)
 #define DISABLE_ON_WIN_MAC_CHROMEOS(x) DISABLED_##x
 #else
 #define DISABLE_ON_WIN_MAC_CHROMEOS(x) x
@@ -197,8 +198,7 @@ class DataReductionProxyBrowsertestBase : public InProcessBrowserTest {
     config_ = config;
     // Config is not fetched if the lite page
     // redirect previews are not enabled. So, return early.
-    if (!previews::params::IsLitePageServerPreviewsEnabled() &&
-        !params::ForceEnableClientConfigServiceForAllDataSaverUsers()) {
+    if (!params::ForceEnableClientConfigServiceForAllDataSaverUsers()) {
       return;
     }
   }
@@ -212,7 +212,7 @@ class DataReductionProxyBrowsertestBase : public InProcessBrowserTest {
       base::RunLoop().RunUntilIdle();
 
       content::FetchHistogramsFromChildProcesses();
-      SubprocessMetricsProvider::MergeHistogramDeltasForTesting();
+      metrics::SubprocessMetricsProvider::MergeHistogramDeltasForTesting();
 
       const std::vector<base::Bucket> buckets =
           histogram_tester->GetAllSamples(histogram_name);
@@ -227,8 +227,7 @@ class DataReductionProxyBrowsertestBase : public InProcessBrowserTest {
   }
 
   void WaitForConfig() {
-    if (!previews::params::IsLitePageServerPreviewsEnabled() &&
-        !params::ForceEnableClientConfigServiceForAllDataSaverUsers()) {
+    if (!params::ForceEnableClientConfigServiceForAllDataSaverUsers()) {
       return;
     }
 
@@ -249,9 +248,7 @@ class DataReductionProxyBrowsertestBase : public InProcessBrowserTest {
       const net::test_server::HttpRequest& request) {
     // Config should be fetched only when lite page
     // redirect previews are enabled.
-    EXPECT_TRUE(
-        previews::params::IsLitePageServerPreviewsEnabled() ||
-        params::ForceEnableClientConfigServiceForAllDataSaverUsers());
+    EXPECT_TRUE(params::ForceEnableClientConfigServiceForAllDataSaverUsers());
 
     auto response = std::make_unique<net::test_server::BasicHttpResponse>();
     response->set_content(config_.SerializeAsString());
@@ -714,33 +711,26 @@ IN_PROC_BROWSER_TEST_F(DataReductionProxyBrowsertest,
 }
 
 // Test that enabling the holdback disables the proxy and that the client config
-// is fetched when lite page redirect preview is enabled.
+// is fetched when it is force enabled.
 class DataReductionProxyWithHoldbackBrowsertest
-    : public ::testing::WithParamInterface<std::tuple<bool, bool>>,
+    : public ::testing::WithParamInterface<bool>,
       public DataReductionProxyBrowsertest {
  public:
   DataReductionProxyWithHoldbackBrowsertest()
-      : lite_page_redirect_previews_enabled_(std::get<0>(GetParam())),
-        enable_config_service_fetches_(std::get<1>(GetParam())) {}
+      : enable_config_service_fetches_(GetParam()) {}
 
   void SetUp() override {
     fetch_client_config_feature_list_.InitWithFeatureState(
         data_reduction_proxy::features::kFetchClientConfig,
         enable_config_service_fetches_);
 
-    previews_lite_page_redirect_feature_list_.InitWithFeatureState(
-        previews::features::kLitePageServerPreviews,
-        lite_page_redirect_previews_enabled_);
-
     InProcessBrowserTest::SetUp();
   }
 
-  const bool lite_page_redirect_previews_enabled_;
   const bool enable_config_service_fetches_;
 
  private:
   base::test::ScopedFeatureList fetch_client_config_feature_list_;
-  base::test::ScopedFeatureList previews_lite_page_redirect_feature_list_;
 };
 
 IN_PROC_BROWSER_TEST_P(DataReductionProxyWithHoldbackBrowsertest,
@@ -767,13 +757,10 @@ IN_PROC_BROWSER_TEST_P(DataReductionProxyWithHoldbackBrowsertest,
   EXPECT_NE(GetBody(), kPrimaryProxyResponse);
 }
 
-// First parameter is true if lite page redirect preview is enabled.
-// Second parameter is true if data reduction proxy config should always be
-// fetched.
+// Parameter is true if data reduction proxy config should always be fetched.
 INSTANTIATE_TEST_SUITE_P(All,
                          DataReductionProxyWithHoldbackBrowsertest,
-                         ::testing::Combine(::testing::Bool(),
-                                            ::testing::Bool()));
+                         ::testing::Bool());
 
 class DataReductionProxyExpBrowsertest : public DataReductionProxyBrowsertest {
  public:

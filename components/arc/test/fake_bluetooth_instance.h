@@ -10,6 +10,8 @@
 
 #include "base/macros.h"
 #include "components/arc/mojom/bluetooth.mojom.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/remote.h"
 
 namespace device {
 class BluetoothUUID;
@@ -67,12 +69,49 @@ class FakeBluetoothInstance : public mojom::BluetoothInstance {
     DISALLOW_COPY_AND_ASSIGN(LEDeviceFoundData);
   };
 
+  class ConnectionStateChangedData {
+   public:
+    ConnectionStateChangedData(mojom::BluetoothAddressPtr addr,
+                               device::BluetoothTransport device_type,
+                               bool connected);
+    ~ConnectionStateChangedData();
+
+    const mojom::BluetoothAddressPtr& addr() const { return addr_; }
+    device::BluetoothTransport device_type() const { return device_type_; }
+    bool connected() const { return connected_; }
+
+   private:
+    mojom::BluetoothAddressPtr addr_;
+    device::BluetoothTransport device_type_;
+    bool connected_;
+
+    DISALLOW_COPY_AND_ASSIGN(ConnectionStateChangedData);
+  };
+
+  class LEConnectionStateChangeData {
+   public:
+    LEConnectionStateChangeData(mojom::BluetoothAddressPtr addr,
+                                bool connected);
+    ~LEConnectionStateChangeData();
+
+    const mojom::BluetoothAddressPtr& addr() const { return addr_; }
+    bool connected() const { return connected_; }
+
+   private:
+    mojom::BluetoothAddressPtr addr_;
+    bool connected_;
+
+    DISALLOW_COPY_AND_ASSIGN(LEConnectionStateChangeData);
+  };
+
   FakeBluetoothInstance();
   ~FakeBluetoothInstance() override;
 
   // mojom::BluetoothInstance overrides:
-  void InitDeprecated(mojom::BluetoothHostPtr host_ptr) override;
-  void Init(mojom::BluetoothHostPtr host_ptr, InitCallback callback) override;
+  void InitDeprecated(
+      mojo::PendingRemote<mojom::BluetoothHost> host_remote) override;
+  void Init(mojo::PendingRemote<mojom::BluetoothHost> host_remote,
+            InitCallback callback) override;
   void OnAdapterProperties(
       mojom::BluetoothStatus status,
       std::vector<mojom::BluetoothPropertyPtr> properties) override;
@@ -85,6 +124,9 @@ class FakeBluetoothInstance : public mojom::BluetoothInstance {
   void OnBondStateChanged(mojom::BluetoothStatus status,
                           mojom::BluetoothAddressPtr remote_addr,
                           mojom::BluetoothBondState state) override;
+  void OnConnectionStateChanged(mojom::BluetoothAddressPtr remote_addr,
+                                device::BluetoothTransport device_type,
+                                bool connected) override;
   void OnLEDeviceFoundForN(
       mojom::BluetoothAddressPtr addr,
       int32_t rssi,
@@ -151,6 +193,16 @@ class FakeBluetoothInstance : public mojom::BluetoothInstance {
     return le_device_found_data_;
   }
 
+  const std::vector<std::unique_ptr<ConnectionStateChangedData>>&
+  connection_state_changed_data() const {
+    return connection_state_changed_data_;
+  }
+
+  const std::vector<std::unique_ptr<LEConnectionStateChangeData>>&
+  le_connection_state_change_data() {
+    return le_connection_state_change_data_;
+  }
+
   const std::vector<std::unique_ptr<GattDBResult>>& gatt_db_result() const {
     return gatt_db_result_;
   }
@@ -160,11 +212,15 @@ class FakeBluetoothInstance : public mojom::BluetoothInstance {
   std::vector<std::vector<mojom::BluetoothPropertyPtr>>
       device_properties_changed_data_;
   std::vector<std::unique_ptr<LEDeviceFoundData>> le_device_found_data_;
+  std::vector<std::unique_ptr<ConnectionStateChangedData>>
+      connection_state_changed_data_;
+  std::vector<std::unique_ptr<LEConnectionStateChangeData>>
+      le_connection_state_change_data_;
   std::vector<std::unique_ptr<GattDBResult>> gatt_db_result_;
 
   // Keeps the binding alive so that calls to this class can be correctly
   // routed.
-  mojom::BluetoothHostPtr host_;
+  mojo::Remote<mojom::BluetoothHost> host_remote_;
 
   DISALLOW_COPY_AND_ASSIGN(FakeBluetoothInstance);
 };

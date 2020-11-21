@@ -25,7 +25,7 @@ ManagePasswordsIconViews::ManagePasswordsIconViews(
                          icon_label_bubble_delegate,
                          page_action_icon_delegate) {
   // Password icon should not be mirrored in RTL.
-  image()->EnableCanvasFlippingForRTLUI(false);
+  image()->SetFlipCanvasOnPaintForRTLUI(false);
 }
 
 ManagePasswordsIconViews::~ManagePasswordsIconViews() = default;
@@ -53,7 +53,7 @@ void ManagePasswordsIconViews::UpdateUiForState() {
   parent()->Layout();
 }
 
-views::BubbleDialogDelegateView* ManagePasswordsIconViews::GetBubble() const {
+views::BubbleDialogDelegate* ManagePasswordsIconViews::GetBubble() const {
   return PasswordBubbleViewBase::manage_password_bubble();
 }
 
@@ -80,10 +80,26 @@ const gfx::VectorIcon& ManagePasswordsIconViews::GetVectorIcon() const {
 
 base::string16 ManagePasswordsIconViews::GetTextForTooltipAndAccessibleName()
     const {
-  return l10n_util::GetStringUTF16(
-      state_ == password_manager::ui::PENDING_PASSWORD_STATE
-          ? IDS_PASSWORD_MANAGER_TOOLTIP_SAVE
-          : IDS_PASSWORD_MANAGER_TOOLTIP_MANAGE);
+  switch (state_) {
+    case password_manager::ui::INACTIVE_STATE:
+    case password_manager::ui::CONFIRMATION_STATE:
+    case password_manager::ui::CREDENTIAL_REQUEST_STATE:
+    case password_manager::ui::AUTO_SIGNIN_STATE:
+    case password_manager::ui::CHROME_SIGN_IN_PROMO_STATE:
+    case password_manager::ui::WILL_DELETE_UNSYNCED_ACCOUNT_PASSWORDS_STATE:
+    case password_manager::ui::MANAGE_STATE:
+    case password_manager::ui::PASSWORD_UPDATED_SAFE_STATE:
+    case password_manager::ui::PASSWORD_UPDATED_MORE_TO_FIX:
+    case password_manager::ui::PASSWORD_UPDATED_UNSAFE_STATE:
+      return l10n_util::GetStringUTF16(IDS_PASSWORD_MANAGER_TOOLTIP_MANAGE);
+    case password_manager::ui::PENDING_PASSWORD_UPDATE_STATE:
+    case password_manager::ui::PENDING_PASSWORD_STATE:
+      return l10n_util::GetStringUTF16(IDS_PASSWORD_MANAGER_TOOLTIP_SAVE);
+    case password_manager::ui::CAN_MOVE_PASSWORD_TO_ACCOUNT_STATE:
+      return l10n_util::GetStringUTF16(IDS_PASSWORD_MANAGER_TOOLTIP_MOVE);
+  }
+  NOTREACHED();
+  return base::string16();
 }
 
 void ManagePasswordsIconViews::AboutToRequestFocusFromTabTraversal(

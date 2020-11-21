@@ -25,6 +25,10 @@ namespace {
 const char kChildrenDictAttr[] = "children";
 }
 
+namespace ui {
+class AXPropertyNode;
+}
+
 namespace content {
 
 // A utility class for formatting platform-specific accessibility information,
@@ -37,10 +41,12 @@ class CONTENT_EXPORT AccessibilityTreeFormatterBase
   AccessibilityTreeFormatterBase();
   ~AccessibilityTreeFormatterBase() override;
 
-  static base::string16 DumpAccessibilityTreeFromManager(
+  static std::string DumpAccessibilityTreeFromManager(
       BrowserAccessibilityManager* ax_mgr,
       bool internal,
-      std::vector<PropertyFilter> property_filters);
+      std::vector<AXPropertyFilter> property_filters);
+
+  std::string Format(ui::AXPlatformNodeDelegate* root) const override;
 
   // Populates the given DictionaryValue with the accessibility tree.
   // The dictionary contains a key/value pair for each attribute of the node,
@@ -63,28 +69,30 @@ class CONTENT_EXPORT AccessibilityTreeFormatterBase
   //   } ]
   // }
   // Build an accessibility tree for the current Chrome app.
-  virtual std::unique_ptr<base::DictionaryValue> BuildAccessibilityTree(
-      BrowserAccessibility* root) = 0;
+  virtual base::Value BuildTree(BrowserAccessibility* root) const = 0;
 
-  // AccessibilityTreeFormatter overrides.
+  // AXTreeFormatter overrides.
   void AddDefaultFilters(
-      std::vector<PropertyFilter>* property_filters) override;
-  std::unique_ptr<base::DictionaryValue> FilterAccessibilityTree(
-      const base::DictionaryValue& dict) override;
-  void FormatAccessibilityTree(const base::DictionaryValue& tree_node,
-                               base::string16* contents) override;
-  void FormatAccessibilityTreeForTesting(ui::AXPlatformNodeDelegate* root,
-                                         base::string16* contents) override;
+      std::vector<AXPropertyFilter>* property_filters) override;
+  base::Value FilterTree(const base::Value& dict) const override;
+  std::string FormatTree(const base::Value& tree_node) const override;
   void SetPropertyFilters(
-      const std::vector<PropertyFilter>& property_filters) override;
-  void SetNodeFilters(const std::vector<NodeFilter>& node_filters) override;
+      const std::vector<AXPropertyFilter>& property_filters) override;
+  void SetNodeFilters(const std::vector<AXNodeFilter>& node_filters) override;
   void set_show_ids(bool show_ids) override;
-  base::FilePath::StringType GetVersionSpecificExpectedFileSuffix() override;
 
  protected:
   //
   // Overridden by platform subclasses.
   //
+
+  // Returns property nodes complying to the line index filter for all
+  // allow/allow_empty property filters.
+  std::vector<ui::AXPropertyNode> PropertyFilterNodesFor(
+      const std::string& line_index) const;
+
+  // Return true if match-all filter is present.
+  bool HasMatchAllPropertyFilter() const;
 
   // Process accessibility tree with filters for output.
   // Given a dictionary that contains a platform-specific dictionary
@@ -93,60 +101,54 @@ class CONTENT_EXPORT AccessibilityTreeFormatterBase
   // - Returns a filtered text view as one large string.
   // - Provides a filtered version of the dictionary in an out param,
   //   (only if the out param is provided).
-  virtual base::string16 ProcessTreeForOutput(
+  virtual std::string ProcessTreeForOutput(
       const base::DictionaryValue& node,
-      base::DictionaryValue* filtered_dict_result = nullptr) = 0;
+      base::DictionaryValue* filtered_dict_result = nullptr) const = 0;
 
   //
   // Utility functions to be used by each platform.
   //
 
-  base::string16 FormatCoordinates(const base::DictionaryValue& value,
-                                   const std::string& name,
-                                   const std::string& x_name,
-                                   const std::string& y_name);
+  std::string FormatCoordinates(const base::Value& dict,
+                                const std::string& name,
+                                const std::string& x_name,
+                                const std::string& y_name) const;
 
-  base::string16 FormatRectangle(const base::DictionaryValue& value,
-                                 const std::string& name,
-                                 const std::string& left_name,
-                                 const std::string& top_name,
-                                 const std::string& width_name,
-                                 const std::string& height_name);
+  std::string FormatRectangle(const base::Value& dict,
+                              const std::string& name,
+                              const std::string& left_name,
+                              const std::string& top_name,
+                              const std::string& width_name,
+                              const std::string& height_name) const;
 
   // Writes the given attribute string out to |line| if it matches the property
   // filters.
   // Returns false if the attribute was filtered out.
   bool WriteAttribute(bool include_by_default,
-                      const base::string16& attr,
-                      base::string16* line);
-  bool WriteAttribute(bool include_by_default,
                       const std::string& attr,
-                      base::string16* line);
-  void AddPropertyFilter(std::vector<PropertyFilter>* property_filters,
+                      std::string* line) const;
+  void AddPropertyFilter(std::vector<AXPropertyFilter>* property_filters,
                          std::string filter,
-                         PropertyFilter::Type type = PropertyFilter::ALLOW);
-  bool show_ids() { return show_ids_; }
+                         AXPropertyFilter::Type type = AXPropertyFilter::ALLOW);
+  bool show_ids() const { return show_ids_; }
 
  private:
-  void RecursiveFormatAccessibilityTree(const BrowserAccessibility& node,
-                                        base::string16* contents,
-                                        int indent);
-  void RecursiveFormatAccessibilityTree(const base::DictionaryValue& tree_node,
-                                        base::string16* contents,
-                                        int depth = 0);
+  void RecursiveFormatTree(const base::Value& tree_node,
+                           std::string* contents,
+                           int depth = 0) const;
 
-  bool MatchesPropertyFilters(const base::string16& text,
+  bool MatchesPropertyFilters(const std::string& text,
                               bool default_result) const;
-  bool MatchesNodeFilters(const base::DictionaryValue& dict) const;
+  bool MatchesNodeFilters(const base::Value& dict) const;
 
   // Property filters used when formatting the accessibility tree as text.
   // Any property which matches a property filter will be skipped.
-  std::vector<PropertyFilter> property_filters_;
+  std::vector<AXPropertyFilter> property_filters_;
 
   // Node filters used when formatting the accessibility tree as text.
   // Any node which matches a node wilder will be skipped, along with all its
   // children.
-  std::vector<NodeFilter> node_filters_;
+  std::vector<AXNodeFilter> node_filters_;
 
   // Whether or not node ids should be included in the dump.
   bool show_ids_ = false;

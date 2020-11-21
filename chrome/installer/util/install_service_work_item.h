@@ -13,6 +13,7 @@
 #define CHROME_INSTALLER_UTIL_INSTALL_SERVICE_WORK_ITEM_H_
 
 #include <memory>
+#include <vector>
 
 #include "base/macros.h"
 #include "base/strings/string16.h"
@@ -40,13 +41,29 @@ class InstallServiceWorkItem : public WorkItem {
   // |service_cmd_line| is the command line with which the service is invoked by
   // the SCM. For example,
   // "C:\Program Files (x86)\Google\Chrome\ElevationService.exe" /svc
+  //
+  // NOTE: |registry_path| is mapped to the 32-bit view of the registry for
+  // legacy reasons. |registry_path| is the path in HKEY_LOCAL_MACHINE under
+  // which the service persists information, for instance if the service has to
+  // persist a versioned service name. An example |registry_path| is
+  // "Software\ProductFoo".
+  //
+  // If COM CLSID/AppId registration is required, |clsids| should contain the
+  // CLSIDs and AppIds to register. If COM Interface/Typelib registration is
+  // required, |iids| should contain the Interfaces and Typelibs to register.
   InstallServiceWorkItem(const base::string16& service_name,
                          const base::string16& display_name,
-                         const base::CommandLine& service_cmd_line);
+                         const base::CommandLine& service_cmd_line,
+                         const base::string16& registry_path,
+                         const std::vector<GUID>& clsids,
+                         const std::vector<GUID>& iids);
 
   ~InstallServiceWorkItem() override;
 
-  static bool DeleteService(const base::string16& service_name);
+  static bool DeleteService(const base::string16& service_name,
+                            const base::string16& registry_path,
+                            const std::vector<GUID>& clsids,
+                            const std::vector<GUID>& iids);
 
  private:
   friend class InstallServiceWorkItemTest;

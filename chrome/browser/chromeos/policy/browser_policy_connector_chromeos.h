@@ -37,6 +37,7 @@ class AttestationFlow;
 
 namespace policy {
 
+class AdbSideloadingAllowanceModePolicyHandler;
 class AffiliatedCloudPolicyInvalidator;
 class AffiliatedInvalidationServiceProvider;
 class AffiliatedRemoteCommandsInvalidator;
@@ -56,7 +57,7 @@ class ServerBackedStateKeysBroker;
 class TPMAutoUpdateModePolicyHandler;
 class DeviceScheduledUpdateChecker;
 class DeviceCloudExternalDataPolicyHandler;
-class SystemProxySettingsPolicyHandler;
+class SystemProxyManager;
 
 // Extends ChromeBrowserPolicyConnector with the setup specific to Chrome OS.
 class BrowserPolicyConnectorChromeOS
@@ -98,6 +99,12 @@ class BrowserPolicyConnectorChromeOS
   // defaults to enterprise enrollment domain. The policy needs to be loaded
   // before the custom display domain can be used.
   std::string GetEnterpriseDisplayDomain() const;
+
+  // Returns the manager of the domain for use in UI if specified, otherwise the
+  // enterprise display domain.
+  // TODO(crbug.com/1081272): refactor localization hints for all strings that
+  // depend on this method
+  std::string GetEnterpriseDomainManager() const;
 
   // Returns the Kerberos realm (aka Windows Domain) if the device is managed by
   // Active Directory.
@@ -171,13 +178,24 @@ class BrowserPolicyConnectorChromeOS
     return tpm_auto_update_mode_policy_handler_.get();
   }
 
-  SystemProxySettingsPolicyHandler* GetSystemProxySettingsPolicyHandler()
-      const {
-    return system_proxy_settings_policy_handler_.get();
+  SystemProxyManager* GetSystemProxyManager() const {
+    return system_proxy_manager_.get();
   }
 
   HostnameHandler* GetHostnameHandler() const {
     return hostname_handler_.get();
+  }
+
+  AdbSideloadingAllowanceModePolicyHandler*
+  GetAdbSideloadingAllowanceModePolicyHandler() const {
+    return adb_sideloading_allowance_mode_policy_handler_.get();
+  }
+
+  // Return a pointer to the device-wide client certificate provisioning
+  // scheduler. The callers do not take ownership of that pointer.
+  chromeos::cert_provisioning::CertProvisioningScheduler*
+  GetDeviceCertProvisioningScheduler() {
+    return device_cert_provisioning_scheduler_.get();
   }
 
   // Returns device's market segment.
@@ -213,6 +231,10 @@ class BrowserPolicyConnectorChromeOS
   void OnDeviceCloudPolicyManagerDisconnected() override;
 
   chromeos::AffiliationIDSet GetDeviceAffiliationIDs() const;
+
+  // BrowserPolicyConnector:
+  // Always returns true as command line flag can be set under dev mode only.
+  bool IsCommandLineSwitchSupported() const override;
 
  protected:
   // ChromeBrowserPolicyConnector:
@@ -266,8 +288,9 @@ class BrowserPolicyConnectorChromeOS
       device_scheduled_update_checker_;
   std::vector<std::unique_ptr<policy::DeviceCloudExternalDataPolicyHandler>>
       device_cloud_external_data_policy_handlers_;
-  std::unique_ptr<SystemProxySettingsPolicyHandler>
-      system_proxy_settings_policy_handler_;
+  std::unique_ptr<SystemProxyManager> system_proxy_manager_;
+  std::unique_ptr<AdbSideloadingAllowanceModePolicyHandler>
+      adb_sideloading_allowance_mode_policy_handler_;
 
   // This policy provider is used on Chrome OS to feed user policy into the
   // global PolicyService instance. This works by installing the cloud policy
@@ -283,6 +306,11 @@ class BrowserPolicyConnectorChromeOS
   // The ConfigurationPolicyProviders created in the constructor are initially
   // added here, and then pushed to the super class in BuildPolicyProviders().
   std::vector<std::unique_ptr<ConfigurationPolicyProvider>> providers_for_init_;
+
+  // Manages provisioning of certificates from
+  // RequiredClientCertificateForDevice device policy.
+  std::unique_ptr<chromeos::cert_provisioning::CertProvisioningScheduler>
+      device_cert_provisioning_scheduler_;
 
   base::WeakPtrFactory<BrowserPolicyConnectorChromeOS> weak_ptr_factory_{this};
 

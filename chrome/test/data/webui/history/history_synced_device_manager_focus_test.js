@@ -3,15 +3,15 @@
 // found in the LICENSE file.
 
 import {ensureLazyLoaded} from 'chrome://history/history.js';
+import {pressAndReleaseKeyOn} from 'chrome://resources/polymer/v3_0/iron-test-helpers/mock-interactions.js';
 import {createSession, createWindow, polymerSelectAll} from 'chrome://test/history/test_util.js';
 import {flushTasks} from 'chrome://test/test_util.m.js';
-import {pressAndReleaseKeyOn, tap} from 'chrome://resources/polymer/v3_0/iron-test-helpers/mock-interactions.js';
 
 suite('<history-synced-device-manager>', function() {
   let element;
 
   setup(function() {
-    PolymerTest.clearBody();
+    document.body.innerHTML = '';
 
     return ensureLazyLoaded().then(() => {
       element = document.createElement('history-synced-device-manager');
@@ -61,7 +61,7 @@ suite('<history-synced-device-manager>', function() {
     pressAndReleaseKeyOn(focused, 38, [], 'ArrowUp');
     focused = cards[0].$['collapse-button'];
     assertEquals(focused, lastFocused);
-    tap(focused);
+    focused.click();
     await flushTasks();
 
     // Pressing down goes to the next card.
@@ -73,7 +73,7 @@ suite('<history-synced-device-manager>', function() {
     pressAndReleaseKeyOn(focused, 38, [], 'ArrowUp');
     focused = cards[0].$['collapse-button'];
     assertEquals(focused, lastFocused);
-    tap(focused);
+    focused.click();
     await flushTasks();
 
     // First card's urls are focusable again.

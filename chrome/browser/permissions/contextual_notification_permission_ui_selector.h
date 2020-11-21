@@ -10,8 +10,6 @@
 #include "chrome/browser/permissions/crowd_deny_safe_browsing_request.h"
 #include "components/permissions/notification_permission_ui_selector.h"
 
-class Profile;
-
 namespace permissions {
 class PermissionRequest;
 }
@@ -20,22 +18,19 @@ namespace url {
 class Origin;
 }
 
-// Determines if the quiet prompt UI should be used to display a notification
-// permission request on a given site. This is the case when:
-//  1) the quiet UI is enabled in prefs for all sites, either directly by the
-//     user in settings, or by the AdaptiveQuietNotificationPermissionUiEnabler.
-//  2) the quiet UI is triggered by crowd deny, either through:
-//     a) CrowdDenyPreloadData, that is, the component updater, or
-//     b) CrowdDenySafeBrowsingRequest, that is, on-demand Safe Browsing pings.
-// If both (1) and (2) are fulfilled, the crowd-deny UI is shown.
+// Determines if crowd deny or abusive blocklists prescribe that the quiet UI
+// should be used to display a notification permission request on a given site.
+// This is the case when the  both of the below sources classify the origin as
+// spammy or abusive:
+//   a) CrowdDenyPreloadData, that is, the component updater, and
+//   b) CrowdDenySafeBrowsingRequest, that is, on-demand Safe Browsing pings.
 //
 // Each instance of this class is long-lived and can support multiple requests,
 // but only one at a time.
 class ContextualNotificationPermissionUiSelector
     : public permissions::NotificationPermissionUiSelector {
  public:
-  // Constructs an instance in the context of the given |profile|.
-  explicit ContextualNotificationPermissionUiSelector(Profile* profile);
+  ContextualNotificationPermissionUiSelector();
   ~ContextualNotificationPermissionUiSelector() override;
 
   // NotificationPermissionUiSelector:
@@ -50,14 +45,11 @@ class ContextualNotificationPermissionUiSelector
   ContextualNotificationPermissionUiSelector& operator=(
       const ContextualNotificationPermissionUiSelector&) = delete;
 
-  void EvaluateCrowdDenyTrigger(url::Origin origin);
+  void EvaluatePerSiteTriggers(const url::Origin& origin);
   void OnSafeBrowsingVerdictReceived(
+      Decision candidate_decision,
       CrowdDenySafeBrowsingRequest::Verdict verdict);
-  void OnCrowdDenyTriggerEvaluated(UiToUse ui_to_use);
-
-  void Notify(UiToUse ui_to_use, base::Optional<QuietUiReason> quiet_ui_reason);
-
-  Profile* profile_;
+  void Notify(const Decision& decision);
 
   base::Optional<CrowdDenySafeBrowsingRequest> safe_browsing_request_;
   DecisionMadeCallback callback_;

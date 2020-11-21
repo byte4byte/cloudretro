@@ -38,8 +38,23 @@ extern NSString* const
 // The text for the primary action. Must be set before the view is loaded.
 @property(nonatomic, strong) NSString* primaryActionString;
 
+// Controls if there is a secondary action in the view. Must be set before the
+// view is loaded.
+@property(nonatomic) BOOL secondaryActionAvailable;
+
+// The text for the secondary action. Must be set before the view is loaded.
+@property(nonatomic, strong) NSString* secondaryActionString;
+
 // The image. Must be set before the view is loaded.
 @property(nonatomic, strong) UIImage* image;
+
+// Sets the custom spacing between the image and the title / subtitle. Must be
+// set before the view is loaded.
+@property(nonatomic, assign) CGFloat customSpacingAfterImage;
+
+// The accessibility label for the image view. If nil, the image won't be
+// accessible.
+@property(nonatomic, strong) NSString* imageAccessibilityLabel;
 
 // Value to determine whether or not the image's size should be scaled.
 @property(nonatomic) BOOL imageHasFixedSize;
@@ -56,11 +71,34 @@ extern NSString* const
 // view is loaded.
 @property(nonatomic) BOOL helpButtonAvailable;
 
+// When set, this value will be set as the accessibility label for the help
+// button.
+@property(nonatomic) NSString* helpButtonAccessibilityLabel;
+
 // The help button item in the top left of the view. Nil if not available.
 @property(nonatomic, readonly) UIBarButtonItem* helpButton;
 
+// Controls if the toolbar dismiss button is available in the view. Default is
+// YES. Must be set before the view is loaded.
+@property(nonatomic) BOOL showDismissBarButton;
+
+// Allows to modify the system item for the dismiss bar button (defaults to
+// UIBarButtonSystemItemDone). Must be set before the view is loaded.
+@property(nonatomic, assign) UIBarButtonSystemItem dismissBarButtonSystemItem;
+
 // The action handler for interactions in this View Controller.
 @property(nonatomic, weak) id<ConfirmationAlertActionHandler> actionHandler;
+
+// Returns an image generated from the content of this view controller.
+@property(nonatomic, readonly) UIImage* content;
+
+// The button for the primary action. Nil if not available.
+@property(nonatomic, readonly) UIButton* primaryActionButton;
+
+// Enables pointer support.
+#if defined(__IPHONE_13_4)
+@property(nonatomic) BOOL pointerInteractionEnabled API_AVAILABLE(ios(13.4));
+#endif  // defined(__IPHONE_13_4)
 
 @end
 

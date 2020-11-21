@@ -68,9 +68,10 @@ class MockRequestPeer : public content::RequestPeer {
   ~MockRequestPeer() override {}
 
   MOCK_METHOD2(OnUploadProgress, void(uint64_t position, uint64_t size));
-  MOCK_METHOD2(OnReceivedRedirect,
+  MOCK_METHOD3(OnReceivedRedirect,
                bool(const net::RedirectInfo& redirect_info,
-                    network::mojom::URLResponseHeadPtr head));
+                    network::mojom::URLResponseHeadPtr head,
+                    std::vector<std::string>*));
   MOCK_METHOD1(OnReceivedResponse,
                void(network::mojom::URLResponseHeadPtr head));
   void OnStartLoadingResponseBody(
@@ -88,10 +89,6 @@ class MockRequestPeer : public content::RequestPeer {
   MOCK_METHOD1(OnTransferSizeUpdated, void(int transfer_size_diff));
   MOCK_METHOD1(OnCompletedRequest,
                void(const network::URLLoaderCompletionStatus& status));
-  scoped_refptr<base::TaskRunner> GetTaskRunner() override {
-    NOTREACHED();
-    return nullptr;
-  }
 
   void RunUntilBodyBecomesReady() {
     base::RunLoop loop;

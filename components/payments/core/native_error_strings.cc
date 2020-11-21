@@ -61,6 +61,9 @@ const char kInstallingMultipleDefaultAppsNotSupported[] =
     "Installing multiple payment handlers from a single payment method "
     "manifest is not supported.";
 
+const char kInvalidInitiatorFrame[] =
+    "Cannot initialize PaymentRequest in an invalid frame.";
+
 const char kInvalidManifestUrl[] =
     "\"$1\" is not a valid payment manifest URL with HTTPS scheme (or HTTP "
     "scheme for localhost).";
@@ -73,9 +76,9 @@ const char kInvalidServiceWorkerUrl[] =
 
 const char kInvalidSslCertificate[] = "SSL certificate is not valid.";
 
-const char kMethodDataRequired[] = "Method data required.";
-
-const char kMethodNameRequired[] = "Method name required.";
+const char kInvalidWebAppIcon[] =
+    "Failed to download or decode a non-empty icon for payment app with \"$1\" "
+    "manifest.";
 
 const char kMultiplePaymentMethodsNotSupportedFormat[] =
     "The payment methods $ are not supported.";
@@ -131,10 +134,14 @@ const char kPaymentHandlerInsecureNavigation[] =
     "The payment handler navigated to a page with insecure context, invalid "
     "certificate state, or malicious content.";
 
+const char kPaymentHandlerActivityDied[] =
+    "The payment handler is closed because the Android activity is destroyed.";
+
+const char kPaymentHandlerFailToLoadMainFrame[] =
+    "The payment handler fails to load the page.";
+
 const char kSinglePaymentMethodNotSupportedFormat[] =
     "The payment method $ is not supported.";
-
-const char kShippingOptionIdRequired[] = "Shipping option identifier required.";
 
 const char kCanMakePaymentEventRejected[] =
     "Payment handler rejected the promise passed into "
@@ -199,6 +206,23 @@ const char kNoContentAndNoLinkHeader[] =
 
 const char kNoContentInPaymentManifest[] =
     "No content found in payment manifest \"$1\".";
+
+const char kUnableToInvokeAndroidPaymentApps[] =
+    "Unable to invoke Android apps.";
+
+const char kUserClosedPaymentApp[] = "User closed the payment app.";
+
+const char kMoreThanOneService[] =
+    "Found more than one IS_READY_TO_PAY service, but at most one service is "
+    "supported.";
+
+const char kCredentialIdsRequired[] =
+    "The \"secure-payment-confirmation\" method requires a non-empty "
+    "\"credentialIds\" array of non-empty arrays.";
+
+const char kTimeoutTooLong[] =
+    "The \"secure-payment-confirmation\" method requires at most 1 hour "
+    "\"timeout\" field.";
 
 }  // namespace errors
 }  // namespace payments

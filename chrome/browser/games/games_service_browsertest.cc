@@ -10,7 +10,7 @@
 #include "base/run_loop.h"
 #include "base/task/post_task.h"
 #include "base/task/thread_pool.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "chrome/browser/games/games_service_factory.h"
@@ -23,6 +23,7 @@
 #include "components/games/core/proto/games_catalog.pb.h"
 #include "components/games/core/proto/highlighted_games.pb.h"
 #include "components/games/core/test/test_utils.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -95,8 +96,7 @@ class GamesServiceBrowserTest : public PlatformBrowserTest {
     bool write_file_success = false;
     base::ThreadPool::PostTask(
         FROM_HERE, {base::MayBlock()}, base::BindLambdaForTesting([&]() {
-          write_file_success = base::WriteFile(file_path, string_data.data(),
-                                               string_data.size()) != -1;
+          write_file_success = base::WriteFile(file_path, string_data);
           run_loop.Quit();
         }));
     run_loop.Run();

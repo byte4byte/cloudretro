@@ -4,18 +4,14 @@
 
 source_set("web_content_area") {
   sources = [
+    "alert_overlay.h",
+    "alert_overlay.mm",
     "app_launcher_overlay.h",
     "app_launcher_overlay.mm",
     "http_auth_overlay.h",
     "http_auth_overlay.mm",
-    "java_script_alert_overlay.h",
-    "java_script_alert_overlay.mm",
-    "java_script_confirmation_overlay.h",
-    "java_script_confirmation_overlay.mm",
-    "java_script_dialog_source.h",
-    "java_script_dialog_source.mm",
-    "java_script_prompt_overlay.h",
-    "java_script_prompt_overlay.mm",
+    "java_script_dialog_overlay.h",
+    "java_script_dialog_overlay.mm",
   ]
 
   configs += [ "//build/config/compiler:enable_arc" ]
@@ -25,7 +21,8 @@ source_set("web_content_area") {
     "//components/strings:components_strings_grit",
     "//ios/chrome/app/strings:ios_strings",
     "//ios/chrome/browser/overlays",
-    "//ios/chrome/browser/overlays/public/common/alerts",
+    "//ios/chrome/browser/ui/dialogs",
+    "//ios/chrome/browser/ui/dialogs:constants",
     "//ios/chrome/browser/ui/elements",
     "//ios/web/public",
     "//ui/base",
@@ -38,6 +35,7 @@ source_set("unit_tests") {
   sources = [
     "app_launcher_overlay_unittest.mm",
     "http_auth_overlay_unittest.mm",
+    "java_script_dialog_overlay_unittest.mm",
   ]
 
   configs += [ "//build/config/compiler:enable_arc" ]
@@ -48,10 +46,10 @@ source_set("unit_tests") {
     "//components/strings:components_strings_grit",
     "//ios/chrome/app/strings:ios_strings_grit",
     "//ios/chrome/browser/overlays",
-    "//ios/chrome/browser/overlays/public/common/alerts",
     "//ios/chrome/browser/ui/dialogs",
+    "//ios/chrome/browser/ui/dialogs:constants",
     "//ios/chrome/browser/ui/elements",
-    "//ios/chrome/browser/ui/overlays/common/alerts/test",
+    "//ios/web/public/test/fakes",
     "//testing/gtest",
     "//ui/base",
     "//url",

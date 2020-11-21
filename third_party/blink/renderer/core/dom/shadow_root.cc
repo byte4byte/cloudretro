@@ -27,6 +27,8 @@
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
 
 #include "third_party/blink/public/platform/platform.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_get_inner_html_options.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_set_inner_html_options.h"
 #include "third_party/blink/renderer/core/css/resolver/style_resolver.h"
 #include "third_party/blink/renderer/core/css/style_change_reason.h"
 #include "third_party/blink/renderer/core/css/style_engine.h"
@@ -46,6 +48,7 @@
 #include "third_party/blink/renderer/core/layout/layout_object.h"
 #include "third_party/blink/renderer/core/trustedtypes/trusted_types_util.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
+#include "third_party/blink/renderer/platform/wtf/size_assertions.h"
 
 namespace blink {
 
@@ -59,8 +62,7 @@ struct SameSizeAsShadowRoot : public DocumentFragment, public TreeScope {
   unsigned flags[1];
 };
 
-static_assert(sizeof(ShadowRoot) == sizeof(SameSizeAsShadowRoot),
-              "ShadowRoot should stay small");
+ASSERT_SIZE(ShadowRoot, SameSizeAsShadowRoot);
 
 ShadowRoot::ShadowRoot(Document& document, ShadowRootType type)
     : DocumentFragment(nullptr, kCreateShadowRoot),
@@ -116,29 +118,45 @@ String ShadowRoot::innerHTML() const {
   return CreateMarkup(this, kChildrenOnly);
 }
 
-void ShadowRoot::setInnerHTML(const String& markup,
-                              ExceptionState& exception_state) {
-  if (DocumentFragment* fragment = CreateFragmentForInnerOuterHTML(
-          markup, &host(), kAllowScriptingContent, "innerHTML",
-          exception_state))
-    ReplaceChildrenWithFragment(this, fragment, exception_state);
+String ShadowRoot::getInnerHTML(const GetInnerHTMLOptions* options) const {
+  DCHECK(RuntimeEnabledFeatures::DeclarativeShadowDOMEnabled(
+      GetExecutionContext()));
+  ClosedRootsSet include_closed_roots;
+  if (options->hasClosedRoots()) {
+    for (auto& shadow_root : options->closedRoots()) {
+      include_closed_roots.insert(shadow_root);
+    }
+  }
+  return CreateMarkup(
+      this, kChildrenOnly, kDoNotResolveURLs,
+      options->includeShadowRoots() ? kIncludeShadowRoots : kNoShadowRoots,
+      include_closed_roots);
 }
 
-void ShadowRoot::RecalcStyle(const StyleRecalcChange change) {
-  // ShadowRoot doesn't support custom callbacks.
-  DCHECK(!HasCustomStyleCallbacks());
-  DCHECK(!RuntimeEnabledFeatures::FlatTreeStyleRecalcEnabled());
+void ShadowRoot::SetInnerHTMLInternal(const String& html,
+                                      const SetInnerHTMLOptions* options,
+                                      ExceptionState& exception_state) {
+  bool include_shadow_roots =
+      options->hasIncludeShadowRoots() && options->includeShadowRoots();
+  if (DocumentFragment* fragment = CreateFragmentForInnerOuterHTML(
+          html, &host(), kAllowScriptingContent, "innerHTML",
+          include_shadow_roots, exception_state)) {
+    ReplaceChildrenWithFragment(this, fragment, exception_state);
+  }
+}
 
-  StyleRecalcChange child_change = change;
-  if (GetStyleChangeType() == kSubtreeStyleChange)
-    child_change = child_change.ForceRecalcDescendants();
+void ShadowRoot::setInnerHTML(const String& html,
+                              ExceptionState& exception_state) {
+  const SetInnerHTMLOptions options;
+  SetInnerHTMLInternal(html, &options, exception_state);
+}
 
-  // There's no style to update so just calling RecalcStyle means we're updated.
-  ClearNeedsStyleRecalc();
-
-  if (child_change.TraverseChildren(*this))
-    RecalcDescendantStyles(child_change);
-  ClearChildNeedsStyleRecalc();
+void ShadowRoot::setInnerHTMLWithOptions(const String& html,
+                                         const SetInnerHTMLOptions* options,
+                                         ExceptionState& exception_state) {
+  DCHECK(RuntimeEnabledFeatures::DeclarativeShadowDOMEnabled(
+      GetExecutionContext()));
+  SetInnerHTMLInternal(html, options, exception_state);
 }
 
 void ShadowRoot::RebuildLayoutTree(WhitespaceAttacher& whitespace_attacher) {
@@ -237,7 +255,7 @@ void ShadowRoot::SetNeedsDistributionRecalc() {
   host().MarkAncestorsWithChildNeedsDistributionRecalc();
 }
 
-void ShadowRoot::Trace(Visitor* visitor) {
+void ShadowRoot::Trace(Visitor* visitor) const {
   visitor->Trace(style_sheet_list_);
   visitor->Trace(slot_assignment_);
   visitor->Trace(shadow_root_v0_);

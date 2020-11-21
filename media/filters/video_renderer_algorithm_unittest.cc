@@ -9,7 +9,7 @@
 #include <tuple>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/memory/ref_counted.h"
 #include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
@@ -73,8 +73,8 @@ class VideoRendererAlgorithmTest : public testing::Test {
  public:
   VideoRendererAlgorithmTest()
       : tick_clock_(new base::SimpleTestTickClock()),
-        algorithm_(base::Bind(&WallClockTimeSource::GetWallClockTimes,
-                              base::Unretained(&time_source_)),
+        algorithm_(base::BindRepeating(&WallClockTimeSource::GetWallClockTimes,
+                                       base::Unretained(&time_source_)),
                    &media_log_) {
     // Always start the TickClock at a non-zero value since null values have
     // special connotations.
@@ -1212,8 +1212,7 @@ TEST_F(VideoRendererAlgorithmTest, RemoveExpiredFramesWithoutRendering) {
   // as effective since we know the duration of it. It is not removed since we
   // only have one frame in the queue though.
   auto frame = CreateFrame(tg.interval(0));
-  frame->metadata()->SetTimeDelta(VideoFrameMetadata::FRAME_DURATION,
-                                  tg.interval(1));
+  frame->metadata()->frame_duration = tg.interval(1);
   algorithm_.EnqueueFrame(frame);
   ASSERT_EQ(0u, algorithm_.RemoveExpiredFrames(tg.current() + tg.interval(3)));
   EXPECT_EQ(0u, EffectiveFramesQueued());
@@ -1246,12 +1245,12 @@ TEST_F(VideoRendererAlgorithmTest, RemoveExpiredFrames) {
   tg.step(2);
   // Two frames are removed, one displayed frame (which should not be counted as
   // dropped) and one undisplayed one.
-  ASSERT_EQ(1u, algorithm_.RemoveExpiredFrames(tg.current()));
+  ASSERT_EQ(2u, algorithm_.RemoveExpiredFrames(tg.current()));
   // Since we just removed the last rendered frame, OnLastFrameDropped() should
   // be ignored.
   algorithm_.OnLastFrameDropped();
   frame = RenderAndStep(&tg, &frames_dropped);
-  EXPECT_EQ(1u, frames_dropped);
+  EXPECT_EQ(0u, frames_dropped);
   EXPECT_EQ(2u, frames_queued());
   EXPECT_EQ(1u, EffectiveFramesQueued());
   ASSERT_TRUE(frame);
@@ -1585,8 +1584,7 @@ TEST_F(VideoRendererAlgorithmTest, InfiniteDurationMetadata) {
   TickGenerator tg(tick_clock_->NowTicks(), 50);
 
   auto frame = CreateFrame(kInfiniteDuration);
-  frame->metadata()->SetTimeDelta(VideoFrameMetadata::FRAME_DURATION,
-                                  tg.interval(1));
+  frame->metadata()->frame_duration = tg.interval(1);
   algorithm_.EnqueueFrame(frame);
 
   // This should not crash or fail.
@@ -1599,8 +1597,7 @@ TEST_F(VideoRendererAlgorithmTest, UsesFrameDuration) {
   TickGenerator tg(tick_clock_->NowTicks(), 50);
 
   auto frame = CreateFrame(tg.interval(0));
-  frame->metadata()->SetTimeDelta(VideoFrameMetadata::FRAME_DURATION,
-                                  tg.interval(1));
+  frame->metadata()->frame_duration = tg.interval(1);
   algorithm_.EnqueueFrame(frame);
 
   // This should not crash or fail.
@@ -1612,8 +1609,7 @@ TEST_F(VideoRendererAlgorithmTest, UsesFrameDuration) {
   constexpr base::TimeDelta kLongDuration = base::TimeDelta::FromSeconds(3);
   for (int i = 1; i < 4; ++i) {
     frame = CreateFrame(tg.interval(i));
-    frame->metadata()->SetTimeDelta(VideoFrameMetadata::FRAME_DURATION,
-                                    i == 3 ? kLongDuration : tg.interval(1));
+    frame->metadata()->frame_duration = i == 3 ? kLongDuration : tg.interval(1);
     algorithm_.EnqueueFrame(frame);
   }
 
@@ -1635,8 +1631,7 @@ TEST_F(VideoRendererAlgorithmTest, WallClockDurationMetadataSet) {
 
   for (int i = 0; i < frame_count; i++) {
     auto frame = CreateFrame(tg.interval(i));
-    frame->metadata()->SetTimeDelta(VideoFrameMetadata::FRAME_DURATION,
-                                    tg.interval(1));
+    frame->metadata()->frame_duration = tg.interval(1);
     algorithm_.EnqueueFrame(frame);
   }
 
@@ -1645,12 +1640,8 @@ TEST_F(VideoRendererAlgorithmTest, WallClockDurationMetadataSet) {
     auto frame = RenderAndStep(&tg, &frames_dropped);
 
     SCOPED_TRACE(base::StringPrintf("Frame #%d", i));
-    base::TimeDelta wallclock_duration;
-    EXPECT_TRUE(frame->metadata()->GetTimeDelta(
-        media::VideoFrameMetadata::WALLCLOCK_FRAME_DURATION,
-        &wallclock_duration));
 
-    EXPECT_EQ(wallclock_duration, intended_duration);
+    EXPECT_EQ(*frame->metadata()->wallclock_frame_duration, intended_duration);
     EXPECT_EQ(algorithm_.average_frame_duration(), intended_duration);
   }
 }

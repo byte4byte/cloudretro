@@ -3,10 +3,10 @@
 // found in the LICENSE file.
 
 // clang-format off
+import {webUIListenerCallback} from 'chrome://resources/js/cr.m.js';
+import {dashToCamelCase, flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 import {ImportDataBrowserProxyImpl, ImportDataStatus} from 'chrome://settings/lazy_load.js';
 import {TestBrowserProxy} from 'chrome://test/test_browser_proxy.m.js';
-import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
-import {webUIListenerCallback} from 'chrome://resources/js/cr.m.js';
 // clang-format on
 
 /** @implements {ImportDataBrowserProxy} */
@@ -59,7 +59,7 @@ suite('ImportDataDialog', function() {
     {
       autofillFormData: true,
       favorites: true,
-      history: true,
+      history: false,  // Emulate unsupported import option
       index: 1,
       name: 'Mozilla Firefox',
       passwords: true,
@@ -86,8 +86,10 @@ suite('ImportDataDialog', function() {
   }
 
   const prefs = {};
-  ['import_dialog_history', 'import_dialog_bookmarks',
-   'import_dialog_saved_passwords', 'import_dialog_search_engine',
+  ['import_dialog_history',
+   'import_dialog_bookmarks',
+   'import_dialog_saved_passwords',
+   'import_dialog_search_engine',
    'import_dialog_autofill_form_data',
   ].forEach(function(name) {
     prefs[name] = createBooleanPref(name);
@@ -110,6 +112,16 @@ suite('ImportDataDialog', function() {
       flush();
     });
   });
+
+  function ensureSettingsCheckboxCheckedStatus(prefName, checked) {
+    const settingsCheckbox =
+        dialog.$[dashToCamelCase(prefName.replace(/_/g, '-'))];
+
+    if (settingsCheckbox.checked !== checked) {
+      // Use click operation to produce a 'change' event.
+      settingsCheckbox.$.checkbox.click();
+    }
+  }
 
   function simulateBrowserProfileChange(index) {
     dialog.$.browserSelect.selectedIndex = index;
@@ -142,7 +154,7 @@ suite('ImportDataDialog', function() {
 
     // Flip all prefs to false.
     Object.keys(prefs).forEach(function(prefName) {
-      dialog.set('prefs.' + prefName + '.value', false);
+      ensureSettingsCheckboxCheckedStatus(prefName, false);
     });
     assertTrue(dialog.$.import.disabled);
 
@@ -151,10 +163,10 @@ suite('ImportDataDialog', function() {
     assertTrue(dialog.$.import.disabled);
 
     // Ensure everything except |import_dialog_bookmarks| is ignored.
-    dialog.set('prefs.import_dialog_history.value', true);
+    ensureSettingsCheckboxCheckedStatus('import_dialog_history', true);
     assertTrue(dialog.$.import.disabled);
 
-    dialog.set('prefs.import_dialog_bookmarks.value', true);
+    ensureSettingsCheckboxCheckedStatus('import_dialog_bookmarks', true);
     assertFalse(dialog.$.import.disabled);
   });
 
@@ -197,8 +209,8 @@ suite('ImportDataDialog', function() {
   });
 
   test('ImportFromBrowserProfile', function() {
-    dialog.set('prefs.import_dialog_bookmarks.value', false);
-    dialog.set('prefs.import_dialog_search_engine.value', true);
+    ensureSettingsCheckboxCheckedStatus('import_dialog_bookmarks', false);
+    ensureSettingsCheckboxCheckedStatus('import_dialog_search_engine', true);
 
     const expectedIndex = 0;
     simulateBrowserProfileChange(expectedIndex);
@@ -218,6 +230,27 @@ suite('ImportDataDialog', function() {
 
       assertFalse(dialog.$.successIcon.parentElement.hidden);
       assertTrue(dialog.$$('settings-toggle-button').parentElement.hidden);
+    });
+  });
+
+  test('ImportFromBrowserProfileWithUnsupportedOption', function() {
+    // Flip all prefs to true.
+    Object.keys(prefs).forEach(function(prefName) {
+      ensureSettingsCheckboxCheckedStatus(prefName, true);
+    });
+
+    const expectedIndex = 1;
+    simulateBrowserProfileChange(expectedIndex);
+    dialog.$.import.click();
+
+    const importCalled = browserProxy.whenCalled('importData');
+    return importCalled.then(([actualIndex, types]) => {
+      assertEquals(expectedIndex, actualIndex);
+
+      Object.keys(prefs).forEach(function(prefName) {
+        // import_dialog_history is unsupported and hidden
+        assertEquals(prefName !== 'import_dialog_history', types[prefName]);
+      });
     });
   });
 

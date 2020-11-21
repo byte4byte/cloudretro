@@ -4,7 +4,7 @@
 
 #include "ios/web_view/internal/passwords/web_view_password_feature_manager.h"
 
-#include "base/logging.h"
+#include "base/notreached.h"
 #include "components/password_manager/core/browser/password_manager_features_util.h"
 #include "components/prefs/pref_service.h"
 #include "components/sync/driver/sync_service.h"
@@ -20,7 +20,7 @@ WebViewPasswordFeatureManager::WebViewPasswordFeatureManager(
     : pref_service_(pref_service), sync_service_(sync_service) {}
 
 bool WebViewPasswordFeatureManager::IsGenerationEnabled() const {
-  return false;
+  return true;
 }
 
 bool WebViewPasswordFeatureManager::IsOptedInForAccountStorage() const {
@@ -35,27 +35,49 @@ bool WebViewPasswordFeatureManager::ShouldShowAccountStorageOptIn() const {
   return false;
 }
 
-bool WebViewPasswordFeatureManager::ShouldShowAccountStorageReSignin() const {
+bool WebViewPasswordFeatureManager::ShouldShowAccountStorageReSignin(
+    const GURL& current_page_url) const {
   return false;
 }
 
-void WebViewPasswordFeatureManager::SetAccountStorageOptIn(bool opt_in) {
+void WebViewPasswordFeatureManager::OptInToAccountStorage() {
   NOTREACHED();
 }
 
-bool WebViewPasswordFeatureManager::ShouldShowPasswordStorePicker() const {
+void WebViewPasswordFeatureManager::OptOutOfAccountStorageAndClearSettings() {
+  NOTREACHED();
+}
+
+bool WebViewPasswordFeatureManager::ShouldShowAccountStorageBubbleUi() const {
   return false;
 }
 
-autofill::PasswordForm::Store
+password_manager::PasswordForm::Store
 WebViewPasswordFeatureManager::GetDefaultPasswordStore() const {
   // ios/web_view should never write to the profile password store.
-  return autofill::PasswordForm::Store::kAccountStore;
+  return password_manager::PasswordForm::Store::kAccountStore;
 }
 
 void WebViewPasswordFeatureManager::SetDefaultPasswordStore(
-    const autofill::PasswordForm::Store& store) {
+    const password_manager::PasswordForm::Store& store) {
   NOTREACHED();
+}
+
+password_manager::metrics_util::PasswordAccountStorageUsageLevel
+WebViewPasswordFeatureManager::ComputePasswordAccountStorageUsageLevel() const {
+  // ios/web_view doesn't support either the profile password store or sync, so
+  // the account-scoped storage is the only option.
+  return password_manager::metrics_util::PasswordAccountStorageUsageLevel::
+      kUsingAccountStorage;
+}
+
+void WebViewPasswordFeatureManager::RecordMoveOfferedToNonOptedInUser() {
+  NOTREACHED();
+}
+
+int WebViewPasswordFeatureManager::GetMoveOfferedToNonOptedInUserCount() const {
+  NOTREACHED();
+  return 0;
 }
 
 }  // namespace ios_web_view

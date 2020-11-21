@@ -14,7 +14,7 @@
 #include "build/build_config.h"
 #include "chrome/browser/ui/exclusive_access/exclusive_access_bubble_type.h"
 #include "chrome/browser/ui/exclusive_access/exclusive_access_manager.h"
-#include "chrome/browser/ui/exclusive_access/fullscreen_controller_test.h"
+#include "chrome/browser/ui/exclusive_access/exclusive_access_test.h"
 #include "chrome/browser/ui/views/exclusive_access_bubble_views.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/fullscreen_control/fullscreen_control_host.h"
@@ -24,6 +24,7 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_features.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/mojom/frame/fullscreen.mojom.h"
@@ -33,6 +34,7 @@
 #include "ui/events/keycodes/dom/dom_code.h"
 #include "ui/gfx/animation/animation_test_api.h"
 #include "ui/views/controls/button/button.h"
+#include "ui/views/test/button_test_api.h"
 #include "ui/views/view.h"
 #include "url/gurl.h"
 
@@ -90,7 +92,7 @@ class FullscreenControlViewTest : public InProcessBrowserTest {
   }
 
   views::Button* GetFullscreenExitButton() {
-    return GetFullscreenControlView()->exit_fullscreen_button();
+    return GetFullscreenControlView()->exit_fullscreen_button_for_testing();
   }
 
   ExclusiveAccessManager* GetExclusiveAccessManager() {
@@ -115,11 +117,9 @@ class FullscreenControlViewTest : public InProcessBrowserTest {
 
   void EnterActiveTabFullscreen() {
     FullscreenNotificationObserver fullscreen_observer(browser());
-    content::WebContentsDelegate* delegate =
-        static_cast<content::WebContentsDelegate*>(browser());
-    delegate->EnterFullscreenModeForTab(GetActiveWebContents(),
-                                        GURL("about:blank"),
-                                        blink::mojom::FullscreenOptions());
+    auto* delegate = static_cast<content::WebContentsDelegate*>(browser());
+    delegate->EnterFullscreenModeForTab(GetActiveWebContents()->GetMainFrame(),
+                                        {});
     fullscreen_observer.Wait();
     ASSERT_TRUE(delegate->IsFullscreenForTabOrPending(GetActiveWebContents()));
   }
@@ -185,7 +185,7 @@ IN_PROC_BROWSER_TEST_F(FullscreenControlViewTest,
 // These four tests which cover the mouse/touch fullscreen UI are covering
 // behavior that doesn't exist on Mac - Mac has its own native fullscreen exit
 // UI. See IsExitUiEnabled() in FullscreenControlHost.
-#if !defined(OS_MACOSX)
+#if !defined(OS_MAC)
 
 IN_PROC_BROWSER_TEST_F(FullscreenControlViewTest, MouseExitFullscreen) {
   EnterActiveTabFullscreenAndFinishPromptAnimation();
@@ -208,8 +208,8 @@ IN_PROC_BROWSER_TEST_F(FullscreenControlViewTest, MouseExitFullscreen) {
   ui::MouseEvent mouse_click(ui::ET_MOUSE_PRESSED, gfx::Point(), gfx::Point(),
                              base::TimeTicks(), ui::EF_LEFT_MOUSE_BUTTON,
                              ui::EF_LEFT_MOUSE_BUTTON);
-  GetFullscreenControlView()->ButtonPressed(GetFullscreenExitButton(),
-                                            mouse_click);
+  views::test::ButtonTestApi(GetFullscreenExitButton())
+      .NotifyClick(mouse_click);
 
   ASSERT_FALSE(GetFullscreenControlHost());
   ASSERT_FALSE(browser_view->IsFullscreen());
@@ -326,12 +326,12 @@ IN_PROC_BROWSER_TEST_F(FullscreenControlViewTest, TouchPopupInteraction) {
   // Simulate a short tap that doesn't trigger the popup.
   ui::TouchEvent touch_event(
       ui::ET_TOUCH_PRESSED, gfx::Point(1, 1), ui::EventTimeForNow(),
-      ui::PointerDetails(ui::EventPointerType::POINTER_TYPE_TOUCH, 0));
+      ui::PointerDetails(ui::EventPointerType::kTouch, 0));
   host->OnTouchEvent(touch_event);
 
   touch_event = ui::TouchEvent(
       ui::ET_TOUCH_RELEASED, gfx::Point(1, 1), ui::EventTimeForNow(),
-      ui::PointerDetails(ui::EventPointerType::POINTER_TYPE_TOUCH, 0));
+      ui::PointerDetails(ui::EventPointerType::kTouch, 0));
   host->OnTouchEvent(touch_event);
 
   ASSERT_FALSE(host->IsVisible());
@@ -339,7 +339,7 @@ IN_PROC_BROWSER_TEST_F(FullscreenControlViewTest, TouchPopupInteraction) {
   // Simulate a press-and-hold.
   touch_event = ui::TouchEvent(
       ui::ET_TOUCH_PRESSED, gfx::Point(1, 1), ui::EventTimeForNow(),
-      ui::PointerDetails(ui::EventPointerType::POINTER_TYPE_TOUCH, 0));
+      ui::PointerDetails(ui::EventPointerType::kTouch, 0));
   host->OnTouchEvent(touch_event);
 
   ui::GestureEvent gesture(1, 1, 0, ui::EventTimeForNow(),
@@ -350,14 +350,14 @@ IN_PROC_BROWSER_TEST_F(FullscreenControlViewTest, TouchPopupInteraction) {
   RunLoopUntilVisibilityChanges();
   touch_event = ui::TouchEvent(
       ui::ET_TOUCH_RELEASED, gfx::Point(1, 1), ui::EventTimeForNow(),
-      ui::PointerDetails(ui::EventPointerType::POINTER_TYPE_TOUCH, 0));
+      ui::PointerDetails(ui::EventPointerType::kTouch, 0));
   host->OnTouchEvent(touch_event);
   ASSERT_TRUE(host->IsVisible());
 
   // Simulate pressing outside the popup, which should hide the popup.
   touch_event = ui::TouchEvent(
       ui::ET_TOUCH_PRESSED, gfx::Point(1, 1), ui::EventTimeForNow(),
-      ui::PointerDetails(ui::EventPointerType::POINTER_TYPE_TOUCH, 0));
+      ui::PointerDetails(ui::EventPointerType::kTouch, 0));
   host->OnTouchEvent(touch_event);
   RunLoopUntilVisibilityChanges();
   ASSERT_FALSE(host->IsVisible());
@@ -365,7 +365,7 @@ IN_PROC_BROWSER_TEST_F(FullscreenControlViewTest, TouchPopupInteraction) {
   // Simulate a press-and-hold again.
   touch_event = ui::TouchEvent(
       ui::ET_TOUCH_PRESSED, gfx::Point(1, 1), ui::EventTimeForNow(),
-      ui::PointerDetails(ui::EventPointerType::POINTER_TYPE_TOUCH, 0));
+      ui::PointerDetails(ui::EventPointerType::kTouch, 0));
   host->OnTouchEvent(touch_event);
 
   gesture =
@@ -377,7 +377,7 @@ IN_PROC_BROWSER_TEST_F(FullscreenControlViewTest, TouchPopupInteraction) {
 
   touch_event = ui::TouchEvent(
       ui::ET_TOUCH_RELEASED, gfx::Point(1, 1), ui::EventTimeForNow(),
-      ui::PointerDetails(ui::EventPointerType::POINTER_TYPE_TOUCH, 0));
+      ui::PointerDetails(ui::EventPointerType::kTouch, 0));
   host->OnTouchEvent(touch_event);
   ASSERT_TRUE(host->IsVisible());
 
@@ -385,9 +385,9 @@ IN_PROC_BROWSER_TEST_F(FullscreenControlViewTest, TouchPopupInteraction) {
   // browser to exit fullscreen and destroy the exit control and its host.
   touch_event = ui::TouchEvent(
       ui::ET_TOUCH_PRESSED, gfx::Point(1, 1), ui::EventTimeForNow(),
-      ui::PointerDetails(ui::EventPointerType::POINTER_TYPE_TOUCH, 0));
-  GetFullscreenControlView()->ButtonPressed(GetFullscreenExitButton(),
-                                            touch_event);
+      ui::PointerDetails(ui::EventPointerType::kTouch, 0));
+  views::test::ButtonTestApi(GetFullscreenExitButton())
+      .NotifyClick(touch_event);
 
   ASSERT_FALSE(GetFullscreenControlHost());
   ASSERT_FALSE(browser_view->IsFullscreen());
@@ -413,7 +413,7 @@ IN_PROC_BROWSER_TEST_F(FullscreenControlViewTest,
   // Simulate a press-and-hold.
   ui::TouchEvent touch_event(
       ui::ET_TOUCH_PRESSED, gfx::Point(1, 1), ui::EventTimeForNow(),
-      ui::PointerDetails(ui::EventPointerType::POINTER_TYPE_TOUCH, 0));
+      ui::PointerDetails(ui::EventPointerType::kTouch, 0));
   host->OnTouchEvent(touch_event);
   ui::GestureEvent gesture(1, 1, 0, ui::EventTimeForNow(),
                            ui::GestureEventDetails(ui::ET_GESTURE_LONG_PRESS));
@@ -429,14 +429,14 @@ IN_PROC_BROWSER_TEST_F(FullscreenControlViewTest,
   // Release the touch, which should have no effect.
   touch_event = ui::TouchEvent(
       ui::ET_TOUCH_RELEASED, gfx::Point(1, 1), ui::EventTimeForNow(),
-      ui::PointerDetails(ui::EventPointerType::POINTER_TYPE_TOUCH, 0));
+      ui::PointerDetails(ui::EventPointerType::kTouch, 0));
   host->OnTouchEvent(touch_event);
   ASSERT_FALSE(host->IsVisible());
 
   // Simulate a press-and-hold to trigger the UI.
   touch_event = ui::TouchEvent(
       ui::ET_TOUCH_PRESSED, gfx::Point(1, 1), ui::EventTimeForNow(),
-      ui::PointerDetails(ui::EventPointerType::POINTER_TYPE_TOUCH, 0));
+      ui::PointerDetails(ui::EventPointerType::kTouch, 0));
   host->OnTouchEvent(touch_event);
   gesture =
       ui::GestureEvent(1, 1, 0, ui::EventTimeForNow(),
@@ -462,7 +462,7 @@ IN_PROC_BROWSER_TEST_F(FullscreenControlViewTest,
   // Press outside the popup, which should hide the popup.
   touch_event = ui::TouchEvent(
       ui::ET_TOUCH_PRESSED, gfx::Point(1, 1), ui::EventTimeForNow(),
-      ui::PointerDetails(ui::EventPointerType::POINTER_TYPE_TOUCH, 0));
+      ui::PointerDetails(ui::EventPointerType::kTouch, 0));
   host->OnTouchEvent(touch_event);
   RunLoopUntilVisibilityChanges();
   ASSERT_FALSE(host->IsVisible());

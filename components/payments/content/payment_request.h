@@ -11,12 +11,14 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "components/payments/content/developer_console_logger.h"
+#include "components/payments/content/initialization_task.h"
 #include "components/payments/content/payment_handler_host.h"
 #include "components/payments/content/payment_request_display_manager.h"
 #include "components/payments/content/payment_request_spec.h"
 #include "components/payments/content/payment_request_state.h"
 #include "components/payments/content/service_worker_payment_app.h"
 #include "components/payments/core/journey_logger.h"
+#include "content/public/browser/global_routing_id.h"
 #include "mojo/public/cpp/bindings/receiver.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "third_party/blink/public/mojom/payments/payment_request.mojom.h"
@@ -34,15 +36,16 @@ class ContentPaymentRequestDelegate;
 class PaymentRequestWebContentsManager;
 
 // This class manages the interaction between the renderer (through the
-// PaymentRequestClient and Mojo stub implementation) and the UI (through the
-// PaymentRequestDelegate). The API user (merchant) specification (supported
-// payment methods, required information, order details) is stored in
+// PaymentRequestClient and Mojo stub implementation) and the desktop Payment UI
+// (through the PaymentRequestDelegate). The API user (merchant) specification
+// (supported payment methods, required information, order details) is stored in
 // PaymentRequestSpec, and the current user selection state (and related data)
-// is stored in PaymentRequestSpec.
+// is stored in PaymentRequestState.
 class PaymentRequest : public mojom::PaymentRequest,
                        public PaymentHandlerHost::Delegate,
                        public PaymentRequestSpec::Observer,
-                       public PaymentRequestState::Delegate {
+                       public PaymentRequestState::Delegate,
+                       public InitializationTask::Observer {
  public:
   class ObserverForTest {
    public:
@@ -50,7 +53,8 @@ class PaymentRequest : public mojom::PaymentRequest,
     virtual void OnCanMakePaymentReturned() = 0;
     virtual void OnHasEnrolledInstrumentCalled() = 0;
     virtual void OnHasEnrolledInstrumentReturned() = 0;
-    virtual void OnShowAppsReady() {}
+    virtual void OnAppListReady(base::WeakPtr<PaymentRequest> payment_request) {
+    }
     virtual void OnNotSupportedError() = 0;
     virtual void OnConnectionTerminated() = 0;
     virtual void OnAbortCalled() = 0;
@@ -61,7 +65,6 @@ class PaymentRequest : public mojom::PaymentRequest,
   };
 
   PaymentRequest(content::RenderFrameHost* render_frame_host,
-                 content::WebContents* web_contents,
                  std::unique_ptr<ContentPaymentRequestDelegate> delegate,
                  PaymentRequestWebContentsManager* manager,
                  PaymentRequestDisplayManager* display_manager,
@@ -81,7 +84,7 @@ class PaymentRequest : public mojom::PaymentRequest,
   void Abort() override;
   void Complete(mojom::PaymentComplete result) override;
   void CanMakePayment() override;
-  void HasEnrolledInstrument(bool per_method_quota) override;
+  void HasEnrolledInstrument() override;
 
   // PaymentHandlerHost::Delegate
   bool ChangePaymentMethod(const std::string& method_name,
@@ -100,9 +103,6 @@ class PaymentRequest : public mojom::PaymentRequest,
   void OnShippingAddressSelected(mojom::PaymentAddressPtr address) override;
   void OnPayerInfoSelected(mojom::PayerDetailPtr payer_info) override;
 
-  void SetInvokedServiceWorkerIdentity(const url::Origin& origin,
-                                       int64_t registration_id);
-
   // Called when the user explicitly cancelled the flow. Will send a message
   // to the renderer which will indirectly destroy this object (through
   // OnConnectionTerminated).
@@ -111,6 +111,12 @@ class PaymentRequest : public mojom::PaymentRequest,
   // Called when the main frame attached to this PaymentRequest is navigating to
   // another document, but before the PaymentRequest is destroyed.
   void DidStartMainFrameNavigationToDifferentDocument(bool is_user_initiated);
+
+  // Called when the frame attached to this PaymentRequest is about to be
+  // destroyed. This is used to clean up before the RenderFrameHost is actually
+  // destroyed because some objects held by the PaymentRequest (e.g.
+  // InternalAuthenticator) must be out-lived by the RenderFrameHost.
+  void RenderFrameDeleted(content::RenderFrameHost* render_frame_host);
 
   // As a result of a browser-side error or renderer-initiated mojo channel
   // closure (e.g. there was an error on the renderer side, or payment was
@@ -124,23 +130,34 @@ class PaymentRequest : public mojom::PaymentRequest,
   // Hide this Payment Request if it's already showing.
   void HideIfNecessary();
 
-  bool IsIncognito() const;
+  bool IsOffTheRecord() const;
 
   // Called when the payment handler requests to open a payment handler window.
   void OnPaymentHandlerOpenWindowCalled();
 
-  content::WebContents* web_contents() { return web_contents_; }
+  content::WebContents* web_contents();
+
+  const content::GlobalFrameRoutingId& initiator_frame_routing_id() const {
+    return initiator_frame_routing_id_;
+  }
 
   bool skipped_payment_request_ui() { return skipped_payment_request_ui_; }
   bool is_show_user_gesture() const { return is_show_user_gesture_; }
 
-  PaymentRequestSpec* spec() { return spec_.get(); }
-  PaymentRequestState* state() { return state_.get(); }
+  base::WeakPtr<PaymentRequestSpec> spec() { return spec_->AsWeakPtr(); }
+  base::WeakPtr<PaymentRequestState> state() { return state_->AsWeakPtr(); }
 
-  PaymentRequestSpec* spec() const { return spec_.get(); }
-  PaymentRequestState* state() const { return state_.get(); }
+  base::WeakPtr<PaymentRequestSpec> spec() const { return spec_->AsWeakPtr(); }
+  base::WeakPtr<PaymentRequestState> state() const {
+    return state_->AsWeakPtr();
+  }
+
+  base::WeakPtr<PaymentRequest> GetWeakPtr();
 
  private:
+  // InitializationTask::Observer.
+  void OnInitialized(InitializationTask* initialization_task) override;
+
   // Returns true after init() has been called and the mojo connection has been
   // established. If the mojo connection gets later disconnected, this will
   // returns false.
@@ -170,8 +187,7 @@ class PaymentRequest : public mojom::PaymentRequest,
 
   // The callback for PaymentRequestState::HasEnrolledInstrument. Checks for
   // query quota and may send QUERY_QUOTA_EXCEEDED.
-  void HasEnrolledInstrumentCallback(bool per_method_quota,
-                                     bool has_enrolled_instrument);
+  void HasEnrolledInstrumentCallback(bool has_enrolled_instrument);
 
   // The callback for PaymentRequestState::AreRequestedMethodsSupported.
   void AreRequestedMethodsSupportedCallback(bool methods_supported,
@@ -186,8 +202,9 @@ class PaymentRequest : public mojom::PaymentRequest,
   void RespondToHasEnrolledInstrumentQuery(bool has_enrolled_instrument,
                                            bool warn_localhost_or_file);
 
-  content::WebContents* web_contents_;
-  content::RenderFrameHost* initiator_render_frame_host_;
+  void OnAbortResult(bool aborted);
+
+  const content::GlobalFrameRoutingId initiator_frame_routing_id_;
   DeveloperConsoleLogger log_;
   std::unique_ptr<ContentPaymentRequestDelegate> delegate_;
   // |manager_| owns this PaymentRequest.
@@ -202,7 +219,7 @@ class PaymentRequest : public mojom::PaymentRequest,
 
   // The end-point for the payment handler renderer process to call into the
   // browser process.
-  PaymentHandlerHost payment_handler_host_;
+  std::unique_ptr<PaymentHandlerHost> payment_handler_host_;
 
   // The scheme, host, and port of the top level frame that has invoked
   // PaymentRequest API as formatted by

@@ -12,6 +12,7 @@
 #include "chrome/grit/generated_resources.h"
 #include "components/omnibox/browser/omnibox_edit_model.h"
 #include "components/omnibox/browser/omnibox_view.h"
+#include "content/public/browser/browser_context.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace qrcode_generator {
@@ -23,14 +24,15 @@ QRCodeGeneratorIconView::QRCodeGeneratorIconView(
     : PageActionIconView(command_updater,
                          IDC_QRCODE_GENERATOR,
                          icon_label_bubble_delegate,
-                         page_action_icon_delegate) {
+                         page_action_icon_delegate),
+      bubble_requested_(false) {
   SetVisible(false);
   SetLabel(l10n_util::GetStringUTF16(IDS_OMNIBOX_QRCODE_GENERATOR_ICON_LABEL));
 }
 
 QRCodeGeneratorIconView::~QRCodeGeneratorIconView() = default;
 
-views::BubbleDialogDelegateView* QRCodeGeneratorIconView::GetBubble() const {
+views::BubbleDialogDelegate* QRCodeGeneratorIconView::GetBubble() const {
   content::WebContents* web_contents = GetWebContents();
   if (!web_contents)
     return nullptr;
@@ -53,17 +55,34 @@ void QRCodeGeneratorIconView::UpdateImpl() {
   if (!omnibox_view)
     return;
 
-  // TODO(skare): Fix show and re-hide conditions.
-  // Need this queried in more cases.
-  if (omnibox_view->model()->has_focus() &&
-      !omnibox_view->model()->user_input_in_progress()) {
-    if (!GetVisible())
-      SetVisible(true);
-  }
+  bool feature_available =
+      QRCodeGeneratorBubbleController::IsGeneratorAvailable(
+          web_contents->GetLastCommittedURL(),
+          web_contents->GetBrowserContext()->IsOffTheRecord());
+
+  bool visible = GetBubble() != nullptr ||
+                 (feature_available && omnibox_view->model()->has_focus() &&
+                  !omnibox_view->model()->user_input_in_progress());
+
+  // Once the bubble has initialized, or focus returned to the omnibox,
+  // clear the initializing flag.
+  if (visible && bubble_requested_)
+    bubble_requested_ = false;
+
+  // If the bubble is in the process of showing, prevent losing the
+  // inkdrop or going through a hide/show cycle.
+  visible |= bubble_requested_;
+
+  // The icon is cleared on navigations and similar in
+  // LocationVarView::Update().
+  if (visible)
+    SetVisible(true);
 }
 
 void QRCodeGeneratorIconView::OnExecuting(
-    PageActionIconView::ExecuteSource execute_source) {}
+    PageActionIconView::ExecuteSource execute_source) {
+  bubble_requested_ = true;
+}
 
 const gfx::VectorIcon& QRCodeGeneratorIconView::GetVectorIcon() const {
   return kQrcodeGeneratorIcon;

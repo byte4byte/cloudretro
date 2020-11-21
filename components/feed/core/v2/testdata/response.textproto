@@ -134,7 +134,7 @@ feed_response {
       renderable_unit: CONTENT
       content_extension {
         xsurface_content {
-          xsurface_output: "data4"        
+          xsurface_output: "data4"
         }
       }
     }
@@ -452,10 +452,32 @@ feed_response {
       }
     }
   }
-  feed_response_metadata {
-    response_time_ms: 1587056924
+  data_operation {
+    operation: UPDATE_OR_APPEND
+    metadata {
+      content_id {
+        content_domain: "request_schedule"
+        id: 300842786
+      }
+    }
+    request_schedule {
+      time_based_schedule {
+        refresh_time_from_response_time {
+          seconds: 86308
+          nanos: 822963644
+        }
+        refresh_time_from_response_time {
+          seconds: 120000
+        }
+      }
+    }
   }
-  server_capabilities: CARD_MENU
-  response_status_code: STATUS_OK
+  feed_response_metadata {
+    #response_time_ms: 1587056924
+    chrome_feed_response_metadata {
+      privacy_notice_fulfilled: true
+      waa_on: true
+    }
+  }
 }
 

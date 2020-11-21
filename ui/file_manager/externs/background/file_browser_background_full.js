@@ -5,7 +5,7 @@
 /**
  * @interface
  */
-class FileBrowserBackgroundFull extends FileBrowserBackground {
+class FileBrowserBackgroundFull extends BackgroundBase {
   constructor() {
     /**
      * @type {!DriveSyncHandler}
@@ -48,4 +48,19 @@ class FileBrowserBackgroundFull extends FileBrowserBackground {
      */
     this.crostini;
   }
+
+  /**
+   * Register callback to be invoked after initialization of the background
+   * page. If the initialization is already done, the callback is invoked
+   * immediately.
+   *
+   * @param {function()} callback
+   */
+  ready(callback) {}
+
+  /**
+   * Forces File Operation Util to return error for automated tests.
+   * @param {boolean} enable
+   */
+  forceFileOperationErrorForTest(enable) {}
 }

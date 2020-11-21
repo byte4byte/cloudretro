@@ -4,8 +4,10 @@
 
 #include "chrome/browser/ui/global_media_controls/media_notification_service.h"
 
+#include "base/callback_list.h"
 #include "base/metrics/field_trial_params.h"
 #include "base/metrics/histogram_functions.h"
+#include "base/ranges/algorithm.h"
 #include "chrome/browser/media/router/media_router_feature.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -13,13 +15,17 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/global_media_controls/media_dialog_delegate.h"
 #include "chrome/browser/ui/global_media_controls/media_notification_container_impl.h"
+#include "chrome/browser/ui/global_media_controls/media_notification_device_provider_impl.h"
 #include "chrome/browser/ui/global_media_controls/media_notification_service_observer.h"
 #include "chrome/browser/ui/global_media_controls/overlay_media_notification.h"
+#include "chrome/browser/ui/media_router/media_router_ui.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "components/media_message_center/media_notification_item.h"
 #include "components/media_message_center/media_notification_util.h"
 #include "components/media_message_center/media_session_notification_item.h"
+#include "components/media_router/browser/presentation/start_presentation_context.h"
 #include "components/ukm/content/source_url_recorder.h"
+#include "content/public/browser/audio_service.h"
 #include "content/public/browser/media_session.h"
 #include "content/public/browser/media_session_service.h"
 #include "media/base/media_switches.h"
@@ -35,6 +41,15 @@ constexpr int kMaxActionsRecordedToUKM = 100;
 constexpr int kAutoDismissTimerInMinutesDefault = 60;  // minutes
 
 constexpr const char kAutoDismissTimerInMinutesParamName[] = "timer_in_minutes";
+
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused.
+enum class MediaNotificationClickSource {
+  kMedia = 0,
+  kPresentation,
+  kMediaFling,
+  kMaxValue = kMediaFling
+};
 
 // Returns the time value to be used for the auto-dismissing of the
 // notifications after they are inactive.
@@ -148,6 +163,21 @@ void MediaNotificationService::Session::MediaSessionInfoChanged(
   StartInactiveTimer();
 }
 
+void MediaNotificationService::Session::MediaSessionActionsChanged(
+    const std::vector<media_session::mojom::MediaSessionAction>& actions) {
+  bool is_audio_device_switching_supported =
+      base::ranges::find(
+          actions,
+          media_session::mojom::MediaSessionAction::kSwitchAudioDevice) !=
+      actions.end();
+  if (is_audio_device_switching_supported !=
+      is_audio_device_switching_supported_) {
+    is_audio_device_switching_supported_ = is_audio_device_switching_supported;
+    is_audio_device_switching_supported_callback_list_.Notify(
+        is_audio_device_switching_supported_);
+  }
+}
+
 void MediaNotificationService::Session::MediaSessionPositionChanged(
     const base::Optional<media_session::MediaPosition>& position) {
   OnSessionInteractedWith();
@@ -155,8 +185,13 @@ void MediaNotificationService::Session::MediaSessionPositionChanged(
 
 void MediaNotificationService::Session::OnMediaRoutesChanged(
     const std::vector<media_router::MediaRoute>& routes) {
-  if (!routes.empty())
+  // Closes the media dialog after a cast session starts.
+  if (!routes.empty()) {
+    if (owner_->dialog_delegate_) {
+      owner_->dialog_delegate_->HideMediaDialog();
+    }
     item_->Dismiss();
+  }
 }
 
 void MediaNotificationService::Session::SetController(
@@ -164,6 +199,7 @@ void MediaNotificationService::Session::SetController(
   if (controller.is_bound()) {
     observer_receiver_.reset();
     controller->AddObserver(observer_receiver_.BindNewPipeAndPassRemote());
+    controller_ = std::move(controller);
   }
 }
 
@@ -204,6 +240,30 @@ void MediaNotificationService::Session::OnSessionOverlayStateChanged(
     // inactive.
     StartInactiveTimer();
   }
+}
+
+bool MediaNotificationService::Session::IsPlaying() {
+  return is_playing_;
+}
+
+void MediaNotificationService::Session::SetAudioSinkId(const std::string& id) {
+  controller_->SetAudioSinkId(id);
+}
+
+std::unique_ptr<base::RepeatingCallbackList<void(bool)>::Subscription>
+MediaNotificationService::Session::
+    RegisterIsAudioDeviceSwitchingSupportedCallback(
+        base::RepeatingCallback<void(bool)> callback) {
+  callback.Run(is_audio_device_switching_supported_);
+  return is_audio_device_switching_supported_callback_list_.Add(
+      std::move(callback));
+}
+
+void MediaNotificationService::Session::SetPresentationManagerForTesting(
+    base::WeakPtr<media_router::WebContentsPresentationManager>
+        presentation_manager) {
+  presentation_manager_ = presentation_manager;
+  presentation_manager_->AddObserver(this);
 }
 
 // static
@@ -254,7 +314,8 @@ void MediaNotificationService::Session::MarkActiveIfNecessary() {
   owner_->OnSessionBecameActive(id_);
 }
 
-MediaNotificationService::MediaNotificationService(Profile* profile)
+MediaNotificationService::MediaNotificationService(Profile* profile,
+                                                   bool show_from_all_profiles)
     : overlay_media_notifications_manager_(this) {
   if (base::FeatureList::IsEnabled(media::kGlobalMediaControlsForCast) &&
       media_router::MediaRouterEnabled(profile)) {
@@ -265,9 +326,10 @@ MediaNotificationService::MediaNotificationService(Profile* profile)
                 &MediaNotificationService::OnCastNotificationsChanged,
                 base::Unretained(this)));
   }
-
-  const base::UnguessableToken& source_id =
-      content::MediaSession::GetSourceId(profile);
+  if (media_router::GlobalMediaControlsCastStartStopEnabled()) {
+    presentation_request_notification_provider_ =
+        std::make_unique<PresentationRequestNotificationProvider>(this);
+  }
 
   // Connect to the controller manager so we can create media controllers for
   // media sessions.
@@ -277,13 +339,26 @@ MediaNotificationService::MediaNotificationService(Profile* profile)
   // Connect to receive audio focus events.
   content::GetMediaSessionService().BindAudioFocusManager(
       audio_focus_remote_.BindNewPipeAndPassReceiver());
-  audio_focus_remote_->AddSourceObserver(
-      source_id, audio_focus_observer_receiver_.BindNewPipeAndPassRemote());
 
-  audio_focus_remote_->GetSourceFocusRequests(
-      source_id,
-      base::BindOnce(&MediaNotificationService::OnReceivedAudioFocusRequests,
-                     weak_ptr_factory_.GetWeakPtr()));
+  if (show_from_all_profiles) {
+    audio_focus_remote_->AddObserver(
+        audio_focus_observer_receiver_.BindNewPipeAndPassRemote());
+
+    audio_focus_remote_->GetFocusRequests(
+        base::BindOnce(&MediaNotificationService::OnReceivedAudioFocusRequests,
+                       weak_ptr_factory_.GetWeakPtr()));
+  } else {
+    const base::UnguessableToken& source_id =
+        content::MediaSession::GetSourceId(profile);
+
+    audio_focus_remote_->AddSourceObserver(
+        source_id, audio_focus_observer_receiver_.BindNewPipeAndPassRemote());
+
+    audio_focus_remote_->GetSourceFocusRequests(
+        source_id,
+        base::BindOnce(&MediaNotificationService::OnReceivedAudioFocusRequests,
+                       weak_ptr_factory_.GetWeakPtr()));
+  }
 }
 
 MediaNotificationService::~MediaNotificationService() {
@@ -361,8 +436,7 @@ void MediaNotificationService::OnFocusLost(
       &MediaNotificationService::OnItemUnfrozen, base::Unretained(this), id));
   active_controllable_session_ids_.erase(id);
   frozen_session_ids_.insert(id);
-  for (auto& observer : observers_)
-    observer.OnNotificationListChanged();
+  OnNotificationChanged(&id);
 }
 
 void MediaNotificationService::ShowNotification(const std::string& id) {
@@ -374,9 +448,7 @@ void MediaNotificationService::ShowNotification(const std::string& id) {
   }
 
   active_controllable_session_ids_.insert(id);
-
-  for (auto& observer : observers_)
-    observer.OnNotificationListChanged();
+  OnNotificationChanged(&id);
 
   if (!dialog_delegate_)
     return;
@@ -402,8 +474,7 @@ void MediaNotificationService::HideNotification(const std::string& id) {
     dragged_out_session_ids_.erase(id);
   }
 
-  for (auto& observer : observers_)
-    observer.OnNotificationListChanged();
+  OnNotificationChanged(&id);
 
   if (!dialog_delegate_)
     return;
@@ -411,25 +482,29 @@ void MediaNotificationService::HideNotification(const std::string& id) {
   dialog_delegate_->HideMediaSession(id);
 }
 
-scoped_refptr<base::SequencedTaskRunner>
-MediaNotificationService::GetTaskRunner() const {
-  return nullptr;
-}
-
 void MediaNotificationService::RemoveItem(const std::string& id) {
   active_controllable_session_ids_.erase(id);
   frozen_session_ids_.erase(id);
   inactive_session_ids_.erase(id);
+  supplemental_notifications_.erase(id);
 
   if (base::Contains(dragged_out_session_ids_, id)) {
     overlay_media_notifications_manager_.CloseOverlayNotification(id);
     dragged_out_session_ids_.erase(id);
   }
 
+  // Copy |id| to avoid a dangling reference after the session is deleted. This
+  // happens when |id| refers to a string owned by the session being removed.
+  const auto id_copy{id};
+
   sessions_.erase(id);
 
-  for (auto& observer : observers_)
-    observer.OnNotificationListChanged();
+  OnNotificationChanged(&id_copy);
+}
+
+scoped_refptr<base::SequencedTaskRunner>
+MediaNotificationService::GetTaskRunner() const {
+  return nullptr;
 }
 
 void MediaNotificationService::LogMediaSessionActionButtonPressed(
@@ -473,6 +548,9 @@ void MediaNotificationService::OnContainerClicked(const std::string& id) {
   if (!delegate)
     return;
 
+  base::UmaHistogramEnumeration("Media.Notification.Click",
+                                MediaNotificationClickSource::kMedia);
+
   delegate->ActivateContents(web_contents);
 }
 
@@ -484,22 +562,17 @@ void MediaNotificationService::OnContainerDismissed(const std::string& id) {
     return;
   }
 
-  auto it = sessions_.find(id);
-  if (it == sessions_.end()) {
-    if (!cast_notification_provider_)
-      return;
-
-    base::WeakPtr<media_message_center::MediaNotificationItem> cast_item =
-        cast_notification_provider_->GetNotificationItem(id);
-    if (cast_item)
-      cast_item->Dismiss();
-
+  Session* session = GetSession(id);
+  if (!session) {
+    auto item = GetNonSessionNotificationItem(id);
+    if (item)
+      item->Dismiss();
     return;
   }
 
-  it->second.set_dismiss_reason(
+  session->set_dismiss_reason(
       GlobalMediaControlsDismissReason::kUserDismissedNotification);
-  it->second.item()->Dismiss();
+  session->item()->Dismiss();
 }
 
 void MediaNotificationService::OnContainerDestroyed(const std::string& id) {
@@ -533,15 +606,31 @@ void MediaNotificationService::OnContainerDraggedOut(const std::string& id,
       id, std::move(overlay_notification));
   active_controllable_session_ids_.erase(id);
   dragged_out_session_ids_.insert(id);
+  OnNotificationChanged(&id);
+}
 
-  for (auto& observer : observers_)
-    observer.OnNotificationListChanged();
+void MediaNotificationService::OnAudioSinkChosen(const std::string& id,
+                                                 const std::string& sink_id) {
+  auto it = sessions_.find(id);
+  DCHECK(it != sessions_.end());
+  it->second.SetAudioSinkId(sink_id);
 }
 
 void MediaNotificationService::Shutdown() {
-  // |cast_notification_provider_| depends on MediaRouter, which is another
-  // keyed service.
+  // |cast_notification_provider_| and
+  // |presentation_request_notification_provider_| depend on MediaRouter, which
+  // is another keyed service.
   cast_notification_provider_.reset();
+  presentation_request_notification_provider_.reset();
+}
+
+void MediaNotificationService::AddSupplementalNotification(
+    const std::string& id,
+    content::WebContents* web_contents) {
+  DCHECK(web_contents);
+  supplemental_notifications_.emplace(id, web_contents);
+  if (!HasSessionForWebContents(web_contents))
+    ShowNotification(id);
 }
 
 void MediaNotificationService::OnOverlayNotificationClosed(
@@ -566,8 +655,7 @@ void MediaNotificationService::OnOverlayNotificationClosed(
     active_controllable_session_ids_.insert(id);
   dragged_out_session_ids_.erase(id);
 
-  for (auto& observer : observers_)
-    observer.OnNotificationListChanged();
+  OnNotificationChanged(&id);
 
   // If there's a dialog currently open, then we should show the item in the
   // dialog.
@@ -584,8 +672,7 @@ void MediaNotificationService::OnOverlayNotificationClosed(
 }
 
 void MediaNotificationService::OnCastNotificationsChanged() {
-  for (auto& observer : observers_)
-    observer.OnNotificationListChanged();
+  OnNotificationChanged(nullptr);
 }
 
 void MediaNotificationService::SetDialogDelegate(
@@ -593,13 +680,26 @@ void MediaNotificationService::SetDialogDelegate(
   DCHECK(!delegate || !dialog_delegate_);
   dialog_delegate_ = delegate;
 
-  for (auto& observer : observers_)
-    observer.OnMediaDialogOpenedOrClosed();
+  if (dialog_delegate_) {
+    for (auto& observer : observers_)
+      observer.OnMediaDialogOpened();
+  } else {
+    for (auto& observer : observers_)
+      observer.OnMediaDialogClosed();
+  }
 
   if (!dialog_delegate_)
     return;
 
+  std::list<std::string> sorted_session_ids;
   for (const std::string& id : active_controllable_session_ids_) {
+    if (sessions_.find(id)->second.IsPlaying())
+      sorted_session_ids.push_front(id);
+    else
+      sorted_session_ids.push_back(id);
+  }
+
+  for (const std::string& id : sorted_session_ids) {
     base::WeakPtr<media_message_center::MediaNotificationItem> item =
         GetNotificationItem(id);
     MediaNotificationContainerImpl* container =
@@ -614,6 +714,7 @@ void MediaNotificationService::SetDialogDelegate(
 
   media_message_center::RecordConcurrentNotificationCount(
       active_controllable_session_ids_.size());
+
   if (cast_notification_provider_) {
     media_message_center::RecordConcurrentCastNotificationCount(
         cast_notification_provider_->GetItemCount());
@@ -645,8 +746,7 @@ void MediaNotificationService::OnSessionBecameActive(const std::string& id) {
   else
     active_controllable_session_ids_.insert(id);
 
-  for (auto& observer : observers_)
-    observer.OnNotificationListChanged();
+  OnNotificationChanged(&id);
 
   // If there's a dialog currently open, then we should show the item in the
   // dialog.
@@ -672,14 +772,61 @@ void MediaNotificationService::OnSessionBecameInactive(const std::string& id) {
   HideNotification(id);
 }
 
+std::unique_ptr<
+    MediaNotificationDeviceProvider::GetOutputDevicesCallbackList::Subscription>
+MediaNotificationService::RegisterAudioOutputDeviceDescriptionsCallback(
+    MediaNotificationDeviceProvider::GetOutputDevicesCallback callback) {
+  if (!device_provider_)
+    device_provider_ = std::make_unique<MediaNotificationDeviceProviderImpl>(
+        content::CreateAudioSystemForAudioService());
+  return device_provider_->RegisterOutputDeviceDescriptionsCallback(
+      std::move(callback));
+}
+
+std::unique_ptr<base::RepeatingCallbackList<void(bool)>::Subscription>
+MediaNotificationService::RegisterIsAudioOutputDeviceSwitchingSupportedCallback(
+    const std::string& id,
+    base::RepeatingCallback<void(bool)> callback) {
+  auto it = sessions_.find(id);
+  DCHECK(it != sessions_.end());
+
+  return it->second.RegisterIsAudioDeviceSwitchingSupportedCallback(
+      std::move(callback));
+}
+
+void MediaNotificationService::OnStartPresentationContextCreated(
+    std::unique_ptr<media_router::StartPresentationContext> context) {
+  if (presentation_request_notification_provider_) {
+    presentation_request_notification_provider_
+        ->OnStartPresentationContextCreated(std::move(context));
+  }
+}
+
+void MediaNotificationService::set_device_provider_for_testing(
+    std::unique_ptr<MediaNotificationDeviceProvider> device_provider) {
+  device_provider_ = std::move(device_provider);
+}
+
+std::unique_ptr<media_router::CastDialogController>
+MediaNotificationService::CreateCastDialogControllerForSession(
+    const std::string& session_id) {
+  auto it = sessions_.find(session_id);
+  if (it != sessions_.end()) {
+    auto ui = std::make_unique<media_router::MediaRouterUI>(
+        it->second.web_contents());
+    ui->InitWithDefaultMediaSource();
+    return ui;
+  }
+  return nullptr;
+}
+
 void MediaNotificationService::OnItemUnfrozen(const std::string& id) {
   frozen_session_ids_.erase(id);
 
   if (!base::Contains(dragged_out_session_ids_, id))
     active_controllable_session_ids_.insert(id);
 
-  for (auto& observer : observers_)
-    observer.OnNotificationListChanged();
+  OnNotificationChanged(&id);
 }
 
 void MediaNotificationService::OnReceivedAudioFocusRequests(
@@ -690,11 +837,64 @@ void MediaNotificationService::OnReceivedAudioFocusRequests(
 
 base::WeakPtr<media_message_center::MediaNotificationItem>
 MediaNotificationService::GetNotificationItem(const std::string& id) {
+  Session* session = GetSession(id);
+  if (session)
+    return session->item()->GetWeakPtr();
+  return GetNonSessionNotificationItem(id);
+}
+
+MediaNotificationService::Session* MediaNotificationService::GetSession(
+    const std::string& id) {
   auto it = sessions_.find(id);
-  if (it != sessions_.end()) {
-    return it->second.item()->GetWeakPtr();
-  } else if (cast_notification_provider_) {
-    return cast_notification_provider_->GetNotificationItem(id);
+  return it == sessions_.end() ? nullptr : &it->second;
+}
+
+base::WeakPtr<media_message_center::MediaNotificationItem>
+MediaNotificationService::GetNonSessionNotificationItem(const std::string& id) {
+  if (cast_notification_provider_) {
+    auto item = cast_notification_provider_->GetNotificationItem(id);
+    if (item)
+      return item;
   }
+
+  if (presentation_request_notification_provider_) {
+    auto item =
+        presentation_request_notification_provider_->GetNotificationItem(id);
+    if (item)
+      return item;
+  }
+
   return nullptr;
+}
+
+void MediaNotificationService::OnNotificationChanged(
+    const std::string* changed_notification_id) {
+  for (auto& observer : observers_)
+    observer.OnNotificationListChanged();
+
+  // Avoid re-examining the supplemental notifications as a side-effect of
+  // hiding a supplemental notification.
+  if (!changed_notification_id ||
+      base::Contains(supplemental_notifications_, *changed_notification_id))
+    return;
+
+  // Hide supplemental notifications if necessary.
+  for (const auto& pair : supplemental_notifications_) {
+    // If there is an active session associated with the same web contents as
+    // this supplemental notification, hide it.
+    if (HasSessionForWebContents(pair.second)) {
+      HideNotification(pair.first);
+    }
+  }
+}
+
+bool MediaNotificationService::HasSessionForWebContents(
+    content::WebContents* web_contents) const {
+  DCHECK(web_contents);
+  return std::any_of(sessions_.begin(), sessions_.end(),
+                     [web_contents, this](const auto& pair) {
+                       return pair.second.web_contents() == web_contents &&
+                              base::Contains(active_controllable_session_ids_,
+                                             pair.first);
+                     });
 }

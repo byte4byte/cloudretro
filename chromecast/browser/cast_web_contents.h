@@ -14,9 +14,9 @@
 #include "base/optional.h"
 #include "base/process/process.h"
 #include "base/strings/string16.h"
-#include "base/strings/string_piece_forward.h"
 #include "chromecast/common/mojom/feature_manager.mojom.h"
 #include "content/public/common/media_playback_renderer_type.mojom.h"
+#include "mojo/public/cpp/bindings/generic_pending_receiver.h"
 #include "services/service_manager/public/cpp/binder_registry.h"
 #include "services/service_manager/public/cpp/interface_provider.h"
 #include "third_party/blink/public/common/messaging/web_message_port.h"
@@ -31,9 +31,12 @@ namespace content {
 class WebContents;
 }  // namespace content
 
-namespace chromecast {
+namespace on_load_script_injector {
+template <typename>
+class OnLoadScriptInjectorHost;
+}  // namespace on_load_script_injector
 
-class QueryableDataHost;
+namespace chromecast {
 
 struct RendererFeature {
   const std::string name;
@@ -170,6 +173,9 @@ class CastWebContents {
     // the underlying OnRendererProcessStarted() method.
     virtual void OnRenderProcessReady(const base::Process& process) {}
 
+    // Notify media playback state changes for the underlying WebContents.
+    virtual void MediaPlaybackChanged(bool media_playing) {}
+
     // Adds |this| to the ObserverList in the implementation of
     // |cast_web_contents|.
     void Observe(CastWebContents* cast_web_contents);
@@ -223,10 +229,6 @@ class CastWebContents {
     bool enable_websql = false;
     // Enable mixer audio support for this CastWebContents.
     bool enable_mixer_audio = false;
-    // Whether to provide a QueryableDataHost for this CastWebContents.
-    // Clients can use it to send queryable values to the render frames.
-    // queryable_data_host() will return a nullptr if this is false.
-    bool enable_queryable_data_host = false;
     // Whether to provide a URL filter applied to network requests for the
     // activity hosted by this CastWebContents.
     // No filters implies no restrictions.
@@ -261,13 +263,13 @@ class CastWebContents {
   // same tab ID at any given time.
   virtual int tab_id() const = 0;
 
+  // An identifier for the WebContents, mainly used by platform views service.
+  // IDs may be re-used but are unique among all live CastWebContents.
+  virtual int id() const = 0;
+
   // TODO(seantopping): Hide this, clients shouldn't use WebContents directly.
   virtual content::WebContents* web_contents() const = 0;
   virtual PageState page_state() const = 0;
-
-  // Returns QueryableDataHost that is used to push values to the renderer.
-  // Returns nullptr if the new queryable data bindings is enabled.
-  virtual QueryableDataHost* queryable_data_host() const = 0;
 
   // Returns the PID of the main frame process if valid.
   virtual base::Optional<pid_t> GetMainFrameRenderProcessPid() const = 0;
@@ -329,29 +331,13 @@ class CastWebContents {
   // Page Communication
   // ===========================================================================
 
-  // Executes a UTF-8 encoded |script| for every subsequent page load where
-  // the frame's URL has an origin reflected in |origins|. The script is
-  // executed early, prior to the execution of the document's scripts.
-  //
-  // Scripts are identified by a string-based client-managed |id|. Any
-  // script previously injected using the same |id| will be replaced.
-  //
-  // The order in which multiple bindings are executed is the same as the
-  // order in which the bindings were Added. If a script is added which
-  // clobbers an existing script of the same |id|, the previous script's
-  // precedence in the injection order will be preserved.
-  // |script| and |id| must be non-empty string.
-  //
-  // At least one |origins| entry must be specified.
-  // If a wildcard "*" is specified in |origins|, then the script will be
-  // evaluated for all documents.
-  virtual void AddBeforeLoadJavaScript(base::StringPiece id,
-                                       const std::vector<std::string>& origins,
-                                       base::StringPiece script) = 0;
+  // Returns the script injector instance, which injects scripts at page load
+  // time.
+  virtual on_load_script_injector::OnLoadScriptInjectorHost<std::string>*
+  script_injector() = 0;
 
-  // Removes a previously added JavaScript snippet identified by |id|.
-  // This is a no-op if there is no JavaScript snippet identified by |id|.
-  virtual void RemoveBeforeLoadJavaScript(base::StringPiece id) = 0;
+  // Injects on-load scripts into the WebContents' main frame.
+  virtual void InjectScriptsIntoMainFrame() = 0;
 
   // Posts a message to the frame's onMessage handler.
   //
@@ -361,11 +347,6 @@ class CastWebContents {
   // See html.spec.whatwg.org/multipage/web-messaging.html sect. 9.4.3
   // for more details on how the target origin policy is applied.
   // Should be called on UI thread.
-  // TODO(crbug.com/803242): Deprecated and will be shortly removed.
-  virtual void PostMessageToMainFrame(
-      const std::string& target_origin,
-      const std::string& data,
-      std::vector<mojo::ScopedMessagePipeHandle> channels) = 0;
   virtual void PostMessageToMainFrame(
       const std::string& target_origin,
       const std::string& data,
@@ -399,6 +380,10 @@ class CastWebContents {
   // Delegate should register its mojo interface binders via this function
   // when it is ready.
   virtual service_manager::BinderRegistry* binder_registry() = 0;
+
+  // Asks the CastWebContents to bind an interface receiver using either its
+  // registry or any registered InterfaceProvider.
+  virtual bool TryBindReceiver(mojo::GenericPendingReceiver& receiver) = 0;
 
   // Used for owner to pass its |InterfaceProvider| pointers to CastWebContents.
   // It is owner's responsibility to make sure each |InterfaceProvider| pointer

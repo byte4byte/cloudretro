@@ -5,156 +5,236 @@
 package org.chromium.components.page_info;
 
 import android.content.Intent;
+import android.graphics.drawable.Drawable;
 
+import androidx.annotation.IntDef;
+import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
 import org.chromium.base.Callback;
 import org.chromium.base.Consumer;
-import org.chromium.components.content_settings.ContentSettingValues;
+import org.chromium.base.supplier.Supplier;
+import org.chromium.components.browser_ui.site_settings.SiteSettingsClient;
+import org.chromium.components.content_settings.CookieControlsBridge;
 import org.chromium.components.content_settings.CookieControlsObserver;
+import org.chromium.components.embedder_support.browser_context.BrowserContextHandle;
 import org.chromium.components.omnibox.AutocompleteSchemeClassifier;
 import org.chromium.components.page_info.PageInfoView.PageInfoViewParams;
-import org.chromium.ui.base.AndroidPermissionDelegate;
 import org.chromium.ui.modaldialog.ModalDialogManager;
 
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
+
 /**
- * Interface that provides embedder-level information to PageInfoController.
+ *  Provides embedder-level information to PageInfoController.
  */
-public interface PageInfoControllerDelegate {
+public abstract class PageInfoControllerDelegate {
+    @IntDef({OfflinePageState.NOT_OFFLINE_PAGE, OfflinePageState.TRUSTED_OFFLINE_PAGE,
+            OfflinePageState.UNTRUSTED_OFFLINE_PAGE})
+    @Retention(RetentionPolicy.SOURCE)
+    public @interface OfflinePageState {
+        int NOT_OFFLINE_PAGE = 1;
+        int TRUSTED_OFFLINE_PAGE = 2;
+        int UNTRUSTED_OFFLINE_PAGE = 3;
+    }
+
+    @IntDef({PreviewPageState.NOT_PREVIEW, PreviewPageState.SECURE_PAGE_PREVIEW,
+            PreviewPageState.INSECURE_PAGE_PREVIEW})
+    @Retention(RetentionPolicy.SOURCE)
+    public @interface PreviewPageState {
+        int NOT_PREVIEW = 1;
+        int SECURE_PAGE_PREVIEW = 2;
+        int INSECURE_PAGE_PREVIEW = 3;
+    }
+
+    private final Supplier<ModalDialogManager> mModalDialogManager;
+    private final AutocompleteSchemeClassifier mAutocompleteSchemeClassifier;
+    private final VrHandler mVrHandler;
+    private final boolean mIsSiteSettingsAvailable;
+    private final boolean mCookieControlsShown;
+    protected @PreviewPageState int mPreviewPageState;
+    protected @OfflinePageState int mOfflinePageState;
+    protected boolean mIsHttpsImageCompressionApplied;
+    protected String mOfflinePageUrl;
+
+    public PageInfoControllerDelegate(Supplier<ModalDialogManager> modalDialogManager,
+            AutocompleteSchemeClassifier autocompleteSchemeClassifier, VrHandler vrHandler,
+            boolean isSiteSettingsAvailable, boolean cookieControlsShown) {
+        mModalDialogManager = modalDialogManager;
+        mAutocompleteSchemeClassifier = autocompleteSchemeClassifier;
+        mVrHandler = vrHandler;
+        mIsSiteSettingsAvailable = isSiteSettingsAvailable;
+        mCookieControlsShown = cookieControlsShown;
+        mIsHttpsImageCompressionApplied = false;
+
+        // These sometimes get overwritten by derived classes.
+        mPreviewPageState = PreviewPageState.NOT_PREVIEW;
+        mOfflinePageState = OfflinePageState.NOT_OFFLINE_PAGE;
+        mOfflinePageUrl = null;
+    }
     /**
      * Creates an AutoCompleteClassifier.
      */
-    AutocompleteSchemeClassifier createAutocompleteSchemeClassifier();
+    public AutocompleteSchemeClassifier createAutocompleteSchemeClassifier() {
+        return mAutocompleteSchemeClassifier;
+    }
 
     /**
      * Whether cookie controls should be shown in Page Info UI.
      */
-    boolean cookieControlsShown();
+    public boolean cookieControlsShown() {
+        return mCookieControlsShown;
+    }
 
     /**
      * Return the ModalDialogManager to be used.
      */
-    ModalDialogManager getModalDialogManager();
-
-    /**
-     * Whether Page Info UI should use dark colors.
-     */
-    boolean useDarkColors();
+    public ModalDialogManager getModalDialogManager() {
+        return mModalDialogManager.get();
+    }
 
     /**
      * Initialize viewParams with Preview UI info, if any.
      * @param viewParams The params to be initialized with Preview UI info.
      * @param runAfterDismiss Used to set "show original" callback on Previews UI.
      */
-    void initPreviewUiParams(PageInfoViewParams viewParams, Consumer<Runnable> runAfterDismiss);
+    public void initPreviewUiParams(
+            PageInfoViewParams viewParams, Consumer<Runnable> runAfterDismiss) {
+        // Don't support Preview UI by default.
+        viewParams.previewUIShown = false;
+        viewParams.previewSeparatorShown = false;
+    }
 
     /**
      * Whether website dialog is displayed for a preview.
      */
-    boolean isShowingPreview();
+    public boolean isShowingPreview() {
+        return mPreviewPageState != PreviewPageState.NOT_PREVIEW;
+    }
 
     /**
      * Whether Preview page state is INSECURE.
      */
-    boolean isPreviewPageInsecure();
+    public boolean isPreviewPageInsecure() {
+        return mPreviewPageState == PreviewPageState.INSECURE_PAGE_PREVIEW;
+    }
 
     /**
      * Returns whether or not an instant app is available for |url|.
      */
-    boolean isInstantAppAvailable(String url);
+    public boolean isInstantAppAvailable(String url) {
+        return false;
+    }
+
+    /**
+     * Returns whether LiteMode https image compression was applied on this page
+     */
+    public boolean isHttpsImageCompressionApplied() {
+        return mIsHttpsImageCompressionApplied;
+    }
 
     /**
      * Gets the instant app intent for the given URL if one exists.
      */
-    Intent getInstantAppIntentForUrl(String url);
+    public Intent getInstantAppIntentForUrl(String url) {
+        return null;
+    }
 
     /**
      * Returns a VrHandler for Page Info UI.
      */
-    public VrHandler getVrHandler();
+    public VrHandler getVrHandler() {
+        return mVrHandler;
+    }
 
     /**
      * Gets the Url of the offline page being shown if any. Returns null otherwise.
      */
     @Nullable
-    String getOfflinePageUrl();
+    public String getOfflinePageUrl() {
+        return mOfflinePageUrl;
+    }
 
     /**
      * Whether the page being shown is an offline page.
      */
-    boolean isShowingOfflinePage();
+    public boolean isShowingOfflinePage() {
+        return mOfflinePageState != OfflinePageState.NOT_OFFLINE_PAGE && !isShowingPreview();
+    }
 
     /**
      * Initialize viewParams with Offline Page UI info, if any.
      * @param viewParams The PageInfoViewParams to set state on.
-     * @param consumer Used to set "open Online" button callback for offline page.
+     * @param runAfterDismiss Used to set "open Online" button callback for offline page.
      */
-    void initOfflinePageUiParams(PageInfoViewParams viewParams, Consumer<Runnable> runAfterDismiss);
+    public void initOfflinePageUiParams(
+            PageInfoViewParams viewParams, Consumer<Runnable> runAfterDismiss) {
+        viewParams.openOnlineButtonShown = false;
+    }
 
     /**
      * Return the connection message shown for an offline page, if appropriate.
      * Returns null if there's no offline page.
      */
     @Nullable
-    String getOfflinePageConnectionMessage();
+    public String getOfflinePageConnectionMessage() {
+        return null;
+    }
+
+    /**
+     * Returns whether or not the performance badge should be shown for |url|.
+     */
+    public boolean shouldShowPerformanceBadge(String url) {
+        return false;
+    }
 
     /**
      * Whether Site settings are available.
      */
-    boolean isSiteSettingsAvailable();
+    public boolean isSiteSettingsAvailable() {
+        return mIsSiteSettingsAvailable;
+    }
 
     /**
      * Show site settings for the URL passed in.
      * @param url The URL to show site settings for.
      */
-    void showSiteSettings(String url);
+    public abstract void showSiteSettings(String url);
 
-    // TODO(crbug.com/1052375): Remove the next three methods when cookie controls UI
-    // has been componentized.
+    /**
+     * Show cookie settings.
+     */
+    public abstract void showCookieSettings();
+
     /**
      * Creates Cookie Controls Bridge.
-     * @param The CookieControlsObserver to create the bridge with.
+     * @param observer The CookieControlsObserver to create the bridge with.
+     * @return the object that facilitates interfacing with native code.
      */
-    void createCookieControlsBridge(CookieControlsObserver observer);
+    @NonNull
+    public abstract CookieControlsBridge createCookieControlsBridge(
+            CookieControlsObserver observer);
 
     /**
-     * Called when cookie controls UI is closed.
+     * @return Returns the browser context associated with this dialog.
      */
-    void onUiClosing();
+    @NonNull
+    public abstract BrowserContextHandle getBrowserContext();
 
     /**
-     * Notes whether third party cookies should be blocked for the site.
+     * @return Returns the SiteSettingsClient for this page info.
      */
-    void setThirdPartyCookieBlockingEnabledForSite(boolean blockCookies);
-
-    // TODO(crbug.com/1058595): Componentize PermissionParamsBuilder once site settings code has
-    // been componentized. These methods can be removed at that point.
-    /**
-     * Creates a Permission Params List builder and holds on to it.
-     * @param permissionDelegate Delegate for checking system permissions.
-     * @param fullUrl Full URL of the site whose permissions are being displayed.
-     * @param shouldShowTitle Should show section title for permissions in Page Info UI.
-     * @param systemSettingsActivityRequiredListener Listener for when we need the user to enable
-     *                                               a system setting to proceed.
-     * @param displayPermissionsCallback Callback to run to display fresh permissions in response to
-     *                                   user interaction with a permission entry.
-     */
-    void createPermissionParamsListBuilder(AndroidPermissionDelegate permissionDelegate,
-            String fullUrl, boolean shouldShowTitle,
-            SystemSettingsActivityRequiredListener systemSettingsActivityRequiredListener,
-            Callback<PageInfoView.PermissionParams> displayPermissionsCallback);
+    @NonNull
+    public abstract SiteSettingsClient getSiteSettingsClient();
 
     /**
-     * Adds a permission entry corresponding to the input params.
-     * @param name Name of the permission to add.
-     * @param type Type of the permission to add.
-     * @param currentSettingValue The value of the permission to add.
+     * Fetches a favicon for the current page and passes it to callback.
+     * The UI will use a fallback icon if null is supplied.
      */
-    void addPermissionEntry(String name, int type, @ContentSettingValues int currentSettingValue);
+    public abstract void getFavicon(String url, Callback<Drawable> callback);
 
     /**
-     * Updates the Page Info View passed in with up to date permissions info.
-     * @param view The Page Info view to update.
+     * @return Returns the drawable for the Preview UI.
      */
-    void updatePermissionDisplay(PageInfoView view);
+    public abstract Drawable getPreviewUiIcon();
 }

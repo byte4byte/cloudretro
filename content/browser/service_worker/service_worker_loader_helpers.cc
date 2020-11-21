@@ -63,30 +63,6 @@ bool CheckResponseHead(
   return true;
 }
 
-std::unique_ptr<net::HttpResponseInfo> CreateHttpResponseInfoAndCheckHeaders(
-    const network::mojom::URLResponseHead& response_head,
-    blink::ServiceWorkerStatusCode* out_service_worker_status,
-    network::URLLoaderCompletionStatus* out_completion_status,
-    std::string* out_error_message) {
-  if (!CheckResponseHead(response_head, out_service_worker_status,
-                         out_completion_status, out_error_message)) {
-    return nullptr;
-  }
-
-  auto response_info = std::make_unique<net::HttpResponseInfo>();
-  response_info->headers = response_head.headers;
-  if (response_head.ssl_info.has_value())
-    response_info->ssl_info = *response_head.ssl_info;
-  response_info->was_fetched_via_spdy = response_head.was_fetched_via_spdy;
-  response_info->was_alpn_negotiated = response_head.was_alpn_negotiated;
-  response_info->alpn_negotiated_protocol =
-      response_head.alpn_negotiated_protocol;
-  response_info->connection_info = response_head.connection_info;
-  response_info->remote_endpoint = response_head.remote_endpoint;
-  response_info->response_time = response_head.response_time;
-  return response_info;
-}
-
 bool ShouldBypassCacheDueToUpdateViaCache(
     bool is_main_script,
     blink::mojom::ServiceWorkerUpdateViaCache cache_mode) {
@@ -116,19 +92,19 @@ bool ShouldValidateBrowserCacheForScript(
 #if DCHECK_IS_ON()
 void CheckVersionStatusBeforeWorkerScriptLoad(
     ServiceWorkerVersion::Status status,
-    blink::mojom::ResourceType resource_type) {
-  switch (resource_type) {
+    network::mojom::RequestDestination resource_destination) {
+  switch (resource_destination) {
     // The service worker main script should be fetched during worker startup.
-    case blink::mojom::ResourceType::kServiceWorker:
+    case network::mojom::RequestDestination::kServiceWorker:
       DCHECK_EQ(status, ServiceWorkerVersion::NEW);
       break;
     // importScripts() should be called until completion of the install event.
-    case blink::mojom::ResourceType::kScript:
+    case network::mojom::RequestDestination::kScript:
       DCHECK(status == ServiceWorkerVersion::NEW ||
              status == ServiceWorkerVersion::INSTALLING);
       break;
     default:
-      NOTREACHED() << resource_type;
+      NOTREACHED() << resource_destination;
       break;
   }
 }

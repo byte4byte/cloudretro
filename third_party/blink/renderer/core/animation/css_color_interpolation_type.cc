@@ -79,8 +79,8 @@ CSSColorInterpolationType::CreateInterpolableColor(CSSValueID keyword) {
 
 std::unique_ptr<InterpolableValue>
 CSSColorInterpolationType::CreateInterpolableColor(const StyleColor& color) {
-  if (color.IsCurrentColor())
-    return CreateInterpolableColorForIndex(kCurrentcolor);
+  if (!color.IsNumeric())
+    return CreateInterpolableColor(color.GetColorKeyword());
   return CreateInterpolableColor(color.GetColor());
 }
 
@@ -141,8 +141,9 @@ Color CSSColorInterpolationType::ResolveInterpolableColor(
                                *state.Style())
               .Access();
     }
-    AddPremultipliedColor(red, green, blue, alpha, currentcolor_fraction,
-                          current_style_color.GetColor());
+    AddPremultipliedColor(
+        red, green, blue, alpha, currentcolor_fraction,
+        current_style_color.Resolve(Color(), state.Style()->UsedColorScheme()));
   }
   const TextLinkColors& colors = state.GetDocument().GetTextLinkColors();
   if (double webkit_activelink_fraction =

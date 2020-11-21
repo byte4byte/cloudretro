@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #include <algorithm>
+#include <set>
 #include <vector>
 
 #include "base/bind.h"
@@ -18,6 +19,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/avatar_menu.h"
 #include "chrome/browser/profiles/profile_avatar_icon_util.h"
@@ -43,6 +45,18 @@
 using base::ASCIIToUTF16;
 using base::UTF8ToUTF16;
 using content::BrowserThread;
+
+namespace {
+
+size_t GetDefaultAvatarIconResourceIDAtIndex(int index) {
+#if defined(OS_WIN)
+  return profiles::GetOldDefaultAvatar2xIconResourceIDAtIndex(index);
+#else
+  return profiles::GetDefaultAvatarIconResourceIDAtIndex(index);
+#endif  // defined(OS_WIN)
+}
+
+}  //  namespace
 
 ProfileNameVerifierObserver::ProfileNameVerifierObserver(
     TestingProfileManager* testing_profile_manager)
@@ -149,11 +163,12 @@ TEST_F(ProfileInfoCacheTest, AddProfiles) {
     base::string16 profile_name =
         ASCIIToUTF16(base::StringPrintf("name_%ud", i));
 #if !defined(OS_ANDROID)
-    const SkBitmap* icon = rb.GetImageNamed(
-        profiles::GetDefaultAvatarIconResourceIDAtIndex(
-            i)).ToSkBitmap();
-#endif
-    std::string supervised_user_id = "";
+
+    size_t icon_id = GetDefaultAvatarIconResourceIDAtIndex(i);
+    const SkBitmap* icon = rb.GetImageNamed(icon_id).ToSkBitmap();
+
+#endif  // !defined(OS_ANDROID)
+    std::string supervised_user_id;
 #if BUILDFLAG(ENABLE_SUPERVISED_USERS)
     if (i == 3)
       supervised_user_id = supervised_users::kChildAccountSUID;
@@ -470,8 +485,8 @@ TEST_F(ProfileInfoCacheTest, GAIAPicture) {
   // The profile icon should be the default one.
   EXPECT_TRUE(GetCache()->ProfileIsUsingDefaultAvatarAtIndex(0));
   EXPECT_TRUE(GetCache()->ProfileIsUsingDefaultAvatarAtIndex(1));
-  int default_avatar_id =
-      profiles::GetDefaultAvatarIconResourceIDAtIndex(kDefaultAvatarIndex);
+  size_t default_avatar_id =
+      GetDefaultAvatarIconResourceIDAtIndex(kDefaultAvatarIndex);
   const gfx::Image& default_avatar_image(
       ui::ResourceBundle::GetSharedInstance().GetImageNamed(default_avatar_id));
   EXPECT_TRUE(
@@ -498,13 +513,14 @@ TEST_F(ProfileInfoCacheTest, GAIAPicture) {
   EXPECT_FALSE(GetCache()->IsUsingGAIAPictureOfProfileAtIndex(1));
 // Avatar icons not used on Android.
 #if !defined(OS_ANDROID)
-  int other_avatar_id =
-      profiles::GetDefaultAvatarIconResourceIDAtIndex(kOtherAvatarIndex);
+
+  size_t other_avatar_id =
+      GetDefaultAvatarIconResourceIDAtIndex(kOtherAvatarIndex);
   const gfx::Image& other_avatar_image(
       ui::ResourceBundle::GetSharedInstance().GetImageNamed(other_avatar_id));
   EXPECT_TRUE(
       gfx::test::AreImagesEqual(other_avatar_image, entry->GetAvatarIcon()));
-#endif
+#endif  // !defined(OS_ANDROID)
 
   // Explicitly setting the GAIA picture should make it preferred again.
   GetCache()->SetIsUsingGAIAPictureOfProfileAtIndex(1, true);
@@ -583,7 +599,7 @@ TEST_F(ProfileInfoCacheTest, SetSupervisedUserId) {
 
 TEST_F(ProfileInfoCacheTest, EmptyGAIAInfo) {
   base::string16 profile_name = ASCIIToUTF16("name_1");
-  int id = profiles::GetDefaultAvatarIconResourceIDAtIndex(0);
+  size_t id = GetDefaultAvatarIconResourceIDAtIndex(0);
   const gfx::Image& profile_image(
       ui::ResourceBundle::GetSharedInstance().GetImageNamed(id));
 
@@ -771,7 +787,7 @@ TEST_F(ProfileInfoCacheTest, EntriesInAttributesStorage) {
   }
 }
 
-#if !defined(OS_ANDROID) && !defined(OS_CHROMEOS)
+#if !defined(OS_ANDROID) && !BUILDFLAG(IS_CHROMEOS_ASH)
 TEST_F(ProfileInfoCacheTest, MigrateLegacyProfileNamesAndRecomputeIfNeeded) {
   EXPECT_EQ(0U, GetCache()->GetNumberOfProfiles());
   // Mimick a pre-existing Directory with profiles that has legacy profile
@@ -874,8 +890,10 @@ TEST_F(ProfileInfoCacheTest, GetGaiaImageForAvatarMenu) {
 
   // Try to get the GAIA image. For the first time, it triggers an async image
   // load from disk. The load status indicates the image is still being loaded.
+  constexpr int kArbitraryPreferredSize = 96;
   EXPECT_EQ(AvatarMenu::ImageLoadStatus::LOADING,
-            AvatarMenu::GetImageForMenuButton(profile_path, &image_loaded));
+            AvatarMenu::GetImageForMenuButton(profile_path, &image_loaded,
+                                              kArbitraryPreferredSize));
   EXPECT_FALSE(gfx::test::AreImagesEqual(gaia_image, image_loaded));
 
   // Wait until the async image load finishes.
@@ -883,12 +901,13 @@ TEST_F(ProfileInfoCacheTest, GetGaiaImageForAvatarMenu) {
 
   // Since the GAIA image is loaded now, we can get it this time.
   EXPECT_EQ(AvatarMenu::ImageLoadStatus::LOADED,
-            AvatarMenu::GetImageForMenuButton(profile_path, &image_loaded));
+            AvatarMenu::GetImageForMenuButton(profile_path, &image_loaded,
+                                              kArbitraryPreferredSize));
   EXPECT_TRUE(gfx::test::AreImagesEqual(gaia_image, image_loaded));
 }
 #endif
 
-#if defined(OS_CHROMEOS) || defined(OS_ANDROID)
+#if BUILDFLAG(IS_CHROMEOS_ASH) || defined(OS_ANDROID)
 TEST_F(ProfileInfoCacheTest,
        DontMigrateLegacyProfileNamesWithoutNewAvatarMenu) {
   EXPECT_EQ(0U, GetCache()->GetNumberOfProfiles());

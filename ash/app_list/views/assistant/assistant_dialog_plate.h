@@ -15,8 +15,6 @@
 #include "ash/assistant/ui/base/assistant_button_listener.h"
 #include "ash/public/cpp/assistant/controller/assistant_controller.h"
 #include "ash/public/cpp/assistant/controller/assistant_controller_observer.h"
-#include "ash/public/cpp/assistant/controller/assistant_interaction_controller.h"
-#include "ash/public/cpp/assistant/controller/assistant_ui_controller.h"
 #include "base/component_export.h"
 #include "base/macros.h"
 #include "base/scoped_observer.h"
@@ -30,11 +28,11 @@ class CallbackLayerAnimationObserver;
 
 namespace views {
 class ImageButton;
+class ImageView;
 }  // namespace views
 
 namespace ash {
 class AssistantViewDelegate;
-class LogoView;
 class MicView;
 
 // AssistantDialogPlate --------------------------------------------------------
@@ -100,7 +98,7 @@ class APP_LIST_EXPORT AssistantDialogPlate
   AssistantViewDelegate* const delegate_;
 
   // The following views are all owned by the view hierarchy
-  LogoView* molecule_icon_ = nullptr;
+  views::ImageView* molecule_icon_ = nullptr;
   views::View* input_modality_layout_container_ = nullptr;
   views::View* keyboard_layout_container_ = nullptr;
   views::View* voice_layout_container_ = nullptr;
@@ -114,18 +112,6 @@ class APP_LIST_EXPORT AssistantDialogPlate
 
   ScopedObserver<AssistantController, AssistantControllerObserver>
       assistant_controller_observer_{this};
-
-  ScopedObserver<AssistantInteractionController,
-                 AssistantInteractionModelObserver,
-                 &AssistantInteractionController::AddModelObserver,
-                 &AssistantInteractionController::RemoveModelObserver>
-      assistant_interaction_model_observer_{this};
-
-  ScopedObserver<AssistantUiController,
-                 AssistantUiModelObserver,
-                 &AssistantUiController::AddModelObserver,
-                 &AssistantUiController::RemoveModelObserver>
-      assistant_ui_model_observer_{this};
 
   DISALLOW_COPY_AND_ASSIGN(AssistantDialogPlate);
 };

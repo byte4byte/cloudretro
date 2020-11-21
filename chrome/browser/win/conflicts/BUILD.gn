@@ -27,10 +27,7 @@ source_set("module_info") {
     "//content/public/common",
   ]
 
-  deps = [
-    "//base:i18n",
-    "//chrome/common/safe_browsing:pe_image_reader",
-  ]
+  deps = [ "//base:i18n" ]
 
   libs = [ "crypt32.lib" ]
 }
@@ -56,6 +53,7 @@ source_set("unit_tests") {
   deps = [
     ":conflicts_dll",
     ":module_info",
+    "//base",
     "//chrome/browser",
     "//chrome/services/util_win:lib",
     "//chrome/test:test_support",
@@ -97,9 +95,11 @@ if (is_chrome_branded) {
       ":conflicts_dll",
       ":module_list_proto",
       "//chrome/browser",
+      "//chrome/browser:browser_process",
       "//chrome/chrome_elf:third_party_shared_defines",
       "//chrome/test:test_support_ui",
       "//components/services/quarantine/public/cpp:features",
+      "//content/test:test_support",
       "//testing/gtest",
     ]
   }

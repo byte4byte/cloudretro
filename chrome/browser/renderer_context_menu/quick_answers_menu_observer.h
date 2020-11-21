@@ -30,11 +30,6 @@ class QuickAnswersMenuObserver
   ~QuickAnswersMenuObserver() override;
 
   // RenderViewContextMenuObserver implementation.
-  void InitMenu(const content::ContextMenuParams& params) override;
-  bool IsCommandIdSupported(int command_id) override;
-  bool IsCommandIdChecked(int command_id) override;
-  bool IsCommandIdEnabled(int command_id) override;
-  void ExecuteCommand(int command_id) override;
   void CommandWillBeExecuted(int command_id) override;
   void OnContextMenuShown(const content::ContextMenuParams& params,
                           const gfx::Rect& bounds_in_screen) override;
@@ -44,17 +39,17 @@ class QuickAnswersMenuObserver
 
   // QuickAnswersDelegate implementation.
   void OnQuickAnswerReceived(
-      std::unique_ptr<chromeos::quick_answers::QuickAnswer> answer) override;
+      std::unique_ptr<chromeos::quick_answers::QuickAnswer> answer) override {}
   void OnEligibilityChanged(bool eligible) override;
-  void OnNetworkError() override;
-
-  void SetQuickAnswerClientForTesting(
-      std::unique_ptr<chromeos::quick_answers::QuickAnswersClient>
-          quick_answers_client);
+  void OnNetworkError() override {}
 
  private:
-  bool IsRichUiEnabled();
-  void SendAssistantQuery(const std::string& query);
+  std::string GetDeviceLanguage();
+  void OnTextSurroundingSelectionAvailable(
+      const std::string& selected_text,
+      const base::string16& surrounding_text,
+      uint32_t start_offset,
+      uint32_t end_offset);
 
   // The interface to add a context-menu item and update it.
   RenderViewContextMenuProxy* proxy_;
@@ -66,15 +61,14 @@ class QuickAnswersMenuObserver
   // locale, consents, etc).
   bool is_eligible_ = false;
 
-  // Query used to retrieve quick answer.
-  std::string query_;
-
-  std::unique_ptr<chromeos::quick_answers::QuickAnswer> quick_answer_;
+  gfx::Rect bounds_in_screen_;
 
   ash::QuickAnswersController* quick_answers_controller_ = nullptr;
 
   // Whether commands other than quick answers is executed.
   bool is_other_command_executed_ = false;
+
+  base::WeakPtrFactory<QuickAnswersMenuObserver> weak_factory_{this};
 };
 
 #endif  // CHROME_BROWSER_RENDERER_CONTEXT_MENU_QUICK_ANSWERS_MENU_OBSERVER_H_

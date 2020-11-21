@@ -51,6 +51,9 @@ namespace test {
 // RunLoop::Run(UntilIdle) or TaskEnvironment::RunUntilIdle is called on the
 // main thread.
 //
+// The TaskEnvironment requires TestTimeouts::Initialize() to be called in order
+// to run posted tasks, so that it can watch for problematic long-running tasks.
+//
 // The TimeSource trait can be used to request that delayed tasks be under the
 // manual control of RunLoop::Run() and TaskEnvironment::FastForward*() methods.
 //
@@ -273,7 +276,6 @@ class TaskEnvironment {
   // Only valid for instances using TimeSource::MOCK_TIME. Returns a
   // TickClock whose time is updated by FastForward(By|UntilNoTasksRemain).
   const TickClock* GetMockTickClock() const;
-  std::unique_ptr<TickClock> DeprecatedGetMockTickClock();
 
   // Only valid for instances using TimeSource::MOCK_TIME. Returns a
   // Clock whose time is updated by FastForward(By|UntilNoTasksRemain). The

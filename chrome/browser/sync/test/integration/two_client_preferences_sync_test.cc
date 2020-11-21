@@ -16,6 +16,7 @@
 #include "chrome/common/pref_names.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
+#include "content/public/test/browser_test.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 using preferences_helper::BooleanPrefMatches;
@@ -44,7 +45,6 @@ class TwoClientPreferencesSyncTest : public SyncTest {
 
 IN_PROC_BROWSER_TEST_F(TwoClientPreferencesSyncTest, E2E_ENABLED(Sanity)) {
   ResetSyncForPrimaryAccount();
-  DisableVerifier();
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
   ASSERT_TRUE(StringPrefMatchChecker(prefs::kHomePage).Wait());
   const std::string new_home_page = base::StringPrintf(
@@ -108,7 +108,6 @@ IN_PROC_BROWSER_TEST_F(TwoClientPreferencesSyncTest,
                        E2E_ENABLED(UnsyncableBooleanPref)) {
   ResetSyncForPrimaryAccount();
   ASSERT_TRUE(SetupSync());
-  DisableVerifier();
   ASSERT_TRUE(StringPrefMatchChecker(prefs::kHomePage).Wait());
   ASSERT_TRUE(BooleanPrefMatchChecker(prefs::kDisableScreenshots).Wait());
 
@@ -168,19 +167,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientPreferencesSyncTest,
 class TwoClientPreferencesSyncTestWithSelfNotifications : public SyncTest {
  public:
   TwoClientPreferencesSyncTestWithSelfNotifications() : SyncTest(TWO_CLIENT) {}
-
-  ~TwoClientPreferencesSyncTestWithSelfNotifications() override {}
-
-  void SetUp() override {
-    // If verifiers are enabled, ChangeBooleanPref() and similar methods will
-    // apply changes to both the specified client and the verifier profile.
-    // These tests should only apply changes in one client.
-    DisableVerifier();
-    SyncTest::SetUp();
-  }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(TwoClientPreferencesSyncTestWithSelfNotifications);
+  ~TwoClientPreferencesSyncTestWithSelfNotifications() override = default;
 };
 
 IN_PROC_BROWSER_TEST_F(TwoClientPreferencesSyncTestWithSelfNotifications,
@@ -206,16 +193,11 @@ IN_PROC_BROWSER_TEST_F(TwoClientPreferencesSyncTestWithSelfNotifications,
   ASSERT_THAT(GetPrefs(1)->GetString(pref_name), Eq(string_value));
 
   // Start sync and await until they sync mutually.
-  base::HistogramTester histogram_tester;
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
 
   // Verify that neither of the clients got updated, because of type mismatch.
   EXPECT_THAT(GetPrefs(0)->GetBoolean(pref_name), Eq(true));
   EXPECT_THAT(GetPrefs(1)->GetString(pref_name), Eq(string_value));
-
-  // Only one of the two clients sees the mismatch, the one sync-ing last.
-  histogram_tester.ExpectTotalCount("Sync.Preferences.RemotePrefTypeMismatch",
-                                    1);
 }
 
 // Verifies that priority synced preferences and regular sycned preferences are

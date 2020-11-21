@@ -5,12 +5,19 @@
 #include "ash/system/accessibility/floating_accessibility_detailed_controller.h"
 
 #include "ash/public/cpp/shell_window_ids.h"
+#include "ash/resources/vector_icons/vector_icons.h"
 #include "ash/shell.h"
+#include "ash/strings/grit/ash_strings.h"
+#include "ash/style/ash_color_provider.h"
 #include "ash/system/accessibility/tray_accessibility.h"
 #include "ash/system/tray/tray_background_view.h"
 #include "ash/system/tray/tray_constants.h"
 #include "ash/wm/collision_detection/collision_detection_utils.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
+#include "ui/gfx/paint_vector_icon.h"
+#include "ui/views/controls/button/image_button.h"
+#include "ui/wm/public/activation_client.h"
 
 namespace ash {
 
@@ -42,10 +49,13 @@ class FloatingAccessibilityDetailedController::DetailedBubbleView
 
 FloatingAccessibilityDetailedController::
     FloatingAccessibilityDetailedController(Delegate* delegate)
-    : DetailedViewDelegate(/*tray_controller*/ nullptr), delegate_(delegate) {}
+    : DetailedViewDelegate(/*tray_controller*/ nullptr), delegate_(delegate) {
+  Shell::Get()->activation_client()->AddObserver(this);
+}
 
 FloatingAccessibilityDetailedController::
     ~FloatingAccessibilityDetailedController() {
+  Shell::Get()->activation_client()->RemoveObserver(this);
   if (!bubble_widget_ || bubble_widget_->IsClosed())
     return;
   bubble_widget_->CloseNow();
@@ -65,6 +75,7 @@ void FloatingAccessibilityDetailedController::Show(
   init_params.anchor_rect = anchor_rect;
   init_params.insets = gfx::Insets(0, kUnifiedMenuPadding, kUnifiedMenuPadding,
                                    kUnifiedMenuPadding);
+  init_params.close_on_deactivate = false;
   init_params.corner_radius = kUnifiedTrayCornerRadius;
   init_params.has_shadow = false;
   init_params.translucent = true;
@@ -77,16 +88,17 @@ void FloatingAccessibilityDetailedController::Show(
       std::make_unique<tray::AccessibilityDetailedView>(this));
   bubble_view_->SetPreferredSize(
       gfx::Size(kTrayMenuWidth, kDetailedViewHeightDip));
-  detailed_view_->SetFocusBehavior(ActionableView::FocusBehavior::ALWAYS);
+  bubble_view_->SetFocusBehavior(ActionableView::FocusBehavior::ALWAYS);
   detailed_view_->SetPaintToLayer();
   detailed_view_->layer()->SetFillsBoundsOpaquely(false);
 
   bubble_widget_ = views::BubbleDialogDelegateView::CreateBubble(bubble_view_);
+  bubble_view_->SetCanActivate(true);
   TrayBackgroundView::InitializeBubbleAnimations(bubble_widget_);
   bubble_view_->InitializeAndShowBubble();
 
   // Focus on the bubble whenever it is shown.
-  detailed_view_->RequestFocus();
+  bubble_view_->RequestFocus();
 }
 
 void FloatingAccessibilityDetailedController::UpdateAnchorRect(
@@ -102,6 +114,8 @@ void FloatingAccessibilityDetailedController::UpdateAnchorRect(
 }
 
 void FloatingAccessibilityDetailedController::CloseBubble() {
+  if (delegate_->GetBubbleWidget())
+    delegate_->GetBubbleWidget()->Activate();
   if (!bubble_widget_ || bubble_widget_->IsClosed())
     return;
   bubble_widget_->Close();
@@ -112,20 +126,31 @@ void FloatingAccessibilityDetailedController::TransitionToMainView(
   CloseBubble();
 }
 
-views::Button* FloatingAccessibilityDetailedController::CreateHelpButton(
-    views::ButtonListener* listener) {
-  auto* button = DetailedViewDelegate::CreateHelpButton(listener);
-  button->SetEnabled(false);
+base::string16
+FloatingAccessibilityDetailedController::GetAccessibleNameForBubble() {
+  return l10n_util::GetStringUTF16(
+      IDS_ASH_FLOATING_ACCESSIBILITY_DETAILED_MENU);
+}
+
+views::Button* FloatingAccessibilityDetailedController::CreateBackButton(
+    views::Button::PressedCallback callback) {
+  views::ImageButton* button = static_cast<views::ImageButton*>(
+      DetailedViewDelegate::CreateBackButton(std::move(callback)));
+  gfx::ImageSkia image = gfx::CreateVectorIcon(
+      kAutoclickCloseIcon,
+      AshColorProvider::Get()->GetContentLayerColor(
+          AshColorProvider::ContentLayerType::kIconColorPrimary));
+  button->SetImage(views::Button::STATE_NORMAL, image);
+  button->SetTooltipText(l10n_util::GetStringUTF16(
+      IDS_ASH_FLOATING_ACCESSIBILITY_DETAILED_MENU_CLOSE));
+
   return button;
 }
 
-views::Button* FloatingAccessibilityDetailedController::CreateSettingsButton(
-    views::ButtonListener* listener,
-    int setting_accessible_name_id) {
-  auto* button = DetailedViewDelegate::CreateSettingsButton(
-      listener, setting_accessible_name_id);
-  // TODO(crbug.com/1061068): Enable when the settings UI is ready.
-  button->SetEnabled(false);
+views::Button* FloatingAccessibilityDetailedController::CreateHelpButton(
+    views::Button::PressedCallback callback) {
+  auto* button = DetailedViewDelegate::CreateHelpButton(std::move(callback));
+  button->SetVisible(false);
   return button;
 }
 
@@ -141,6 +166,25 @@ void FloatingAccessibilityDetailedController::BubbleViewDestroyed() {
 void FloatingAccessibilityDetailedController::OnAccessibilityStatusChanged() {
   if (detailed_view_)
     detailed_view_->OnAccessibilityStatusChanged();
+}
+
+void FloatingAccessibilityDetailedController::OnWindowActivated(
+    ActivationReason reason,
+    aura::Window* gained_active,
+    aura::Window* lost_active) {
+  if (!gained_active || !bubble_widget_)
+    return;
+
+  views::Widget* gained_widget =
+      views::Widget::GetWidgetForNativeView(gained_active);
+  // Do not close the view if our bubble was activated.
+  // Also, do not close the view the floating menu was activated, since it
+  // controls our visibility.
+  if (gained_widget == bubble_widget_ ||
+      gained_widget == delegate_->GetBubbleWidget())
+    return;
+
+  bubble_widget_->CloseWithReason(views::Widget::ClosedReason::kLostFocus);
 }
 
 }  // namespace ash

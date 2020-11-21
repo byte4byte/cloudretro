@@ -102,7 +102,7 @@ bool WebBundleInterceptorForNetwork::MaybeCreateLoaderForResponse(
 
 void WebBundleInterceptorForNetwork::OnMetadataReady(
     network::ResourceRequest request,
-    data_decoder::mojom::BundleMetadataParseErrorPtr error) {
+    web_package::mojom::BundleMetadataParseErrorPtr error) {
   if (error) {
     web_bundle_utils::CompleteWithInvalidWebBundleError(
         std::move(forwarding_client_), frame_tree_node_id_,
@@ -123,7 +123,7 @@ void WebBundleInterceptorForNetwork::OnMetadataReady(
         "bundle.");
     return;
   }
-  if (!reader_->source().IsNavigationPathRestrictionSatisfied(primary_url_)) {
+  if (!reader_->source().IsPathRestrictionSatisfied(primary_url_)) {
     web_bundle_utils::CompleteWithInvalidWebBundleError(
         std::move(forwarding_client_), frame_tree_node_id_,
         base::StringPrintf("Path restriction mismatch: Can't navigate to %s "

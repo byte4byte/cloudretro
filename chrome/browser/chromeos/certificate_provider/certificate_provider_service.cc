@@ -11,8 +11,8 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
 #include "base/callback.h"
+#include "base/callback_helpers.h"
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/macros.h"
@@ -24,8 +24,6 @@
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "chrome/browser/chromeos/certificate_provider/certificate_provider.h"
 #include "net/base/net_errors.h"
-#include "third_party/boringssl/src/include/openssl/digest.h"
-#include "third_party/boringssl/src/include/openssl/ssl.h"
 
 namespace chromeos {
 
@@ -184,25 +182,13 @@ void CertificateProviderService::SSLPrivateKey::Sign(
   // PostSignResult().
   callback = base::BindOnce(&PostSignResult, std::move(callback));
 
-  // The extension expects the input to be hashed ahead of time.
-  const EVP_MD* md = SSL_get_signature_algorithm_digest(algorithm);
-  uint8_t digest[EVP_MAX_MD_SIZE];
-  unsigned digest_len;
-  if (!md || !EVP_Digest(input.data(), input.size(), digest, &digest_len, md,
-                         nullptr)) {
-    std::move(callback).Run(net::ERR_SSL_CLIENT_AUTH_SIGNATURE_FAILED,
-                            /*signature=*/{});
-    return;
-  }
-
   if (!service_) {
     std::move(callback).Run(net::ERR_FAILED, /*signature=*/{});
     return;
   }
 
   service_->RequestSignatureFromExtension(
-      extension_id_, cert_info_.certificate, algorithm,
-      base::make_span(digest, digest_len),
+      extension_id_, cert_info_.certificate, algorithm, input,
       /*authenticating_user_account_id=*/{}, std::move(callback));
 }
 
@@ -229,47 +215,52 @@ void CertificateProviderService::RemoveObserver(Observer* observer) {
   observers_.RemoveObserver(observer);
 }
 
-bool CertificateProviderService::SetCertificatesProvidedByExtension(
+void CertificateProviderService::SetCertificatesProvidedByExtension(
     const std::string& extension_id,
-    int cert_request_id,
     const CertificateInfoList& certificate_infos) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  certificate_map_.UpdateCertificatesForExtension(extension_id,
+                                                  certificate_infos);
+  for (auto& observer : observers_)
+    observer.OnCertificatesUpdated(extension_id, certificate_infos);
+}
+
+bool CertificateProviderService::SetExtensionCertificateReplyReceived(
+    const std::string& extension_id,
+    int cert_request_id) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   bool completed = false;
-  if (!certificate_requests_.SetCertificates(extension_id, cert_request_id,
-                                             certificate_infos, &completed)) {
+  if (!certificate_requests_.SetExtensionReplyReceived(
+          extension_id, cert_request_id, &completed)) {
     DLOG(WARNING) << "Unexpected reply of extension " << extension_id
                   << " to request " << cert_request_id;
     return false;
   }
   if (completed) {
-    std::map<std::string, CertificateInfoList> certificates;
     base::OnceCallback<void(net::ClientCertIdentityList)> callback;
-    certificate_requests_.RemoveRequest(cert_request_id, &certificates,
-                                        &callback);
-    UpdateCertificatesAndRun(certificates, std::move(callback));
+    certificate_requests_.RemoveRequest(cert_request_id, &callback);
+    CollectCertificatesAndRun(std::move(callback));
   }
   return true;
 }
 
-void CertificateProviderService::ReplyToSignRequest(
+bool CertificateProviderService::ReplyToSignRequest(
     const std::string& extension_id,
     int sign_request_id,
     const std::vector<uint8_t>& signature) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   // TODO(crbug.com/1046860): Remove logging after stabilizing the feature.
-  VLOG(1) << "Extension " << extension_id << " replied to signature request "
-          << sign_request_id << ", size " << signature.size();
+  LOG(WARNING) << "Extension " << extension_id
+               << " replied to signature request " << sign_request_id
+               << ", size " << signature.size();
 
   scoped_refptr<net::X509Certificate> certificate;
   net::SSLPrivateKey::SignCallback callback;
   if (!sign_requests_.RemoveRequest(extension_id, sign_request_id, &certificate,
                                     &callback)) {
-    LOG(ERROR) << "request id unknown.";
-    // The request was aborted before, or the extension replied multiple times
-    // to the same request.
-    return;
+    return false;
   }
 
   const net::Error error_code = signature.empty() ? net::ERR_FAILED : net::OK;
@@ -279,6 +270,7 @@ void CertificateProviderService::ReplyToSignRequest(
     for (auto& observer : observers_)
       observer.OnSignCompleted(certificate, extension_id);
   }
+  return true;
 }
 
 bool CertificateProviderService::LookUpCertificate(
@@ -299,20 +291,23 @@ CertificateProviderService::CreateCertificateProvider() {
   return std::make_unique<CertificateProviderImpl>(weak_factory_.GetWeakPtr());
 }
 
+void CertificateProviderService::OnExtensionUnregistered(
+    const std::string& extension_id) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  certificate_map_.RemoveExtension(extension_id);
+}
+
 void CertificateProviderService::OnExtensionUnloaded(
     const std::string& extension_id) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-
-  for (const int cert_request_id :
-       certificate_requests_.DropExtension(extension_id)) {
-    std::map<std::string, CertificateInfoList> certificates;
-    base::OnceCallback<void(net::ClientCertIdentityList)> callback;
-    certificate_requests_.RemoveRequest(cert_request_id, &certificates,
-                                        &callback);
-    UpdateCertificatesAndRun(certificates, std::move(callback));
-  }
-
   certificate_map_.RemoveExtension(extension_id);
+
+  for (const int completed_cert_request_id :
+       certificate_requests_.DropExtension(extension_id)) {
+    base::OnceCallback<void(net::ClientCertIdentityList)> callback;
+    certificate_requests_.RemoveRequest(completed_cert_request_id, &callback);
+    CollectCertificatesAndRun(std::move(callback));
+  }
 
   for (auto& callback : sign_requests_.RemoveAllRequests(extension_id))
     std::move(callback).Run(net::ERR_FAILED, std::vector<uint8_t>());
@@ -323,7 +318,7 @@ void CertificateProviderService::OnExtensionUnloaded(
 void CertificateProviderService::RequestSignatureBySpki(
     const std::string& subject_public_key_info,
     uint16_t algorithm,
-    base::span<const uint8_t> digest,
+    base::span<const uint8_t> input,
     const base::Optional<AccountId>& authenticating_user_account_id,
     net::SSLPrivateKey::SignCallback callback) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
@@ -339,7 +334,7 @@ void CertificateProviderService::RequestSignatureBySpki(
   }
 
   RequestSignatureFromExtension(extension_id, info.certificate, algorithm,
-                                digest, authenticating_user_account_id,
+                                input, authenticating_user_account_id,
                                 std::move(callback));
 }
 
@@ -375,8 +370,8 @@ void CertificateProviderService::AbortSignatureRequestsForAuthenticatingUser(
     const int sign_request_id = sign_request.second;
 
     // TODO(crbug.com/1046860): Remove logging after stabilizing the feature.
-    VLOG(1) << "Aborting user login signature request from extension "
-            << extension_id << " id " << sign_request_id;
+    LOG(WARNING) << "Aborting user login signature request from extension "
+                 << extension_id << " id " << sign_request_id;
 
     pin_dialog_manager_.AbortSignRequest(extension_id, sign_request_id);
 
@@ -397,9 +392,10 @@ void CertificateProviderService::GetCertificatesFromExtensions(
       delegate_->CertificateProviderExtensions());
 
   if (provider_extensions.empty()) {
-    DVLOG(2) << "No provider extensions left, clear all certificates.";
-    UpdateCertificatesAndRun(std::map<std::string, CertificateInfoList>(),
-                             std::move(callback));
+    DVLOG(2) << "No provider extensions left.";
+    // Note that there could still be unfinished requests to extensions that
+    // were previously registered.
+    CollectCertificatesAndRun(std::move(callback));
     return;
   }
 
@@ -412,46 +408,40 @@ void CertificateProviderService::GetCertificatesFromExtensions(
   delegate_->BroadcastCertificateRequest(cert_request_id);
 }
 
-void CertificateProviderService::UpdateCertificatesAndRun(
-    const std::map<std::string, CertificateInfoList>& extension_to_certificates,
+void CertificateProviderService::CollectCertificatesAndRun(
     base::OnceCallback<void(net::ClientCertIdentityList)> callback) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
-  // Extensions are removed from the service's state when they're unloaded.
-  // Any remaining extension is assumed to be enabled.
-  certificate_map_.Update(extension_to_certificates);
-
-  net::ClientCertIdentityList all_certs;
-  for (const auto& entry : extension_to_certificates) {
-    for (const CertificateInfo& cert_info : entry.second)
-      all_certs.push_back(std::make_unique<ClientCertIdentity>(
-          cert_info.certificate, weak_factory_.GetWeakPtr()));
+  net::ClientCertIdentityList client_cert_identity_list;
+  std::vector<scoped_refptr<net::X509Certificate>> certificates =
+      certificate_map_.GetCertificates();
+  for (const scoped_refptr<net::X509Certificate>& certificate : certificates) {
+    client_cert_identity_list.push_back(std::make_unique<ClientCertIdentity>(
+        certificate, weak_factory_.GetWeakPtr()));
   }
 
-  std::move(callback).Run(std::move(all_certs));
+  std::move(callback).Run(std::move(client_cert_identity_list));
 }
 
 void CertificateProviderService::TerminateCertificateRequest(
     int cert_request_id) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
-  std::map<std::string, CertificateInfoList> certificates;
   base::OnceCallback<void(net::ClientCertIdentityList)> callback;
-  if (!certificate_requests_.RemoveRequest(cert_request_id, &certificates,
-                                           &callback)) {
+  if (!certificate_requests_.RemoveRequest(cert_request_id, &callback)) {
     DLOG(WARNING) << "Request id " << cert_request_id << " unknown.";
     return;
   }
 
   DVLOG(1) << "Time out certificate request " << cert_request_id;
-  UpdateCertificatesAndRun(certificates, std::move(callback));
+  CollectCertificatesAndRun(std::move(callback));
 }
 
 void CertificateProviderService::RequestSignatureFromExtension(
     const std::string& extension_id,
     const scoped_refptr<net::X509Certificate>& certificate,
     uint16_t algorithm,
-    base::span<const uint8_t> digest,
+    base::span<const uint8_t> input,
     const base::Optional<AccountId>& authenticating_user_account_id,
     net::SSLPrivateKey::SignCallback callback) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
@@ -461,16 +451,16 @@ void CertificateProviderService::RequestSignatureFromExtension(
       std::move(callback));
 
   // TODO(crbug.com/1046860): Remove logging after stabilizing the feature.
-  VLOG(1) << "Starting signature request to extension " << extension_id
-          << " id " << sign_request_id;
+  LOG(WARNING) << "Starting signature request to extension " << extension_id
+               << " id " << sign_request_id;
 
   pin_dialog_manager_.AddSignRequestId(extension_id, sign_request_id,
                                        authenticating_user_account_id);
   if (!delegate_->DispatchSignRequestToExtension(
-          extension_id, sign_request_id, algorithm, certificate, digest)) {
+          extension_id, sign_request_id, algorithm, certificate, input)) {
     // TODO(crbug.com/1046860): Remove logging after stabilizing the feature.
-    VLOG(1) << "Failed to dispatch signature request to extension "
-            << extension_id << " id " << sign_request_id;
+    LOG(WARNING) << "Failed to dispatch signature request to extension "
+                 << extension_id << " id " << sign_request_id;
     scoped_refptr<net::X509Certificate> local_certificate;
     sign_requests_.RemoveRequest(extension_id, sign_request_id,
                                  &local_certificate, &callback);

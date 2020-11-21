@@ -60,6 +60,7 @@ class WebrtcConnectionToHost : public ConnectionToHost,
   void OnWebrtcTransportConnecting() override;
   void OnWebrtcTransportConnected() override;
   void OnWebrtcTransportError(ErrorCode error) override;
+  void OnWebrtcTransportProtocolChanged() override;
   void OnWebrtcTransportIncomingDataChannel(
       const std::string& name,
       std::unique_ptr<MessagePipe> pipe) override;
@@ -67,6 +68,7 @@ class WebrtcConnectionToHost : public ConnectionToHost,
       scoped_refptr<webrtc::MediaStreamInterface> stream) override;
   void OnWebrtcTransportMediaStreamRemoved(
       scoped_refptr<webrtc::MediaStreamInterface> stream) override;
+  void OnWebrtcTransportRouteChanged(const TransportRoute& route) override;
 
   // ChannelDispatcherBase::EventHandler interface.
   void OnChannelInitialized(ChannelDispatcherBase* channel_dispatcher) override;

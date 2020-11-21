@@ -8,6 +8,9 @@
 #include <vector>
 #include "components/autofill/core/browser/data_model/autofill_profile.h"
 #include "components/autofill/core/browser/data_model/credit_card.h"
+#include "components/autofill_assistant/browser/action_value.pb.h"
+#include "components/autofill_assistant/browser/client_status.h"
+#include "components/autofill_assistant/browser/service.pb.h"
 #include "components/autofill_assistant/browser/user_data.h"
 
 namespace autofill_assistant {
@@ -61,6 +64,28 @@ bool CompareContactDetails(
     const CollectUserDataOptions& collect_user_data_options,
     const autofill::AutofillProfile* a,
     const autofill::AutofillProfile* b);
+
+bool IsCompleteContact(const autofill::AutofillProfile* profile,
+                       const CollectUserDataOptions& collect_user_data_options);
+
+bool IsCompleteShippingAddress(
+    const autofill::AutofillProfile* profile,
+    const CollectUserDataOptions& collect_user_data_options);
+
+bool IsCompleteCreditCard(
+    const autofill::CreditCard* credit_card,
+    const autofill::AutofillProfile* billing_profile,
+    const CollectUserDataOptions& collect_user_data_options);
+
+// Get a formatted autofill value. The replacement is treated as strict,
+// meaning a missing value will lead to a failed ClientStatus.
+ClientStatus GetFormattedAutofillValue(const AutofillValue& autofill_value,
+                                       const UserData* user_data,
+                                       std::string* out_value);
+ClientStatus GetFormattedAutofillValue(
+    const AutofillValueRegexp& autofill_value,
+    const UserData* user_data,
+    std::string* out_value);
 
 }  // namespace autofill_assistant
 

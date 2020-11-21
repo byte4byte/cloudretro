@@ -4,32 +4,37 @@
 
 #include "content/shell/browser/shell_browser_main_parts.h"
 
+#include <utility>
+
 #include "base/base_switches.h"
 #include "base/bind.h"
+#include "base/callback_helpers.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
-#include "base/message_loop/message_loop_current.h"
+#include "base/task/current_thread.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
 #include "cc/base/switches.h"
+#include "components/performance_manager/embedder/performance_manager_lifetime.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/main_function_params.h"
+#include "content/public/common/result_codes.h"
 #include "content/public/common/url_constants.h"
 #include "content/shell/android/shell_descriptors.h"
 #include "content/shell/browser/shell.h"
 #include "content/shell/browser/shell_browser_context.h"
 #include "content/shell/browser/shell_devtools_manager_delegate.h"
+#include "content/shell/browser/shell_platform_delegate.h"
 #include "content/shell/common/shell_switches.h"
 #include "device/bluetooth/bluetooth_adapter_factory.h"
 #include "net/base/filename_util.h"
 #include "net/base/net_module.h"
 #include "net/grit/net_resources.h"
-#include "services/service_manager/embedder/result_codes.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "url/gurl.h"
 
@@ -40,6 +45,9 @@
 #include "net/base/network_change_notifier.h"
 #endif
 
+#if defined(USE_OZONE) || defined(USE_X11)
+#include "ui/base/ui_base_features.h"
+#endif
 #if defined(USE_X11)
 #include "ui/base/x/x11_util.h"  // nogncheck
 #endif
@@ -54,6 +62,14 @@
 #include "device/bluetooth/dbus/bluez_dbus_manager.h"
 #elif defined(OS_LINUX)
 #include "device/bluetooth/dbus/dbus_bluez_manager_wrapper_linux.h"
+#endif  // #elif defined(OS_LINUX)
+
+#if BUILDFLAG(USE_GTK)
+#include "ui/gtk/gtk_ui.h"
+#include "ui/gtk/gtk_ui_delegate.h"
+#if defined(USE_X11)
+#include "ui/gtk/x/gtk_ui_delegate_x11.h"  // nogncheck
+#endif
 #endif
 
 namespace content {
@@ -101,10 +117,11 @@ ShellBrowserMainParts::ShellBrowserMainParts(
 ShellBrowserMainParts::~ShellBrowserMainParts() {
 }
 
-#if !defined(OS_MACOSX)
+#if !defined(OS_MAC)
 void ShellBrowserMainParts::PreMainMessageLoopStart() {
 #if defined(USE_AURA) && defined(USE_X11)
-  ui::TouchFactory::SetTouchDeviceListFromCommandLine();
+  if (!features::IsUsingOzonePlatform())
+    ui::TouchFactory::SetTouchDeviceListFromCommandLine();
 #endif
 }
 #endif
@@ -119,9 +136,6 @@ void ShellBrowserMainParts::PostMainMessageLoopStart() {
 }
 
 int ShellBrowserMainParts::PreEarlyInitialization() {
-#if defined(USE_X11)
-  ui::SetDefaultX11ErrorHandlers();
-#endif
 #if !defined(OS_CHROMEOS) && defined(USE_AURA) && defined(OS_LINUX)
   ui::InitializeInputMethodForTesting();
 #endif
@@ -129,7 +143,7 @@ int ShellBrowserMainParts::PreEarlyInitialization() {
   net::NetworkChangeNotifier::SetFactory(
       new net::NetworkChangeNotifierFactoryAndroid());
 #endif
-  return service_manager::RESULT_CODE_NORMAL_EXIT;
+  return RESULT_CODE_NORMAL_EXIT;
 }
 
 void ShellBrowserMainParts::InitializeBrowserContexts() {
@@ -140,6 +154,26 @@ void ShellBrowserMainParts::InitializeBrowserContexts() {
 void ShellBrowserMainParts::InitializeMessageLoopContext() {
   Shell::CreateNewWindow(browser_context_.get(), GetStartupURL(), nullptr,
                          gfx::Size());
+}
+
+// Copied from ChromeBrowserMainExtraPartsViewsLinux::ToolkitInitialized().
+// See that function for details.
+void ShellBrowserMainParts::ToolkitInitialized() {
+#if BUILDFLAG(USE_GTK) && defined(USE_X11)
+  if (switches::IsRunWebTestsSwitchPresent())
+    return;
+#if defined(USE_OZONE)
+  if (features::IsUsingOzonePlatform())
+    return;
+#endif
+  gtk_ui_delegate_ =
+      std::make_unique<ui::GtkUiDelegateX11>(x11::Connection::Get());
+  ui::GtkUiDelegate::SetInstance(gtk_ui_delegate_.get());
+  views::LinuxUI* linux_ui = BuildGtkUi(gtk_ui_delegate_.get());
+  linux_ui->UpdateDeviceScaleFactor();
+  views::LinuxUI::SetInstance(linux_ui);
+  linux_ui->Initialize();
+#endif
 }
 
 int ShellBrowserMainParts::PreCreateThreads() {
@@ -155,9 +189,15 @@ int ShellBrowserMainParts::PreCreateThreads() {
   return 0;
 }
 
+void ShellBrowserMainParts::PostCreateThreads() {
+  performance_manager_lifetime_ =
+      std::make_unique<performance_manager::PerformanceManagerLifetime>(
+          performance_manager::Decorators::kNone, base::DoNothing());
+}
+
 void ShellBrowserMainParts::PreMainMessageLoopRun() {
   InitializeBrowserContexts();
-  Shell::Initialize();
+  Shell::Initialize(CreateShellPlatformDelegate());
   net::NetModule::SetResourceProvider(PlatformResourceProvider);
   ShellDevToolsManagerDelegate::StartHttpHandler(browser_context_.get());
   InitializeMessageLoopContext();
@@ -177,6 +217,10 @@ void ShellBrowserMainParts::PostMainMessageLoopRun() {
   ShellDevToolsManagerDelegate::StopHttpHandler();
   browser_context_.reset();
   off_the_record_browser_context_.reset();
+#if BUILDFLAG(USE_GTK)
+  views::LinuxUI::SetInstance(nullptr);
+#endif
+  performance_manager_lifetime_.reset();
 }
 
 void ShellBrowserMainParts::PreDefaultMainMessageLoopRun(
@@ -193,6 +237,11 @@ void ShellBrowserMainParts::PostDestroyThreads() {
   device::BluetoothAdapterFactory::Shutdown();
   bluez::DBusBluezManagerWrapperLinux::Shutdown();
 #endif
+}
+
+std::unique_ptr<ShellPlatformDelegate>
+ShellBrowserMainParts::CreateShellPlatformDelegate() {
+  return std::make_unique<ShellPlatformDelegate>();
 }
 
 }  // namespace

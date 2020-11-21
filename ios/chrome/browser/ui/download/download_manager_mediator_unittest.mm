@@ -9,11 +9,9 @@
 #include "base/run_loop.h"
 #include "base/strings/sys_string_conversions.h"
 #import "base/test/ios/wait_util.h"
-#include "base/test/scoped_feature_list.h"
 #include "ios/chrome/browser/download/download_directory_util.h"
 #import "ios/chrome/browser/download/external_app_util.h"
 #import "ios/chrome/test/fakes/fake_download_manager_consumer.h"
-#include "ios/web/common/features.h"
 #import "ios/web/public/test/fakes/fake_download_task.h"
 #include "ios/web/public/test/web_task_environment.h"
 #include "net/base/net_errors.h"
@@ -103,9 +101,6 @@ TEST_F(DownloadManagerMediatorTest, StartTempDownload) {
 // file writer is configured to write into Chrome's Documents download
 // directory.
 TEST_F(DownloadManagerMediatorTest, StartDownload) {
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitAndEnableFeature(web::features::kEnablePersistentDownloads);
-
   task()->SetSuggestedFilename(
       base::SysNSStringToUTF16(kTestSuggestedFileName));
   mediator_.SetDownloadTask(task());
@@ -124,10 +119,16 @@ TEST_F(DownloadManagerMediatorTest, StartDownload) {
   task()->SetDone(true);
   EXPECT_EQ(kDownloadManagerStateSucceeded, consumer_.state);
   // Download file should be located in download directory.
-  base::FilePath file = mediator_.GetDownloadPath();
   base::FilePath download_dir;
   GetDownloadsDirectory(&download_dir);
-  EXPECT_TRUE(download_dir.IsParent(file));
+  ASSERT_TRUE(
+      WaitUntilConditionOrTimeout(base::test::ios::kWaitForDownloadTimeout, ^{
+        base::RunLoop().RunUntilIdle();
+        return download_dir.IsParent(mediator_.GetDownloadPath());
+      }));
+
+  // Updates the consumer once the file has been moved.
+  mediator_.SetDownloadTask(task());
 }
 
 // Tests starting and failing the download. Simulates download failure from

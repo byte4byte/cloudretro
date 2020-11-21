@@ -93,11 +93,6 @@ namespace extensions {
 ////////////////////////////////////////////////////////////////////////////////
 // AutofillPrivateSaveAddressFunction
 
-AutofillPrivateSaveAddressFunction::AutofillPrivateSaveAddressFunction()
-    : chrome_details_(this) {}
-
-AutofillPrivateSaveAddressFunction::~AutofillPrivateSaveAddressFunction() {}
-
 ExtensionFunction::ResponseAction AutofillPrivateSaveAddressFunction::Run() {
   std::unique_ptr<api::autofill_private::SaveAddress::Params> parameters =
       api::autofill_private::SaveAddress::Params::Create(*args_);
@@ -206,12 +201,6 @@ ExtensionFunction::ResponseAction AutofillPrivateSaveAddressFunction::Run() {
 ////////////////////////////////////////////////////////////////////////////////
 // AutofillPrivateGetCountryListFunction
 
-AutofillPrivateGetCountryListFunction::AutofillPrivateGetCountryListFunction()
-    : chrome_details_(this) {}
-
-AutofillPrivateGetCountryListFunction::
-    ~AutofillPrivateGetCountryListFunction() {}
-
 ExtensionFunction::ResponseAction AutofillPrivateGetCountryListFunction::Run() {
   autofill::PersonalDataManager* personal_data =
       autofill::PersonalDataManagerFactory::GetForProfile(
@@ -233,9 +222,6 @@ ExtensionFunction::ResponseAction AutofillPrivateGetCountryListFunction::Run() {
 
 ////////////////////////////////////////////////////////////////////////////////
 // AutofillPrivateGetAddressComponentsFunction
-
-AutofillPrivateGetAddressComponentsFunction::
-    ~AutofillPrivateGetAddressComponentsFunction() {}
 
 ExtensionFunction::ResponseAction
 AutofillPrivateGetAddressComponentsFunction::Run() {
@@ -264,18 +250,11 @@ AutofillPrivateGetAddressComponentsFunction::Run() {
   address_components.SetKey("components", std::move(rows));
   address_components.SetKey("languageCode", base::Value(language_code_));
 
-  return RespondNow(OneArgument(
-      base::Value::ToUniquePtrValue(std::move(address_components))));
+  return RespondNow(OneArgument(std::move(address_components)));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // AutofillPrivateGetAddressListFunction
-
-AutofillPrivateGetAddressListFunction::AutofillPrivateGetAddressListFunction()
-    : chrome_details_(this) {}
-
-AutofillPrivateGetAddressListFunction::
-    ~AutofillPrivateGetAddressListFunction() {}
 
 ExtensionFunction::ResponseAction AutofillPrivateGetAddressListFunction::Run() {
   autofill::PersonalDataManager* personal_data =
@@ -292,12 +271,6 @@ ExtensionFunction::ResponseAction AutofillPrivateGetAddressListFunction::Run() {
 
 ////////////////////////////////////////////////////////////////////////////////
 // AutofillPrivateSaveCreditCardFunction
-
-AutofillPrivateSaveCreditCardFunction::AutofillPrivateSaveCreditCardFunction()
-    : chrome_details_(this) {}
-
-AutofillPrivateSaveCreditCardFunction::
-    ~AutofillPrivateSaveCreditCardFunction() {}
 
 ExtensionFunction::ResponseAction AutofillPrivateSaveCreditCardFunction::Run() {
   std::unique_ptr<api::autofill_private::SaveCreditCard::Params> parameters =
@@ -347,11 +320,31 @@ ExtensionFunction::ResponseAction AutofillPrivateSaveCreditCardFunction::Run() {
                            base::UTF8ToUTF16(*card->expiration_year));
   }
 
+  if (card->nickname) {
+    credit_card.SetNickname(base::UTF8ToUTF16(*card->nickname));
+  }
+
   if (use_existing_card) {
+    // Only updates when the card info changes.
+    if (existing_card && existing_card->Compare(credit_card) == 0)
+      return RespondNow(NoArguments());
+
+    // Record when nickname is updated.
+    if (credit_card.HasNonEmptyValidNickname() &&
+        existing_card->nickname() != credit_card.nickname()) {
+      base::RecordAction(
+          base::UserMetricsAction("AutofillCreditCardsEditedWithNickname"));
+    }
+
     personal_data->UpdateCreditCard(credit_card);
+    base::RecordAction(base::UserMetricsAction("AutofillCreditCardsEdited"));
   } else {
     personal_data->AddCreditCard(credit_card);
     base::RecordAction(base::UserMetricsAction("AutofillCreditCardsAdded"));
+    if (credit_card.HasNonEmptyValidNickname()) {
+      base::RecordAction(
+          base::UserMetricsAction("AutofillCreditCardsAddedWithNickname"));
+    }
   }
 
   return RespondNow(NoArguments());
@@ -359,11 +352,6 @@ ExtensionFunction::ResponseAction AutofillPrivateSaveCreditCardFunction::Run() {
 
 ////////////////////////////////////////////////////////////////////////////////
 // AutofillPrivateRemoveEntryFunction
-
-AutofillPrivateRemoveEntryFunction::AutofillPrivateRemoveEntryFunction()
-    : chrome_details_(this) {}
-
-AutofillPrivateRemoveEntryFunction::~AutofillPrivateRemoveEntryFunction() {}
 
 ExtensionFunction::ResponseAction AutofillPrivateRemoveEntryFunction::Run() {
   std::unique_ptr<api::autofill_private::RemoveEntry::Params> parameters =
@@ -384,9 +372,6 @@ ExtensionFunction::ResponseAction AutofillPrivateRemoveEntryFunction::Run() {
 ////////////////////////////////////////////////////////////////////////////////
 // AutofillPrivateValidatePhoneNumbersFunction
 
-AutofillPrivateValidatePhoneNumbersFunction::
-    ~AutofillPrivateValidatePhoneNumbersFunction() {}
-
 ExtensionFunction::ResponseAction
 AutofillPrivateValidatePhoneNumbersFunction::Run() {
   std::unique_ptr<api::autofill_private::ValidatePhoneNumbers::Params>
@@ -403,17 +388,12 @@ AutofillPrivateValidatePhoneNumbersFunction::Run() {
   RemoveDuplicatePhoneNumberAtIndex(params->index_of_new_number,
                                     params->country_code, phone_numbers.get());
 
-  return RespondNow(OneArgument(std::move(phone_numbers)));
+  return RespondNow(
+      OneArgument(base::Value::FromUniquePtrValue(std::move(phone_numbers))));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // AutofillPrivateMaskCreditCardFunction
-
-AutofillPrivateMaskCreditCardFunction::AutofillPrivateMaskCreditCardFunction()
-    : chrome_details_(this) {}
-
-AutofillPrivateMaskCreditCardFunction::
-    ~AutofillPrivateMaskCreditCardFunction() {}
 
 ExtensionFunction::ResponseAction AutofillPrivateMaskCreditCardFunction::Run() {
   std::unique_ptr<api::autofill_private::MaskCreditCard::Params> parameters =
@@ -434,13 +414,6 @@ ExtensionFunction::ResponseAction AutofillPrivateMaskCreditCardFunction::Run() {
 ////////////////////////////////////////////////////////////////////////////////
 // AutofillPrivateGetCreditCardListFunction
 
-AutofillPrivateGetCreditCardListFunction::
-    AutofillPrivateGetCreditCardListFunction()
-    : chrome_details_(this) {}
-
-AutofillPrivateGetCreditCardListFunction::
-    ~AutofillPrivateGetCreditCardListFunction() {}
-
 ExtensionFunction::ResponseAction
 AutofillPrivateGetCreditCardListFunction::Run() {
   autofill::PersonalDataManager* personal_data =
@@ -458,13 +431,6 @@ AutofillPrivateGetCreditCardListFunction::Run() {
 
 ////////////////////////////////////////////////////////////////////////////////
 // AutofillPrivateMigrateCreditCardsFunction
-
-AutofillPrivateMigrateCreditCardsFunction::
-    AutofillPrivateMigrateCreditCardsFunction()
-    : chrome_details_(this) {}
-
-AutofillPrivateMigrateCreditCardsFunction::
-    ~AutofillPrivateMigrateCreditCardsFunction() {}
 
 ExtensionFunction::ResponseAction
 AutofillPrivateMigrateCreditCardsFunction::Run() {
@@ -505,13 +471,6 @@ AutofillPrivateMigrateCreditCardsFunction::Run() {
 ////////////////////////////////////////////////////////////////////////////////
 // AutofillPrivateLogServerCardLinkClickedFunction
 
-AutofillPrivateLogServerCardLinkClickedFunction::
-    AutofillPrivateLogServerCardLinkClickedFunction()
-    : chrome_details_(this) {}
-
-AutofillPrivateLogServerCardLinkClickedFunction::
-    ~AutofillPrivateLogServerCardLinkClickedFunction() {}
-
 ExtensionFunction::ResponseAction
 AutofillPrivateLogServerCardLinkClickedFunction::Run() {
   autofill::PersonalDataManager* personal_data =
@@ -527,13 +486,6 @@ AutofillPrivateLogServerCardLinkClickedFunction::Run() {
 
 ////////////////////////////////////////////////////////////////////////////////
 // AutofillPrivateSetCreditCardFIDOAuthEnabledStateFunction
-
-AutofillPrivateSetCreditCardFIDOAuthEnabledStateFunction::
-    AutofillPrivateSetCreditCardFIDOAuthEnabledStateFunction()
-    : chrome_details_(this) {}
-
-AutofillPrivateSetCreditCardFIDOAuthEnabledStateFunction::
-    ~AutofillPrivateSetCreditCardFIDOAuthEnabledStateFunction() {}
 
 ExtensionFunction::ResponseAction
 AutofillPrivateSetCreditCardFIDOAuthEnabledStateFunction::Run() {
@@ -560,12 +512,6 @@ AutofillPrivateSetCreditCardFIDOAuthEnabledStateFunction::Run() {
 
 ////////////////////////////////////////////////////////////////////////////////
 // AutofillPrivateGetUpiIdListFunction
-
-AutofillPrivateGetUpiIdListFunction::AutofillPrivateGetUpiIdListFunction() =
-    default;
-
-AutofillPrivateGetUpiIdListFunction::~AutofillPrivateGetUpiIdListFunction() =
-    default;
 
 ExtensionFunction::ResponseAction AutofillPrivateGetUpiIdListFunction::Run() {
   autofill::PersonalDataManager* personal_data =

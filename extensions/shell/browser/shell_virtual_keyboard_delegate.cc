@@ -7,7 +7,7 @@
 #include <memory>
 #include <utility>
 
-#include "base/logging.h"
+#include "base/notreached.h"
 #include "base/values.h"
 
 namespace extensions {
@@ -57,7 +57,11 @@ bool ShellVirtualKeyboardDelegate::ShowLanguageSettings() {
   return false;
 }
 
-bool ShellVirtualKeyboardDelegate::IsLanguageSettingsEnabled() {
+bool ShellVirtualKeyboardDelegate::ShowSuggestionSettings() {
+  return false;
+}
+
+bool ShellVirtualKeyboardDelegate::IsSettingsEnabled() {
   return false;
 }
 

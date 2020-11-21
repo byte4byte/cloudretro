@@ -8,7 +8,6 @@
 
 #include <utility>
 
-#include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
 #include "build/build_config.h"
 #include "ui/base/ui_base_features.h"
@@ -16,7 +15,6 @@
 #include "ui/events/gestures/fling_curve.h"
 #include "ui/events/gestures/physics_based_fling_curve.h"
 #include "ui/events/mobile_scroller.h"
-#include "ui/gfx/geometry/safe_integer_conversions.h"
 
 #if defined(OS_WIN)
 #include "ui/display/win/screen_win.h"

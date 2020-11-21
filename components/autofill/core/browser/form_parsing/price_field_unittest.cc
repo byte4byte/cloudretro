@@ -22,22 +22,24 @@ namespace autofill {
 
 class PriceFieldTest : public testing::Test {
  public:
-  PriceFieldTest() {}
+  PriceFieldTest() = default;
+  PriceFieldTest(const PriceFieldTest&) = delete;
+  PriceFieldTest& operator=(const PriceFieldTest&) = delete;
 
  protected:
-  std::vector<std::unique_ptr<AutofillField>> list_;
-  std::unique_ptr<PriceField> field_;
-  FieldCandidatesMap field_candidates_map_;
-
   // Downcast for tests.
   static std::unique_ptr<PriceField> Parse(AutofillScanner* scanner) {
-    std::unique_ptr<FormField> field = PriceField::Parse(scanner, nullptr);
+    // An empty page_language means the language is unknown and patterns of all
+    // languages are used.
+    std::unique_ptr<FormField> field =
+        PriceField::Parse(scanner, LanguageCode(""), nullptr);
     return std::unique_ptr<PriceField>(
         static_cast<PriceField*>(field.release()));
   }
 
- private:
-  DISALLOW_COPY_AND_ASSIGN(PriceFieldTest);
+  std::vector<std::unique_ptr<AutofillField>> list_;
+  std::unique_ptr<PriceField> field_;
+  FieldCandidatesMap field_candidates_map_;
 };
 
 TEST_F(PriceFieldTest, ParsePrice) {

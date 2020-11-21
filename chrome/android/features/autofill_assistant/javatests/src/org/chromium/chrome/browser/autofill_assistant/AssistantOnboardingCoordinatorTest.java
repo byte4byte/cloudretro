@@ -4,15 +4,17 @@
 
 package org.chromium.chrome.browser.autofill_assistant;
 
-import static android.support.test.espresso.Espresso.onView;
-import static android.support.test.espresso.action.ViewActions.click;
-import static android.support.test.espresso.action.ViewActions.scrollTo;
-import static android.support.test.espresso.assertion.ViewAssertions.matches;
-import static android.support.test.espresso.matcher.ViewMatchers.assertThat;
-import static android.support.test.espresso.matcher.ViewMatchers.isCompletelyDisplayed;
-import static android.support.test.espresso.matcher.ViewMatchers.isDisplayed;
-import static android.support.test.espresso.matcher.ViewMatchers.withId;
+import static androidx.test.espresso.Espresso.onView;
+import static androidx.test.espresso.action.ViewActions.click;
+import static androidx.test.espresso.action.ViewActions.scrollTo;
+import static androidx.test.espresso.assertion.ViewAssertions.matches;
+import static androidx.test.espresso.matcher.ViewMatchers.assertThat;
+import static androidx.test.espresso.matcher.ViewMatchers.isCompletelyDisplayed;
+import static androidx.test.espresso.matcher.ViewMatchers.isDisplayed;
+import static androidx.test.espresso.matcher.ViewMatchers.withId;
 
+import static org.hamcrest.CoreMatchers.allOf;
+import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.Matchers.instanceOf;
 import static org.junit.Assert.assertEquals;
@@ -21,13 +23,17 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.Mockito.verify;
 
+import static org.chromium.chrome.browser.autofill_assistant.AutofillAssistantUiTestUtil.waitUntil;
 import static org.chromium.chrome.browser.autofill_assistant.AutofillAssistantUiTestUtil.waitUntilViewMatchesCondition;
 
-import android.support.test.filters.MediumTest;
+import android.app.Activity;
+import android.text.Spanned;
+import android.text.style.ClickableSpan;
 import android.view.View;
 import android.widget.TextView;
 
 import androidx.annotation.IdRes;
+import androidx.test.filters.MediumTest;
 
 import org.junit.Before;
 import org.junit.Rule;
@@ -37,18 +43,23 @@ import org.mockito.Mock;
 import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
 
+import org.chromium.base.ActivityState;
+import org.chromium.base.ApplicationStatus;
 import org.chromium.base.Callback;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.chrome.autofill_assistant.R;
-import org.chromium.chrome.browser.ChromeActivity;
+import org.chromium.chrome.browser.app.ChromeActivity;
 import org.chromium.chrome.browser.autofill_assistant.overlay.AssistantOverlayCoordinator;
 import org.chromium.chrome.browser.autofill_assistant.overlay.AssistantOverlayModel;
 import org.chromium.chrome.browser.autofill_assistant.overlay.AssistantOverlayState;
+import org.chromium.chrome.browser.customtabs.CustomTabActivity;
 import org.chromium.chrome.browser.customtabs.CustomTabActivityTestRule;
 import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.widget.bottomsheet.BottomSheetController;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
+import org.chromium.chrome.test.util.ChromeTabUtils;
+import org.chromium.components.browser_ui.bottomsheet.BottomSheetController;
+import org.chromium.components.browser_ui.widget.scrim.ScrimCoordinator;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 
 import java.util.ArrayList;
@@ -74,21 +85,25 @@ public class AssistantOnboardingCoordinatorTest {
     private ChromeActivity mActivity;
     private BottomSheetController mBottomSheetController;
     private Tab mTab;
+    private ScrimCoordinator mScrimCoordinator;
 
     @Before
     public void setUp() throws Exception {
         AutofillAssistantUiTestUtil.startOnBlankPage(mCustomTabActivityTestRule);
         mActivity = mCustomTabActivityTestRule.getActivity();
         mBottomSheetController = TestThreadUtils.runOnUiThreadBlocking(
-                () -> AutofillAssistantUiTestUtil.createBottomSheetController(mActivity));
+                () -> AutofillAssistantUiTestUtil.getBottomSheetController(mActivity));
         mTab = mActivity.getTabModelSelector().getCurrentTab();
+        mScrimCoordinator = mCustomTabActivityTestRule.getActivity()
+                                    .getRootUiCoordinatorForTesting()
+                                    .getScrimCoordinator();
     }
 
     private AssistantOnboardingCoordinator createCoordinator(Tab tab) {
         AssistantOnboardingCoordinator coordinator =
                 new AssistantOnboardingCoordinator("", new HashMap<String, String>(), mActivity,
-                        mBottomSheetController, mActivity.getFullscreenManager(),
-                        mActivity.getCompositorViewHolder(), mActivity.getScrim());
+                        mBottomSheetController, mActivity.getBrowserControlsManager(),
+                        mActivity.getCompositorViewHolder(), mScrimCoordinator);
         coordinator.disableAnimationForTesting();
         return coordinator;
     }
@@ -112,7 +127,7 @@ public class AssistantOnboardingCoordinatorTest {
         showOnboardingAndWait(coordinator, mCallback);
 
         assertTrue(TestThreadUtils.runOnUiThreadBlocking(coordinator::isInProgress));
-        onView(is(mActivity.getScrim())).check(matches(isDisplayed()));
+        onView(is(mScrimCoordinator.getViewForTesting())).check(matches(isDisplayed()));
         onView(withId(buttonToClick)).perform(scrollTo(), click());
 
         verify(mCallback).onResult(expectAccept);
@@ -145,7 +160,7 @@ public class AssistantOnboardingCoordinatorTest {
         assertFalse(TestThreadUtils.runOnUiThreadBlocking(coordinator::isInProgress));
 
         // An overlay was captured, and it is still shown.
-        onView(is(mActivity.getScrim())).check(matches(isDisplayed()));
+        onView(is(mScrimCoordinator.getViewForTesting())).check(matches(isDisplayed()));
         assertEquals(1, capturedOverlays.size());
         AssistantOverlayCoordinator overlay = capturedOverlays.get(0);
         assertNotNull(overlay);
@@ -159,7 +174,7 @@ public class AssistantOnboardingCoordinatorTest {
 
     @Test
     @MediumTest
-    public void testShownFlag() throws Exception {
+    public void testShownFlag() {
         AssistantOnboardingCoordinator coordinator = createCoordinator(/* tab= */ null);
         assertFalse(coordinator.getOnboardingShown());
 
@@ -169,24 +184,23 @@ public class AssistantOnboardingCoordinatorTest {
 
     @Test
     @MediumTest
-    public void testShowDifferentInformationalText() throws Exception {
+    public void testShowDifferentInformationalText() {
         AutofillAssistantPreferencesUtil.setInitialPreferences(true);
 
         HashMap<String, String> parameters = new HashMap();
         parameters.put("INTENT", "RENT_CAR");
-        AssistantOnboardingCoordinator coordinator = new AssistantOnboardingCoordinator("",
-                parameters, mActivity, mBottomSheetController, mActivity.getFullscreenManager(),
-                mActivity.getCompositorViewHolder(), mActivity.getScrim());
+        AssistantOnboardingCoordinator coordinator =
+                new AssistantOnboardingCoordinator("", parameters, mActivity,
+                        mBottomSheetController, mActivity.getBrowserControlsManager(),
+                        mActivity.getCompositorViewHolder(), mScrimCoordinator);
         coordinator.disableAnimationForTesting();
         showOnboardingAndWait(coordinator, mCallback);
 
-        TextView termsView = mBottomSheetController.getBottomSheetViewForTesting().findViewById(
-                R.id.onboarding_subtitle);
+        TextView termsView = mActivity.findViewById(R.id.onboarding_subtitle);
         assertEquals(
                 mActivity.getResources().getText(R.string.autofill_assistant_init_message_short),
                 termsView.getText());
-        TextView titleView = mBottomSheetController.getBottomSheetViewForTesting().findViewById(
-                R.id.onboarding_try_assistant);
+        TextView titleView = mActivity.findViewById(R.id.onboarding_try_assistant);
         assertEquals(
                 mActivity.getResources().getText(R.string.autofill_assistant_init_message_rent_car),
                 titleView.getText());
@@ -194,24 +208,23 @@ public class AssistantOnboardingCoordinatorTest {
 
     @Test
     @MediumTest
-    public void testShowExperimentalInformationalText() throws Exception {
+    public void testShowExperimentalInformationalText() {
         AutofillAssistantPreferencesUtil.setInitialPreferences(true);
 
         HashMap<String, String> parameters = new HashMap();
         parameters.put("INTENT", "BUY_MOVIE_TICKET");
-        AssistantOnboardingCoordinator coordinator = new AssistantOnboardingCoordinator("4363482",
-                parameters, mActivity, mBottomSheetController, mActivity.getFullscreenManager(),
-                mActivity.getCompositorViewHolder(), mActivity.getScrim());
+        AssistantOnboardingCoordinator coordinator =
+                new AssistantOnboardingCoordinator("4363482", parameters, mActivity,
+                        mBottomSheetController, mActivity.getBrowserControlsManager(),
+                        mActivity.getCompositorViewHolder(), mScrimCoordinator);
         coordinator.disableAnimationForTesting();
         showOnboardingAndWait(coordinator, mCallback);
 
-        TextView termsView = mBottomSheetController.getBottomSheetViewForTesting().findViewById(
-                R.id.onboarding_subtitle);
+        TextView termsView = mActivity.findViewById(R.id.onboarding_subtitle);
         assertEquals(
                 mActivity.getResources().getText(R.string.autofill_assistant_init_message_short),
                 termsView.getText());
-        TextView titleView = mBottomSheetController.getBottomSheetViewForTesting().findViewById(
-                R.id.onboarding_try_assistant);
+        TextView titleView = mActivity.findViewById(R.id.onboarding_try_assistant);
         assertEquals(mActivity.getResources().getText(
                              R.string.autofill_assistant_init_message_buy_movie_tickets),
                 titleView.getText());
@@ -219,25 +232,136 @@ public class AssistantOnboardingCoordinatorTest {
 
     @Test
     @MediumTest
-    public void testShowStandardInformationalText() throws Exception {
+    public void testShowStandardInformationalText() {
         AutofillAssistantPreferencesUtil.setInitialPreferences(true);
 
         HashMap<String, String> parameters = new HashMap();
-        AssistantOnboardingCoordinator coordinator = new AssistantOnboardingCoordinator("",
-                parameters, mActivity, mBottomSheetController, mActivity.getFullscreenManager(),
-                mActivity.getCompositorViewHolder(), mActivity.getScrim());
+        AssistantOnboardingCoordinator coordinator =
+                new AssistantOnboardingCoordinator("", parameters, mActivity,
+                        mBottomSheetController, mActivity.getBrowserControlsManager(),
+                        mActivity.getCompositorViewHolder(), mScrimCoordinator);
         coordinator.disableAnimationForTesting();
         showOnboardingAndWait(coordinator, mCallback);
 
-        TextView termsView = mBottomSheetController.getBottomSheetViewForTesting().findViewById(
-                R.id.onboarding_subtitle);
+        TextView termsView = mActivity.findViewById(R.id.onboarding_subtitle);
         assertEquals(View.VISIBLE, termsView.getVisibility());
         assertEquals(mActivity.getResources().getText(R.string.autofill_assistant_init_message),
                 termsView.getText());
-        TextView titleView = mBottomSheetController.getBottomSheetViewForTesting().findViewById(
-                R.id.onboarding_try_assistant);
+        TextView titleView = mActivity.findViewById(R.id.onboarding_try_assistant);
         assertEquals(mActivity.getResources().getText(R.string.autofill_assistant_init_title),
                 titleView.getText());
+    }
+
+    @Test
+    @MediumTest
+    public void testUseOfOutsideStrings() {
+        AutofillAssistantPreferencesUtil.setInitialPreferences(true);
+
+        HashMap<String, String> parameters = new HashMap<>();
+        parameters.put("ONBOARDING_FETCH_TIMEOUT_MS", "0");
+        AssistantOnboardingCoordinator coordinator =
+                new AssistantOnboardingCoordinator("", parameters, mActivity,
+                        mBottomSheetController, mActivity.getBrowserControlsManager(),
+                        mActivity.getCompositorViewHolder(), mScrimCoordinator);
+
+        String expectedTitle = "Title";
+        String expectedMessage = "Message";
+        String expectedTerms = "Terms <link>Click</link>";
+        String expectedTermsUrl = "https://something.google.com/something";
+
+        coordinator.addEntryToStringMap("onboarding_title", expectedTitle);
+        coordinator.addEntryToStringMap("onboarding_text", expectedMessage);
+        coordinator.addEntryToStringMap("terms_and_conditions", expectedTerms);
+        coordinator.addEntryToStringMap("terms_and_conditions_url", expectedTermsUrl);
+
+        coordinator.disableAnimationForTesting();
+        showOnboardingAndWait(coordinator, mCallback);
+
+        assertEquals(((TextView) mActivity.findViewById(R.id.onboarding_try_assistant)).getText(),
+                expectedTitle);
+        assertEquals(((TextView) mActivity.findViewById(R.id.onboarding_subtitle)).getText(),
+                expectedMessage);
+        TextView termsMessage = mActivity.findViewById(R.id.google_terms_message);
+        assertThat(termsMessage.getText().toString(),
+                allOf(containsString("Terms"), containsString("Click")));
+        Spanned spannedMessage = (Spanned) termsMessage.getText();
+        ClickableSpan[] spans =
+                spannedMessage.getSpans(0, spannedMessage.length(), ClickableSpan.class);
+        assertEquals(spans.length, 1);
+        TestThreadUtils.runOnUiThreadBlocking(() -> {
+            assertEquals("Click",
+                    spannedMessage
+                            .subSequence(spannedMessage.getSpanStart(spans[0]),
+                                    spannedMessage.getSpanEnd(spans[0]))
+                            .toString());
+        });
+        spans[0].onClick(termsMessage);
+        waitUntil(() -> getOpenedUrlSpec().equals(expectedTermsUrl));
+    }
+
+    @Test
+    @MediumTest
+    public void testUseOfOutsideStringsRejectsTermsWithoutLink() {
+        AutofillAssistantPreferencesUtil.setInitialPreferences(true);
+
+        HashMap<String, String> parameters = new HashMap<>();
+        parameters.put("ONBOARDING_FETCH_TIMEOUT_MS", "0");
+        AssistantOnboardingCoordinator coordinator =
+                new AssistantOnboardingCoordinator("", parameters, mActivity,
+                        mBottomSheetController, mActivity.getBrowserControlsManager(),
+                        mActivity.getCompositorViewHolder(), mScrimCoordinator);
+
+        coordinator.addEntryToStringMap("terms_and_conditions", "Bad terms");
+
+        coordinator.disableAnimationForTesting();
+        showOnboardingAndWait(coordinator, mCallback);
+
+        TextView termsMessage = mActivity.findViewById(R.id.google_terms_message);
+        assertEquals(termsMessage.getText().toString(),
+                mActivity.getResources()
+                        .getText(R.string.autofill_assistant_google_terms_description)
+                        .toString()
+                        .replaceAll("<link>", "")
+                        .replaceAll("</link>", ""));
+    }
+
+    @Test
+    @MediumTest
+    public void testUseOfOutsideStringsRejectsNonGoogleSudomainLink() {
+        AutofillAssistantPreferencesUtil.setInitialPreferences(true);
+
+        HashMap<String, String> parameters = new HashMap<>();
+        parameters.put("ONBOARDING_FETCH_TIMEOUT_MS", "0");
+        AssistantOnboardingCoordinator coordinator =
+                new AssistantOnboardingCoordinator("", parameters, mActivity,
+                        mBottomSheetController, mActivity.getBrowserControlsManager(),
+                        mActivity.getCompositorViewHolder(), mScrimCoordinator);
+
+        coordinator.addEntryToStringMap(
+                "terms_and_conditions_url", "https://www.domain.com/something");
+
+        coordinator.disableAnimationForTesting();
+        showOnboardingAndWait(coordinator, mCallback);
+
+        TextView termsMessage = mActivity.findViewById(R.id.google_terms_message);
+        Spanned spannedMessage = (Spanned) termsMessage.getText();
+        ClickableSpan[] spans =
+                spannedMessage.getSpans(0, spannedMessage.length(), ClickableSpan.class);
+        assertEquals(spans.length, 1);
+        TestThreadUtils.runOnUiThreadBlocking(() -> {
+            assertEquals("Learn more",
+                    spannedMessage
+                            .subSequence(spannedMessage.getSpanStart(spans[0]),
+                                    spannedMessage.getSpanEnd(spans[0]))
+                            .toString()
+                            .replaceAll("\\s+", " "));
+        });
+        spans[0].onClick(termsMessage);
+        waitUntil(()
+                          -> getOpenedUrlSpec().equals(
+                                  mActivity.getResources()
+                                          .getText(R.string.autofill_assistant_google_terms_url)
+                                          .toString()));
     }
 
     /** Trigger onboarding and wait until it is fully displayed. */
@@ -245,5 +369,22 @@ public class AssistantOnboardingCoordinatorTest {
             AssistantOnboardingCoordinator coordinator, Callback<Boolean> callback) {
         TestThreadUtils.runOnUiThreadBlocking(() -> coordinator.show(callback));
         waitUntilViewMatchesCondition(withId(R.id.button_init_ok), isCompletelyDisplayed());
+    }
+
+    // Get the newly opened Activity (through CustomTabActivity.showInfoPage) that happens on
+    // terms click. Return the URL of the current tab on that activity.
+    private String getOpenedUrlSpec() {
+        for (Activity runningActivity : ApplicationStatus.getRunningActivities()) {
+            if (runningActivity instanceof CustomTabActivity
+                    && ApplicationStatus.getStateForActivity(runningActivity)
+                            == ActivityState.RESUMED) {
+                return ChromeTabUtils
+                        .getUrlOnUiThread(((CustomTabActivity) runningActivity)
+                                                  .getTabModelSelector()
+                                                  .getCurrentTab())
+                        .getSpec();
+            }
+        }
+        return "";
     }
 }

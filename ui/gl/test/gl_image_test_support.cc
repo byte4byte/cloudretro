@@ -6,7 +6,8 @@
 
 #include <vector>
 
-#include "base/logging.h"
+#include "base/check_op.h"
+#include "base/notreached.h"
 #include "base/stl_util.h"
 #include "ui/gfx/buffer_format_util.h"
 #include "ui/gfx/half_float.h"
@@ -15,6 +16,7 @@
 
 #if defined(USE_OZONE)
 #include "base/run_loop.h"
+#include "ui/base/ui_base_features.h"
 #include "ui/ozone/public/ozone_platform.h"
 #endif
 
@@ -36,9 +38,11 @@ void rgb_to_yuv(uint8_t r, uint8_t g, uint8_t b, T* y, T* u, T* v) {
 void GLImageTestSupport::InitializeGL(
     base::Optional<GLImplementation> prefered_impl) {
 #if defined(USE_OZONE)
-  ui::OzonePlatform::InitParams params;
-  params.single_process = true;
-  ui::OzonePlatform::InitializeForGPU(params);
+  if (features::IsUsingOzonePlatform()) {
+    ui::OzonePlatform::InitParams params;
+    params.single_process = true;
+    ui::OzonePlatform::InitializeForGPU(params);
+  }
 #endif
 
   std::vector<GLImplementation> allowed_impls =
@@ -50,9 +54,11 @@ void GLImageTestSupport::InitializeGL(
 
   GLSurfaceTestSupport::InitializeOneOffImplementation(impl, true);
 #if defined(USE_OZONE)
-  // Make sure all the tasks posted to the current task runner by the
-  // initialization functions are run before running the tests.
-  base::RunLoop().RunUntilIdle();
+  if (features::IsUsingOzonePlatform()) {
+    // Make sure all the tasks posted to the current task runner by the
+    // initialization functions are run before running the tests.
+    base::RunLoop().RunUntilIdle();
+  }
 #endif
 }
 

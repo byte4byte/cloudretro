@@ -69,6 +69,10 @@ class WMHelperTester : public WMHelper, public VSyncTimingManager::Delegate {
   void RemovePostTargetHandler(ui::EventHandler* handler) override {}
   bool InTabletMode() const override { return false; }
   double GetDefaultDeviceScaleFactor() const override { return 1.0; }
+  double GetDeviceScaleFactorForWindow(aura::Window* window) const override {
+    return 1.0;
+  }
+  void SetDefaultScaleCancellation(bool default_scale_cancellation) override {}
   void SetImeBlocked(aura::Window* window, bool ime_blocked) override {}
   bool IsImeBlocked(aura::Window* window) const override { return false; }
 
@@ -106,11 +110,9 @@ void ExoTestBaseViews::SetUp() {
   views::ViewsTestBase::SetUp();
 
   wm_helper_ = std::make_unique<WMHelperTester>(root_window());
-  WMHelper::SetInstance(wm_helper_.get());
 }
 
 void ExoTestBaseViews::TearDown() {
-  WMHelper::SetInstance(nullptr);
   wm_helper_.reset();
 
   views::ViewsTestBase::TearDown();

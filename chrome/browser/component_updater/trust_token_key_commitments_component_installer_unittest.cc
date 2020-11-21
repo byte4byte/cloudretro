@@ -11,7 +11,7 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/run_loop.h"
 #include "base/sequence_checker.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -47,8 +47,7 @@ TEST_F(TrustTokenKeyCommitmentsComponentInstallerTest, FeatureDisabled) {
   auto service =
       std::make_unique<component_updater::MockComponentUpdateService>();
   EXPECT_CALL(*service, RegisterComponent(_)).Times(0);
-  RegisterTrustTokenKeyCommitmentsComponentIfTrustTokensEnabled(
-      service.get(), component_install_dir_.GetPath());
+  RegisterTrustTokenKeyCommitmentsComponentIfTrustTokensEnabled(service.get());
 
   env_.RunUntilIdle();
 }
@@ -70,12 +69,10 @@ TEST_F(TrustTokenKeyCommitmentsComponentInstallerTest, LoadsCommitments) {
       std::make_unique<TrustTokenKeyCommitmentsComponentInstallerPolicy>(
           base::BindLambdaForTesting(confirmation_callback));
 
-  ASSERT_EQ(
-      base::WriteFile(
-          TrustTokenKeyCommitmentsComponentInstallerPolicy::GetInstalledPath(
-              component_install_dir_.GetPath()),
-          expectation.data(), expectation.size()),
-      static_cast<int>(expectation.size()));
+  ASSERT_TRUE(base::WriteFile(
+      TrustTokenKeyCommitmentsComponentInstallerPolicy::GetInstalledPath(
+          component_install_dir_.GetPath()),
+      expectation));
 
   policy->ComponentReady(base::Version(), component_install_dir_.GetPath(),
                          std::make_unique<base::DictionaryValue>());

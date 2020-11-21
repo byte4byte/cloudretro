@@ -31,8 +31,7 @@ body.files-ng [file-type-icon] {
 }
 
 body.files-ng [file-type-icon='archive'] {
-  -webkit-mask-image: url(../images/filetype/filetype_archive.svg);
-  background-color: currentColor;
+  background-image: url(../images/filetype/filetype_archive.svg);
 }
 
 [file-type-icon='audio'] {
@@ -490,6 +489,16 @@ body.files-ng [file-type-icon='downloads'] {
   background-image: none;
 }
 
+[file-type-icon='camera-folder'] {
+  -webkit-mask-image: url(../images/filetype/filetype_folder.svg);
+  background-color: currentColor;
+  background-image: none;
+}
+
+body.camera-folder-enabled [file-type-icon='camera-folder'] {
+  -webkit-mask-image: url(../images/volumes/camera.svg);
+}
+
 [volume-type-icon='drive'] {
   background-image: -webkit-image-set(
       url(../images/volumes/drive.png) 1x,
@@ -843,9 +852,7 @@ body.files-ng [file-type-icon='removable'] {
 }
 
 body.files-ng [file-type-icon='crostini'] {
-  -webkit-mask-image: url(../images/volumes/linux_files.svg);
-  background-color: currentColor;
-  background-image: none;
+  background-image: url(../images/volumes/linux_files.svg);
 }
 
 .tree-row[selected] > [root-type-icon='crostini'],

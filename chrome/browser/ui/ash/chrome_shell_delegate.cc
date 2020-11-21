@@ -5,6 +5,7 @@
 #include "chrome/browser/ui/ash/chrome_shell_delegate.h"
 
 #include <memory>
+#include <utility>
 
 #include "ash/public/cpp/ash_features.h"
 #include "ash/screenshot_delegate.h"
@@ -12,13 +13,16 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_process_platform_part_chromeos.h"
 #include "chrome/browser/chromeos/multidevice_setup/multidevice_setup_service_factory.h"
+#include "chrome/browser/nearby_sharing/nearby_share_delegate_impl.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/ash/back_gesture_contextual_nudge_delegate.h"
 #include "chrome/browser/ui/ash/chrome_accessibility_delegate.h"
+#include "chrome/browser/ui/ash/chrome_capture_mode_delegate.h"
 #include "chrome/browser/ui/ash/chrome_screenshot_grabber.h"
 #include "chrome/browser/ui/ash/keyboard/chrome_keyboard_ui.h"
 #include "chrome/browser/ui/ash/session_util.h"
+#include "chrome/browser/ui/ash/tab_scrubber.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_navigator.h"
@@ -31,6 +35,8 @@
 #include "chromeos/services/multidevice_setup/multidevice_setup_service.h"
 #include "content/public/browser/device_service.h"
 #include "content/public/browser/media_session_service.h"
+#include "content/public/browser/render_widget_host.h"
+#include "content/public/browser/render_widget_host_view.h"
 #include "ui/aura/window.h"
 #include "url/gurl.h"
 
@@ -38,6 +44,17 @@ namespace {
 
 const char kKeyboardShortcutHelpPageUrl[] =
     "https://support.google.com/chromebook/answer/183101";
+
+content::WebContents* GetActiveWebContentsForNativeBrowserWindow(
+    gfx::NativeWindow window) {
+  if (!window)
+    return nullptr;
+  BrowserView* browser_view =
+      BrowserView::GetBrowserViewForNativeWindow(window);
+  if (!browser_view)
+    return nullptr;
+  return browser_view->browser()->tab_strip_model()->GetActiveWebContents();
+}
 
 }  // namespace
 
@@ -51,6 +68,11 @@ bool ChromeShellDelegate::CanShowWindowForUser(
                                 base::BindRepeating(&GetActiveBrowserContext));
 }
 
+std::unique_ptr<ash::CaptureModeDelegate>
+ChromeShellDelegate::CreateCaptureModeDelegate() const {
+  return std::make_unique<ChromeCaptureModeDelegate>();
+}
+
 void ChromeShellDelegate::OpenKeyboardShortcutHelpPage() const {
   chrome::ScopedTabbedBrowserDisplayer scoped_tabbed_browser_displayer(
       ProfileManager::GetActiveUserProfile());
@@ -62,37 +84,72 @@ void ChromeShellDelegate::OpenKeyboardShortcutHelpPage() const {
 }
 
 bool ChromeShellDelegate::CanGoBack(gfx::NativeWindow window) const {
-  BrowserView* browser_view =
-      BrowserView::GetBrowserViewForNativeWindow(window);
-  if (!browser_view)
-    return false;
   content::WebContents* contents =
-      browser_view->browser()->tab_strip_model()->GetActiveWebContents();
-  if (!contents)
-    return false;
-  return contents->GetController().CanGoBack();
+      GetActiveWebContentsForNativeBrowserWindow(window);
+  return contents ? contents->GetController().CanGoBack() : false;
 }
 
-bool ChromeShellDelegate::CreateBrowserForTabDrop(
-    gfx::NativeWindow source_window,
+void ChromeShellDelegate::SetTabScrubberEnabled(bool enabled) {
+  TabScrubber::GetInstance()->SetEnabled(enabled);
+}
+
+bool ChromeShellDelegate::AllowDefaultTouchActions(gfx::NativeWindow window) {
+  content::WebContents* contents =
+      GetActiveWebContentsForNativeBrowserWindow(window);
+  if (!contents)
+    return true;
+  content::RenderWidgetHostView* render_widget_host_view =
+      contents->GetRenderWidgetHostView();
+  if (!render_widget_host_view)
+    return true;
+  content::RenderWidgetHost* render_widget_host =
+      render_widget_host_view->GetRenderWidgetHost();
+  if (!render_widget_host)
+    return true;
+  base::Optional<cc::TouchAction> allowed_touch_action =
+      render_widget_host->GetAllowedTouchAction();
+  return allowed_touch_action.has_value()
+             ? *allowed_touch_action != cc::TouchAction::kNone
+             : true;
+}
+
+bool ChromeShellDelegate::ShouldWaitForTouchPressAck(gfx::NativeWindow window) {
+  content::WebContents* contents =
+      GetActiveWebContentsForNativeBrowserWindow(window);
+  if (!contents)
+    return false;
+  content::RenderWidgetHostView* render_widget_host_view =
+      contents->GetRenderWidgetHostView();
+  if (!render_widget_host_view)
+    return false;
+  return !!render_widget_host_view->GetRenderWidgetHost();
+}
+
+bool ChromeShellDelegate::IsTabDrag(const ui::OSExchangeData& drop_data) {
+  DCHECK(ash::features::IsWebUITabStripTabDragIntegrationEnabled());
+  return tab_strip_ui::IsDraggedTab(drop_data);
+}
+
+aura::Window* ChromeShellDelegate::CreateBrowserForTabDrop(
+    aura::Window* source_window,
     const ui::OSExchangeData& drop_data) {
-  CHECK(ash::features::IsWebUITabStripTabDragIntegrationEnabled());
+  DCHECK(ash::features::IsWebUITabStripTabDragIntegrationEnabled());
 
   BrowserView* source_view = BrowserView::GetBrowserViewForNativeWindow(
       source_window->GetToplevelWindow());
   if (!source_view)
-    return false;
+    return nullptr;
 
   Browser::CreateParams params = source_view->browser()->create_params();
   params.user_gesture = true;
   params.initial_show_state = ui::SHOW_STATE_DEFAULT;
   Browser* browser = Browser::Create(params);
   if (!browser)
-    return false;
+    return nullptr;
 
   if (!tab_strip_ui::DropTabsInNewBrowser(browser, drop_data)) {
     browser->window()->Close();
-    return false;
+    return nullptr;
   }
 
   // TODO(https://crbug.com/1069869): evaluate whether the above
@@ -100,7 +157,7 @@ bool ChromeShellDelegate::CreateBrowserForTabDrop(
   // reflect failure in UX.
 
   browser->window()->Show();
-  return true;
+  return browser->window()->GetNativeWindow();
 }
 
 void ChromeShellDelegate::BindBluetoothSystemFactory(
@@ -113,12 +170,6 @@ void ChromeShellDelegate::BindFingerprint(
   content::GetDeviceService().BindFingerprint(std::move(receiver));
 }
 
-void ChromeShellDelegate::BindNavigableContentsFactory(
-    mojo::PendingReceiver<content::mojom::NavigableContentsFactory> receiver) {
-  ProfileManager::GetActiveUserProfile()->BindNavigableContentsFactory(
-      std::move(receiver));
-}
-
 void ChromeShellDelegate::BindMultiDeviceSetup(
     mojo::PendingReceiver<chromeos::multidevice_setup::mojom::MultiDeviceSetup>
         receiver) {
@@ -129,7 +180,7 @@ void ChromeShellDelegate::BindMultiDeviceSetup(
     service->BindMultiDeviceSetup(std::move(receiver));
 }
 
-media_session::mojom::MediaSessionService*
+media_session::MediaSessionService*
 ChromeShellDelegate::GetMediaSessionService() {
   return &content::GetMediaSessionService();
 }
@@ -147,4 +198,10 @@ std::unique_ptr<ash::BackGestureContextualNudgeDelegate>
 ChromeShellDelegate::CreateBackGestureContextualNudgeDelegate(
     ash::BackGestureContextualNudgeController* controller) {
   return std::make_unique<BackGestureContextualNudgeDelegate>(controller);
+}
+
+std::unique_ptr<ash::NearbyShareDelegate>
+ChromeShellDelegate::CreateNearbyShareDelegate(
+    ash::NearbyShareController* controller) const {
+  return std::make_unique<NearbyShareDelegateImpl>(controller);
 }

@@ -12,7 +12,7 @@
 namespace blink {
 
 DocumentModuleScriptFetcher::DocumentModuleScriptFetcher(
-    util::PassKey<ModuleScriptLoader> pass_key)
+    base::PassKey<ModuleScriptLoader> pass_key)
     : ModuleScriptFetcher(pass_key) {}
 
 void DocumentModuleScriptFetcher::Fetch(
@@ -31,7 +31,7 @@ void DocumentModuleScriptFetcher::Fetch(
 void DocumentModuleScriptFetcher::NotifyFinished(Resource* resource) {
   ClearResource();
 
-  ScriptResource* script_resource = ToScriptResource(resource);
+  auto* script_resource = To<ScriptResource>(resource);
 
   HeapVector<Member<ConsoleMessage>> error_messages;
   ModuleScriptCreationParams::ModuleType module_type;
@@ -48,7 +48,7 @@ void DocumentModuleScriptFetcher::NotifyFinished(Resource* resource) {
   client_->NotifyFetchFinished(params, error_messages);
 }
 
-void DocumentModuleScriptFetcher::Trace(Visitor* visitor) {
+void DocumentModuleScriptFetcher::Trace(Visitor* visitor) const {
   ModuleScriptFetcher::Trace(visitor);
   visitor->Trace(client_);
   ResourceClient::Trace(visitor);

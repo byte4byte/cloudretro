@@ -48,13 +48,21 @@
 // of the screen.
 - (void)markUnifiedConsentScreenReachedBottom;
 
-// Updates the primary button based on the user sign-in state.
-- (void)updatePrimaryButtonStyle;
+// Sets the title, styling, and other button properties for the confirmation
+// button based on the user consent text that is currently displayed on-screen
+// and the whether the user has previously been signed-in.
+- (void)setConfirmationButtonProperties;
 
 // Returns the supported orientations for the device type:
 // |UIInterfaceOrientationPortrait| orientation on iPhone and all other
 // orientations on iPad.
 - (NSUInteger)supportedInterfaceOrientations;
+
+// Blocks the UI (except the cancel button) when the sign-in is in progress.
+- (void)signinWillStart;
+
+// Unblocks the UI when the sign-in is done.
+- (void)signinDidStop;
 
 @end
 

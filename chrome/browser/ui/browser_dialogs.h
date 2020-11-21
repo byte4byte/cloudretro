@@ -15,7 +15,9 @@
 #include "base/strings/string16.h"
 #include "build/build_config.h"
 #include "chrome/browser/ui/bookmarks/bookmark_editor.h"
+#include "chrome/common/buildflags.h"
 #include "content/public/browser/content_browser_client.h"
+#include "extensions/buildflags/buildflags.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/native_widget_types.h"
 
@@ -24,6 +26,10 @@ class ChooserController;
 class LoginHandler;
 class Profile;
 struct WebApplicationInfo;
+
+#if BUILDFLAG(ENABLE_EXTENSIONS)
+class SettingsOverriddenDialogController;
+#endif
 
 namespace base {
 class FilePath;
@@ -103,14 +109,14 @@ void ShowCreateChromeAppShortcutsDialog(
 using AppInstallationAcceptanceCallback =
     base::OnceCallback<void(bool, std::unique_ptr<WebApplicationInfo>)>;
 
-// Shows the Web App bubble.
+// Shows the Web App install bubble.
 //
 // |web_app_info| is the WebApplicationInfo being converted into an app.
 // |web_app_info.app_url| should contain a start url from a web app manifest
 // (for a Desktop PWA), or the current url (when creating a shortcut app).
-void ShowWebAppDialog(content::WebContents* web_contents,
-                      std::unique_ptr<WebApplicationInfo> web_app_info,
-                      AppInstallationAcceptanceCallback callback);
+void ShowWebAppInstallDialog(content::WebContents* web_contents,
+                             std::unique_ptr<WebApplicationInfo> web_app_info,
+                             AppInstallationAcceptanceCallback callback);
 
 // Sets whether |ShowWebAppDialog| should accept immediately without any
 // user interaction. |auto_open_in_window| sets whether the open in window
@@ -118,13 +124,26 @@ void ShowWebAppDialog(content::WebContents* web_contents,
 void SetAutoAcceptWebAppDialogForTesting(bool auto_accept,
                                          bool auto_open_in_window);
 
+// Describes the state of in-product-help being shown to the user.
+enum class PwaInProductHelpState {
+  // The in-product-help bubble was shown.
+  kShown,
+  // The in-product-help bubble was not shown.
+  kNotShown
+};
+
 // Shows the PWA installation confirmation bubble anchored off the PWA install
 // icon in the omnibox.
 //
 // |web_app_info| is the WebApplicationInfo to be installed.
-void ShowPWAInstallBubble(content::WebContents* web_contents,
-                          std::unique_ptr<WebApplicationInfo> web_app_info,
-                          AppInstallationAcceptanceCallback callback);
+// |callback| is called when install bubble closed.
+// |iph_state| records whether PWA install iph is shown before Install bubble is
+// shown.
+void ShowPWAInstallBubble(
+    content::WebContents* web_contents,
+    std::unique_ptr<WebApplicationInfo> web_app_info,
+    AppInstallationAcceptanceCallback callback,
+    PwaInProductHelpState iph_state = PwaInProductHelpState::kNotShown);
 
 // Sets whether |ShowPWAInstallBubble| should accept immediately without any
 // user interaction.
@@ -147,13 +166,13 @@ void ShowPrintJobConfirmationDialog(gfx::NativeWindow parent,
 
 #endif  // OS_CHROMEOS
 
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
 
 // Bridging methods that show/hide the toolkit-views based Task Manager on Mac.
 task_manager::TaskManagerTableModel* ShowTaskManagerViews(Browser* browser);
 void HideTaskManagerViews();
 
-#endif  // OS_MACOSX
+#endif  // OS_MAC
 
 #if defined(TOOLKIT_VIEWS)
 
@@ -319,6 +338,32 @@ void ShowExtensionInstallBlockedDialog(
     content::WebContents* web_contents,
     base::OnceClosure done_callback);
 
+#if BUILDFLAG(ENABLE_SUPERVISED_USERS) && BUILDFLAG(ENABLE_EXTENSIONS)
+// The type of action that the ExtensionInstalledBlockedByParentDialog
+// is being shown in reaction to.
+enum class ExtensionInstalledBlockedByParentDialogAction {
+  kAdd,     // The user attempted to add the extension.
+  kEnable,  // The user attempted to enable the extension.
+};
+
+// Displays a dialog to notify the user that the extension installation is
+// blocked by a parent
+void ShowExtensionInstallBlockedByParentDialog(
+    ExtensionInstalledBlockedByParentDialogAction action,
+    const extensions::Extension* extension,
+    content::WebContents* web_contents,
+    base::OnceClosure done_callback);
+#endif  // BUILDFLAG(ENABLE_SUPERVISED_USERS) && BUILDFLAG(ENABLE_EXTENSIONS)
+
+// TODO(devlin): Put more extension-y bits in this block - currently they're
+// unguarded.
+#if BUILDFLAG(ENABLE_EXTENSIONS)
+// Shows the dialog indicating that an extension has overridden a setting.
+void ShowExtensionSettingsOverriddenDialog(
+    std::unique_ptr<SettingsOverriddenDialogController> controller,
+    Browser* browser);
+#endif
+
 // Returns a OnceClosure that client code can call to close the device chooser.
 // This OnceClosure references the actual dialog as a WeakPtr, so it's safe to
 // call at any point.
@@ -326,6 +371,12 @@ base::OnceClosure ShowDeviceChooserDialog(
     content::RenderFrameHost* owner,
     std::unique_ptr<ChooserController> controller);
 bool IsDeviceChooserShowingForTesting(Browser* browser);
+
+// Show the prompt to set a window name for browser's window, optionally with
+// the given context.
+void ShowWindowNamePrompt(Browser* browser);
+void ShowWindowNamePromptForTesting(Browser* browser,
+                                    gfx::NativeWindow context);
 
 }  // namespace chrome
 

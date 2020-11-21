@@ -37,9 +37,9 @@
 #include "ui/views/style/typography.h"
 #include "ui/views/widget/widget.h"
 
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
 #include "chrome/browser/platform_util.h"
-#endif  // defined(OS_MACOSX)
+#endif  // defined(OS_MAC)
 
 // static
 views::Widget* RelaunchRecommendedBubbleView::ShowBubble(
@@ -84,12 +84,11 @@ bool RelaunchRecommendedBubbleView::ShouldShowCloseButton() const {
 }
 
 gfx::ImageSkia RelaunchRecommendedBubbleView::GetWindowIcon() {
-  return gfx::CreateVectorIcon(gfx::IconDescription(
-      vector_icons::kBusinessIcon, kTitleIconSize, gfx::kChromeIconGrey));
-}
-
-bool RelaunchRecommendedBubbleView::ShouldShowWindowIcon() const {
-  return true;
+  return gfx::CreateVectorIcon(
+      gfx::IconDescription(vector_icons::kBusinessIcon,
+                           ChromeLayoutProvider::Get()->GetDistanceMetric(
+                               DISTANCE_BUBBLE_HEADER_VECTOR_ICON_SIZE),
+                           gfx::kChromeIconGrey));
 }
 
 void RelaunchRecommendedBubbleView::Init() {
@@ -97,7 +96,7 @@ void RelaunchRecommendedBubbleView::Init() {
   auto label = std::make_unique<views::Label>(
       l10n_util::GetPluralStringFUTF16(IDS_RELAUNCH_RECOMMENDED_BODY,
                                        BrowserList::GetIncognitoBrowserCount()),
-      views::style::CONTEXT_MESSAGE_BOX_BODY_TEXT);
+      views::style::CONTEXT_DIALOG_BODY_TEXT);
 
   label->SetMultiLine(true);
   label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
@@ -105,23 +104,17 @@ void RelaunchRecommendedBubbleView::Init() {
   // Align the body label with the left edge of the bubble's title.
   // TODO(bsep): Remove this when fixing https://crbug.com/810970.
   // Note: BubleFrameView applies INSETS_DIALOG_TITLE either side of the icon.
-  int title_offset = 2 * views::LayoutProvider::Get()
-                             ->GetInsetsMetric(views::INSETS_DIALOG_TITLE)
-                             .left() +
-                     kTitleIconSize;
+  const int title_offset = 2 * views::LayoutProvider::Get()
+                                   ->GetInsetsMetric(views::INSETS_DIALOG_TITLE)
+                                   .left() +
+                           ChromeLayoutProvider::Get()->GetDistanceMetric(
+                               DISTANCE_BUBBLE_HEADER_VECTOR_ICON_SIZE);
   label->SetBorder(views::CreateEmptyBorder(
       gfx::Insets(0, title_offset - margins().left(), 0, 0)));
 
   AddChildView(std::move(label));
 
   base::RecordAction(base::UserMetricsAction("RelaunchRecommendedShown"));
-}
-
-gfx::Size RelaunchRecommendedBubbleView::CalculatePreferredSize() const {
-  const int width = ChromeLayoutProvider::Get()->GetDistanceMetric(
-                        DISTANCE_BUBBLE_PREFERRED_WIDTH) -
-                    margins().width();
-  return gfx::Size(width, GetHeightForWidth(width));
 }
 
 void RelaunchRecommendedBubbleView::VisibilityChanged(
@@ -145,18 +138,21 @@ RelaunchRecommendedBubbleView::RelaunchRecommendedBubbleView(
           detection_time,
           base::BindRepeating(&RelaunchRecommendedBubbleView::UpdateWindowTitle,
                               base::Unretained(this))) {
-  DialogDelegate::SetButtons(ui::DIALOG_BUTTON_OK);
-  DialogDelegate::SetButtonLabel(
-      ui::DIALOG_BUTTON_OK,
-      l10n_util::GetStringUTF16(IDS_RELAUNCH_ACCEPT_BUTTON));
+  SetButtons(ui::DIALOG_BUTTON_OK);
+  SetButtonLabel(ui::DIALOG_BUTTON_OK,
+                 l10n_util::GetStringUTF16(IDS_RELAUNCH_ACCEPT_BUTTON));
+  SetShowIcon(true);
 
-  DialogDelegate::SetCloseCallback(
+  SetCloseCallback(
       base::BindOnce(&base::RecordAction,
                      base::UserMetricsAction("RelaunchRecommended_Close")));
 
-  chrome::RecordDialogCreation(chrome::DialogIdentifier::RELAUNCH_RECOMMENDED);
+  set_fixed_width(views::LayoutProvider::Get()->GetDistanceMetric(
+      views::DISTANCE_BUBBLE_PREFERRED_WIDTH));
+
   set_margins(ChromeLayoutProvider::Get()->GetDialogInsetsForContentType(
       views::TEXT, views::TEXT));
+  chrome::RecordDialogCreation(chrome::DialogIdentifier::RELAUNCH_RECOMMENDED);
 }
 
 void RelaunchRecommendedBubbleView::UpdateWindowTitle() {

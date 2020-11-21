@@ -4,7 +4,8 @@
 
 #include "third_party/blink/public/common/input/web_pointer_event.h"
 
-#include "base/logging.h"
+#include "base/check_op.h"
+#include "base/notreached.h"
 
 namespace blink {
 
@@ -72,6 +73,30 @@ WebPointerEvent::WebPointerEvent(WebInputEvent::Type type,
 
 std::unique_ptr<WebInputEvent> WebPointerEvent::Clone() const {
   return std::make_unique<WebPointerEvent>(*this);
+}
+
+bool WebPointerEvent::CanCoalesce(const WebInputEvent& event) const {
+  if (!IsPointerEventType(event.GetType()))
+    return false;
+  const WebPointerEvent& pointer_event =
+      static_cast<const WebPointerEvent&>(event);
+  return (GetType() == WebInputEvent::Type::kPointerMove ||
+          GetType() == WebInputEvent::Type::kPointerRawUpdate) &&
+         GetType() == event.GetType() &&
+         GetModifiers() == event.GetModifiers() && id == pointer_event.id &&
+         pointer_type == pointer_event.pointer_type;
+}
+
+void WebPointerEvent::Coalesce(const WebInputEvent& event) {
+  DCHECK(CanCoalesce(event));
+  const WebPointerEvent& pointer_event =
+      static_cast<const WebPointerEvent&>(event);
+  // Accumulate movement deltas.
+  int x = movement_x;
+  int y = movement_y;
+  *this = pointer_event;
+  movement_x += x;
+  movement_y += y;
 }
 
 WebPointerEvent WebPointerEvent::CreatePointerCausesUaActionEvent(

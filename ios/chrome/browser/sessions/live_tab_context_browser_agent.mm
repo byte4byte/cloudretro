@@ -7,7 +7,7 @@
 #include <memory>
 #include <utility>
 
-#include "base/logging.h"
+#include "base/notreached.h"
 #include "base/optional.h"
 #include "base/strings/sys_string_conversions.h"
 #include "components/sessions/core/session_types.h"
@@ -50,6 +50,10 @@ int LiveTabContextBrowserAgent::GetSelectedIndex() const {
 }
 
 std::string LiveTabContextBrowserAgent::GetAppName() const {
+  return std::string();
+}
+
+std::string LiveTabContextBrowserAgent::GetUserTitle() const {
   return std::string();
 }
 

@@ -23,23 +23,19 @@ NSString* const kGenerateQrCodeActivityType =
 }
 
 @property(nonatomic, weak, readonly) NSString* title;
-@property(nonatomic, weak, readonly) id<QRGenerationCommands> dispatcher;
+@property(nonatomic, weak, readonly) id<QRGenerationCommands> handler;
 
 @end
 
 @implementation GenerateQrCodeActivity
 
-+ (NSString*)activityIdentifier {
-  return kGenerateQrCodeActivityType;
-}
-
 - (instancetype)initWithURL:(const GURL&)activityURL
                       title:(NSString*)title
-                 dispatcher:(id<QRGenerationCommands>)dispatcher {
+                    handler:(id<QRGenerationCommands>)handler {
   if (self = [super init]) {
     _activityURL = activityURL;
     _title = title;
-    _dispatcher = dispatcher;
+    _handler = handler;
   }
   return self;
 }
@@ -47,7 +43,7 @@ NSString* const kGenerateQrCodeActivityType =
 #pragma mark - UIActivity
 
 - (NSString*)activityType {
-  return [[self class] activityIdentifier];
+  return kGenerateQrCodeActivityType;
 }
 
 - (NSString*)activityTitle {
@@ -59,7 +55,7 @@ NSString* const kGenerateQrCodeActivityType =
 }
 
 - (BOOL)canPerformWithActivityItems:(NSArray*)activityItems {
-  return YES;
+  return self.handler != nil;
 }
 
 + (UIActivityCategory)activityCategory {
@@ -67,7 +63,7 @@ NSString* const kGenerateQrCodeActivityType =
 }
 
 - (void)performActivity {
-  [self.dispatcher
+  [self.handler
       generateQRCode:[[GenerateQRCodeCommand alloc] initWithURL:_activityURL
                                                           title:self.title]];
   [self activityDidFinish:YES];

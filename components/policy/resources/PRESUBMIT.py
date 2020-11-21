@@ -7,6 +7,7 @@
 
 import sys
 from xml.dom import minidom
+from xml.parsers import expat
 
 def _GetPolicyTemplates(template_path):
   # Read list of policies in the template. eval() is used instead of a JSON
@@ -22,8 +23,8 @@ def _GetPolicyTemplates(template_path):
 
 def _CheckPolicyTemplatesSyntax(input_api, output_api):
   local_path = input_api.PresubmitLocalPath()
-  filepath = input_api.os_path.join(input_api.change.RepositoryRoot() + \
-      '/components/policy/resources/policy_templates.json')
+  filepath = input_api.os_path.join(input_api.change.RepositoryRoot(),
+      'components','policy','resources','policy_templates.json')
 
   try:
     template_affected_file = next(iter(f \
@@ -40,7 +41,7 @@ def _CheckPolicyTemplatesSyntax(input_api, output_api):
     # Optimization: only load this when it's needed.
     import syntax_check_policy_template_json
     device_policy_proto_path = input_api.os_path.join(
-        local_path, '../proto/chrome_device_policy.proto')
+        local_path, '..','proto','chrome_device_policy.proto')
     args = ["--device_policy_proto_path=" + device_policy_proto_path]
 
     root = input_api.change.RepositoryRoot()
@@ -79,8 +80,10 @@ def _CheckPolicyTemplatesSyntax(input_api, output_api):
 def _CheckPolicyTestCases(input_api, output_api, policies):
   # Read list of policies in chrome/test/data/policy/policy_test_cases.json.
   root = input_api.change.RepositoryRoot()
+  test_cases_depot_path = input_api.os_path.join(
+       'chrome', 'test', 'data', 'policy', 'policy_test_cases.json')
   policy_test_cases_file = input_api.os_path.join(
-      root, 'chrome', 'test', 'data', 'policy', 'policy_test_cases.json')
+      root, test_cases_depot_path)
   test_names = input_api.json.load(open(policy_test_cases_file)).keys()
   tested_policies = frozenset(name.partition('.')[0]
                               for name in test_names
@@ -101,6 +104,13 @@ def _CheckPolicyTestCases(input_api, output_api, policies):
     results.append(output_api.PresubmitError(error_missing % policy))
   for policy in extra:
     results.append(output_api.PresubmitError(error_extra % policy))
+
+  results.extend(
+      input_api.canned_checks.CheckChangeHasNoTabs(
+          input_api,
+          output_api,
+          source_file_filter=lambda x: x.LocalPath() == test_cases_depot_path))
+
   return results
 
 
@@ -196,7 +206,16 @@ def _CheckMissingPlaceholders(input_api, output_api, template_path):
     for key in ['desc', 'text']:
       if not key in item:
         continue
-      node = minidom.parseString('<msg>%s</msg>' % item[key]).childNodes[0]
+      try:
+        node = minidom.parseString('<msg>%s</msg>' % item[key]).childNodes[0]
+      except expat.ExpatError as e:
+        error = (
+            'Error when checking for missing placeholders: %s in:\n'
+            '!<Policy Start>!\n%s\n<Policy End>!' %
+            (e, item[key]))
+        results.append(output_api.PresubmitError(error))
+        continue
+
       for child in node.childNodes:
         if child.nodeType == minidom.Node.TEXT_NODE and '$' in child.data:
           warning = ('Character \'$\' found outside of a placeholder in "%s". '

@@ -29,6 +29,7 @@
 #include "chrome/browser/ui/webui/chromeos/login/terms_of_service_screen_handler.h"
 #include "chromeos/dbus/session_manager/fake_session_manager_client.h"
 #include "components/policy/proto/chrome_device_policy.pb.h"
+#include "content/public/test/browser_test.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -163,7 +164,7 @@ class TermsOfServiceScreenTest : public OobeBaseTest {
     return BuildHttpResponse(text);
   }
 
-  // Returns a successful |BasicHttpResponse| with |content|.
+  // Returns a successful `BasicHttpResponse` with `content`.
   std::unique_ptr<BasicHttpResponse> BuildHttpResponse(
       const std::string& content) {
     std::unique_ptr<BasicHttpResponse> http_response =

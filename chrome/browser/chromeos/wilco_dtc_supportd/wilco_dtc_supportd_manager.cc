@@ -7,7 +7,7 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/logging.h"
 #include "base/strings/string_util.h"
 #include "chrome/browser/browser_process.h"
@@ -59,6 +59,7 @@ bool AreOnlyAffiliatedUsersLoggedIn() {
       user_manager::UserManager::Get()->GetLoggedInUsers();
   for (user_manager::User* user : logged_in_users) {
     if (!user->IsAffiliated()) {
+      VLOG(2) << "Non-affiliated user is logged in";
       return false;
     }
   }

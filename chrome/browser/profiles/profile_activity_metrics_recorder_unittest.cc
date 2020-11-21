@@ -29,11 +29,19 @@ constexpr base::TimeDelta kLongTimeOfInactivity =
 
 }  // namespace
 
-class ProfileActivityMetricsRecorderTest : public testing::Test {
+class ProfileActivityMetricsRecorderTest
+    : public testing::Test,
+      public ::testing::WithParamInterface<bool> {
  public:
   ProfileActivityMetricsRecorderTest()
       : task_environment_(base::test::TaskEnvironment::TimeSource::MOCK_TIME),
         profile_manager_(TestingBrowserProcess::GetGlobal()) {
+    is_ephemeral_ = GetParam();
+
+    // Change the value if Ephemeral is not supported.
+    is_ephemeral_ &=
+        TestingProfile::SetScopedFeatureListForEphemeralGuestProfiles(
+            scoped_feature_list_, is_ephemeral_);
     base::SetRecordActionTaskRunner(
         task_environment_.GetMainThreadTaskRunner());
   }
@@ -57,7 +65,7 @@ class ProfileActivityMetricsRecorderTest : public testing::Test {
 
   void ActivateBrowser(Profile* profile) {
     Browser::CreateParams browser_params(profile, false);
-    browsers_.push_back(CreateBrowserWithTestWindowForParams(&browser_params));
+    browsers_.push_back(CreateBrowserWithTestWindowForParams(browser_params));
 
     // This triggers the recorder to post a task, wait until that's done.
     BrowserList::SetLastActive(browsers_.back().get());
@@ -65,7 +73,14 @@ class ProfileActivityMetricsRecorderTest : public testing::Test {
   }
 
   void ActivateIncognitoBrowser(Profile* profile) {
-    ActivateBrowser(profile->GetOffTheRecordProfile());
+    ActivateBrowser(profile->GetPrimaryOTRProfile());
+  }
+
+  void ActivateGuestBrowser(Profile* profile) {
+    if (IsEphemeral())
+      ActivateBrowser(profile);
+    else
+      ActivateBrowser(profile->GetPrimaryOTRProfile());
   }
 
   void SimulateUserEvent() {
@@ -83,6 +98,7 @@ class ProfileActivityMetricsRecorderTest : public testing::Test {
                                  /*count=*/1);
   }
 
+  bool IsEphemeral() { return is_ephemeral_; }
   TestingProfileManager* profile_manager() { return &profile_manager_; }
   base::HistogramTester* histograms() { return &histogram_tester_; }
   content::BrowserTaskEnvironment* task_environment() {
@@ -91,7 +107,9 @@ class ProfileActivityMetricsRecorderTest : public testing::Test {
 
  private:
   content::BrowserTaskEnvironment task_environment_;
+  base::test::ScopedFeatureList scoped_feature_list_;
 
+  bool is_ephemeral_;
   TestingProfileManager profile_manager_;
   base::HistogramTester histogram_tester_;
 
@@ -100,7 +118,7 @@ class ProfileActivityMetricsRecorderTest : public testing::Test {
   DISALLOW_COPY_AND_ASSIGN(ProfileActivityMetricsRecorderTest);
 };
 
-TEST_F(ProfileActivityMetricsRecorderTest, GuestProfile) {
+TEST_P(ProfileActivityMetricsRecorderTest, GuestProfile) {
   Profile* regular_profile = profile_manager()->CreateTestingProfile("p1");
   Profile* guest_profile = profile_manager()->CreateGuestProfile();
   histograms()->ExpectTotalCount("Profile.BrowserActive.PerProfile", 0);
@@ -111,18 +129,20 @@ TEST_F(ProfileActivityMetricsRecorderTest, GuestProfile) {
   histograms()->ExpectBucketCount("Profile.BrowserActive.PerProfile",
                                   /*bucket=*/1, /*count=*/1);
   SimulateUserActionAndExpectRecording(/*bucket=*/1);
+  histograms()->ExpectTotalCount("Profile.NumberOfProfilesAtProfileSwitch",
+                                 /*count=*/0);
 
-  // Activate an incognito browser instance of the guest profile.
-  // Note: Creating a non-incognito guest browser instance is not possible.
-  ActivateIncognitoBrowser(guest_profile);
+  ActivateGuestBrowser(guest_profile);
   histograms()->ExpectBucketCount("Profile.BrowserActive.PerProfile",
                                   /*bucket=*/0, /*count=*/1);
   SimulateUserActionAndExpectRecording(/*bucket=*/0);
+  histograms()->ExpectUniqueSample("Profile.NumberOfProfilesAtProfileSwitch",
+                                   /*bucket=*/1, /*count=*/1);
 
   histograms()->ExpectTotalCount("Profile.BrowserActive.PerProfile", 2);
 }
 
-TEST_F(ProfileActivityMetricsRecorderTest, IncognitoProfile) {
+TEST_P(ProfileActivityMetricsRecorderTest, IncognitoProfile) {
   Profile* regular_profile = profile_manager()->CreateTestingProfile("p1");
   histograms()->ExpectTotalCount("Profile.BrowserActive.PerProfile", 0);
 
@@ -135,9 +155,11 @@ TEST_F(ProfileActivityMetricsRecorderTest, IncognitoProfile) {
                                   /*bucket=*/1, /*count=*/2);
 
   histograms()->ExpectTotalCount("Profile.BrowserActive.PerProfile", 2);
+  histograms()->ExpectTotalCount("Profile.NumberOfProfilesAtProfileSwitch",
+                                 /*count=*/0);
 }
 
-TEST_F(ProfileActivityMetricsRecorderTest, MultipleProfiles) {
+TEST_P(ProfileActivityMetricsRecorderTest, MultipleProfiles) {
   // Profile 1: Profile is created. This does not affect the histogram.
   Profile* profile1 = profile_manager()->CreateTestingProfile("p1");
   // Profile 2: Profile is created. This does not affect the histogram.
@@ -160,6 +182,9 @@ TEST_F(ProfileActivityMetricsRecorderTest, MultipleProfiles) {
   histograms()->ExpectBucketCount("Profile.BrowserActive.PerProfile",
                                   /*bucket=*/1, /*count=*/2);
   SimulateUserActionAndExpectRecording(/*bucket=*/1);
+  // No profile switch, so far.
+  histograms()->ExpectTotalCount("Profile.NumberOfProfilesAtProfileSwitch",
+                                 /*count=*/0);
 
   // Profile 1: Session lasts 2 minutes.
   task_environment()->FastForwardBy(base::TimeDelta::FromMinutes(2));
@@ -170,6 +195,8 @@ TEST_F(ProfileActivityMetricsRecorderTest, MultipleProfiles) {
   histograms()->ExpectBucketCount("Profile.BrowserActive.PerProfile",
                                   /*bucket=*/2, /*count=*/1);
   SimulateUserActionAndExpectRecording(/*bucket=*/2);
+  histograms()->ExpectUniqueSample("Profile.NumberOfProfilesAtProfileSwitch",
+                                   /*bucket=*/3, /*count=*/1);
 
   // Profile 1: Session ended. The duration(2 minutes) is recorded.
   histograms()->ExpectBucketCount("Profile.SessionDuration.PerProfile",
@@ -184,6 +211,8 @@ TEST_F(ProfileActivityMetricsRecorderTest, MultipleProfiles) {
   histograms()->ExpectBucketCount("Profile.BrowserActive.PerProfile",
                                   /*bucket=*/3, /*count=*/1);
   SimulateUserActionAndExpectRecording(/*bucket=*/3);
+  histograms()->ExpectUniqueSample("Profile.NumberOfProfilesAtProfileSwitch",
+                                   /*bucket=*/3, /*count=*/2);
 
   // Profile 3: Session ended. The duration(2 minutes) is recorded.
   histograms()->ExpectBucketCount("Profile.SessionDuration.PerProfile",
@@ -192,7 +221,7 @@ TEST_F(ProfileActivityMetricsRecorderTest, MultipleProfiles) {
   histograms()->ExpectTotalCount("Profile.BrowserActive.PerProfile", 4);
 }
 
-TEST_F(ProfileActivityMetricsRecorderTest, SessionInactivityNotRecorded) {
+TEST_P(ProfileActivityMetricsRecorderTest, SessionInactivityNotRecorded) {
   Profile* profile = profile_manager()->CreateTestingProfile("p1");
 
   ActivateBrowser(profile);
@@ -211,7 +240,7 @@ TEST_F(ProfileActivityMetricsRecorderTest, SessionInactivityNotRecorded) {
                                   /*bucket=*/1, /*count=*/2);
 }
 
-TEST_F(ProfileActivityMetricsRecorderTest, ProfileState) {
+TEST_P(ProfileActivityMetricsRecorderTest, ProfileState) {
   Profile* regular_profile = profile_manager()->CreateTestingProfile("p1");
   Profile* guest_profile = profile_manager()->CreateGuestProfile();
   histograms()->ExpectTotalCount("Profile.State.Avatar_All", 0);
@@ -226,8 +255,8 @@ TEST_F(ProfileActivityMetricsRecorderTest, ProfileState) {
   histograms()->ExpectTotalCount("Profile.State.Avatar_All", 1);
 
   // Repeating the same thing immediately has no impact (neither for any other
-  // profile). Note that guest profile can only get created with incognito.
-  ActivateIncognitoBrowser(guest_profile);
+  // profile).
+  ActivateGuestBrowser(guest_profile);
   histograms()->ExpectTotalCount("Profile.State.Avatar_All", 1);
 
   // Stay inactive so the session ends and stay inactive long after that.
@@ -243,7 +272,7 @@ TEST_F(ProfileActivityMetricsRecorderTest, ProfileState) {
   histograms()->ExpectTotalCount("Profile.State.Avatar_All", 2);
 }
 
-TEST_F(ProfileActivityMetricsRecorderTest, AccountMetrics) {
+TEST_P(ProfileActivityMetricsRecorderTest, AccountMetrics) {
   Profile* regular_profile = profile_manager()->CreateTestingProfile("p1");
   Profile* guest_profile = profile_manager()->CreateGuestProfile();
   histograms()->ExpectTotalCount("Profile.AllAccounts.Names", 0);
@@ -256,6 +285,10 @@ TEST_F(ProfileActivityMetricsRecorderTest, AccountMetrics) {
   histograms()->ExpectTotalCount("Profile.AllAccounts.Names", 2);
 
   // We don't record for the guest profile.
-  ActivateIncognitoBrowser(guest_profile);
+  ActivateGuestBrowser(guest_profile);
   histograms()->ExpectTotalCount("Profile.AllAccounts.Names", 2);
 }
+
+INSTANTIATE_TEST_SUITE_P(AllGuestTypes,
+                         ProfileActivityMetricsRecorderTest,
+                         /*is_ephemeral=*/testing::Bool());

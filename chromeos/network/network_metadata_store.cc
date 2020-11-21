@@ -8,12 +8,15 @@
 #include "base/time/time.h"
 #include "chromeos/network/network_configuration_handler.h"
 #include "chromeos/network/network_connection_handler.h"
+#include "chromeos/network/network_event_log.h"
 #include "chromeos/network/network_handler.h"
 #include "chromeos/network/network_state.h"
 #include "chromeos/network/network_state_handler.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
+#include "components/user_manager/user.h"
+#include "components/user_manager/user_manager.h"
 #include "third_party/cros_system_api/dbus/shill/dbus-constants.h"
 
 namespace chromeos {
@@ -23,10 +26,28 @@ namespace {
 const char kNetworkMetadataPref[] = "network_metadata";
 const char kLastConnectedTimestampPref[] = "last_connected_timestamp";
 const char kIsFromSync[] = "is_from_sync";
-const char kIsCreatedByUser[] = "is_created_by_user";
+const char kOwner[] = "owner";
+const char kExternalModifications[] = "external_modifications";
+const char kBadPassword[] = "bad_password";
+const char kCustomApnList[] = "custom_apn_list";
 
 std::string GetPath(const std::string& guid, const std::string& subkey) {
   return base::StringPrintf("%s.%s", guid.c_str(), subkey.c_str());
+}
+
+base::Value CreateOrCloneListValue(const base::Value* list) {
+  if (list)
+    return list->Clone();
+
+  return base::ListValue();
+}
+
+bool ListContains(const base::Value* list, const std::string& value) {
+  if (!list)
+    return false;
+  base::Value::ConstListView list_view = list->GetList();
+  return std::find(list_view.begin(), list_view.end(), base::Value(value)) !=
+         list_view.end();
 }
 
 }  // namespace
@@ -41,17 +62,22 @@ NetworkMetadataStore::NetworkMetadataStore(
     NetworkConnectionHandler* network_connection_handler,
     NetworkStateHandler* network_state_handler,
     PrefService* profile_pref_service,
-    PrefService* device_pref_service)
+    PrefService* device_pref_service,
+    bool is_enterprise_managed)
     : network_configuration_handler_(network_configuration_handler),
       network_connection_handler_(network_connection_handler),
       network_state_handler_(network_state_handler),
       profile_pref_service_(profile_pref_service),
-      device_pref_service_(device_pref_service) {
+      device_pref_service_(device_pref_service),
+      is_enterprise_managed_(is_enterprise_managed) {
   if (network_connection_handler_) {
     network_connection_handler_->AddObserver(this);
   }
   if (network_configuration_handler_) {
     network_configuration_handler_->AddObserver(this);
+  }
+  if (LoginState::IsInitialized()) {
+    LoginState::Get()->AddObserver(this);
   }
 }
 
@@ -61,6 +87,40 @@ NetworkMetadataStore::~NetworkMetadataStore() {
   }
   if (network_configuration_handler_) {
     network_configuration_handler_->RemoveObserver(this);
+  }
+  if (LoginState::IsInitialized()) {
+    LoginState::Get()->RemoveObserver(this);
+  }
+}
+
+void NetworkMetadataStore::LoggedInStateChanged() {
+  OwnSharedNetworksOnFirstUserLogin();
+}
+
+void NetworkMetadataStore::OwnSharedNetworksOnFirstUserLogin() {
+  if (is_enterprise_managed_ || !network_state_handler_ ||
+      !user_manager::UserManager::IsInitialized()) {
+    return;
+  }
+
+  const user_manager::UserManager* user_manager =
+      user_manager::UserManager::Get();
+
+  if (!user_manager->IsCurrentUserNew() ||
+      !user_manager->IsCurrentUserOwner()) {
+    return;
+  }
+
+  NET_LOG(EVENT) << "Taking ownership of shared networks.";
+  NetworkStateHandler::NetworkStateList networks;
+  network_state_handler_->GetNetworkListByType(NetworkTypePattern::WiFi(), true,
+                                               false, 0, &networks);
+  for (const chromeos::NetworkState* network : networks) {
+    if (network->IsPrivate()) {
+      continue;
+    }
+
+    SetIsCreatedByUser(network->guid());
   }
 }
 
@@ -77,6 +137,7 @@ void NetworkMetadataStore::ConnectSucceeded(const std::string& service_path) {
 
   SetLastConnectedTimestamp(network->guid(),
                             base::Time::Now().ToDeltaSinceWindowsEpoch());
+  SetPref(network->guid(), kBadPassword, base::Value(false));
 
   if (is_first_connection) {
     for (auto& observer : observers_) {
@@ -85,10 +146,64 @@ void NetworkMetadataStore::ConnectSucceeded(const std::string& service_path) {
   }
 }
 
+void NetworkMetadataStore::ConnectFailed(const std::string& service_path,
+                                         const std::string& error_name) {
+  const NetworkState* network =
+      network_state_handler_->GetNetworkState(service_path);
+
+  // Only set kBadPassword for Wi-Fi networks which have never had a successful
+  // connection with the current password.  |error_name| is always set to
+  // "connect-failed", network->GetError() contains the real cause.
+  if (!network || network->type() != shill::kTypeWifi ||
+      network->GetError() != shill::kErrorBadPassphrase ||
+      !GetLastConnectedTimestamp(network->guid()).is_zero()) {
+    return;
+  }
+
+  SetPref(network->guid(), kBadPassword, base::Value(true));
+}
+
 void NetworkMetadataStore::OnConfigurationCreated(
     const std::string& service_path,
     const std::string& guid) {
-  SetPref(guid, kIsCreatedByUser, base::Value(true));
+  SetIsCreatedByUser(guid);
+}
+
+void NetworkMetadataStore::SetIsCreatedByUser(const std::string& network_guid) {
+  if (!user_manager::UserManager::IsInitialized())
+    return;
+
+  const user_manager::User* user =
+      user_manager::UserManager::Get()->GetActiveUser();
+  if (!user) {
+    NET_LOG(EVENT)
+        << "Network added with no active user, owner metadata not recorded.";
+    return;
+  }
+
+  SetPref(network_guid, kOwner, base::Value(user->username_hash()));
+
+  for (auto& observer : observers_) {
+    observer.OnNetworkCreated(network_guid);
+  }
+}
+
+void NetworkMetadataStore::UpdateExternalModifications(
+    const std::string& network_guid,
+    const std::string& field) {
+  const base::Value* fields = GetPref(network_guid, kExternalModifications);
+  if (GetIsCreatedByUser(network_guid)) {
+    if (ListContains(fields, field)) {
+      base::Value writeable_fields = CreateOrCloneListValue(fields);
+      writeable_fields.EraseListValue(base::Value(field));
+      SetPref(network_guid, kExternalModifications,
+              std::move(writeable_fields));
+    }
+  } else if (!ListContains(fields, field)) {
+    base::Value writeable_fields = CreateOrCloneListValue(fields);
+    writeable_fields.Append(base::Value(field));
+    SetPref(network_guid, kExternalModifications, std::move(writeable_fields));
+  }
 }
 
 void NetworkMetadataStore::OnConfigurationModified(
@@ -100,6 +215,15 @@ void NetworkMetadataStore::OnConfigurationModified(
   }
 
   SetPref(guid, kIsFromSync, base::Value(false));
+
+  if (set_properties->HasKey(shill::kProxyConfigProperty)) {
+    UpdateExternalModifications(guid, shill::kProxyConfigProperty);
+  }
+  if (set_properties->FindPath(
+          base::StringPrintf("%s.%s", shill::kStaticIPConfigProperty,
+                             shill::kNameServersProperty))) {
+    UpdateExternalModifications(guid, shill::kNameServersProperty);
+  }
 
   // Only clear last connected if the passphrase changes.  Other settings
   // (autoconnect, dns, etc.) won't affect the ability to connect to a network.
@@ -175,13 +299,51 @@ bool NetworkMetadataStore::GetIsConfiguredBySync(
 }
 
 bool NetworkMetadataStore::GetIsCreatedByUser(const std::string& network_guid) {
-  const base::Value* is_created_by_user =
-      GetPref(network_guid, kIsCreatedByUser);
-  if (!is_created_by_user) {
+  const NetworkState* network =
+      network_state_handler_->GetNetworkStateFromGuid(network_guid);
+  if (network && network->IsPrivate())
+    return true;
+
+  const base::Value* owner = GetPref(network_guid, kOwner);
+  if (!owner) {
     return false;
   }
 
-  return is_created_by_user->GetBool();
+  const user_manager::User* user =
+      user_manager::UserManager::Get()->GetActiveUser();
+  if (!user) {
+    return false;
+  }
+
+  return owner->GetString() == user->username_hash();
+}
+
+bool NetworkMetadataStore::GetIsFieldExternallyModified(
+    const std::string& network_guid,
+    const std::string& field) {
+  const base::Value* fields = GetPref(network_guid, kExternalModifications);
+  return ListContains(fields, field);
+}
+
+bool NetworkMetadataStore::GetHasBadPassword(const std::string& network_guid) {
+  const base::Value* has_bad_password = GetPref(network_guid, kBadPassword);
+
+  // If the pref is not set, default to false.
+  if (!has_bad_password) {
+    return false;
+  }
+
+  return has_bad_password->GetBool();
+}
+
+void NetworkMetadataStore::SetCustomAPNList(const std::string& network_guid,
+                                            base::Value list) {
+  SetPref(network_guid, kCustomApnList, std::move(list));
+}
+
+const base::Value* NetworkMetadataStore::GetCustomAPNList(
+    const std::string& network_guid) {
+  return GetPref(network_guid, kCustomApnList);
 }
 
 void NetworkMetadataStore::SetPref(const std::string& network_guid,
@@ -190,10 +352,7 @@ void NetworkMetadataStore::SetPref(const std::string& network_guid,
   const NetworkState* network =
       network_state_handler_->GetNetworkStateFromGuid(network_guid);
 
-  if (!network)
-    return;
-
-  if (network->IsPrivate()) {
+  if (network && network->IsPrivate() && profile_pref_service_) {
     base::Value profile_dict =
         profile_pref_service_->GetDictionary(kNetworkMetadataPref)->Clone();
     profile_dict.SetPath(GetPath(network_guid, key), std::move(value));
@@ -217,14 +376,13 @@ const base::Value* NetworkMetadataStore::GetPref(
   const NetworkState* network =
       network_state_handler_->GetNetworkStateFromGuid(network_guid);
 
-  if (!network) {
-    return nullptr;
-  }
-
-  if (network->IsPrivate()) {
+  if (network && network->IsPrivate() && profile_pref_service_) {
     const base::Value* profile_dict =
         profile_pref_service_->GetDictionary(kNetworkMetadataPref);
-    return profile_dict->FindPath(GetPath(network_guid, key));
+    const base::Value* value =
+        profile_dict->FindPath(GetPath(network_guid, key));
+    if (value)
+      return value;
   }
 
   const base::Value* device_dict =

@@ -18,7 +18,9 @@
 namespace content {
 
 // This class provides an interface for persisting impression/conversion data to
-// disk, and performing queries on it.
+// disk, and performing queries on it. ConversionStorage should initialize
+// itself. Calls to a ConversionStorage instance that failed to initialize
+// properly should result in no-ops.
 class ConversionStorage {
  public:
   // Storage delegate that can supplied to extend basic conversion storage
@@ -43,12 +45,26 @@ class ConversionStorage {
     // Impressions will be checked against this limit after they schedule a new
     // report.
     virtual int GetMaxConversionsPerImpression() const = 0;
+
+    // These limits are designed solely to avoid excessive disk / memory usage.
+    // In particular, they do not correspond with any privacy parameters.
+    // TODO(crbug.com/1082754): Consider replacing this functionality (and the
+    // data deletion logic) with the quota system.
+    //
+    // Returns the maximum number of impressions that can be in storage at any
+    // time for an impression top-level origin.
+    virtual int GetMaxImpressionsPerOrigin() const = 0;
+    //  Returns the maximum number of conversions that can be in storage at any
+    //  time for a conversion top-level origin. Note that since reporting
+    //  origins are the actual entities that invoke conversion registration, we
+    //  could consider changing this limit to be keyed by a <conversion origin,
+    //  reporting origin> tuple.
+    virtual int GetMaxConversionsPerOrigin() const = 0;
   };
   virtual ~ConversionStorage() = default;
 
-  // Initializes the storage. Returns true on success, otherwise the storage
-  // should not be used.
-  virtual bool Initialize() = 0;
+  // When adding a new method, also add it to
+  // ConversionStorageTest.StorageUsedAfterFailedInitilization_FailsSilently.
 
   // Add |impression| to storage. Two impressions are considered
   // matching when they share a <reporting_origin, conversion_origin> pair. When
@@ -70,6 +86,13 @@ class ConversionStorage {
   // underlying storage.
   virtual std::vector<ConversionReport> GetConversionsToReport(
       base::Time max_report_time) = 0;
+
+  // Returns all active impressions in storage. Active impressions are all
+  // impressions that can still convert. Impressions that: are past expiry,
+  // reached the conversion limit, or was marked inactive due to having
+  // converted and then superceded by a matching impression should not be
+  // returned.
+  virtual std::vector<StorableImpression> GetActiveImpressions() = 0;
 
   // Deletes all impressions that have expired and have no pending conversion
   // reports. Returns the number of impressions that were deleted.

@@ -144,10 +144,9 @@ class MEDIA_GPU_EXPORT V4L2VideoEncodeAccelerator
   // any error occurs, |flush_callback| will be called to notify client.
   void FlushTask(FlushCallback flush_callback);
 
-  // Service I/O on the V4L2 devices, called by the V4L2 device poller on the
-  // |encoder_task_runner_|. |event| is set to true if a V4L2 event was
-  // detected.
-  void ServiceDeviceTask(bool event);
+  // Service I/O on the V4L2 devices.  This task should only be scheduled from
+  // DevicePollTask().
+  void ServiceDeviceTask();
 
   // Handle the device queues.
   void Enqueue();
@@ -156,13 +155,16 @@ class MEDIA_GPU_EXPORT V4L2VideoEncodeAccelerator
   bool EnqueueInputRecord(V4L2WritableBufferRef input_buf);
   bool EnqueueOutputRecord(V4L2WritableBufferRef output_buf);
 
-  // Attempt to start/stop the V4L2 device poller.
+  // Attempt to start/stop device_poll_thread_.
   bool StartDevicePoll();
   bool StopDevicePoll();
 
-  // Called by the V4L2 device poller on the |encoder_task_runner_| whenever an
-  // error occurred.
-  void OnPollError();
+  //
+  // Device tasks, to be run on device_poll_thread_.
+  //
+
+  // The device task.
+  void DevicePollTask(bool poll_device);
 
   //
   // Safe from any thread.
@@ -188,6 +190,8 @@ class MEDIA_GPU_EXPORT V4L2VideoEncodeAccelerator
   // Process one video frame in |image_processor_input_queue_| by
   // |image_processor_|.
   void InputImageProcessorTask();
+
+  void MaybeFlushImageProcessor();
 
   // Change encoding parameters.
   void RequestEncodingParametersChangeTask(uint32_t bitrate,
@@ -258,6 +262,10 @@ class MEDIA_GPU_EXPORT V4L2VideoEncodeAccelerator
   // time Encode() if the coded size is different from the expected one by VEA.
   // For example, it happens in WebRTC simulcast case.
   gfx::Size input_frame_size_;
+  // A natural_size() of VideoFrame on VEA::Encode(). This is updated on the
+  // first time Encode() always. The natural_size() of VideoFrames fed by
+  // VEA::Encode() must be the same as |input_natural_size_|.
+  gfx::Size input_natural_size_;
 
   // Visible rectangle of VideoFrame to be fed to an encoder driver, in other
   // words, a visible rectangle that output encoded bitstream buffers represent.
@@ -279,7 +287,7 @@ class MEDIA_GPU_EXPORT V4L2VideoEncodeAccelerator
   State encoder_state_;
 
   // For H264, for resilience, we prepend each IDR with SPS and PPS. Some
-  // devices support this via the V4L2_CID_MPEG_VIDEO_H264_SPS_PPS_BEFORE_IDR
+  // devices support this via the V4L2_CID_MPEG_VIDEO_PREPEND_SPSPPS_TO_IDR
   // control. For devices that don't, we cache the latest SPS and PPS and inject
   // them into the stream before every IDR.
   bool inject_sps_and_pps_ = false;
@@ -333,9 +341,15 @@ class MEDIA_GPU_EXPORT V4L2VideoEncodeAccelerator
   std::vector<size_t> free_image_processor_output_buffer_indices_;
   // Video frames ready to be processed. Only accessed on child thread.
   base::queue<InputFrameInfo> image_processor_input_queue_;
+  // The number of frames that are being processed by |image_processor_|.
+  size_t num_frames_in_image_processor_ = 0;
 
   const scoped_refptr<base::SingleThreadTaskRunner> encoder_task_runner_;
   SEQUENCE_CHECKER(encoder_sequence_checker_);
+
+  // The device polling thread handles notifications of V4L2 device changes.
+  // TODO(sheu): replace this thread with an TYPE_IO encoder_thread_.
+  base::Thread device_poll_thread_;
 
   // To expose client callbacks from VideoEncodeAccelerator.
   // NOTE: all calls to these objects *MUST* be executed on

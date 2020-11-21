@@ -59,11 +59,11 @@ class ConnectorSettingsTest : public testing::Test {
 
   ServiceProcessPrefs* CreateTestFile(const char* json) {
     base::FilePath file_name = temp_dir_.GetPath().AppendASCII("file.txt");
-    base::DeleteFile(file_name, false);
+    base::DeleteFile(file_name);
     if (json) {
       std::string content = json;
       std::replace(content.begin(), content.end(), '\'', '"');
-      base::WriteFile(file_name, content.c_str(), content.size());
+      base::WriteFile(file_name, content);
     }
     ServiceProcessPrefs* prefs =
         new ServiceProcessPrefs(file_name, task_runner_.get());

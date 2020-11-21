@@ -7,6 +7,7 @@
 
 #include "ash/ash_export.h"
 #include "ash/wm/splitview/split_view_controller.h"
+#include "base/optional.h"
 #include "ui/aura/window_observer.h"
 #include "ui/compositor/layer_animation_observer.h"
 #include "ui/gfx/transform.h"
@@ -27,12 +28,14 @@ enum SplitviewAnimationType {
   // Used to fade in and out the highlights on either side which indicate where
   // to drag a selector item.
   SPLITVIEW_ANIMATION_HIGHLIGHT_FADE_IN,
+  SPLITVIEW_ANIMATION_HIGHLIGHT_FADE_IN_CANNOT_SNAP,
   SPLITVIEW_ANIMATION_HIGHLIGHT_FADE_OUT,
   // Used to fade in and out the other highlight. There are normally two
   // highlights, one on each side. When entering a state with a preview
   // highlight, one highlight is the preview highlight, and the other highlight
   // is the other highlight.
   SPLITVIEW_ANIMATION_OTHER_HIGHLIGHT_FADE_IN,
+  SPLITVIEW_ANIMATION_OTHER_HIGHLIGHT_FADE_IN_CANNOT_SNAP,
   SPLITVIEW_ANIMATION_OTHER_HIGHLIGHT_FADE_OUT,
   // Used to fade in and out the label on the overview item which warns users
   // the item cannot be snapped. The label appears on the overview item after
@@ -138,14 +141,30 @@ ASH_EXPORT bool ShouldAllowSplitView();
 // not compatible.
 ASH_EXPORT void ShowAppCannotSnapToast();
 
-// Returns the desired snap position. To be able to get snapped (meaning the
-// return value is not |SplitViewController::NONE|), |window| must 1) first of
-// all satisfy |SplitViewController::CanSnapWindow| on the split view controller
-// for |root_window|, and 2) secondly be dragged either inside
-// |snap_distance_from_edge| or dragged toward the edge for at least
-// |minimum_drag_distance| distance until it's dragged into a suitable edge of
-// the work area of |root_window| (i.e., |horizontal_edge_inset| if dragged
-// horizontally to snap, or |vertical_edge_inset| if dragged vertically).
+// Calculates the snap position for a dragged window at |location_in_screen|,
+// ignoring any properties of the window itself. The |root_window| is of the
+// current screen. |initial_location_in_screen| is the location at drag start if
+// the drag began in |root_window|, and is empty otherwise. To be snappable
+// (meaning the return value is not |SplitViewController::NONE|),
+// |location_in_screen| must be either inside |snap_distance_from_edge| or
+// dragged toward the edge for at least |minimum_drag_distance| distance until
+// it's dragged into a suitable edge of the work area of |root_window| (i.e.,
+// |horizontal_edge_inset| if dragged horizontally to snap, or
+// |vertical_edge_inset| if dragged vertically).
+ASH_EXPORT SplitViewController::SnapPosition GetSnapPositionForLocation(
+    aura::Window* root_window,
+    const gfx::Point& location_in_screen,
+    const base::Optional<gfx::Point>& initial_location_in_screen,
+    int snap_distance_from_edge,
+    int minimum_drag_distance,
+    int horizontal_edge_inset,
+    int vertical_edge_inset);
+
+// Returns the desired snap position. To be snappable, |window| must 1)
+// satisfy |SplitViewController::CanSnapWindow| for |root_window|, and
+// 2) be snappable according to |GetSnapPositionForLocation| above.
+// |initial_location_in_screen| is the window location at drag start in
+// its initial window. Otherwise, the arguments are the same as above.
 ASH_EXPORT SplitViewController::SnapPosition GetSnapPosition(
     aura::Window* root_window,
     aura::Window* window,

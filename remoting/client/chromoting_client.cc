@@ -6,6 +6,7 @@
 
 #include <utility>
 
+#include "base/logging.h"
 #include "remoting/base/capabilities.h"
 #include "remoting/base/constants.h"
 #include "remoting/client/client_context.h"
@@ -200,6 +201,9 @@ void ChromotingClient::SetVideoLayout(const protocol::VideoLayout& layout) {
     mouse_input_scaler_.set_output_size(size_dips.width(), size_dips.height());
   }
 }
+
+void ChromotingClient::SetTransportInfo(
+    const protocol::TransportInfo& transport_info) {}
 
 void ChromotingClient::InjectClipboardEvent(
     const protocol::ClipboardEvent& event) {

@@ -7,9 +7,10 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/command_line.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/metrics/histogram_macros_local.h"
 #include "build/build_config.h"
 #include "gpu/command_buffer/common/swap_buffers_complete_params.h"
 #include "ui/gfx/vsync_provider.h"
@@ -255,7 +256,7 @@ void PassThroughImageTransportSurface::FinishSwapBuffers(
       // Report only if collection is enabled and supported on current platform
       // See gpu::Scheduler::TakeTotalBlockingTime for details.
       if (!blocked_time_since_last_swap.is_min()) {
-        UMA_HISTOGRAM_CUSTOM_MICROSECONDS_TIMES(
+        LOCAL_HISTOGRAM_CUSTOM_MICROSECONDS_TIMES(
             "GPU.GpuBlockedBetweenSwapsUs2", blocked_time_since_last_swap,
             kTimingMetricsHistogramMin, kTimingMetricsHistogramMax,
             kTimingMetricsHistogramBuckets);
@@ -272,17 +273,18 @@ void PassThroughImageTransportSurface::FinishSwapBuffersAsync(
     SwapCompletionCallback callback,
     gfx::SwapResponse response,
     uint64_t local_swap_id,
-    gfx::SwapResult result,
-    std::unique_ptr<gfx::GpuFence> gpu_fence) {
+    gfx::SwapCompletionResult result) {
   // TODO(afrantzis): It's probably not ideal to introduce a wait here.
   // However, since this is a temporary step to maintain existing behavior
   // until we are ready to expose the gpu_fence further, and fences are only
   // enabled with a flag, this should be fine for now.
-  if (gpu_fence)
-    gpu_fence->Wait();
-  response.result = result;
+  if (result.gpu_fence) {
+    result.gpu_fence->Wait();
+    result.gpu_fence.reset();
+  }
+  response.result = result.swap_result;
   FinishSwapBuffers(std::move(response), local_swap_id);
-  std::move(callback).Run(result, nullptr);
+  std::move(callback).Run(std::move(result));
 }
 
 void PassThroughImageTransportSurface::BufferPresented(

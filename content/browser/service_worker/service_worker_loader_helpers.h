@@ -36,16 +36,6 @@ bool CheckResponseHead(
     network::URLLoaderCompletionStatus* out_completion_status,
     std::string* out_error_message);
 
-// Creates net::HttpResponseInfo from |response_head|. Returns nullptr when the
-// response is invalid.
-// TODO(crbug.com/1060076): Remove this once HttpResponseInfo dependencies are
-// gone.
-std::unique_ptr<net::HttpResponseInfo> CreateHttpResponseInfoAndCheckHeaders(
-    const network::mojom::URLResponseHead& response_head,
-    blink::ServiceWorkerStatusCode* out_service_worker_status,
-    network::URLLoaderCompletionStatus* out_completion_status,
-    std::string* out_error_message);
-
 bool ShouldBypassCacheDueToUpdateViaCache(
     bool is_main_script,
     blink::mojom::ServiceWorkerUpdateViaCache cache_mode);
@@ -58,10 +48,10 @@ bool ShouldValidateBrowserCacheForScript(
 
 #if DCHECK_IS_ON()
 // Checks the consistency between the status of the service worker version and
-// the script resource type to be fetched by the loaders.
+// the script resource destination to be fetched by the loaders.
 void CheckVersionStatusBeforeWorkerScriptLoad(
     ServiceWorkerVersion::Status status,
-    blink::mojom::ResourceType resource_type);
+    network::mojom::RequestDestination resource_destination);
 #endif  // DCHECK_IS_ON()
 
 }  // namespace service_worker_loader_helpers

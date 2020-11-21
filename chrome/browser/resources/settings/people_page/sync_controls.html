@@ -30,37 +30,22 @@
       }
     </style>
 
-    <template is="dom-if" if="[[!syncSetupFriendlySettings_]]">
-      <div class="cr-row first">
-        <div id="syncEverythingCheckboxLabel" class="flex cr-padded-text">
+    <div id="sync-data-radio" class="cr-row first">
+      <cr-radio-group
+          selected="[[selectedSyncDataRadio_(syncPrefs)]]"
+          on-selected-changed="onSyncDataRadioSelectionChanged_">
+        <cr-radio-button name="sync-everything">
           $i18n{syncEverythingCheckboxLabel}
-        </div>
-        <cr-toggle id="syncAllDataTypesControl"
-            checked="{{syncPrefs.syncAllDataTypes}}"
-            on-change="onSyncAllDataTypesChanged_"
-            aria-labelledby="syncEverythingCheckboxLabel">
-        </cr-toggle>
-      </div>
-    </template>
+        </cr-radio-button>
+        <cr-radio-button name="customize-sync">
+          $i18n{customizeSyncLabel}
+        </cr-radio-button>
+      </cr-radio-group>
+    </div>
 
-    <template is="dom-if" if="[[syncSetupFriendlySettings_]]">
-      <div id="sync-data-radio" class="cr-row first">
-        <cr-radio-group
-            selected="[[selectedSyncDataRadio_(syncPrefs)]]"
-            on-selected-changed="onSyncDataRadioSelectionChanged_">
-          <cr-radio-button name="sync-everything">
-            $i18n{syncEverythingCheckboxLabel}
-          </cr-radio-button>
-          <cr-radio-button name="customize-sync">
-            $i18n{customizeSyncLabel}
-          </cr-radio-button>
-        </cr-radio-group>
-      </div>
-
-      <div class="cr-row first">
-        <h2 class="cr-title-text flex">$i18n{syncData}</h2>
-      </div>
-    </template>
+    <div class="cr-row first">
+      <h2 class="cr-title-text flex">$i18n{syncData}</h2>
+    </div>
 
     <div class="list-frame" id="sync-data-types">
       <div class="list-item" hidden="[[!syncPrefs.appsRegistered]]">
@@ -132,6 +117,17 @@
         </cr-toggle>
       </div>
 
+      <div class="list-item" hidden="[[!syncPrefs.readingListRegistered]]">
+        <div id="readingListCheckboxLabel">
+          $i18n{readingListCheckboxLabel}
+        </div>
+        <cr-toggle checked="{{syncPrefs.readingListSynced}}"
+            on-change="onSingleSyncDataTypeChanged_"
+            disabled="[[syncPrefs.syncAllDataTypes]]"
+            aria-labelledby="readingListCheckboxLabel">
+        </cr-toggle>
+      </div>
+
       <div class="list-item" hidden="[[!syncPrefs.tabsRegistered]]">
         <div id="openTabsCheckboxLabel">
           $i18n{openTabsCheckboxLabel}
@@ -181,7 +177,22 @@
             aria-label="$i18n{enablePaymentsIntegrationCheckboxLabel}">
         </cr-toggle>
       </div>
+
+<if expr="chromeos">
+      <div class="list-item"
+           hidden="[[!syncPrefs.wifiConfigurationsRegistered]]">
+        <div id="wifiConfigurationsCheckboxLabel">
+          $i18n{wifiConfigurationsCheckboxLabel}
+        </div>
+        <cr-toggle checked="{{syncPrefs.wifiConfigurationsSynced}}"
+            on-change="onSingleSyncDataTypeChanged_"
+            disabled="[[syncPrefs.syncAllDataTypes]]"
+            aria-labelledby="wifiConfigurationsCheckboxLabel">
+        </cr-toggle>
+      </div>
     </div>
+</if>
+
   </template>
   <script src="sync_controls.js"></script>
 </dom-module>

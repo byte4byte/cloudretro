@@ -27,6 +27,7 @@
 #include "components/user_prefs/user_prefs.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/test/browser_test.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace chromeos {
@@ -116,9 +117,10 @@ class MockMagnificationObserver {
   MockMagnificationObserver() {
     AccessibilityManager* accessibility_manager = AccessibilityManager::Get();
     CHECK(accessibility_manager);
-    accessibility_subscription_ = accessibility_manager->RegisterCallback(
-        base::Bind(&MockMagnificationObserver::OnAccessibilityStatusChanged,
-                   base::Unretained(this)));
+    accessibility_subscription_ =
+        accessibility_manager->RegisterCallback(base::BindRepeating(
+            &MockMagnificationObserver::OnAccessibilityStatusChanged,
+            base::Unretained(this)));
   }
 
   virtual ~MockMagnificationObserver() {}

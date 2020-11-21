@@ -7,8 +7,8 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
 #include "base/callback.h"
+#include "base/callback_helpers.h"
 #include "base/location.h"
 #include "base/optional.h"
 #include "base/run_loop.h"
@@ -25,6 +25,7 @@
 #include "net/base/net_errors.h"
 #include "net/base/privacy_mode.h"
 #include "net/base/proxy_server.h"
+#include "net/base/schemeful_site.h"
 #include "net/base/test_completion_callback.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/log/test_net_log.h"
@@ -42,7 +43,6 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
-#include "url/origin.h"
 
 using net::test::IsError;
 using net::test::IsOk;
@@ -1132,8 +1132,8 @@ TEST_F(WebSocketTransportClientSocketPoolTest, EndpointLockIsOnlyReleasedOnce) {
 
 // Make sure that WebSocket requests use the correct NetworkIsolationKey.
 TEST_F(WebSocketTransportClientSocketPoolTest, NetworkIsolationKey) {
-  const auto kOrigin = url::Origin::Create(GURL("https://foo.test/"));
-  const NetworkIsolationKey kNetworkIsolationKey(kOrigin, kOrigin);
+  const SchemefulSite kSite(GURL("https://foo.test/"));
+  const NetworkIsolationKey kNetworkIsolationKey(kSite, kSite);
 
   base::test::ScopedFeatureList scoped_feature_list;
   scoped_feature_list.InitWithFeatures(

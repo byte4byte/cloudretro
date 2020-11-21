@@ -27,6 +27,8 @@ enum PermissionName {
   SYSTEM_WAKE_LOCK,
   NFC,
   STORAGE_ACCESS,
+  WINDOW_PLACEMENT,
+  FONT_ACCESS,
 };
 
 struct MidiPermissionDescriptor {

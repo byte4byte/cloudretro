@@ -13,13 +13,14 @@
 #include "base/memory/ref_counted.h"
 #include "base/task/thread_pool/thread_pool_instance.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "content/browser/browser_process_sub_thread.h"
 #include "content/public/browser/browser_main_runner.h"
 #include "media/media_buildflags.h"
 #include "services/viz/public/mojom/compositing/compositing_mode_watcher.mojom.h"
 #include "ui/base/buildflags.h"
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "content/browser/media/keyboard_mic_registration.h"
 #endif
 
@@ -50,11 +51,11 @@ class AudioManager;
 class AudioSystem;
 #if defined(OS_WIN)
 class SystemMessageWindowWin;
-#elif defined(OS_LINUX) && defined(USE_UDEV)
+#elif (defined(OS_LINUX) || defined(OS_CHROMEOS)) && defined(USE_UDEV)
 class DeviceMonitorLinux;
 #endif
 class UserInputMonitor;
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
 class DeviceMonitorMac;
 #endif
 }  // namespace media
@@ -87,6 +88,7 @@ class MediaKeysListenerManagerImpl;
 class MediaStreamManager;
 class SaveFileManager;
 class ScreenlockMonitor;
+class SmsProvider;
 class SpeechRecognitionManagerImpl;
 class StartupTaskRunner;
 class TracingControllerImpl;
@@ -166,7 +168,7 @@ class CONTENT_EXPORT BrowserMainLoop {
     return media_keys_listener_manager_.get();
   }
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   // Only expose this on ChromeOS since it's only needed there. On Android this
   // be null if this process started in reduced mode.
   net::NetworkChangeNotifier* network_change_notifier() const {
@@ -209,11 +211,14 @@ class CONTENT_EXPORT BrowserMainLoop {
   void GetCompositingModeReporter(
       mojo::PendingReceiver<viz::mojom::CompositingModeReporter> receiver);
 
-#if defined(OS_MACOSX) && !defined(OS_IOS)
+#if defined(OS_MAC)
   media::DeviceMonitorMac* device_monitor_mac() const {
     return device_monitor_mac_.get();
   }
 #endif
+
+  SmsProvider* GetSmsProvider();
+  void SetSmsProviderForTesting(std::unique_ptr<SmsProvider>);
 
   BrowserMainParts* parts() { return parts_.get(); }
 
@@ -289,7 +294,8 @@ class CONTENT_EXPORT BrowserMainLoop {
   base::Optional<base::ThreadPoolInstance::ScopedBestEffortExecutionFence>
       scoped_best_effort_execution_fence_;
 
-  // Members initialized in |MainMessageLoopStart()| ---------------------------
+  // Unregister UI thread from hang watching on destruction.
+  base::ScopedClosureRunner unregister_thread_closure_;
 
   // Members initialized in |PostMainMessageLoopStart()| -----------------------
   std::unique_ptr<BrowserProcessSubThread> io_thread_;
@@ -359,7 +365,7 @@ class CONTENT_EXPORT BrowserMainLoop {
 
   std::unique_ptr<media::AudioSystem> audio_system_;
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   KeyboardMicRegistration keyboard_mic_registration_;
 #endif
 
@@ -368,11 +374,13 @@ class CONTENT_EXPORT BrowserMainLoop {
   // Must be deleted on the IO thread.
   std::unique_ptr<SpeechRecognitionManagerImpl> speech_recognition_manager_;
 
+  std::unique_ptr<SmsProvider> sms_provider_;
+
 #if defined(OS_WIN)
   std::unique_ptr<media::SystemMessageWindowWin> system_message_window_;
-#elif defined(OS_LINUX) && defined(USE_UDEV)
+#elif (defined(OS_LINUX) || defined(OS_CHROMEOS)) && defined(USE_UDEV)
   std::unique_ptr<media::DeviceMonitorLinux> device_monitor_linux_;
-#elif defined(OS_MACOSX) && !defined(OS_IOS)
+#elif defined(OS_MAC)
   std::unique_ptr<media::DeviceMonitorMac> device_monitor_mac_;
 #endif
 

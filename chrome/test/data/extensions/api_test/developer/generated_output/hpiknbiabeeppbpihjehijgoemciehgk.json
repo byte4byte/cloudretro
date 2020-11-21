@@ -3,8 +3,10 @@
    "description": "",
    "disableReasons": {
       "blockedByPolicy": false,
+      "parentDisabledPermissions": false,
       "corruptInstall": false,
       "custodianApprovalRequired": false,
+      "reloading": false,
       "suspiciousInstall": false,
       "updateRequired": false
    },

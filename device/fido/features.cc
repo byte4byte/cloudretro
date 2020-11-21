@@ -9,6 +9,7 @@
 #include "base/feature_list.h"
 #include "base/strings/string_split.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "url/origin.h"
 
 namespace device {
@@ -24,19 +25,24 @@ extern const base::Feature kWebAuthBiometricEnrollment{
 extern const base::Feature kWebAuthPhoneSupport{
     "WebAuthenticationPhoneSupport", base::FEATURE_DISABLED_BY_DEFAULT};
 
-extern const base::Feature kWebAuthFeaturePolicy{
-    "WebAuthenticationFeaturePolicy", base::FEATURE_DISABLED_BY_DEFAULT};
+extern const base::Feature kWebAuthCableExtensionAnywhere{
+    "WebAuthenticationCableExtensionAnywhere",
+    base::FEATURE_DISABLED_BY_DEFAULT};
+
+extern const base::Feature kWebAuthGetAssertionFeaturePolicy{
+    "WebAuthenticationGetAssertionFeaturePolicy",
+    base::FEATURE_ENABLED_BY_DEFAULT};
 
 #if defined(OS_CHROMEOS) || defined(OS_LINUX)
 const base::Feature kWebAuthCableLowLatency{"WebAuthenticationCableLowLatency",
                                             base::FEATURE_ENABLED_BY_DEFAULT};
 #endif  // defined(OS_CHROMEOS) || defined(OS_LINUX)
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_ASH)
 const base::Feature kWebAuthCrosPlatformAuthenticator{
     "WebAuthenticationCrosPlatformAuthenticator",
     base::FEATURE_DISABLED_BY_DEFAULT};
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_ASH)
 
 extern const base::Feature kWebAuthAttestationBlockList{
     "WebAuthentiationAttestationBlockList", base::FEATURE_DISABLED_BY_DEFAULT};

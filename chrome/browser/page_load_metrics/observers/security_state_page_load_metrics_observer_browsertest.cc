@@ -13,7 +13,6 @@
 #include "base/test/scoped_feature_list.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/reputation/reputation_web_contents_observer.h"
-#include "chrome/browser/reputation/safety_tip_test_utils.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
@@ -21,8 +20,10 @@
 #include "chrome/common/webui_url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/reputation/core/safety_tip_test_utils.h"
 #include "components/security_state/core/features.h"
 #include "components/ukm/test_ukm_recorder.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
@@ -254,7 +255,7 @@ IN_PROC_BROWSER_TEST_F(SecurityStatePageLoadMetricsBrowserTest,
     ClearUkmRecorder();
     base::HistogramTester histogram_tester;
     if (flag_page) {
-      SetSafetyTipBadRepPatterns({url.host() + "/"});
+      reputation::SetSafetyTipBadRepPatterns({url.host() + "/"});
     }
 
     chrome::AddTabAt(browser(), GURL(), -1, true);
@@ -306,7 +307,7 @@ IN_PROC_BROWSER_TEST_F(SecurityStatePageLoadMetricsBrowserTest,
   for (bool flag_page : {false, true}) {
     base::HistogramTester histogram_tester;
     if (flag_page) {
-      SetSafetyTipBadRepPatterns({url.host() + "/"});
+      reputation::SetSafetyTipBadRepPatterns({url.host() + "/"});
     }
 
     content::WebContents* contents =
@@ -395,10 +396,7 @@ IN_PROC_BROWSER_TEST_F(
   CloseAllTabs();
 
   security_state::SecurityLevel mixed_content_security_level =
-      base::FeatureList::IsEnabled(
-          security_state::features::kPassiveMixedContentWarning)
-          ? security_state::WARNING
-          : security_state::NONE;
+      security_state::WARNING;
 
   histogram_tester()->ExpectTotalCount(
       SecurityStatePageLoadMetricsObserver::
@@ -490,7 +488,7 @@ IN_PROC_BROWSER_TEST_F(SecurityStatePageLoadMetricsBrowserTest,
 
   for (bool flag_page : {false, true}) {
     if (flag_page) {
-      SetSafetyTipBadRepPatterns({url.host() + "/"});
+      reputation::SetSafetyTipBadRepPatterns({url.host() + "/"});
     }
     content::WebContents* contents =
         browser()->tab_strip_model()->GetActiveWebContents();

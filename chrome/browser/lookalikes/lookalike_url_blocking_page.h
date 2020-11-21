@@ -10,9 +10,8 @@
 
 #include "base/macros.h"
 #include "base/time/time.h"
-#include "components/lookalikes/lookalike_url_util.h"
+#include "components/lookalikes/core/lookalike_url_util.h"
 #include "components/security_interstitials/content/security_interstitial_page.h"
-#include "content/public/browser/interstitial_page_delegate.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
 
 class GURL;
@@ -24,33 +23,31 @@ class LookalikeUrlBlockingPage
     : public security_interstitials::SecurityInterstitialPage {
  public:
   // Interstitial type, used in tests.
-  static const content::InterstitialPageDelegate::TypeID kTypeForTesting;
+  static const security_interstitials::SecurityInterstitialPage::TypeID
+      kTypeForTesting;
 
   LookalikeUrlBlockingPage(
       content::WebContents* web_contents,
+      const GURL& safe_url,
       const GURL& request_url,
       ukm::SourceId source_id,
       LookalikeUrlMatchType match_type,
+      bool is_signed_exchange,
       std::unique_ptr<
           security_interstitials::SecurityInterstitialControllerClient>
           controller);
 
   ~LookalikeUrlBlockingPage() override;
 
-  // InterstitialPageDelegate method:
-  InterstitialPageDelegate::TypeID GetTypeForTesting() override;
+  // SecurityInterstitialPage method:
+  security_interstitials::SecurityInterstitialPage::TypeID GetTypeForTesting()
+      override;
 
-  // Allow easier reporting of UKM when no interstitial is shown.
-  static void RecordUkmEvent(ukm::SourceId source_id,
-                             LookalikeUrlMatchType match_type,
-                             LookalikeUrlBlockingPageUserAction user_action);
+  bool is_signed_exchange_for_testing() const { return is_signed_exchange_; }
 
  protected:
-  // InterstitialPageDelegate implementation:
-  void CommandReceived(const std::string& command) override;
-
   // SecurityInterstitialPage implementation:
-  bool ShouldCreateNewNavigation() const override;
+  void CommandReceived(const std::string& command) override;
   void PopulateInterstitialStrings(
       base::DictionaryValue* load_time_data) override;
   void OnInterstitialClosing() override;
@@ -60,14 +57,14 @@ class LookalikeUrlBlockingPage
  private:
   friend class LookalikeUrlNavigationThrottleBrowserTest;
 
-  // Values added to get our shared interstitial HTML to play nice.
-  void PopulateStringsForSharedHTML(base::DictionaryValue* load_time_data);
-
-  // Record UKM iff we haven't already reported for this page.
-  void ReportUkmIfNeeded(LookalikeUrlBlockingPageUserAction action);
-
+  // The URL suggested to the user as the safe URL. Can be empty, in which case
+  // the default action on the interstitial takes the user to the new tab page.
+  const GURL safe_url_;
   ukm::SourceId source_id_;
   LookalikeUrlMatchType match_type_;
+  // True if the throttle encountered a response with
+  // is_signed_exchange_inner_response flag. Only checked in tests.
+  const bool is_signed_exchange_;
 
   DISALLOW_COPY_AND_ASSIGN(LookalikeUrlBlockingPage);
 };

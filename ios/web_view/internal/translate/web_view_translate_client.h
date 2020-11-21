@@ -54,6 +54,11 @@ class WebViewTranslateClient : public translate::TranslateClient {
   // Marked virtual to allow for testing.
   virtual void RevertTranslation();
 
+  // Attempts to initiate a manual translation flow.
+  // Returns boolean indicating if translation can be offered.
+  // Marked virtual to allow for testing.
+  virtual bool RequestTranslationOffer();
+
   // TranslateClient implementation.
   translate::IOSTranslateDriver* GetTranslateDriver() override;
   PrefService* GetPrefs() override;
@@ -70,6 +75,7 @@ class WebViewTranslateClient : public translate::TranslateClient {
                        bool triggered_from_menu) override;
   bool IsTranslatableURL(const GURL& url) override;
   void ShowReportLanguageDetectionErrorUI(const GURL& report_url) override;
+  bool IsAutofillAssistantRunning() const override;
 
  private:
   PrefService* pref_service_;

@@ -4,7 +4,10 @@
 
 #include "gpu/vulkan/vulkan_image.h"
 
+#include "base/logging.h"
 #include "build/build_config.h"
+#include "gpu/config/gpu_info_collector.h"
+#include "gpu/config/gpu_test_config.h"
 #include "gpu/ipc/service/gpu_memory_buffer_factory.h"
 #include "gpu/vulkan/tests/basic_vulkan_test.h"
 #include "gpu/vulkan/vulkan_device_queue.h"
@@ -52,6 +55,12 @@ TEST_F(VulkanImageTest, Create) {
 }
 
 TEST_F(VulkanImageTest, CreateWithExternalMemory) {
+  {
+    // TODO(crbug.com/1069516) : Fails on current driver version on this bot.
+    if (GPUTestBotConfig::CurrentConfigMatches("Win10"))
+      return;
+  }
+
   constexpr gfx::Size size(100, 100);
   constexpr VkImageUsageFlags usage =
       VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
@@ -157,7 +166,8 @@ TEST_F(VulkanImageTest, CreateFromGpuMemoryBufferHandle) {
     gfx::BufferUsage buffer_usage = gfx::BufferUsage::SCANOUT;
     int client_id = 1;
     auto gmb_handle = factory->CreateGpuMemoryBuffer(
-        id, size, format.buffer, buffer_usage, client_id, kNullSurfaceHandle);
+        id, size, /*framebuffer_size=*/size, format.buffer, buffer_usage,
+        client_id, kNullSurfaceHandle);
     EXPECT_TRUE(!gmb_handle.is_null());
     EXPECT_EQ(gmb_handle.type,
               gfx::GpuMemoryBufferType::ANDROID_HARDWARE_BUFFER);

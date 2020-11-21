@@ -7,6 +7,7 @@
  * 'settings-main' displays the selected settings page.
  */
 import 'chrome://resources/cr_components/managed_footnote/managed_footnote.m.js';
+import 'chrome://resources/cr_elements/shared_style_css.m.js';
 import 'chrome://resources/cr_elements/hidden_style_css.m.js';
 import 'chrome://resources/cr_elements/icons.m.js';
 import 'chrome://resources/js/search_highlight_utils.m.js';
@@ -23,9 +24,9 @@ import {PromiseResolver} from 'chrome://resources/js/promise_resolver.m.js';
 import {IronA11yAnnouncer} from 'chrome://resources/polymer/v3_0/iron-a11y-announcer/iron-a11y-announcer.js';
 import {html, Polymer} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
-import {loadTimeData} from '../i18n_setup.m.js';
-import {PageVisibility} from '../page_visibility.m.js';
-import {routes} from '../route.m.js';
+import {loadTimeData} from '../i18n_setup.js';
+import {PageVisibility} from '../page_visibility.js';
+import {routes} from '../route.js';
 import {Route, RouteObserverBehavior, Router} from '../router.m.js';
 
 /**

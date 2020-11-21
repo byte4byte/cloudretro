@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #include <memory>
+#include <vector>
 
 #include "base/callback.h"
 #include "base/component_export.h"
@@ -18,8 +19,10 @@
 #include "base/sequenced_task_runner_helpers.h"
 #include "storage/browser/quota/quota_callbacks.h"
 #include "storage/browser/quota/quota_client.h"
+#include "storage/browser/quota/quota_client_type.h"
 #include "storage/browser/quota/quota_database.h"
 #include "storage/browser/quota/quota_manager.h"
+#include "storage/browser/quota/quota_override_handle.h"
 #include "storage/browser/quota/quota_task.h"
 #include "storage/browser/quota/special_storage_policy.h"
 #include "third_party/blink/public/mojom/quota/quota_types.mojom.h"
@@ -38,10 +41,13 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) QuotaManagerProxy
  public:
   using UsageAndQuotaCallback = QuotaManager::UsageAndQuotaCallback;
 
-  virtual void RegisterClient(scoped_refptr<QuotaClient> client);
+  virtual void RegisterClient(
+      scoped_refptr<QuotaClient> client,
+      QuotaClientType client_type,
+      const std::vector<blink::mojom::StorageType>& storage_types);
   virtual void NotifyStorageAccessed(const url::Origin& origin,
                                      blink::mojom::StorageType type);
-  virtual void NotifyStorageModified(QuotaClient::ID client_id,
+  virtual void NotifyStorageModified(QuotaClientType client_id,
                                      const url::Origin& origin,
                                      blink::mojom::StorageType type,
                                      int64_t delta);
@@ -49,7 +55,7 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) QuotaManagerProxy
   virtual void NotifyOriginNoLongerInUse(const url::Origin& origin);
   virtual void NotifyWriteFailed(const url::Origin& origin);
 
-  virtual void SetUsageCacheEnabled(QuotaClient::ID client_id,
+  virtual void SetUsageCacheEnabled(QuotaClientType client_id,
                                     const url::Origin& origin,
                                     blink::mojom::StorageType type,
                                     bool enabled);
@@ -57,6 +63,17 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) QuotaManagerProxy
                                 const url::Origin& origin,
                                 blink::mojom::StorageType type,
                                 UsageAndQuotaCallback callback);
+
+  // DevTools Quota Override methods:
+  std::unique_ptr<QuotaOverrideHandle> GetQuotaOverrideHandle();
+  // Called by QuotaOverrideHandle upon construction to asynchronously
+  // fetch an id.
+  void GetOverrideHandleId(base::OnceCallback<void(int)>);
+  void OverrideQuotaForOrigin(int handle_id,
+                              url::Origin origin,
+                              base::Optional<int64_t> quota_size,
+                              base::OnceClosure callback);
+  void WithdrawOverridesForHandle(int handle_id);
 
   // This method may only be called on the IO thread.
   // It may return nullptr if the manager has already been deleted.
@@ -70,6 +87,7 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) QuotaManagerProxy
                     scoped_refptr<base::SingleThreadTaskRunner> io_thread);
   virtual ~QuotaManagerProxy();
 
+ private:
   QuotaManager* manager_;  // only accessed on the io thread
   scoped_refptr<base::SingleThreadTaskRunner> io_thread_;
 

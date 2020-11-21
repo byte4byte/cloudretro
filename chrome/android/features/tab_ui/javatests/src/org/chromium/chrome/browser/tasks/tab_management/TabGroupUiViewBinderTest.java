@@ -7,15 +7,12 @@ package org.chromium.chrome.browser.tasks.tab_management;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
-import android.annotation.SuppressLint;
 import android.content.res.ColorStateList;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
-import android.os.Build;
-import android.support.test.annotation.UiThreadTest;
-import android.support.test.filters.SmallTest;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -24,12 +21,13 @@ import android.widget.ImageView;
 
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
+import androidx.test.filters.SmallTest;
 
 import org.junit.Assert;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
-import org.chromium.base.test.util.DisableIf;
+import org.chromium.base.test.UiThreadTest;
 import org.chromium.chrome.browser.toolbar.ToolbarColors;
 import org.chromium.chrome.tab_ui.R;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
@@ -147,8 +145,6 @@ public class TabGroupUiViewBinderTest extends DummyUiActivityTestCase {
     @Test
     @UiThreadTest
     @SmallTest
-    @SuppressLint("NewApi") // Used on K+ because getImageTintList is only supported on API >= 21.
-    @DisableIf.Build(sdk_is_less_than = Build.VERSION_CODES.LOLLIPOP)
     public void testSetTint() {
         ColorStateList tint = ToolbarColors.getThemedToolbarIconTint(getActivity(), true);
         Assert.assertNotEquals(tint, mLeftButton.getImageTintList());
@@ -173,5 +169,29 @@ public class TabGroupUiViewBinderTest extends DummyUiActivityTestCase {
         int blueDrawableId = ((ColorDrawable) mMainContent.getBackground()).getColor();
 
         assertNotEquals(greyDrawableId, blueDrawableId);
+    }
+
+    @Test
+    @UiThreadTest
+    @SmallTest
+    public void testSetLeftButtonContentDescription() {
+        assertNull(mLeftButton.getContentDescription());
+
+        String string = "left button content";
+        mModel.set(TabGroupUiProperties.LEFT_BUTTON_CONTENT_DESCRIPTION, string);
+
+        assertEquals(string, mLeftButton.getContentDescription());
+    }
+
+    @Test
+    @UiThreadTest
+    @SmallTest
+    public void testSetRightButtonContentDescription() {
+        assertNull(mRightButton.getContentDescription());
+
+        String string = "right button content";
+        mModel.set(TabGroupUiProperties.RIGHT_BUTTON_CONTENT_DESCRIPTION, string);
+
+        assertEquals(string, mRightButton.getContentDescription());
     }
 }

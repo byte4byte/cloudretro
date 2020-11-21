@@ -4,13 +4,13 @@
 
 #include <stddef.h>
 
+#include "base/files/file_util.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "build/build_config.h"
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_util.h"
-#include "chrome/browser/metrics/subprocess_metrics_provider.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
@@ -18,6 +18,7 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_frame_host.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/download_test_observer.h"
 #include "content/public/test/test_utils.h"
@@ -131,7 +132,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionFunctionalTest,
         &did_create_popup));
     ASSERT_TRUE(did_create_popup);
     content::WebContents* popup_window = new_window_observer.GetWebContents();
-    WaitForLoadStop(popup_window);
+    EXPECT_TRUE(WaitForLoadStop(popup_window));
     tab1_popup = popup_window->GetMainFrame();
   }
   EXPECT_EQ(GURL(url::kAboutBlankURL), tab1_popup->GetLastCommittedURL());

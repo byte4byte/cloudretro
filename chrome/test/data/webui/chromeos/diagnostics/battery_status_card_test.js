@@ -1,0 +1,132 @@
+// Copyright 2020 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+import 'chrome://diagnostics/battery_status_card.js';
+
+import {BatteryChargeStatus, BatteryHealth, BatteryInfo, SystemDataProviderInterface} from 'chrome://diagnostics/diagnostics_types.js';
+import {fakeBatteryChargeStatus, fakeBatteryHealth, fakeBatteryInfo} from 'chrome://diagnostics/fake_data.js';
+import {FakeSystemDataProvider} from 'chrome://diagnostics/fake_system_data_provider.js';
+import {getSystemDataProvider, setSystemDataProviderForTesting} from 'chrome://diagnostics/mojo_interface_provider.js';
+import {mojoString16ToString} from 'chrome://diagnostics/mojo_utils.js';
+
+import {assertEquals, assertFalse, assertTrue} from '../../chai_assert.js';
+import {flushTasks, isChildVisible} from '../../test_util.m.js';
+
+import * as dx_utils from './diagnostics_test_utils.js';
+
+export function batteryStatusCardTestSuite() {
+  /** @type {?BatteryStatusCardElement} */
+  let batteryStatusElement = null;
+
+  /** @type {?FakeSystemDataProvider} */
+  let provider = null;
+
+  suiteSetup(() => {
+    provider = new FakeSystemDataProvider();
+    setSystemDataProviderForTesting(provider);
+  });
+
+  setup(() => {
+    document.body.innerHTML = '';
+  });
+
+  teardown(() => {
+    if (batteryStatusElement) {
+      batteryStatusElement.remove();
+    }
+    batteryStatusElement = null;
+
+    provider.reset();
+  });
+
+  /**
+   * @param {!BatteryInfo} batteryInfo
+   * @param {!Array<!BatteryChargeStatus>} batteryChargeStatus
+   * @param {!Array<!BatteryHealth>} batteryHealth
+   * @return {!Promise}
+   */
+  function initializeBatteryStatusCard(
+      batteryInfo, batteryChargeStatus, batteryHealth) {
+    assertFalse(!!batteryStatusElement);
+
+    // Initialize the fake data.
+    provider.setFakeBatteryChargeStatus(batteryChargeStatus);
+    provider.setFakeBatteryHealth(batteryHealth);
+    provider.setFakeBatteryInfo(batteryInfo);
+
+    // Add the battery status card to the DOM.
+    batteryStatusElement = /** @type {!BatteryStatusCardElement} */ (
+        document.createElement('battery-status-card'));
+    assertTrue(!!batteryStatusElement);
+    document.body.appendChild(batteryStatusElement);
+
+    return flushTasks();
+  }
+
+  /**
+   * Returns the routine-section from the card.
+   * @return {!RoutineSectionElement}
+   */
+  function getRoutineSection() {
+    const routineSection = /** @type {!RoutineSectionElement} */ (
+        batteryStatusElement.$$('routine-section'));
+    assertTrue(!!routineSection);
+    return routineSection;
+  }
+
+  /**
+   * Returns the Run Tests button from inside the routine-section.
+   * @return {!CrButtonElement}
+   */
+  function getRunTestsButton() {
+    const button = dx_utils.getRunTestsButtonFromSection(getRoutineSection());
+    assertTrue(!!button);
+    return button;
+  }
+
+  /**
+   * Returns whether the run tests button is disabled.
+   * @return {boolean}
+   */
+  function isRunTestsButtonDisabled() {
+    return getRunTestsButton().disabled;
+  }
+
+  test('BatteryStatusCardPopulated', () => {
+    return initializeBatteryStatusCard(
+               fakeBatteryInfo, fakeBatteryChargeStatus, fakeBatteryHealth)
+        .then(() => {
+          const dataPoints =
+              dx_utils.getDataPointElements(batteryStatusElement);
+          dx_utils.assertTextContains(
+              dataPoints[0].value,
+              `${fakeBatteryHealth[0].batteryWearPercentage}`);
+          assertEquals(fakeBatteryHealth[0].cycleCount, dataPoints[1].value);
+          dx_utils.assertTextContains(
+              dataPoints[2].value,
+              `${fakeBatteryChargeStatus[0].currentNowMilliamps}`);
+          dx_utils.assertElementContainsText(
+              batteryStatusElement.$$('#batteryStatusChipInfo'),
+              `${fakeBatteryHealth[0].chargeFullDesignMilliampHours}`);
+
+          const barChart =
+              dx_utils.getPercentBarChartElement(batteryStatusElement);
+          assertEquals(
+              fakeBatteryHealth[0].chargeFullNowMilliampHours, barChart.max);
+          assertEquals(
+              fakeBatteryChargeStatus[0].chargeNowMilliampHours,
+              barChart.value);
+
+          // Verify that the data points container is visible.
+          const diagnosticsCard =
+              dx_utils.getDiagnosticsCard(batteryStatusElement);
+          assertTrue(isChildVisible(diagnosticsCard, '.data-points'));
+
+          // Verify the routine section is in the card.
+          assertTrue(!!getRoutineSection());
+          assertTrue(!!getRunTestsButton());
+          assertFalse(isRunTestsButtonDisabled());
+        });
+  });
+}

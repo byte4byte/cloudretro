@@ -56,6 +56,10 @@ const char kCrostiniAnsiblePlaybookFilePath[] =
 // successfully configured by kCrostiniAnsiblePlaybook user policy.
 const char kCrostiniDefaultContainerConfigured[] =
     "crostini.default_container_configured";
+// A boolean preference representing a user level enterprise policy to allow
+// port forwarding into Crostini.
+const char kCrostiniPortForwardingAllowedByPolicy[] =
+    "crostini.port_forwarding_allowed_by_policy";
 
 // A boolean preference controlling Crostini usage reporting.
 const char kReportCrostiniUsageEnabled[] = "crostini.usage_reporting_enabled";
@@ -75,12 +79,6 @@ const char kCrostiniLastDiskSize[] = "crostini.last_disk_size";
 // A dictionary preference representing a user's settings of forwarded ports
 // to Crostini.
 const char kCrostiniPortForwarding[] = "crostini.port_forwarding.ports";
-// A boolean preference indicating whether Crostini is able to access the mic.
-const char kCrostiniMicSharing[] = "crostini.mic_sharing";
-// A boolean preference indicating whether Crostini was given access to the mic
-// the last time it launched.
-const char kCrostiniMicSharingAtLastLaunch[] =
-    "crostini.mic_sharing_at_last_launch";
 
 // An integer preference indicating the allowance policy for ADB sideloading,
 // with 0 meaning disallowed and 1 meaning allowed
@@ -89,8 +87,6 @@ const char kCrostiniArcAdbSideloadingUserPref[] =
 
 void RegisterProfilePrefs(PrefRegistrySimple* registry) {
   registry->RegisterBooleanPref(kCrostiniEnabled, false);
-  registry->RegisterBooleanPref(kCrostiniMicSharing, false);
-  registry->RegisterBooleanPref(kCrostiniMicSharingAtLastLaunch, false);
   registry->RegisterDictionaryPref(kCrostiniMimeTypes);
   registry->RegisterListPref(kCrostiniPortForwarding);
   registry->RegisterListPref(kCrostiniSharedUsbDevices);
@@ -122,16 +118,17 @@ void RegisterProfilePrefs(PrefRegistrySimple* registry) {
                                 true);
   registry->RegisterBooleanPref(kVmManagementCliAllowedByPolicy, true);
   registry->RegisterBooleanPref(kUserCrostiniRootAccessAllowedByPolicy, true);
+  registry->RegisterBooleanPref(kCrostiniPortForwardingAllowedByPolicy, true);
   registry->RegisterFilePathPref(kCrostiniAnsiblePlaybookFilePath,
                                  base::FilePath());
   registry->RegisterBooleanPref(kCrostiniDefaultContainerConfigured, false);
   registry->RegisterDictionaryPref(
       kCrostiniTerminalSettings, base::DictionaryValue(),
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+      user_prefs::PrefRegistrySyncable::SYNCABLE_OS_PREF);
 
-  // TODO(https://crbug.com/1067577, janagrill): Replace hardcoded 0 with a
-  // constant
-  registry->RegisterIntegerPref(kCrostiniArcAdbSideloadingUserPref, 0);
+  registry->RegisterIntegerPref(
+      kCrostiniArcAdbSideloadingUserPref,
+      static_cast<int>(CrostiniArcAdbSideloadingUserAllowanceMode::kDisallow));
 }
 
 }  // namespace prefs

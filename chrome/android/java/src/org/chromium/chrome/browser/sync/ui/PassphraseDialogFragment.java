@@ -34,10 +34,9 @@ import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.IntentUtils;
 import org.chromium.base.Log;
-import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeStringConstants;
-import org.chromium.chrome.browser.help.HelpAndFeedback;
+import org.chromium.chrome.browser.feedback.HelpAndFeedbackLauncherImpl;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.sync.ProfileSyncService;
 import org.chromium.components.sync.PassphraseType;
@@ -85,13 +84,6 @@ public class PassphraseDialogFragment extends DialogFragment implements OnClickL
             dialog.setTargetFragment(target, -1);
         }
         return dialog;
-    }
-
-    private void recordPassphraseDialogDismissal(int result) {
-        RecordHistogram.recordEnumeratedHistogram(
-                "Sync.PassphraseDialogDismissed",
-                result,
-                PASSPHRASE_DIALOG_LIMIT);
     }
 
     @Override
@@ -182,7 +174,7 @@ public class PassphraseDialogFragment extends DialogFragment implements OnClickL
                 new SpanInfo("<learnmore>", "</learnmore>", new ClickableSpan() {
                     @Override
                     public void onClick(View view) {
-                        HelpAndFeedback.getInstance().show(getActivity(), helpContext,
+                        HelpAndFeedbackLauncherImpl.getInstance().show(getActivity(), helpContext,
                                 Profile.getLastUsedRegularProfile(), null);
                     }
                 }));
@@ -223,7 +215,6 @@ public class PassphraseDialogFragment extends DialogFragment implements OnClickL
                 new SpanInfo("<resetlink>", "</resetlink>", new ClickableSpan() {
                     @Override
                     public void onClick(View view) {
-                        recordPassphraseDialogDismissal(PASSPHRASE_DIALOG_RESET_LINK);
                         Uri syncDashboardUrl = Uri.parse(ChromeStringConstants.SYNC_DASHBOARD_URL);
                         Intent intent = new Intent(Intent.ACTION_VIEW, syncDashboardUrl);
                         intent.setPackage(ContextUtils.getApplicationContext().getPackageName());
@@ -249,7 +240,6 @@ public class PassphraseDialogFragment extends DialogFragment implements OnClickL
         int cancelReason = isIncorrectPassphraseVisible()
                 ? PASSPHRASE_DIALOG_ERROR
                 : PASSPHRASE_DIALOG_CANCEL;
-        recordPassphraseDialogDismissal(cancelReason);
         getListener().onPassphraseCanceled();
     }
 
@@ -259,9 +249,7 @@ public class PassphraseDialogFragment extends DialogFragment implements OnClickL
 
         String passphrase = mPassphraseEditText.getText().toString();
         boolean success = getListener().onPassphraseEntered(passphrase);
-        if (success) {
-            recordPassphraseDialogDismissal(PASSPHRASE_DIALOG_OK);
-        } else {
+        if (!success) {
             invalidPassphrase();
         }
     }

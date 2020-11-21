@@ -64,6 +64,9 @@ cr.define('settings', function() {
        */
       isNarrow: {
         type: Boolean,
+        value: false,
+        readonly: true,
+        notify: true,
         observer: 'onNarrowChanged_',
       },
 
@@ -82,15 +85,34 @@ cr.define('settings', function() {
       showCrostini_: Boolean,
 
       /** @private */
+      showToolbar_: Boolean,
+
+      /** @private */
+      showNavMenu_: Boolean,
+
+      /** @private */
       showPluginVm_: Boolean,
 
       /** @private */
       showReset_: Boolean,
 
       /** @private */
+      showStartup_: Boolean,
+
+      /** @private */
       lastSearchQuery_: {
         type: String,
         value: '',
+      },
+
+      /**
+       * The threshold at which the toolbar will change from normal to narrow
+       * mode, in px.
+       * @private {boolean}
+       */
+      narrowThreshold_: {
+        type: Number,
+        value: 980,
       },
     },
 
@@ -106,9 +128,16 @@ cr.define('settings', function() {
      */
     activeRoute_: null,
 
+    /**
+     * Converts prefs to settings metrics to help record pref changes.
+     * @private {PrefToSettingMetricConverter}
+     */
+    prefToSettingMetricConverter_: null,
+
     /** @override */
     created() {
       settings.Router.getInstance().initializeRouteFromUrl();
+      this.prefToSettingMetricConverter_ = new PrefToSettingMetricConverter();
     },
 
     /**
@@ -117,15 +146,6 @@ cr.define('settings', function() {
      * ES5 strict mode.
      */
     ready() {
-      // Lazy-create the drawer the first time it is opened or swiped into view.
-      listenOnce(this.$.drawer, 'cr-drawer-opening', () => {
-        this.$.drawerTemplate.if = true;
-      });
-
-      window.addEventListener('popstate', e => {
-        this.$.drawer.cancel();
-      });
-
       CrPolicyStrings = {
         controlledSettingExtension:
             loadTimeData.getString('controlledSettingExtension'),
@@ -153,7 +173,10 @@ cr.define('settings', function() {
       this.showAndroidApps_ = loadTimeData.getBoolean('androidAppsVisible');
       this.showCrostini_ = loadTimeData.getBoolean('showCrostini');
       this.showPluginVm_ = loadTimeData.getBoolean('showPluginVm');
+      this.showNavMenu_ = !loadTimeData.getBoolean('isKioskModeActive');
+      this.showToolbar_ = !loadTimeData.getBoolean('isKioskModeActive');
       this.showReset_ = loadTimeData.getBoolean('allowPowerwash');
+      this.showStartup_ = loadTimeData.getBoolean('showStartup');
 
       this.addEventListener('show-container', () => {
         this.$.container.style.visibility = 'visible';
@@ -161,6 +184,25 @@ cr.define('settings', function() {
 
       this.addEventListener('hide-container', () => {
         this.$.container.style.visibility = 'hidden';
+      });
+
+      // If navigation menu is not shown, do not listen to the drawer.
+      if (!this.showNavMenu_) {
+        return;
+      }
+
+      this.async(() => {
+        // Lazy-create the drawer the first time it is opened or swiped into
+        // view.
+        const drawer = this.$$('#drawer');
+        assert(drawer);
+        listenOnce(drawer, 'cr-drawer-opening', () => {
+          this.$$('#drawerTemplate').if = true;
+        });
+
+        window.addEventListener('popstate', e => {
+          drawer.cancel();
+        });
       });
     },
 
@@ -209,12 +251,17 @@ cr.define('settings', function() {
 
       window.addEventListener('focus', settings.recordPageFocus);
       window.addEventListener('blur', settings.recordPageBlur);
+
+      // Clicks need to be captured because unlike focus/blur to the settings
+      // window, a click's propagation can be stopped by child elements.
+      window.addEventListener('click', settings.recordClick, /*capture=*/true);
     },
 
     /** @override */
     detached() {
       window.removeEventListener('focus', settings.recordPageFocus);
       window.removeEventListener('blur', settings.recordPageBlur);
+      window.removeEventListener('click', settings.recordClick);
       settings.Router.getInstance().resetRouteForTesting();
     },
 
@@ -223,7 +270,7 @@ cr.define('settings', function() {
      * @param {!settings.Route} oldRoute
      */
     currentRouteChanged(newRoute, oldRoute) {
-      if (oldRoute && newRoute != oldRoute) {
+      if (oldRoute && newRoute !== oldRoute) {
         // Search triggers route changes and currentRouteChanged() is called
         // in attached() state which is extraneous for this metric.
         settings.recordNavigation();
@@ -239,7 +286,7 @@ cr.define('settings', function() {
       }
 
       if (loadTimeData.getBoolean('newOsSettingsSearch')) {
-        // TODO(crbug/1056909): Remove when new os settings search complete.
+        // TODO(crbug/1080777): Remove when new os settings search complete.
         // This block prevents the old settings search code from being executed.
         return;
       }
@@ -247,11 +294,17 @@ cr.define('settings', function() {
       const urlSearchQuery =
           settings.Router.getInstance().getQueryParameters().get('search') ||
           '';
-      if (urlSearchQuery == this.lastSearchQuery_) {
+
+      if (urlSearchQuery === this.lastSearchQuery_) {
         return;
       }
 
       this.lastSearchQuery_ = urlSearchQuery;
+
+      // If toolbar is hidden, do not update anything.
+      if (!this.showToolbar_) {
+        return;
+      }
 
       const toolbar = /** @type {!OsToolbarElement} */ (this.$$('os-toolbar'));
       const searchField =
@@ -259,7 +312,7 @@ cr.define('settings', function() {
               toolbar.getSearchField());
 
       if (!searchField) {
-        // TODO(crbug/1056909): Remove this and surrounding code when new os
+        // TODO(crbug/1080777): Remove this and surrounding code when new os
         // settings search complete. If the search field has not been rendered
         // yet, do not continue. crbug/1056909 changes the toolbar search field
         // to an optional value, so the element is not attached to the DOM the
@@ -270,7 +323,7 @@ cr.define('settings', function() {
 
       // If the search was initiated by directly entering a search URL, need to
       // sync the URL parameter to the textbox.
-      if (urlSearchQuery != searchField.getValue()) {
+      if (urlSearchQuery !== searchField.getValue()) {
         // Setting the search box value without triggering a 'search-changed'
         // event, to prevent an unnecessary duplicate entry in |window.history|.
         searchField.setValue(urlSearchQuery, true /* noEvent */);
@@ -282,15 +335,19 @@ cr.define('settings', function() {
 
     // Override FindShortcutBehavior methods.
     handleFindShortcut(modalContextOpen) {
-      if (modalContextOpen) {
+      if (modalContextOpen || !this.showToolbar_) {
         return false;
       }
       this.$$('os-toolbar').getSearchField().showAndFocus();
+      this.$$('os-toolbar').getSearchField().getSearchInput().select();
       return true;
     },
 
     // Override FindShortcutBehavior methods.
     searchInputHasFocus() {
+      if (!this.showToolbar_) {
+        return;
+      }
       return this.$$('os-toolbar').getSearchField().isSearchFocused();
     },
 
@@ -304,15 +361,31 @@ cr.define('settings', function() {
     },
 
     /**
+     * @param {!CustomEvent<!{prefKey: string, prefValue: *}>} e
      * @private
      */
-    onSettingChange_() {
-      settings.recordSettingChange();
+    onSettingChange_(e) {
+      const {prefKey, prefValue} = e.detail;
+      const settingMetric =
+          this.prefToSettingMetricConverter_.convertPrefToSettingMetric(
+              prefKey, prefValue);
+
+      // New metrics for this setting pref have not yet been implemented.
+      if (!settingMetric) {
+        settings.recordSettingChange();
+        return;
+      }
+
+      const setting = /** @type {!chromeos.settings.mojom.Setting} */ (
+          settingMetric.setting);
+      const value = /** @type {!chromeos.settings.mojom.SettingChangeValue} */ (
+          settingMetric.value);
+      settings.recordSettingChange(setting, value);
     },
 
     /**
      * Handles the 'search-changed' event fired from the toolbar.
-     * TODO(crbug/1056909): Remove when new settings search complete.
+     * TODO(crbug/1080777): Remove when new settings search complete.
      * @param {!Event} e
      * @private
      */
@@ -335,6 +408,7 @@ cr.define('settings', function() {
      * @private
      */
     onIronActivate_(e) {
+      assert(this.showNavMenu_);
       const section = e.detail.selected;
       const path = new URL(section).pathname;
       const route = settings.Router.getInstance().getRouteForPath(path);
@@ -344,7 +418,7 @@ cr.define('settings', function() {
       if (this.isNarrow) {
         // If the onIronActivate event came from the drawer, close the drawer
         // and wait for the menu to close before navigating to |activeRoute_|.
-        this.$.drawer.close();
+        this.$$('#drawer').close();
         return;
       }
       this.navigateToActiveRoute_();
@@ -352,9 +426,11 @@ cr.define('settings', function() {
 
     /** @private */
     onMenuButtonTap_() {
-      this.$.drawer.toggle();
+      if (!this.showNavMenu_) {
+        return;
+      }
+      this.$$('#drawer').toggle();
     },
-
 
     /**
      * Navigates to |activeRoute_| if set. Used to delay navigation until after
@@ -380,7 +456,7 @@ cr.define('settings', function() {
      * @private
      */
     onMenuClose_() {
-      if (!this.$.drawer.wasCanceled()) {
+      if (!this.$$('#drawer').wasCanceled()) {
         // If a navigation happened, MainPageBehavior#currentRouteChanged
         // handles focusing the corresponding section when we call
         // settings.NavigateTo().
@@ -415,8 +491,8 @@ cr.define('settings', function() {
 
     /** @private */
     onNarrowChanged_() {
-      if (this.$.drawer.open && !this.isNarrow) {
-        this.$.drawer.close();
+      if (this.showNavMenu_ && this.$$('#drawer').open && !this.isNarrow) {
+        this.$$('#drawer').close();
       }
     },
   });

@@ -21,18 +21,6 @@
 #include "chrome/browser/ui/views/sync/dice_bubble_sync_promo_view.h"
 #endif
 
-namespace {
-
-std::unique_ptr<views::View> CreateManageCardsButton(
-    views::ButtonListener* listener) {
-  auto manage_cards_button = views::MdTextButton::CreateSecondaryUiButton(
-      listener, l10n_util::GetStringUTF16(IDS_AUTOFILL_MANAGE_CARDS));
-  manage_cards_button->SetID(autofill::DialogViewId::MANAGE_CARDS_BUTTON);
-  return manage_cards_button;
-}
-
-}  // namespace
-
 namespace autofill {
 
 SaveCardManageCardsBubbleViews::SaveCardManageCardsBubbleViews(
@@ -40,9 +28,17 @@ SaveCardManageCardsBubbleViews::SaveCardManageCardsBubbleViews(
     content::WebContents* web_contents,
     SaveCardBubbleController* controller)
     : SaveCardBubbleViews(anchor_view, web_contents, controller) {
-  DialogDelegate::SetButtons(ui::DIALOG_BUTTON_OK);
-  DialogDelegate::SetExtraView(CreateManageCardsButton(this));
-  DialogDelegate::SetFootnoteView(CreateSigninPromoView());
+  SetButtons(ui::DIALOG_BUTTON_OK);
+  SetExtraView(std::make_unique<views::MdTextButton>(
+                   base::BindRepeating(
+                       [](SaveCardManageCardsBubbleViews* bubble) {
+                         bubble->controller()->OnManageCardsClicked();
+                         bubble->CloseBubble();
+                       },
+                       base::Unretained(this)),
+                   l10n_util::GetStringUTF16(IDS_AUTOFILL_MANAGE_CARDS)))
+      ->SetID(autofill::DialogViewId::MANAGE_CARDS_BUTTON);
+  SetFootnoteView(CreateSigninPromoView());
 }
 
 std::unique_ptr<views::View>
@@ -76,14 +72,6 @@ SaveCardManageCardsBubbleViews::CreateSigninPromoView() {
   InitFootnoteView(promo_view.get());
   return promo_view;
 #endif
-}
-
-void SaveCardManageCardsBubbleViews::ButtonPressed(views::Button* sender,
-                                                   const ui::Event& event) {
-  if (sender->GetViewByID(DialogViewId::MANAGE_CARDS_BUTTON)) {
-    controller()->OnManageCardsClicked();
-    CloseBubble();
-  }
 }
 
 SaveCardManageCardsBubbleViews::~SaveCardManageCardsBubbleViews() = default;

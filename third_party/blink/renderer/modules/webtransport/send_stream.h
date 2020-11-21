@@ -24,7 +24,6 @@ class MODULES_EXPORT SendStream final : public ScriptWrappable,
                                         public WebTransportStream,
                                         public OutgoingStream::Client {
   DEFINE_WRAPPERTYPEINFO();
-  USING_GARBAGE_COLLECTED_MIXIN(SendStream);
 
  public:
   // SendStream doesn't have a JavaScript constructor. It is only constructed
@@ -56,9 +55,9 @@ class MODULES_EXPORT SendStream final : public ScriptWrappable,
 
   // Implementation of OutgoingStream::Client
   void SendFin() override;
-  void ForgetStream() override;
+  void OnOutgoingStreamAbort() override;
 
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
 
  private:
   const Member<OutgoingStream> outgoing_stream_;

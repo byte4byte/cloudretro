@@ -5,6 +5,7 @@
 #include "ash/public/cpp/login_screen_test_api.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
 #include "base/run_loop.h"
@@ -25,6 +26,7 @@
 #include "components/signin/public/base/signin_pref_names.h"
 #include "components/user_manager/known_user.h"
 #include "components/user_manager/user_manager.h"
+#include "content/public/test/browser_test.h"
 
 namespace {
 
@@ -80,8 +82,8 @@ class DeviceIDTest : public OobeBaseTest,
 
   // Checks that user's device ID retrieved from UserManager and Profile are the
   // same.
-  // If |refresh_token| is not empty, checks that device ID associated with the
-  // |refresh_token| in GAIA is the same as ID saved on device.
+  // If `refresh_token` is not empty, checks that device ID associated with the
+  // `refresh_token` in GAIA is the same as ID saved on device.
   void CheckDeviceIDIsConsistent(const AccountId& account_id,
                                  const std::string& refresh_token) {
     const std::string device_id_in_profile = GetDeviceIdFromProfile(account_id);
@@ -165,9 +167,7 @@ class DeviceIDTest : public OobeBaseTest,
       dictionary.SetKey(kv.first, base::Value(kv.second));
     std::string json;
     EXPECT_TRUE(base::JSONWriter::Write(dictionary, &json));
-    EXPECT_EQ(static_cast<int>(json.length()),
-              base::WriteFile(GetRefreshTokenToDeviceIdMapFilePath(),
-                              json.c_str(), json.length()));
+    EXPECT_TRUE(base::WriteFile(GetRefreshTokenToDeviceIdMapFilePath(), json));
   }
 
   std::unique_ptr<base::RunLoop> user_removal_loop_;
@@ -304,7 +304,7 @@ IN_PROC_BROWSER_TEST_F(DeviceIDTest, LegacyUsers) {
           .empty());
   SignInOffline(FakeGaiaMixin::kFakeUserEmail,
                 FakeGaiaMixin::kFakeUserPassword);
-  // Last param |auth_code| is empty, because we don't pass a device ID to GAIA
+  // Last param `auth_code` is empty, because we don't pass a device ID to GAIA
   // in this case.
   CheckDeviceIDIsConsistent(
       AccountId::FromUserEmail(FakeGaiaMixin::kFakeUserEmail), std::string());

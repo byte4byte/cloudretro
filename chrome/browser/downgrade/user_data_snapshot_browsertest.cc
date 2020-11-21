@@ -19,6 +19,7 @@
 #include "base/time/time.h"
 #include "base/version.h"
 #include "build/branding_buildflags.h"
+#include "build/build_config.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/downgrade/downgrade_manager.h"
 #include "chrome/browser/first_run/scoped_relaunch_chrome_browser_override.h"
@@ -33,6 +34,7 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/browser/bookmark_node.h"
+#include "components/bookmarks/test/bookmark_test_helpers.h"
 #include "components/history/core/browser/history_service.h"
 #include "components/history/core/browser/history_types.h"
 #include "components/keyed_service/core/service_access_type.h"
@@ -40,13 +42,15 @@
 #include "components/version_info/version_info.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/referrer.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
+#include "content/public/test/test_utils.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/page_transition_types.h"
 #include "ui/base/window_open_disposition.h"
 
-#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
+#if defined(OS_WIN) && BUILDFLAG(GOOGLE_CHROME_BRANDING)
 #include "base/threading/thread_restrictions.h"
 #include "chrome/install_static/install_modes.h"
 #include "chrome/install_static/test/scoped_install_details.h"
@@ -132,14 +136,14 @@ class UserDataSnapshotBrowserTestBase : public InProcessBrowserTest {
       // Pretend that a lower version of Chrome previously wrote User Data.
       const std::string last_version = GetPreviousChromeVersion();
       base::WriteFile(user_data_dir_.Append(kDowngradeLastVersionFile),
-                      last_version.c_str(), last_version.size());
+                      last_version);
     }
 
     if (IsRolledbackVersion()) {
       // Pretend that a higher version of Chrome previously wrote User Data.
       const std::string last_version = GetNextChromeVersion();
       base::WriteFile(user_data_dir_.Append(kDowngradeLastVersionFile),
-                      last_version.c_str(), last_version.size());
+                      last_version);
     }
     return true;
   }
@@ -202,7 +206,7 @@ class BookmarksSnapshotTest : public UserDataSnapshotBrowserTestBase {
   void SimulateUserActions() override {
     bookmarks::BookmarkModel* bookmark_model =
         BookmarkModelFactory::GetForBrowserContext(browser()->profile());
-
+    bookmarks::test::WaitForBookmarkModelToLoad(bookmark_model);
     auto* folder = bookmark_model->AddFolder(
         bookmark_model->bookmark_bar_node(), 0, folder_title_);
     auto* sub_folder = bookmark_model->AddFolder(folder, 0, sub_folder_title_);
@@ -217,11 +221,14 @@ class BookmarksSnapshotTest : public UserDataSnapshotBrowserTestBase {
                            that_other_url_title_, that_other_url_);
     bookmark_model->AddURL(bookmark_model->mobile_node(), 0, mobile_url_title_,
                            mobile_url_);
+    // This is necessary to ensure the save completes.
+    content::RunAllTasksUntilIdle();
   }
 
   void ValidateUserActions() override {
     bookmarks::BookmarkModel* bookmark_model =
         BookmarkModelFactory::GetForBrowserContext(browser()->profile());
+    bookmarks::test::WaitForBookmarkModelToLoad(bookmark_model);
     ASSERT_TRUE(bookmark_model->bookmark_bar_node()->children().size() == 2);
 
     const bookmarks::BookmarkNode* folder =
@@ -407,7 +414,7 @@ class TabsSnapshotTest : public UserDataSnapshotBrowserTestBase {
     ASSERT_GE(tab_strip->count(), 2);
     ASSERT_LE(tab_strip->count(), 3);
     if (tab_strip->count() == 3) {
-      content::WaitForLoadStop(tab_strip->GetWebContentsAt(2));
+      EXPECT_TRUE(content::WaitForLoadStop(tab_strip->GetWebContentsAt(2)));
       EXPECT_EQ(tab_strip->GetWebContentsAt(2)->GetURL(), GURL("about:blank"));
     }
 
@@ -436,7 +443,7 @@ IN_PROC_BROWSER_TEST_F(InProcessBrowserTest, SameMilestoneSnapshot) {
 
   // No snapshots for same version.
   base::WriteFile(user_data_dir.Append(kDowngradeLastVersionFile),
-                  current_version.c_str(), current_version.size());
+                  current_version);
   EXPECT_FALSE(downgrade_manager.PrepareUserDataDirectoryForCurrentVersion(
       user_data_dir));
   EXPECT_FALSE(
@@ -453,7 +460,7 @@ IN_PROC_BROWSER_TEST_F(InProcessBrowserTest, SameMilestoneSnapshot) {
   auto last_minor_version =
       base::Version(last_minor_version_components).GetString();
   base::WriteFile(user_data_dir.Append(kDowngradeLastVersionFile),
-                  last_minor_version.c_str(), last_minor_version.size());
+                  last_minor_version);
 
   EXPECT_FALSE(downgrade_manager.PrepareUserDataDirectoryForCurrentVersion(
       user_data_dir));
@@ -461,7 +468,7 @@ IN_PROC_BROWSER_TEST_F(InProcessBrowserTest, SameMilestoneSnapshot) {
       base::PathExists(user_data_dir.Append(downgrade::kSnapshotsDir)));
 }
 
-#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
+#if defined(OS_WIN) && BUILDFLAG(GOOGLE_CHROME_BRANDING)
 // Tests that Google Chrome canary takes snapshots on mid-milestone updates.
 IN_PROC_BROWSER_TEST_F(InProcessBrowserTest, CanarySameMilestoneSnapshot) {
   DowngradeManager::EnableSnapshotsForTesting(true);
@@ -476,7 +483,7 @@ IN_PROC_BROWSER_TEST_F(InProcessBrowserTest, CanarySameMilestoneSnapshot) {
 
   // No snapshots for same version.
   base::WriteFile(user_data_dir.Append(kDowngradeLastVersionFile),
-                  current_version.c_str(), current_version.size());
+                  current_version);
   EXPECT_FALSE(downgrade_manager.PrepareUserDataDirectoryForCurrentVersion(
       user_data_dir));
   EXPECT_FALSE(
@@ -493,12 +500,12 @@ IN_PROC_BROWSER_TEST_F(InProcessBrowserTest, CanarySameMilestoneSnapshot) {
   auto last_minor_version =
       base::Version(last_minor_version_components).GetString();
   base::WriteFile(user_data_dir.Append(kDowngradeLastVersionFile),
-                  last_minor_version.c_str(), last_minor_version.size());
+                  last_minor_version);
 
   EXPECT_FALSE(downgrade_manager.PrepareUserDataDirectoryForCurrentVersion(
       user_data_dir));
   EXPECT_TRUE(base::PathExists(user_data_dir.Append(downgrade::kSnapshotsDir)));
 }
-#endif
+#endif  // defined(OS_WIN) && BUILDFLAG(GOOGLE_CHROME_BRANDING)
 
 }  // namespace downgrade

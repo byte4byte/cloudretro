@@ -5,10 +5,22 @@
 import {addSingletonGetter, sendWithPromise} from 'chrome://resources/js/cr.m.js';
 
 import {AuthCompletedCredentials} from '../../gaia_auth_host/authenticator.m.js';
-import {EduLoginParams, ParentAccount} from './edu_login_util.js';
+
+import {EduCoexistenceFlowResult, EduLoginParams, ParentAccount} from './edu_login_util.js';
 
 /** @interface */
 export class EduAccountLoginBrowserProxy {
+  /**
+   * Sends 'updateEduCoexistenceFlowResult' request with provided value.
+   * @param {EduCoexistenceFlowResult} result
+   */
+  updateEduCoexistenceFlowResult(result) {}
+
+  /**
+   * @return {Promise<boolean>}
+   */
+  isNetworkReady() {}
+
   /**
    * Send 'getParents' request to the handler. The promise will be resolved
    * with the list of parents (Array<ParentAccount>).
@@ -49,6 +61,13 @@ export class EduAccountLoginBrowserProxy {
    */
   completeLogin(credentials, eduLoginParams) {}
 
+  /**
+   * Send 'getAccounts' message to the handler. The promise will be resolved
+   * with the list of emails of accounts in session.
+   * @return {Promise<Array<string>>}
+   */
+  getAccounts() {}
+
   /** Send 'dialogClose' message to close the login dialog. */
   dialogClose() {}
 }
@@ -57,6 +76,16 @@ export class EduAccountLoginBrowserProxy {
  * @implements {EduAccountLoginBrowserProxy}
  */
 export class EduAccountLoginBrowserProxyImpl {
+  /** @override */
+  updateEduCoexistenceFlowResult(result) {
+    chrome.send('updateEduCoexistenceFlowResult', [result]);
+  }
+
+  /** @override */
+  isNetworkReady() {
+    return sendWithPromise('isNetworkReady');
+  }
+
   /** @override */
   getParents() {
     return sendWithPromise('getParents');
@@ -85,6 +114,11 @@ export class EduAccountLoginBrowserProxyImpl {
   /** @override */
   completeLogin(credentials, eduLoginParams) {
     chrome.send('completeLogin', [credentials, eduLoginParams]);
+  }
+
+  /** @override */
+  getAccounts() {
+    return sendWithPromise('getAccounts');
   }
 
   /** @override */

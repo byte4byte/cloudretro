@@ -1,4 +1,6 @@
+/client-py/
 *.bak
+*.code-workspace
 *.mk
 *.ncb
 *.opensdf
@@ -46,6 +48,7 @@
 .project
 .pydevproject
 .checkstyle
+*.class
 compile_commands.json
 cscope.*
 GPATH
@@ -67,24 +70,20 @@ vs-chromium-project.txt
 .vscode/
 /_out
 /android_emulator_sdk
-/android_webview/tools/webview_log_verbosifier/.gradle/
-/android_webview/tools/webview_log_verbosifier/.settings/
 /ash/ash_unittests_run.xml
 /base/base_unittests_run.xml
 # See build/.gitignore for entries covering src/build.
 
-# The Chrome OS build creates a /c symlink due to http://crbug.com/54866.
+# The Chrome OS build creates a /c and /c_icu symlink due to http://crbug.com/54866.
 /c
+/c_icu
 /cdm
 /ceee/internal/
 /chrome/android/profiles/afdo.prof
 /chrome/android/profiles/local.txt
 /chrome/angle_unittests_run.xml
 /chrome/app/vector_icons/google_chrome/
-/chrome/build/chrome.x64.orderfile
-/chrome/build/chrome.x86.orderfile
-/chrome/build/chrome_child.x64.orderfile
-/chrome/build/chrome_child.x86.orderfile
+/chrome/build/pgo_profiles/
 /chrome/gl_tests_run.xml
 /chrome/gles2_conform_test_run.xml
 /chrome/tab_capture_performance_tests_run.xml
@@ -107,6 +106,7 @@ vs-chromium-project.txt
 /chrome/browser/resources/chromeos/quickoffice
 /chrome/browser/resources/pdf/html_office
 /chrome/browser/resources/media_router/extension/src/
+/chrome/browser/resources/preinstalled_web_apps/internal/
 /chrome/browser/resources/media_router_internal/
 /chrome/browser/resources/settings_internal/
 /chrome/browser/resources/software_rendering_list
@@ -173,6 +173,8 @@ vs-chromium-project.txt
 /chromecast/internal
 /chromeos/assistant/internal
 /chromeos/components/help_app_ui/resources/app
+/chromeos/components/help_app_ui/resources/prod
+/chromeos/components/media_app_ui/resources/prod
 /chromeos/components/media_app_ui/resources/app
 /chromeos/components/media_app_ui/resources/pkg
 /chromeos/profiles/chromeos.orderfile.txt
@@ -193,8 +195,6 @@ vs-chromium-project.txt
 /components/search_engines/prepopulated_engines.xml
 /components/site_isolation/internal
 /components/suggestions.xml
-/components/test/data/paint_preview/**/*.pb
-/components/test/data/paint_preview/**/*.skp
 /components/variations.xml
 /components/zucchini/testdata/*.exe
 /content/browser/service_worker/proto.xml
@@ -294,8 +294,10 @@ vs-chromium-project.txt
 /tools/json_schema_compiler/test/json_schema_compiler_tests.xml
 /tools/metrics/actions/actions.old.xml
 /tools/metrics/histograms/histograms.before.pretty-print.xml
+/tools/metrics/histograms/histograms_xml/*.before.pretty-print.xml
 /tools/metrics/histograms/enums.before.pretty-print.xml
 /tools/page_cycler/acid3
+/tools/reclient
 /tools/skia_goldctl/
 /tools/swarming_client
 /tools/tryserver
@@ -314,8 +316,14 @@ vs-chromium-project.txt
 # Ignore any Android RenderTest goldens
 **/render_tests/*.png
 
+# Ignore any WPR archive files
+**/wpr_tests/*.wprgo
+
 # Ignore IntelliJ files.
 .idea/
+
+# Ignore cache folder created by clangd
+.cache
 
 # Ignore the default results output directory for tools/run-swarmed.py
 /results

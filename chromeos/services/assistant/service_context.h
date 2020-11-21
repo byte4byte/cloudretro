@@ -7,27 +7,19 @@
 
 #include <string>
 
+#include "ash/public/cpp/assistant/controller/assistant_screen_context_controller.h"
 #include "base/memory/scoped_refptr.h"
 
 namespace ash {
-class AssistantStateBase;
-
-namespace mojom {
 class AssistantAlarmTimerController;
+class AssistantController;
 class AssistantNotificationController;
-class AssistantScreenContextController;
-}  // namespace mojom
+class AssistantStateBase;
 }  // namespace ash
 
 namespace chromeos {
 class CrasAudioHandler;
 class PowerManagerClient;
-
-namespace assistant {
-namespace mojom {
-class AssistantController;
-}  // namespace mojom
-}  // namespace assistant
 }  // namespace chromeos
 
 namespace base {
@@ -45,15 +37,15 @@ class ServiceContext {
  public:
   virtual ~ServiceContext() = default;
 
-  virtual ash::mojom::AssistantAlarmTimerController*
+  virtual ash::AssistantAlarmTimerController*
   assistant_alarm_timer_controller() = 0;
 
-  virtual mojom::AssistantController* assistant_controller() = 0;
+  virtual ash::AssistantController* assistant_controller() = 0;
 
-  virtual ash::mojom::AssistantNotificationController*
+  virtual ash::AssistantNotificationController*
   assistant_notification_controller() = 0;
 
-  virtual ash::mojom::AssistantScreenContextController*
+  virtual ash::AssistantScreenContextController*
   assistant_screen_context_controller() = 0;
 
   virtual ash::AssistantStateBase* assistant_state() = 0;

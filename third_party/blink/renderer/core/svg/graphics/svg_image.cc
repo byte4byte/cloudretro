@@ -29,10 +29,12 @@
 
 #include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
+#include "third_party/blink/public/platform/resource_load_info_notifier_wrapper.h"
 #include "third_party/blink/public/platform/web_url.h"
 #include "third_party/blink/public/platform/web_url_loader.h"
 #include "third_party/blink/public/platform/web_url_loader_client.h"
 #include "third_party/blink/public/platform/web_url_loader_factory.h"
+#include "third_party/blink/public/platform/web_url_request_extra_data.h"
 #include "third_party/blink/renderer/core/animation/document_animations.h"
 #include "third_party/blink/renderer/core/animation/document_timeline.h"
 #include "third_party/blink/renderer/core/dom/document_parser.h"
@@ -46,14 +48,13 @@
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/frame/visual_viewport.h"
 #include "third_party/blink/renderer/core/layout/intrinsic_sizing_info.h"
-#include "third_party/blink/renderer/core/layout/layout_view.h"
 #include "third_party/blink/renderer/core/layout/svg/layout_svg_root.h"
 #include "third_party/blink/renderer/core/loader/frame_load_request.h"
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
 #include "third_party/blink/renderer/core/svg/animation/smil_time_container.h"
 #include "third_party/blink/renderer/core/svg/graphics/svg_image_chrome_client.h"
-#include "third_party/blink/renderer/core/svg/svg_document_extensions.h"
+#include "third_party/blink/renderer/core/svg/svg_animated_preserve_aspect_ratio.h"
 #include "third_party/blink/renderer/core/svg/svg_fe_image_element.h"
 #include "third_party/blink/renderer/core/svg/svg_image_element.h"
 #include "third_party/blink/renderer/core/svg/svg_svg_element.h"
@@ -61,7 +62,6 @@
 #include "third_party/blink/renderer/platform/geometry/int_rect.h"
 #include "third_party/blink/renderer/platform/geometry/length_functions.h"
 #include "third_party/blink/renderer/platform/graphics/color.h"
-#include "third_party/blink/renderer/platform/graphics/dark_mode_image_classifier.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_context.h"
 #include "third_party/blink/renderer/platform/graphics/image_observer.h"
 #include "third_party/blink/renderer/platform/graphics/paint/cull_rect.h"
@@ -80,16 +80,19 @@ using TaskRunnerHandle = scheduler::WebResourceLoadingTaskRunnerHandle;
 
 class FailingLoader final : public WebURLLoader {
  public:
-  explicit FailingLoader(std::unique_ptr<TaskRunnerHandle> task_runner_handle)
-      : task_runner_handle_(std::move(task_runner_handle)) {}
+  explicit FailingLoader(
+      std::unique_ptr<TaskRunnerHandle> freezable_task_runner_handle,
+      std::unique_ptr<TaskRunnerHandle> unfreezable_task_runner_handle)
+      : freezable_task_runner_handle_(std::move(freezable_task_runner_handle)),
+        unfreezable_task_runner_handle_(
+            std::move(unfreezable_task_runner_handle)) {}
   ~FailingLoader() override = default;
 
   // WebURLLoader implementation:
   void LoadSynchronously(
       std::unique_ptr<network::ResourceRequest> request,
-      scoped_refptr<WebURLRequest::ExtraData> request_extra_data,
+      scoped_refptr<WebURLRequestExtraData> url_request_extra_data,
       int requestor_id,
-      bool download_to_network_cache_only,
       bool pass_response_pipe_to_client,
       bool no_mime_sniffing,
       base::TimeDelta timeout_interval,
@@ -99,26 +102,31 @@ class FailingLoader final : public WebURLLoader {
       WebData&,
       int64_t& encoded_data_length,
       int64_t& encoded_body_length,
-      WebBlobInfo& downloaded_blob) override {
+      WebBlobInfo& downloaded_blob,
+      std::unique_ptr<blink::ResourceLoadInfoNotifierWrapper>
+          resource_load_info_notifier_wrapper) override {
     NOTREACHED();
   }
   void LoadAsynchronously(
       std::unique_ptr<network::ResourceRequest> request,
-      scoped_refptr<WebURLRequest::ExtraData> request_extra_data,
+      scoped_refptr<WebURLRequestExtraData> url_request_extra_data,
       int requestor_id,
-      bool download_to_network_cache_only,
       bool no_mime_sniffing,
+      std::unique_ptr<blink::ResourceLoadInfoNotifierWrapper>
+          resource_load_info_notifier_wrapper,
       WebURLLoaderClient* client) override {
     NOTREACHED();
   }
   void SetDefersLoading(bool) override {}
   void DidChangePriority(WebURLRequest::Priority, int) override {}
-  scoped_refptr<base::SingleThreadTaskRunner> GetTaskRunner() override {
-    return task_runner_handle_->GetTaskRunner();
+  scoped_refptr<base::SingleThreadTaskRunner> GetTaskRunnerForBodyLoader()
+      override {
+    return freezable_task_runner_handle_->GetTaskRunner();
   }
 
  private:
-  const std::unique_ptr<TaskRunnerHandle> task_runner_handle_;
+  const std::unique_ptr<TaskRunnerHandle> freezable_task_runner_handle_;
+  const std::unique_ptr<TaskRunnerHandle> unfreezable_task_runner_handle_;
 };
 
 class FailingLoaderFactory final : public WebURLLoaderFactory {
@@ -126,8 +134,13 @@ class FailingLoaderFactory final : public WebURLLoaderFactory {
   // WebURLLoaderFactory implementation:
   std::unique_ptr<WebURLLoader> CreateURLLoader(
       const WebURLRequest&,
-      std::unique_ptr<TaskRunnerHandle> task_runner_handle) override {
-    return std::make_unique<FailingLoader>(std::move(task_runner_handle));
+      std::unique_ptr<TaskRunnerHandle> freezable_task_runner_handle,
+      std::unique_ptr<TaskRunnerHandle> unfreezable_task_runner_handle,
+      CrossVariantMojoRemote<blink::mojom::KeepAliveHandleInterfaceBase>
+          keep_alive_handle) override {
+    return std::make_unique<FailingLoader>(
+        std::move(freezable_task_runner_handle),
+        std::move(unfreezable_task_runner_handle));
   }
 };
 
@@ -169,6 +182,8 @@ SVGImage::SVGImage(ImageObserver* observer, bool is_multipart)
       has_pending_timeline_rewind_(false) {}
 
 SVGImage::~SVGImage() {
+  AllowDestroyingLayoutObjectInFinalizerScope scope;
+
   if (frame_client_)
     frame_client_->ClearImage();
 
@@ -199,27 +214,38 @@ bool SVGImage::IsInSVGImage(const Node* node) {
   return page->GetChromeClient().IsSVGImageChromeClient();
 }
 
+LocalFrame* SVGImage::GetFrame() const {
+  DCHECK(page_);
+  return To<LocalFrame>(page_->MainFrame());
+}
+
+SVGSVGElement* SVGImage::RootElement() const {
+  if (!page_)
+    return nullptr;
+  return DynamicTo<SVGSVGElement>(GetFrame()->GetDocument()->documentElement());
+}
+
+LayoutSVGRoot* SVGImage::LayoutRoot() const {
+  if (SVGSVGElement* root_element = RootElement())
+    return To<LayoutSVGRoot>(root_element->GetLayoutObject());
+  return nullptr;
+}
+
 void SVGImage::CheckLoaded() const {
   CHECK(page_);
-
-  auto* frame = To<LocalFrame>(page_->MainFrame());
-
   // Failures of this assertion might result in wrong origin tainting checks,
   // because CurrentFrameHasSingleSecurityOrigin() assumes all subresources of
   // the SVG are loaded and thus ready for origin checks.
-  CHECK(frame->GetDocument()->LoadEventFinished());
+  CHECK(GetFrame()->GetDocument()->LoadEventFinished());
 }
 
 bool SVGImage::CurrentFrameHasSingleSecurityOrigin() const {
   if (!page_)
     return true;
 
-  auto* frame = To<LocalFrame>(page_->MainFrame());
-
   CheckLoaded();
 
-  SVGSVGElement* root_element =
-      frame->GetDocument()->AccessSVGExtensions().rootElement();
+  SVGSVGElement* root_element = RootElement();
   if (!root_element)
     return true;
 
@@ -242,30 +268,18 @@ bool SVGImage::CurrentFrameHasSingleSecurityOrigin() const {
   return true;
 }
 
-static SVGSVGElement* SvgRootElement(Page* page) {
-  if (!page)
-    return nullptr;
-  auto* frame = To<LocalFrame>(page->MainFrame());
-  return frame->GetDocument()->AccessSVGExtensions().rootElement();
-}
-
 LayoutSize SVGImage::ContainerSize() const {
-  SVGSVGElement* root_element = SvgRootElement(page_.Get());
-  if (!root_element)
-    return LayoutSize();
-
-  LayoutSVGRoot* layout_object =
-      ToLayoutSVGRoot(root_element->GetLayoutObject());
-  if (!layout_object)
+  const LayoutSVGRoot* layout_root = LayoutRoot();
+  if (!layout_root)
     return LayoutSize();
 
   // If a container size is available it has precedence.
-  LayoutSize container_size = layout_object->ContainerSize();
+  LayoutSize container_size = layout_root->ContainerSize();
   if (!container_size.IsEmpty())
     return container_size;
 
   // Assure that a container size is always given for a non-identity zoom level.
-  DCHECK_EQ(layout_object->StyleRef().EffectiveZoom(), 1);
+  DCHECK_EQ(layout_root->StyleRef().EffectiveZoom(), 1);
 
   // No set container size; use concrete object size.
   return intrinsic_size_;
@@ -290,21 +304,15 @@ bool SVGImage::HasIntrinsicDimensions() const {
 }
 
 bool SVGImage::HasIntrinsicSizingInfo() const {
-  SVGSVGElement* svg = SvgRootElement(page_.Get());
-  return svg && svg->GetLayoutObject();
+  return LayoutRoot();
 }
 
 bool SVGImage::GetIntrinsicSizingInfo(
     IntrinsicSizingInfo& intrinsic_sizing_info) const {
-  SVGSVGElement* svg = SvgRootElement(page_.Get());
-  if (!svg)
+  const LayoutSVGRoot* layout_root = LayoutRoot();
+  if (!layout_root)
     return false;
-
-  LayoutSVGRoot* layout_object = ToLayoutSVGRoot(svg->GetLayoutObject());
-  if (!layout_object)
-    return false;
-
-  layout_object->UnscaledIntrinsicSizingInfo(intrinsic_sizing_info);
+  layout_root->UnscaledIntrinsicSizingInfo(intrinsic_sizing_info);
   return true;
 }
 
@@ -321,7 +329,7 @@ FloatSize SVGImage::ConcreteObjectSize(
   // We're not using an intrinsic aspect ratio to resolve a missing
   // intrinsic width or height when preserveAspectRatio is none.
   // (Ref: crbug.com/584172)
-  SVGSVGElement* svg = SvgRootElement(page_.Get());
+  SVGSVGElement* svg = RootElement();
   if (svg->preserveAspectRatio()->CurrentValue()->Align() ==
       SVGPreserveAspectRatio::kSvgPreserveaspectratioNone)
     return default_object_size;
@@ -375,11 +383,8 @@ void SVGImage::ForContainer(const FloatSize& container_size, Func&& func) {
 
   LayoutSize rounded_container_size = RoundedLayoutSize(container_size);
 
-  if (SVGSVGElement* root_element = SvgRootElement(page_.Get())) {
-    if (LayoutSVGRoot* layout_object =
-            ToLayoutSVGRoot(root_element->GetLayoutObject()))
-      layout_object->SetContainerSize(rounded_container_size);
-  }
+  if (LayoutSVGRoot* layout_root = LayoutRoot())
+    layout_root->SetContainerSize(rounded_container_size);
 
   func(FloatSize(rounded_container_size.Width() / container_size.Width(),
                  rounded_container_size.Height() / container_size.Height()));
@@ -401,15 +406,13 @@ void SVGImage::DrawForContainer(cc::PaintCanvas* canvas,
     adjusted_src_size.Scale(residual_scale.Width(), residual_scale.Height());
     scaled_src.SetSize(adjusted_src_size);
 
-    DrawInternal(canvas, flags, dst_rect, scaled_src, kRespectImageOrientation,
-                 kClampImageToSourceRect, url);
+    DrawInternal(canvas, flags, dst_rect, scaled_src, url);
   });
 }
 
 PaintImage SVGImage::PaintImageForCurrentFrame() {
-  auto builder =
-      CreatePaintImageBuilder().set_completion_state(completion_state());
-  PopulatePaintRecordForCurrentFrameForContainer(builder, NullURL(), Size());
+  auto builder = CreatePaintImageBuilder();
+  PopulatePaintRecordForCurrentFrameForContainer(builder, Size(), 1, NullURL());
   return builder.TakePaintImage();
 }
 
@@ -431,7 +434,7 @@ void SVGImage::DrawPatternForContainer(GraphicsContext& context,
   FloatRect spaced_tile(tile);
   spaced_tile.Expand(FloatSize(repeat_spacing));
 
-  PaintRecordBuilder builder(nullptr, &context);
+  PaintRecordBuilder builder(context);
   {
     DrawingRecorder recorder(builder.Context(), builder,
                              DisplayItem::Type::kSVGImage);
@@ -466,38 +469,27 @@ void SVGImage::DrawPatternForContainer(GraphicsContext& context,
   StartAnimation();
 }
 
-sk_sp<PaintRecord> SVGImage::PaintRecordForContainer(
-    const KURL& url,
-    const IntSize& container_size,
-    const IntRect& draw_src_rect,
-    const IntRect& draw_dst_rect,
-    bool flip_y) {
-  if (!page_)
-    return nullptr;
-
-  PaintRecorder recorder;
-  cc::PaintCanvas* canvas = recorder.beginRecording(draw_src_rect);
-  if (flip_y) {
-    canvas->translate(0, draw_dst_rect.Height());
-    canvas->scale(1, -1);
-  }
-  DrawForContainer(canvas, PaintFlags(), FloatSize(container_size), 1,
-                   FloatRect(draw_dst_rect), FloatRect(draw_src_rect), url);
-  return recorder.finishRecordingAsPicture();
-}
-
 void SVGImage::PopulatePaintRecordForCurrentFrameForContainer(
     PaintImageBuilder& builder,
-    const KURL& url,
-    const IntSize& container_size) {
+    const IntSize& zoomed_container_size,
+    float zoom,
+    const KURL& url) {
+  builder.set_completion_state(
+      load_state_ == LoadState::kLoadCompleted
+          ? PaintImage::CompletionState::DONE
+          : PaintImage::CompletionState::PARTIALLY_DONE);
   if (!page_)
     return;
 
-  const IntRect container_rect(IntPoint(), container_size);
+  const IntRect container_rect(IntPoint(), zoomed_container_size);
+  // Compute a new container size based on the zoomed (and potentially
+  // rounded) size.
+  FloatSize container_size(zoomed_container_size);
+  container_size.Scale(1 / zoom);
 
   PaintRecorder recorder;
   cc::PaintCanvas* canvas = recorder.beginRecording(container_rect);
-  DrawForContainer(canvas, PaintFlags(), FloatSize(container_rect.Size()), 1,
+  DrawForContainer(canvas, PaintFlags(), container_size, zoom,
                    FloatRect(container_rect), FloatRect(container_rect), url);
   builder.set_paint_record(recorder.finishRecordingAsPicture(), container_rect,
                            PaintImage::GetNextContentId());
@@ -556,24 +548,21 @@ bool SVGImage::ApplyShaderForContainer(const FloatSize& container_size,
   return result;
 }
 
-void SVGImage::Draw(
-    cc::PaintCanvas* canvas,
-    const PaintFlags& flags,
-    const FloatRect& dst_rect,
-    const FloatRect& src_rect,
-    RespectImageOrientationEnum should_respect_image_orientation,
-    ImageClampingMode clamp_mode,
-    ImageDecodingMode) {
+void SVGImage::Draw(cc::PaintCanvas* canvas,
+                    const PaintFlags& flags,
+                    const FloatRect& dst_rect,
+                    const FloatRect& src_rect,
+                    RespectImageOrientationEnum,
+                    ImageClampingMode,
+                    ImageDecodingMode) {
   if (!page_)
     return;
-
-  DrawInternal(canvas, flags, dst_rect, src_rect,
-               should_respect_image_orientation, clamp_mode, NullURL());
+  DrawInternal(canvas, flags, dst_rect, src_rect, NullURL());
 }
 
 sk_sp<PaintRecord> SVGImage::PaintRecordForCurrentFrame(const KURL& url) {
   DCHECK(page_);
-  LocalFrameView* view = To<LocalFrame>(page_->MainFrame())->View();
+  LocalFrameView* view = GetFrame()->View();
   IntSize rounded_container_size = RoundedIntSize(ContainerSize());
   view->Resize(rounded_container_size);
   page_->GetVisualViewport().SetSize(rounded_container_size);
@@ -595,7 +584,7 @@ sk_sp<PaintRecord> SVGImage::PaintRecordForCurrentFrame(const KURL& url) {
   }
 
   view->UpdateAllLifecyclePhasesExceptPaint(DocumentUpdateReason::kSVGImage);
-  PaintRecordBuilder builder(nullptr, nullptr, paint_controller_.get());
+  PaintRecordBuilder builder(*paint_controller_);
   view->PaintOutsideOfLifecycle(builder.Context(), kGlobalPaintNormalPhase);
   return builder.EndRecording();
 }
@@ -604,8 +593,6 @@ void SVGImage::DrawInternal(cc::PaintCanvas* canvas,
                             const PaintFlags& flags,
                             const FloatRect& dst_rect,
                             const FloatRect& src_rect,
-                            RespectImageOrientationEnum,
-                            ImageClampingMode,
                             const KURL& url) {
   {
     PaintCanvasAutoRestore ar(canvas, false);
@@ -637,13 +624,13 @@ void SVGImage::ScheduleTimelineRewind() {
 void SVGImage::FlushPendingTimelineRewind() {
   if (!has_pending_timeline_rewind_)
     return;
-  if (SVGSVGElement* root_element = SvgRootElement(page_.Get()))
+  if (SVGSVGElement* root_element = RootElement())
     root_element->setCurrentTime(0);
   has_pending_timeline_rewind_ = false;
 }
 
 void SVGImage::StartAnimation() {
-  SVGSVGElement* root_element = SvgRootElement(page_.Get());
+  SVGSVGElement* root_element = RootElement();
   if (!root_element)
     return;
   chrome_client_->ResumeAnimation();
@@ -652,7 +639,7 @@ void SVGImage::StartAnimation() {
 }
 
 void SVGImage::StopAnimation() {
-  SVGSVGElement* root_element = SvgRootElement(page_.Get());
+  SVGSVGElement* root_element = RootElement();
   if (!root_element)
     return;
   chrome_client_->SuspendAnimation();
@@ -660,7 +647,7 @@ void SVGImage::StopAnimation() {
 }
 
 void SVGImage::ResetAnimation() {
-  SVGSVGElement* root_element = SvgRootElement(page_.Get());
+  SVGSVGElement* root_element = RootElement();
   if (!root_element)
     return;
   chrome_client_->SuspendAnimation();
@@ -680,14 +667,11 @@ void SVGImage::RestoreAnimation() {
 }
 
 bool SVGImage::MaybeAnimated() {
-  SVGSVGElement* root_element = SvgRootElement(page_.Get());
+  SVGSVGElement* root_element = RootElement();
   if (!root_element)
     return false;
   return root_element->TimeContainer()->HasAnimations() ||
-         To<LocalFrame>(page_->MainFrame())
-             ->GetDocument()
-             ->Timeline()
-             .HasPendingUpdates();
+         root_element->GetDocument().Timeline().HasPendingUpdates();
 }
 
 void SVGImage::ServiceAnimations(
@@ -718,7 +702,8 @@ void SVGImage::ServiceAnimations(
   // actually generating painted output, not only for performance reasons,
   // but to preserve correct coherence of the cache of the output with
   // the needsRepaint bits of the PaintLayers in the image.
-  LocalFrameView* frame_view = To<LocalFrame>(page_->MainFrame())->View();
+  LocalFrame* frame = GetFrame();
+  LocalFrameView* frame_view = frame->View();
   frame_view->UpdateAllLifecyclePhasesExceptPaint(
       DocumentUpdateReason::kSVGImage);
 
@@ -727,14 +712,12 @@ void SVGImage::ServiceAnimations(
   // know SVG images never have composited animations, we can update animations
   // directly without worrying about including PaintArtifactCompositor's
   // analysis of whether animations should be composited.
-  frame_view->GetLayoutView()
-      ->GetDocument()
-      .GetDocumentAnimations()
-      .UpdateAnimations(DocumentLifecycle::kLayoutClean, nullptr);
+  frame->GetDocument()->GetDocumentAnimations().UpdateAnimations(
+      DocumentLifecycle::kLayoutClean, nullptr);
 }
 
 void SVGImage::AdvanceAnimationForTesting() {
-  if (SVGSVGElement* root_element = SvgRootElement(page_.Get())) {
+  if (SVGSVGElement* root_element = RootElement()) {
     root_element->TimeContainer()->AdvanceFrameForTesting();
 
     // The following triggers animation updates which can issue a new draw
@@ -760,7 +743,7 @@ SVGImageChromeClient& SVGImage::ChromeClientForTesting() {
 }
 
 void SVGImage::UpdateUseCounters(const Document& document) const {
-  if (SVGSVGElement* root_element = SvgRootElement(page_.Get())) {
+  if (SVGSVGElement* root_element = RootElement()) {
     if (root_element->TimeContainer()->HasAnimations()) {
       document.CountUse(WebFeature::kSVGSMILAnimationInImageRegardlessOfCache);
     }
@@ -780,7 +763,7 @@ void SVGImage::LoadCompleted() {
       // Document::ImplicitClose(), we defer AsyncLoadCompleted() to avoid
       // potential bugs and timing dependencies around ImplicitClose() and
       // to make LoadEventFinished() true when AsyncLoadCompleted() is called.
-      To<LocalFrame>(page_->MainFrame())
+      GetFrame()
           ->GetTaskRunner(TaskType::kInternalLoading)
           ->PostTask(FROM_HERE, WTF::Bind(&SVGImage::NotifyAsyncLoadCompleted,
                                           scoped_refptr<SVGImage>(this)));
@@ -853,6 +836,11 @@ Image::SizeAvailability SVGImage::DataChanged(bool all_data_received) {
           default_settings.GetDefaultFontSize());
       page->GetSettings().SetDefaultFixedFontSize(
           default_settings.GetDefaultFixedFontSize());
+
+      // Also copy the preferred-color-scheme to ensure a responsiveness to
+      // dark/light color schemes.
+      page->GetSettings().SetPreferredColorScheme(
+          default_settings.GetPreferredColorScheme());
     }
   }
 
@@ -861,10 +849,12 @@ Image::SizeAvailability SVGImage::DataChanged(bool all_data_received) {
     TRACE_EVENT0("blink", "SVGImage::dataChanged::createFrame");
     DCHECK(!frame_client_);
     frame_client_ = MakeGarbageCollected<SVGImageLocalFrameClient>(this);
-    frame = MakeGarbageCollected<LocalFrame>(frame_client_, *page, nullptr,
-                                             nullptr, nullptr);
+    frame = MakeGarbageCollected<LocalFrame>(
+        frame_client_, *page, nullptr, nullptr, nullptr,
+        FrameInsertType::kInsertInConstructor, base::UnguessableToken::Create(),
+        nullptr, nullptr, /* policy_container */ nullptr);
     frame->SetView(MakeGarbageCollected<LocalFrameView>(*frame));
-    frame->Init();
+    frame->Init(nullptr);
   }
 
   FrameLoader& loader = frame->Loader();
@@ -894,12 +884,11 @@ Image::SizeAvailability SVGImage::DataChanged(bool all_data_received) {
   switch (load_state_) {
     case kInDataChanged:
       load_state_ = kWaitingForAsyncLoadCompletion;
-      return SvgRootElement(page_.Get())
-                 ? kSizeAvailableAndLoadingAsynchronously
-                 : kSizeUnavailable;
+      return RootElement() ? kSizeAvailableAndLoadingAsynchronously
+                           : kSizeUnavailable;
 
     case kLoadCompleted:
-      return SvgRootElement(page_.Get()) ? kSizeAvailable : kSizeUnavailable;
+      return RootElement() ? kSizeAvailable : kSizeUnavailable;
 
     case kDataChangedNotStarted:
     case kWaitingForAsyncLoadCompletion:
@@ -912,18 +901,11 @@ Image::SizeAvailability SVGImage::DataChanged(bool all_data_received) {
 }
 
 bool SVGImage::IsSizeAvailable() {
-  return SvgRootElement(page_.Get());
+  return RootElement();
 }
 
 String SVGImage::FilenameExtension() const {
   return "svg";
-}
-
-DarkModeClassification SVGImage::CheckTypeSpecificConditionsForDarkMode(
-    const FloatRect& dest_rect,
-    DarkModeImageClassifier* classifier) {
-  classifier->SetImageType(DarkModeImageClassifier::ImageType::kSvg);
-  return DarkModeClassification::kNotClassified;
 }
 
 }  // namespace blink

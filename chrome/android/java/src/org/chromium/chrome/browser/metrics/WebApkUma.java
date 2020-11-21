@@ -5,7 +5,6 @@
 package org.chromium.chrome.browser.metrics;
 
 import android.content.ContentResolver;
-import android.os.Build;
 import android.os.Environment;
 import android.os.StatFs;
 import android.provider.Settings;
@@ -20,6 +19,7 @@ import org.chromium.chrome.browser.preferences.SharedPreferencesManager;
 import org.chromium.chrome.browser.webapps.WebApkDistributor;
 import org.chromium.chrome.browser.webapps.WebApkUkmRecorder;
 import org.chromium.chrome.browser.webapps.WebappDataStorage;
+import org.chromium.chrome.browser.webapps.WebappIntentUtils;
 import org.chromium.chrome.browser.webapps.WebappRegistry;
 import org.chromium.components.browser_ui.util.ConversionUtils;
 
@@ -95,8 +95,7 @@ public class WebApkUma {
         int NUM_ENTRIES = 16;
     }
 
-    public static final String HISTOGRAM_UPDATE_REQUEST_SENT =
-            "WebApk.Update.RequestSent";
+    public static final String HISTOGRAM_UPDATE_REQUEST_SENT = "WebApk.Update.RequestSent";
 
     public static final String HISTOGRAM_UPDATE_REQUEST_QUEUED = "WebApk.Update.RequestQueued";
 
@@ -127,7 +126,7 @@ public class WebApkUma {
         for (String uninstalledPackage : uninstalledPackages) {
             RecordHistogram.recordBooleanHistogram("WebApk.Uninstall.Browser", true);
 
-            String webApkId = WebappRegistry.webApkIdForPackage(uninstalledPackage);
+            String webApkId = WebappIntentUtils.getIdForWebApkPackage(uninstalledPackage);
             WebappDataStorage webappDataStorage =
                     WebappRegistry.getInstance().getWebappDataStorage(webApkId);
             if (webappDataStorage != null) {
@@ -151,7 +150,7 @@ public class WebApkUma {
     public static void deferRecordWebApkUninstalled(String packageName) {
         SharedPreferencesManager.getInstance().addToStringSet(
                 ChromePreferenceKeys.WEBAPK_UNINSTALLED_PACKAGES, packageName);
-        String webApkId = WebappRegistry.webApkIdForPackage(packageName);
+        String webApkId = WebappIntentUtils.getIdForWebApkPackage(packageName);
         WebappRegistry.warmUpSharedPrefsForId(webApkId);
         WebappDataStorage webappDataStorage =
                 WebappRegistry.getInstance().getWebappDataStorage(webApkId);
@@ -307,8 +306,7 @@ public class WebApkUma {
             protected void onPostExecute(Void result) {
                 logSpaceUsageUMAOnDataAvailable(mAvailableSpaceInByte, mCacheSizeInByte);
             }
-        }
-                .executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+        }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
     }
 
     private static void logSpaceUsageUMAOnDataAvailable(long spaceSize, long cacheSize) {
@@ -349,13 +347,7 @@ public class WebApkUma {
         long partitionTotalBytes = partitionStats.getTotalBytes();
         long minimumFreeBytes = getLowSpaceLimitBytes(partitionTotalBytes);
 
-        long webApkExtraSpaceBytes = 0;
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            // Extra installation space is only allowed >= Android L
-            webApkExtraSpaceBytes = WEBAPK_EXTRA_INSTALLATION_SPACE_BYTES;
-        }
-
+        long webApkExtraSpaceBytes = WEBAPK_EXTRA_INSTALLATION_SPACE_BYTES;
         return partitionAvailableBytes - minimumFreeBytes + webApkExtraSpaceBytes;
     }
 

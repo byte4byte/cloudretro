@@ -6,7 +6,7 @@
 
 #include "base/feature_list.h"
 #include "build/build_config.h"
-#include "chrome/browser/performance_manager/graph/policies/policy_features.h"
+#include "chrome/browser/performance_manager/policies/policy_features.h"
 #include "components/performance_manager/graph/graph_impl.h"
 #include "components/performance_manager/graph/node_attached_data_impl.h"
 #include "components/performance_manager/graph/process_node_impl.h"
@@ -49,12 +49,12 @@ void ProcessMetricsDecorator::StartTimer() {
 
 #if !defined(OS_ANDROID)
   // Bump the refresh frequency when urgent discarding is done from the graph or
-  // when emitting memory pressure signals on high PMF as these features relies
-  // on relatively fresh data.
+  // when discarding tabs on high PMF as these features relies on relatively
+  // fresh data.
   // TODO(sebmarchand): Measure the performance impact of this.
   if (base::FeatureList::IsEnabled(
           features::kUrgentDiscardingFromPerformanceManager) ||
-      base::FeatureList::IsEnabled(features::kHighPMFMemoryPressureSignals)) {
+      base::FeatureList::IsEnabled(features::kHighPMFDiscardPolicy)) {
     refresh_period = kFastRefreshTimerPeriod;
   }
 #endif

@@ -8,8 +8,8 @@
 
 #include "base/bind.h"
 #include "base/location.h"
-#include "ios/components/webui/sync_internals/sync_internals_ui.h"
 #include "ios/components/webui/web_ui_url_constants.h"
+#include "ios/web_view/internal/webui/web_view_sync_internals_ui.h"
 #include "url/gurl.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -31,7 +31,7 @@ using WebUIIOSFactoryFunction =
 template <class T>
 std::unique_ptr<WebUIIOSController> NewWebUIIOS(WebUIIOS* web_ui,
                                                 const GURL& url) {
-  return std::make_unique<T>(web_ui);
+  return std::make_unique<T>(web_ui, url.host());
 }
 
 // Returns a function that can be used to create the right type of WebUIIOS for
@@ -47,7 +47,7 @@ WebUIIOSFactoryFunction GetWebUIIOSFactoryFunction(const GURL& url) {
   // required, add it below in the appropriate section.
   const std::string url_host = url.host();
   if (url_host == kChromeUISyncInternalsHost)
-    return &NewWebUIIOS<SyncInternalsUI>;
+    return &NewWebUIIOS<WebViewSyncInternalsUI>;
 
   return nullptr;
 }

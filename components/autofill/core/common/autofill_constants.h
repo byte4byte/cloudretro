@@ -18,9 +18,17 @@ extern const char kSettingsOrigin[];
 
 // The number of fields required by Autofill to execute its heuristic and
 // crowd-sourcing query/upload routines.
-size_t MinRequiredFieldsForHeuristics();
-size_t MinRequiredFieldsForQuery();
-size_t MinRequiredFieldsForUpload();
+constexpr size_t kMinRequiredFieldsForHeuristics = 3;
+constexpr size_t kMinRequiredFieldsForQuery = 1;
+constexpr size_t kMinRequiredFieldsForUpload = 1;
+
+// The maximum number of form fields we are willing to parse, due to
+// computational costs.  Several examples of forms with lots of fields that are
+// not relevant to Autofill: (1) the Netflix queue; (2) the Amazon wishlist;
+// (3) router configuration pages; and (4) other configuration pages, e.g. for
+// Google code project settings.
+// Copied to components/autofill/ios/form_util/resources/fill.js.
+const size_t kMaxParseableFields = 200;
 
 // The maximum number of allowed calls to CreditCard::GetMatchingTypes() and
 // AutofillProfile::GetMatchingTypeAndValidities().
@@ -57,6 +65,15 @@ bool IsAutofillEntryWithUseDateDeletable(const base::Time& use_date);
 // The period after which autocomplete entries should be cleaned-up in days.
 // Equivalent to roughly 14 months.
 const int64_t kAutocompleteRetentionPolicyPeriodInDays = 14 * 31;
+
+// Limits the number of times the value of a specific type can be filled into a
+// form.
+constexpr int kTypeValueFormFillingLimit = 9;
+
+// Credit card numbers are sometimes distributed between up to 19 individual
+// fields. Therefore, credit cards need a higher limit compared to
+// |kTypeValueFormFillingLimit|.
+constexpr int kCreditCardTypeValueFormFillingLimit = 19;
 
 }  // namespace autofill
 

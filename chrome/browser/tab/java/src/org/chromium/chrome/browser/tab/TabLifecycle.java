@@ -4,14 +4,22 @@
 
 package org.chromium.chrome.browser.tab;
 
+import org.chromium.base.annotations.MockedInTests;
+
 /**
  */
+@MockedInTests
 public interface TabLifecycle {
     /**
      * @return Whether or not this Tab has a live native component.  This will be true prior to
      *         {@link #initializeNative()} being called or after {@link #destroy()}.
      */
     boolean isInitialized();
+
+    /**
+     * @return Whether this Tab has been destroyed.
+     */
+    boolean isDestroyed();
 
     /**
      * Prepares the tab to be shown. This method is supposed to be called before the tab is

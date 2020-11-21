@@ -5,6 +5,7 @@
 #include "chrome/browser/chromeos/web_applications/system_web_app_integration_test.h"
 #include "chrome/browser/web_applications/system_web_app_manager.h"
 #include "chromeos/components/sample_system_web_app_ui/url_constants.h"
+#include "content/public/test/browser_test.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using SampleSystemWebAppIntegrationTest = SystemWebAppIntegrationTest;
@@ -17,8 +18,5 @@ IN_PROC_BROWSER_TEST_P(SampleSystemWebAppIntegrationTest, SampleSystemWebApp) {
       web_app::SystemAppType::SAMPLE, url, "Sample System Web App"));
 }
 
-INSTANTIATE_TEST_SUITE_P(All,
-                         SampleSystemWebAppIntegrationTest,
-                         ::testing::Values(web_app::ProviderType::kBookmarkApps,
-                                           web_app::ProviderType::kWebApps),
-                         web_app::ProviderTypeParamToString);
+INSTANTIATE_SYSTEM_WEB_APP_MANAGER_TEST_SUITE_MANIFEST_INSTALL_P(
+    SampleSystemWebAppIntegrationTest);

@@ -26,11 +26,11 @@
 #include "base/numerics/ranges.h"
 #include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task/post_task.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "components/discardable_memory/service/discardable_shared_memory_manager.h"
 #include "components/tracing/common/tracing_switches.h"
 #include "components/viz/common/features.h"
@@ -45,7 +45,6 @@
 #include "content/common/child_process.mojom.h"
 #include "content/common/child_process_host_impl.h"
 #include "content/common/in_process_child_thread_params.h"
-#include "content/common/view_messages.h"
 #include "content/public/browser/browser_main_runner.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
@@ -56,12 +55,15 @@
 #include "content/public/common/content_switches.h"
 #include "content/public/common/result_codes.h"
 #include "content/public/common/sandboxed_process_launcher_delegate.h"
+#include "content/public/common/zygote/zygote_buildflags.h"
 #include "gpu/command_buffer/service/gpu_switches.h"
 #include "gpu/config/gpu_driver_bug_list.h"
 #include "gpu/config/gpu_driver_bug_workaround_type.h"
 #include "gpu/config/gpu_finch_features.h"
 #include "gpu/config/gpu_preferences.h"
+#include "gpu/config/gpu_switches.h"
 #include "gpu/ipc/common/gpu_client_ids.h"
+#include "gpu/ipc/common/result_codes.h"
 #include "gpu/ipc/host/shader_disk_cache.h"
 #include "gpu/ipc/in_process_command_buffer.h"
 #include "media/base/media_switches.h"
@@ -69,8 +71,8 @@
 #include "mojo/public/cpp/bindings/associated_remote.h"
 #include "mojo/public/cpp/bindings/generic_pending_receiver.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
-#include "services/service_manager/sandbox/sandbox_type.h"
-#include "services/service_manager/sandbox/switches.h"
+#include "sandbox/policy/sandbox_type.h"
+#include "sandbox/policy/switches.h"
 #include "ui/base/ui_base_features.h"
 #include "ui/base/ui_base_switches.h"
 #include "ui/display/display_switches.h"
@@ -80,9 +82,10 @@
 #include "ui/latency/latency_info.h"
 
 #if defined(OS_WIN)
+#include "base/win/win_util.h"
+#include "sandbox/policy/win/sandbox_win.h"
 #include "sandbox/win/src/sandbox_policy.h"
 #include "sandbox/win/src/window.h"
-#include "services/service_manager/sandbox/win/sandbox_win.h"
 #include "ui/gfx/win/rendering_window_manager.h"
 #endif
 
@@ -96,11 +99,16 @@
 #include "ui/gfx/x/x11_switches.h"  // nogncheck
 #endif
 
-#if defined(OS_MACOSX) || defined(OS_ANDROID)
+#if BUILDFLAG(USE_ZYGOTE_HANDLE)
+#include "content/common/zygote/zygote_handle_impl_linux.h"
+#endif
+
+#if defined(OS_MAC) || defined(OS_ANDROID)
 #include "gpu/ipc/common/gpu_surface_tracker.h"
 #endif
 
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
+#include "components/metal_util/switches.h"
 #include "content/browser/gpu/ca_transaction_gpu_coordinator.h"
 #endif
 
@@ -110,6 +118,10 @@ base::subtle::Atomic32 GpuProcessHost::gpu_crash_count_ = 0;
 bool GpuProcessHost::crashed_before_ = false;
 int GpuProcessHost::recent_crash_count_ = 0;
 gpu::GpuMode GpuProcessHost::last_crash_mode_ = gpu::GpuMode::UNKNOWN;
+// RESULT_CODE_HUNG is expected to be the same in both
+// content/public/common/result_codes.h and gpu/ipc/common/result_codes.h
+static_assert(RESULT_CODE_HUNG == static_cast<int>(gpu::RESULT_CODE_HUNG),
+              "Please use the same enum value in both header files.");
 
 namespace {
 
@@ -140,7 +152,9 @@ const char* GetProcessLifetimeUmaName(gpu::GpuMode gpu_mode) {
 }
 
 // Forgive one GPU process crash after this many minutes.
-constexpr int kForgiveGpuCrashMinutes = 60;
+// This value should not be too small because then Chrome could end up in an
+// endless loop where it hangs and gets killed by GPU watchdog and hangs again.
+constexpr int kForgiveGpuCrashMinutes = 5;
 
 // Forgive one GPU process crash, when the GPU process is launched to run only
 // the display compositor, after this many minutes.
@@ -186,7 +200,7 @@ GpuTerminationStatus ConvertToGpuTerminationStatus(
       return GpuTerminationStatus::PROCESS_CRASHED;
     case base::TERMINATION_STATUS_STILL_RUNNING:
       return GpuTerminationStatus::STILL_RUNNING;
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
     case base::TERMINATION_STATUS_PROCESS_WAS_KILLED_BY_OOM:
       return GpuTerminationStatus::PROCESS_WAS_KILLED_BY_OOM;
 #endif
@@ -209,13 +223,20 @@ GpuTerminationStatus ConvertToGpuTerminationStatus(
 
 // Command-line switches to propagate to the GPU process.
 static const char* const kSwitchNames[] = {
-    service_manager::switches::kDisableSeccompFilterSandbox,
-    service_manager::switches::kGpuSandboxAllowSysVShm,
-    service_manager::switches::kGpuSandboxFailuresFatal,
-    service_manager::switches::kDisableGpuSandbox,
-    service_manager::switches::kNoSandbox,
+    sandbox::policy::switches::kDisableSeccompFilterSandbox,
+    sandbox::policy::switches::kGpuSandboxAllowSysVShm,
+    sandbox::policy::switches::kGpuSandboxFailuresFatal,
+    sandbox::policy::switches::kDisableGpuSandbox,
+    sandbox::policy::switches::kNoSandbox,
+// TODO(crbug.com/1052397): Revisit the macro expression once build flag switch
+// of lacros-chrome is complete.
+#if defined(OS_LINUX) && !BUILDFLAG(IS_CHROMEOS_ASH) && \
+    !BUILDFLAG(IS_CHROMEOS_LACROS)
+    switches::kDisableDevShmUsage,
+#endif
 #if defined(OS_WIN)
     switches::kDisableHighResTimer,
+    switches::kRaiseTimerFrequency,
 #endif  // defined(OS_WIN)
     switches::kEnableANGLEFeatures,
     switches::kDisableANGLEFeatures,
@@ -223,6 +244,7 @@ static const char* const kSwitchNames[] = {
     switches::kDisableGpuRasterization,
     switches::kDisableGLExtensions,
     switches::kDisableLogging,
+    switches::kDisableMipmapGeneration,
     switches::kDisableShaderNameHashing,
     switches::kDisableSkiaRuntimeOpts,
     switches::kDisableWebRtcHWEncoding,
@@ -230,6 +252,7 @@ static const char* const kSwitchNames[] = {
     switches::kEnableLogging,
     switches::kEnableDeJelly,
     switches::kDeJellyScreenWidth,
+    switches::kDoubleBufferCompositing,
     switches::kEnableVizDevTools,
     switches::kHeadless,
     switches::kLoggingLevel,
@@ -247,10 +270,13 @@ static const char* const kSwitchNames[] = {
     switches::kUseGpuInTests,
     switches::kV,
     switches::kVModule,
-#if defined(OS_MACOSX)
-    service_manager::switches::kEnableSandboxLogging,
+    switches::kUseAdapterLuid,
+    switches::kWebViewDrawFunctorUsesVulkan,
+#if defined(OS_MAC)
+    sandbox::policy::switches::kEnableSandboxLogging,
     switches::kDisableAVFoundationOverlays,
     switches::kDisableMacOverlays,
+    switches::kDisableMetalTestShaders,
     switches::kDisableRemoteCoreAnimation,
     switches::kShowMacOverlayBorders,
     switches::kUseHighGPUThreadPriorityForPerfTests,
@@ -259,17 +285,22 @@ static const char* const kSwitchNames[] = {
     switches::kOzonePlatform,
     switches::kDisableExplicitDmaFences,
     switches::kOzoneDumpFile,
+    switches::kDisableBufferBWCompression,
 #endif
 #if defined(USE_X11)
     switches::kX11Display,
     switches::kNoXshm,
 #endif
-    switches::kGpuBlacklistTestGroup,
+    switches::kGpuBlocklistTestGroup,
     switches::kGpuDriverBugListTestGroup,
     switches::kUseCmdDecoder,
     switches::kForceVideoOverlays,
 #if defined(OS_ANDROID)
     switches::kEnableReachedCodeProfiler,
+    switches::kReachedCodeSamplingIntervalUs,
+#endif
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+    switches::kPlatformDisallowsChromeOSDirectVideoDecoder,
 #endif
 };
 
@@ -300,9 +331,11 @@ void OnGpuProcessHostDestroyedOnUI(int host_id, const std::string& message) {
   GpuDataManagerImpl::GetInstance()->AddLogMessage(logging::LOG_ERROR,
                                                    "GpuProcessHost", message);
 #if defined(USE_OZONE)
-  ui::OzonePlatform::GetInstance()
-      ->GetGpuPlatformSupportHost()
-      ->OnChannelDestroyed(host_id);
+  if (features::IsUsingOzonePlatform()) {
+    ui::OzonePlatform::GetInstance()
+        ->GetGpuPlatformSupportHost()
+        ->OnChannelDestroyed(host_id);
+  }
 #endif
 }
 
@@ -359,7 +392,7 @@ class GpuSandboxedProcessLauncherDelegate
       // Open GL path.
       policy->SetTokenLevel(sandbox::USER_RESTRICTED_SAME_ACCESS,
                             sandbox::USER_LIMITED);
-      service_manager::SandboxWin::SetJobLevel(
+      sandbox::policy::SandboxWin::SetJobLevel(
           cmd_line_, sandbox::JOB_UNPROTECTED, 0, policy);
     } else {
       policy->SetTokenLevel(sandbox::USER_RESTRICTED_SAME_ACCESS,
@@ -371,7 +404,7 @@ class GpuSandboxedProcessLauncherDelegate
       // turn blocks on the browser UI thread. So, instead we forgo a window
       // message pump entirely and just add job restrictions to prevent child
       // processes.
-      service_manager::SandboxWin::SetJobLevel(
+      sandbox::policy::SandboxWin::SetJobLevel(
           cmd_line_, sandbox::JOB_LIMITED_USER,
           JOB_OBJECT_UILIMIT_SYSTEMPARAMETERS | JOB_OBJECT_UILIMIT_DESKTOP |
               JOB_OBJECT_UILIMIT_EXITWINDOWS |
@@ -413,22 +446,22 @@ class GpuSandboxedProcessLauncherDelegate
 #endif  // OS_WIN
 
 #if BUILDFLAG(USE_ZYGOTE_HANDLE)
-  service_manager::ZygoteHandle GetZygote() override {
-    if (service_manager::IsUnsandboxedSandboxType(GetSandboxType()))
+  ZygoteHandle GetZygote() override {
+    if (sandbox::policy::IsUnsandboxedSandboxType(GetSandboxType()))
       return nullptr;
 
     // The GPU process needs a specialized sandbox, so fork from the unsandboxed
     // zygote and then apply the actual sandboxes in the forked process.
-    return service_manager::GetUnsandboxedZygote();
+    return GetUnsandboxedZygote();
   }
 #endif  // BUILDFLAG(USE_ZYGOTE_HANDLE)
 
-  service_manager::SandboxType GetSandboxType() override {
-    if (cmd_line_.HasSwitch(service_manager::switches::kDisableGpuSandbox)) {
+  sandbox::policy::SandboxType GetSandboxType() override {
+    if (cmd_line_.HasSwitch(sandbox::policy::switches::kDisableGpuSandbox)) {
       DVLOG(1) << "GPU sandbox is disabled";
-      return service_manager::SandboxType::kNoSandbox;
+      return sandbox::policy::SandboxType::kNoSandbox;
     }
-    return service_manager::SandboxType::kGpu;
+    return sandbox::policy::SandboxType::kGpu;
   }
 
  private:
@@ -455,8 +488,8 @@ class GpuSandboxedProcessLauncherDelegate
 void RecordAppContainerStatus(int error_code, bool crashed_before) {
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   if (!crashed_before &&
-      service_manager::SandboxWin::IsAppContainerEnabledForSandbox(
-          *command_line, service_manager::SandboxType::kGpu)) {
+      sandbox::policy::SandboxWin::IsAppContainerEnabledForSandbox(
+          *command_line, sandbox::policy::SandboxType::kGpu)) {
     base::UmaHistogramSparse("GPU.AppContainer.Status", error_code);
   }
 }
@@ -474,8 +507,8 @@ void BindDiscardableMemoryReceiverOnUI(
     mojo::PendingReceiver<
         discardable_memory::mojom::DiscardableSharedMemoryManager> receiver) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  base::PostTask(
-      FROM_HERE, {BrowserThread::IO},
+  GetIOThreadTaskRunner({})->PostTask(
+      FROM_HERE,
       base::BindOnce(
           &BindDiscardableMemoryReceiverOnIO, std::move(receiver),
           discardable_memory::DiscardableSharedMemoryManager::Get()));
@@ -486,7 +519,7 @@ void BindDiscardableMemoryReceiverOnUI(
 // static
 bool GpuProcessHost::ValidateHost(GpuProcessHost* host) {
   // The Gpu process is invalid if it's not using SwiftShader, the card is
-  // blacklisted, and we can kill it and start over.
+  // blocklisted, and we can kill it and start over.
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kSingleProcess) ||
       base::CommandLine::ForCurrentProcess()->HasSwitch(
@@ -553,8 +586,8 @@ GpuProcessHost* GpuProcessHost::Get(GpuProcessKind kind, bool force_create) {
 // static
 void GpuProcessHost::GetHasGpuProcess(base::OnceCallback<void(bool)> callback) {
   if (!BrowserThread::CurrentlyOn(BrowserThread::IO)) {
-    base::PostTask(
-        FROM_HERE, {BrowserThread::IO},
+    GetIOThreadTaskRunner({})->PostTask(
+        FROM_HERE,
         base::BindOnce(&GpuProcessHost::GetHasGpuProcess, std::move(callback)));
     return;
   }
@@ -577,8 +610,8 @@ void GpuProcessHost::CallOnIO(
 #if !defined(OS_WIN)
   DCHECK_NE(kind, GPU_PROCESS_KIND_INFO_COLLECTION);
 #endif
-  base::PostTask(FROM_HERE, {BrowserThread::IO},
-                 base::BindOnce(&RunCallbackOnIO, kind, force_create,
+  GetIOThreadTaskRunner({})->PostTask(
+      FROM_HERE, base::BindOnce(&RunCallbackOnIO, kind, force_create,
                                 std::move(callback)));
 }
 
@@ -597,12 +630,6 @@ void GpuProcessHost::BindInterface(
       mojo::GenericPendingReceiver(interface_name, std::move(interface_pipe)));
 }
 
-void GpuProcessHost::RunService(
-    const std::string& service_name,
-    mojo::PendingReceiver<service_manager::mojom::Service> receiver) {
-  process_->GetHost()->RunService(service_name, std::move(receiver));
-}
-
 #if defined(USE_OZONE)
 void GpuProcessHost::TerminateGpuProcess(const std::string& message) {
   // At the moment, this path is only used by Ozone/Wayland. Once others start
@@ -610,10 +637,6 @@ void GpuProcessHost::TerminateGpuProcess(const std::string& message) {
   // it's unknown.
   termination_origin_ = GpuTerminationOrigin::kOzoneWaylandProxy;
   process_->TerminateOnBadMessageReceived(message);
-}
-
-void GpuProcessHost::SendGpuProcessMessage(IPC::Message* message) {
-  Send(message);
 }
 #endif  // defined(USE_OZONE)
 
@@ -677,11 +700,12 @@ GpuProcessHost::GpuProcessHost(int host_id, GpuProcessKind kind)
     in_process_ = true;
   }
 #if !defined(OS_ANDROID)
-  if (!in_process_ && base::FeatureList::IsEnabled(
-                          features::kForwardMemoryPressureEventsToGpuProcess)) {
-    memory_pressure_listener_ =
-        std::make_unique<base::MemoryPressureListener>(base::BindRepeating(
-            &GpuProcessHost::OnMemoryPressure, base::Unretained(this)));
+  if (!in_process_ && kind != GPU_PROCESS_KIND_INFO_COLLECTION &&
+      base::FeatureList::IsEnabled(
+          features::kForwardMemoryPressureEventsToGpuProcess)) {
+    memory_pressure_listener_ = std::make_unique<base::MemoryPressureListener>(
+        FROM_HERE, base::BindRepeating(&GpuProcessHost::OnMemoryPressure,
+                                       base::Unretained(this)));
   }
 #endif
 
@@ -702,7 +726,7 @@ GpuProcessHost::~GpuProcessHost() {
 
   SendOutstandingReplies();
 
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
   if (ca_transaction_gpu_coordinator_) {
     ca_transaction_gpu_coordinator_->HostWillBeDestroyed();
     ca_transaction_gpu_coordinator_ = nullptr;
@@ -754,11 +778,7 @@ GpuProcessHost::~GpuProcessHost() {
         // Don't block offscreen contexts (and force page reload for webgl)
         // if this was an intentional shutdown or the OOM killer on Android
         // killed us while Chrome was in the background.
-// TODO(crbug.com/598400): Restrict this to Android for now, since other
-// platforms might fall through here for the 'exit_on_context_lost' workaround.
-#if defined(OS_ANDROID)
         block_offscreen_contexts = false;
-#endif
         message += "exited normally. Everything is okay.";
         break;
       case base::TERMINATION_STATUS_ABNORMAL_TERMINATION:
@@ -776,11 +796,11 @@ GpuProcessHost::~GpuProcessHost() {
       case base::TERMINATION_STATUS_STILL_RUNNING:
         message += "hasn't exited yet.";
         break;
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
       case base::TERMINATION_STATUS_PROCESS_WAS_KILLED_BY_OOM:
         message += "was killed due to out of memory.";
         break;
-#endif  // OS_CHROMEOS
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
 #if defined(OS_ANDROID)
       case base::TERMINATION_STATUS_OOM_PROTECTED:
         message += "was protected from out of memory kill.";
@@ -801,8 +821,8 @@ GpuProcessHost::~GpuProcessHost() {
         NOTREACHED();
         break;
     }
-    base::PostTask(
-        FROM_HERE, {BrowserThread::UI},
+    GetUIThreadTaskRunner({})->PostTask(
+        FROM_HERE,
         base::BindOnce(&OnGpuProcessHostDestroyedOnUI, host_id_, message));
   }
 
@@ -834,7 +854,7 @@ bool GpuProcessHost::Init() {
                                    process_->GetInProcessMojoInvitation()),
         gpu_preferences));
     base::Thread::Options options;
-#if defined(OS_WIN) || defined(OS_MACOSX)
+#if defined(OS_WIN) || defined(OS_MAC)
     // WGL needs to create its own window and pump messages on it.
     options.message_pump_type = base::MessagePumpType::UI;
 #endif
@@ -858,8 +878,9 @@ bool GpuProcessHost::Init() {
   params.product = GetContentClient()->browser()->GetProduct();
   params.deadline_to_synchronize_surfaces =
       switches::GetDeadlineToSynchronizeSurfaces();
-  params.main_thread_task_runner =
-      base::CreateSingleThreadTaskRunner({BrowserThread::UI});
+  params.main_thread_task_runner = GetUIThreadTaskRunner({});
+  params.info_collection_gpu_process =
+      kind_ == GPU_PROCESS_KIND_INFO_COLLECTION;
   gpu_host_ = std::make_unique<viz::GpuHostImpl>(
       this, std::move(viz_main_pending_remote), std::move(params));
 
@@ -878,7 +899,7 @@ bool GpuProcessHost::Init() {
   }
 #endif
 
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
   ca_transaction_gpu_coordinator_ = CATransactionGPUCoordinator::Create(this);
 #endif
 
@@ -904,11 +925,6 @@ bool GpuProcessHost::Send(IPC::Message* msg) {
 
 bool GpuProcessHost::OnMessageReceived(const IPC::Message& message) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-#if defined(USE_OZONE)
-  ui::OzonePlatform::GetInstance()
-      ->GetGpuPlatformSupportHost()
-      ->OnMessageReceived(message);
-#endif
   return true;
 }
 
@@ -975,7 +991,7 @@ void GpuProcessHost::DidInitialize(
     const base::Optional<gpu::GPUInfo>& gpu_info_for_hardware_gpu,
     const base::Optional<gpu::GpuFeatureInfo>&
         gpu_feature_info_for_hardware_gpu,
-    const gpu::GpuExtraInfo& gpu_extra_info) {
+    const gfx::GpuExtraInfo& gpu_extra_info) {
   if (GetGpuCrashCount() > 0) {
     LOG(WARNING) << "Reinitialized the GPU process after a crash. The reported "
                     "initialization time was "
@@ -994,8 +1010,10 @@ void GpuProcessHost::DidInitialize(
 #if defined(OS_ANDROID)
   // Android may kill the GPU process to free memory, especially when the app
   // is the background, so Android cannot have a hard limit on GPU starts.
-  // Reset crash count on Android when context creation succeeds.
-  recent_crash_count_ = 0;
+  // Reset crash count on Android when context creation succeeds, but only if no
+  // fallback option is available.
+  if (!GpuDataManagerImpl::GetInstance()->CanFallback())
+    recent_crash_count_ = 0;
 #endif
 }
 
@@ -1009,8 +1027,10 @@ void GpuProcessHost::DidCreateContextSuccessfully() {
 #if defined(OS_ANDROID)
   // Android may kill the GPU process to free memory, especially when the app
   // is the background, so Android cannot have a hard limit on GPU starts.
-  // Reset crash count on Android when context creation succeeds.
-  recent_crash_count_ = 0;
+  // Reset crash count on Android when context creation succeeds, but only if no
+  // fallback option is available.
+  if (!GpuDataManagerImpl::GetInstance()->CanFallback())
+    recent_crash_count_ = 0;
 #endif
 }
 
@@ -1026,6 +1046,10 @@ void GpuProcessHost::DidUpdateOverlayInfo(
     const gpu::OverlayInfo& overlay_info) {
   GpuDataManagerImpl::GetInstance()->UpdateOverlayInfo(overlay_info);
 }
+
+void GpuProcessHost::DidUpdateHDRStatus(bool hdr_enabled) {
+  GpuDataManagerImpl::GetInstance()->UpdateHDRStatus(hdr_enabled);
+}
 #endif
 
 void GpuProcessHost::BlockDomainFrom3DAPIs(const GURL& url,
@@ -1038,15 +1062,16 @@ bool GpuProcessHost::GpuAccessAllowed() const {
 }
 
 void GpuProcessHost::DisableGpuCompositing() {
-#if defined(OS_ANDROID) || defined(OS_CHROMEOS)
+#if defined(OS_ANDROID) || BUILDFLAG(IS_CHROMEOS_ASH)
   DLOG(ERROR) << "Can't disable GPU compositing";
 #else
   // TODO(crbug.com/819474): The switch from GPU to software compositing should
   // be handled here instead of by ImageTransportFactory.
-  base::PostTask(FROM_HERE, {BrowserThread::UI}, base::BindOnce([]() {
-                   if (auto* factory = ImageTransportFactory::GetInstance())
-                     factory->DisableGpuCompositing();
-                 }));
+  GetUIThreadTaskRunner({})->PostTask(
+      FROM_HERE, base::BindOnce([]() {
+        if (auto* factory = ImageTransportFactory::GetInstance())
+          factory->DisableGpuCompositing();
+      }));
 #endif
 }
 
@@ -1063,8 +1088,8 @@ void GpuProcessHost::RecordLogMessage(int32_t severity,
 void GpuProcessHost::BindDiscardableMemoryReceiver(
     mojo::PendingReceiver<
         discardable_memory::mojom::DiscardableSharedMemoryManager> receiver) {
-  base::PostTask(
-      FROM_HERE, {BrowserThread::UI},
+  GetUIThreadTaskRunner({})->PostTask(
+      FROM_HERE,
       base::BindOnce(&BindDiscardableMemoryReceiverOnUI, std::move(receiver)));
 }
 
@@ -1072,6 +1097,7 @@ GpuProcessKind GpuProcessHost::kind() {
   return kind_;
 }
 
+// Atomically shut down the GPU process with a normal termination status.
 void GpuProcessHost::ForceShutdown() {
   // This is only called on the IO thread so no race against the constructor
   // for another GpuProcessHost.
@@ -1079,6 +1105,14 @@ void GpuProcessHost::ForceShutdown() {
     g_gpu_process_hosts[kind_] = nullptr;
 
   process_->ForceShutdown();
+}
+
+void GpuProcessHost::DumpProcessStack() {
+#if defined(OS_ANDROID)
+  if (in_process_)
+    return;
+  process_->DumpProcessStack();
+#endif
 }
 
 void GpuProcessHost::RunService(mojo::GenericPendingReceiver receiver) {
@@ -1099,10 +1133,10 @@ bool GpuProcessHost::LaunchGpuProcess() {
   std::unique_ptr<base::CommandLine> cmd_line =
       std::make_unique<base::CommandLine>(base::CommandLine::NO_PROGRAM);
 #else
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
   int child_flags = gpu_launcher.empty() ? ChildProcessHost::CHILD_ALLOW_SELF
                                          : ChildProcessHost::CHILD_NORMAL;
-#elif defined(OS_MACOSX)
+#elif defined(OS_MAC)
   int child_flags = ChildProcessHost::CHILD_GPU;
 #else
   int child_flags = ChildProcessHost::CHILD_NORMAL;
@@ -1126,9 +1160,30 @@ bool GpuProcessHost::LaunchGpuProcess() {
 #endif  // defined(OS_WIN)
 
   if (kind_ == GPU_PROCESS_KIND_INFO_COLLECTION) {
-    cmd_line->AppendSwitch(service_manager::switches::kDisableGpuSandbox);
+    cmd_line->AppendSwitch(sandbox::policy::switches::kDisableGpuSandbox);
     cmd_line->AppendSwitchASCII(switches::kUseGL,
                                 gl::kGLImplementationDisabledName);
+
+    // Pass the current device info to the info-collection GPU process for
+    // crash key logging.
+    const gpu::GPUInfo::GPUDevice device_info = GetGPUInfo().active_gpu();
+    cmd_line->AppendSwitchASCII(
+        switches::kGpuVendorId,
+        base::StringPrintf("%u", device_info.vendor_id));
+    cmd_line->AppendSwitchASCII(
+        switches::kGpuDeviceId,
+        base::StringPrintf("%u", device_info.device_id));
+#if defined(OS_WIN)
+    cmd_line->AppendSwitchASCII(
+        switches::kGpuSubSystemId,
+        base::StringPrintf("%u", device_info.sub_sys_id));
+    cmd_line->AppendSwitchASCII(switches::kGpuRevision,
+                                base::StringPrintf("%u", device_info.revision));
+#endif
+    if (device_info.driver_version.length()) {
+      cmd_line->AppendSwitchASCII(switches::kGpuDriverVersion,
+                                  device_info.driver_version);
+    }
   }
 
   // TODO(penghuang): Replace all GPU related switches with GpuPreferences.
@@ -1195,7 +1250,7 @@ void GpuProcessHost::SendOutstandingReplies() {
 }
 
 void GpuProcessHost::RecordProcessCrash() {
-#if !defined(OS_ANDROID) && !defined(OS_CHROMEOS)
+#if !defined(OS_ANDROID) && !BUILDFLAG(IS_CHROMEOS_ASH)
   // Maximum number of times the GPU process can crash before we try something
   // different, like disabling hardware acceleration or all GL.
   constexpr int kGpuFallbackCrashCount = 3;
@@ -1242,6 +1297,14 @@ viz::mojom::GpuService* GpuProcessHost::gpu_service() {
   DCHECK(gpu_host_);
   return gpu_host_->gpu_service();
 }
+
+#if defined(OS_WIN)
+viz::mojom::InfoCollectionGpuService*
+GpuProcessHost::info_collection_gpu_service() {
+  DCHECK(gpu_host_);
+  return gpu_host_->info_collection_gpu_service();
+}
+#endif
 
 int GpuProcessHost::GetIDForTesting() const {
   return process_->GetData().id;

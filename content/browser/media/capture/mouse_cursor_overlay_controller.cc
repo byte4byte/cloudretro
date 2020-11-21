@@ -8,8 +8,8 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
-#include "base/logging.h"
+#include "base/callback_helpers.h"
+#include "base/check_op.h"
 
 namespace content {
 

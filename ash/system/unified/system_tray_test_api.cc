@@ -97,6 +97,11 @@ base::string16 SystemTrayTestApi::GetBubbleViewTooltip(int view_id) {
   return view ? view->GetTooltipText(gfx::Point()) : base::string16();
 }
 
+base::string16 SystemTrayTestApi::GetBubbleViewText(int view_id) {
+  views::View* view = GetBubbleView(view_id);
+  return view ? static_cast<views::Label*>(view)->GetText() : base::string16();
+}
+
 bool SystemTrayTestApi::Is24HourClock() {
   base::HourClockType type =
       GetTray()->time_view_->time_view()->GetHourTypeForTesting();
@@ -106,9 +111,9 @@ bool SystemTrayTestApi::Is24HourClock() {
 void SystemTrayTestApi::TapSelectToSpeakTray() {
   // The Select-to-Speak tray doesn't actually use the event, so construct
   // a bare bones event to perform the action.
-  ui::TouchEvent event(
-      ui::ET_TOUCH_PRESSED, gfx::Point(), base::TimeTicks::Now(),
-      ui::PointerDetails(ui::EventPointerType::POINTER_TYPE_TOUCH), 0);
+  ui::TouchEvent event(ui::ET_TOUCH_PRESSED, gfx::Point(),
+                       base::TimeTicks::Now(),
+                       ui::PointerDetails(ui::EventPointerType::kTouch), 0);
   StatusAreaWidget* status_area_widget =
       RootWindowController::ForWindow(GetTray()->GetWidget()->GetNativeWindow())
           ->GetStatusAreaWidget();

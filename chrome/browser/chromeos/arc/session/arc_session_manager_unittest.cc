@@ -27,6 +27,7 @@
 #include "chrome/browser/chromeos/arc/optin/arc_terms_of_service_oobe_negotiator.h"
 #include "chrome/browser/chromeos/arc/session/arc_play_store_enabled_preference_handler.h"
 #include "chrome/browser/chromeos/arc/session/arc_session_manager.h"
+#include "chrome/browser/chromeos/arc/session/arc_session_manager_observer.h"
 #include "chrome/browser/chromeos/arc/test/arc_data_removed_waiter.h"
 #include "chrome/browser/chromeos/arc/test/test_arc_session_manager.h"
 #include "chrome/browser/chromeos/login/ui/fake_login_display_host.h"
@@ -45,6 +46,7 @@
 #include "chrome/test/base/testing_profile.h"
 #include "chromeos/constants/chromeos_switches.h"
 #include "chromeos/dbus/cryptohome/fake_cryptohome_client.h"
+#include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/power/power_manager_client.h"
 #include "chromeos/dbus/session_manager/session_manager_client.h"
 #include "chromeos/dbus/upstart/upstart_client.h"
@@ -59,8 +61,8 @@
 #include "components/prefs/pref_service.h"
 #include "components/prefs/testing_pref_service.h"
 #include "components/session_manager/core/session_manager.h"
-#include "components/sync/model/fake_sync_change_processor.h"
-#include "components/sync/model/sync_error_factory_mock.h"
+#include "components/sync/test/model/fake_sync_change_processor.h"
+#include "components/sync/test/model/sync_error_factory_mock.h"
 #include "components/sync_preferences/testing_pref_service_syncable.h"
 #include "components/user_manager/scoped_user_manager.h"
 #include "components/user_manager/user_manager.h"
@@ -76,7 +78,7 @@ namespace arc {
 
 namespace {
 
-class ArcInitialStartHandler : public ArcSessionManager::Observer {
+class ArcInitialStartHandler : public ArcSessionManagerObserver {
  public:
   explicit ArcInitialStartHandler(ArcSessionManager* session_manager)
       : session_manager_(session_manager) {
@@ -85,7 +87,7 @@ class ArcInitialStartHandler : public ArcSessionManager::Observer {
 
   ~ArcInitialStartHandler() override { session_manager_->RemoveObserver(this); }
 
-  // ArcSessionManager::Observer:
+  // ArcSessionManagerObserver:
   void OnArcInitialStart() override {
     DCHECK(!was_called_);
     was_called_ = true;
@@ -101,7 +103,7 @@ class ArcInitialStartHandler : public ArcSessionManager::Observer {
   DISALLOW_COPY_AND_ASSIGN(ArcInitialStartHandler);
 };
 
-class FileExpansionObserver : public ArcSessionManager::Observer {
+class FileExpansionObserver : public ArcSessionManagerObserver {
  public:
   FileExpansionObserver() = default;
   ~FileExpansionObserver() override = default;
@@ -112,7 +114,7 @@ class FileExpansionObserver : public ArcSessionManager::Observer {
     return property_files_expansion_result_;
   }
 
-  // ArcSessionManager::Observer:
+  // ArcSessionManagerObserver:
   void OnPropertyFilesExpanded(bool result) override {
     property_files_expansion_result_ = result;
   }
@@ -121,11 +123,39 @@ class FileExpansionObserver : public ArcSessionManager::Observer {
   base::Optional<bool> property_files_expansion_result_;
 };
 
+class ShowErrorObserver : public ArcSessionManagerObserver {
+ public:
+  ShowErrorObserver(const ShowErrorObserver&) = delete;
+  ShowErrorObserver& operator=(const ShowErrorObserver&) = delete;
+
+  explicit ShowErrorObserver(ArcSessionManager* session_manager)
+      : session_manager_(session_manager) {
+    session_manager->AddObserver(this);
+  }
+
+  ~ShowErrorObserver() override { session_manager_->RemoveObserver(this); }
+
+  const base::Optional<ArcSupportHost::ErrorInfo> error_info() const {
+    return error_info_;
+  }
+
+  void OnArcErrorShowRequested(ArcSupportHost::ErrorInfo error_info) override {
+    error_info_ = error_info;
+  }
+
+ private:
+  base::Optional<ArcSupportHost::ErrorInfo> error_info_;
+  ArcSessionManager* const session_manager_;
+};
+
 class ArcSessionManagerInLoginScreenTest : public testing::Test {
  public:
   ArcSessionManagerInLoginScreenTest()
       : user_manager_enabler_(
             std::make_unique<chromeos::FakeChromeUserManager>()) {
+    // Need to initialize DBusThreadManager before ArcSessionManager's
+    // constructor calls DBusThreadManager::Get().
+    chromeos::DBusThreadManager::Initialize();
     chromeos::SessionManagerClient::InitializeFakeInMemory();
 
     ArcSessionManager::SetUiEnabledForTesting(false);
@@ -142,6 +172,7 @@ class ArcSessionManagerInLoginScreenTest : public testing::Test {
     arc_session_manager_.reset();
     arc_service_manager_.reset();
     chromeos::SessionManagerClient::Shutdown();
+    chromeos::DBusThreadManager::Shutdown();
   }
 
  protected:
@@ -194,10 +225,14 @@ class ArcSessionManagerTestBase : public testing::Test {
   ArcSessionManagerTestBase()
       : task_environment_(content::BrowserTaskEnvironment::IO_MAINLOOP),
         user_manager_enabler_(
-            std::make_unique<chromeos::FakeChromeUserManager>()) {}
+            std::make_unique<chromeos::FakeChromeUserManager>()),
+        test_local_state_(std::make_unique<TestingPrefServiceSimple>()) {
+    arc::prefs::RegisterLocalStatePrefs(test_local_state_->registry());
+  }
   ~ArcSessionManagerTestBase() override = default;
 
   void SetUp() override {
+    chromeos::DBusThreadManager::Initialize();
     chromeos::PowerManagerClient::InitializeFake();
     chromeos::SessionManagerClient::InitializeFakeInMemory();
     chromeos::UpstartClient::InitializeFake();
@@ -231,6 +266,7 @@ class ArcSessionManagerTestBase : public testing::Test {
     chromeos::UpstartClient::Shutdown();
     chromeos::SessionManagerClient::Shutdown();
     chromeos::PowerManagerClient::Shutdown();
+    chromeos::DBusThreadManager::Shutdown();
   }
 
   chromeos::FakeChromeUserManager* GetFakeUserManager() const {
@@ -245,6 +281,8 @@ class ArcSessionManagerTestBase : public testing::Test {
     return arc_session_manager_.get();
   }
 
+  PrefService* test_local_state() { return test_local_state_.get(); }
+
   bool WaitForDataRemoved(ArcSessionManager::State expected_state) {
     if (arc_session_manager()->state() !=
         ArcSessionManager::State::REMOVING_DATA_DIR)
@@ -255,6 +293,25 @@ class ArcSessionManagerTestBase : public testing::Test {
       return false;
 
     return true;
+  }
+
+  static std::string GenerateFakeSerialNumber(const std::string& chromeos_user,
+                                              const std::string& salt) {
+    return ArcSessionManager::GenerateFakeSerialNumberForTesting(chromeos_user,
+                                                                 salt);
+  }
+
+  static std::string GetOrCreateSerialNumber(
+      PrefService* local_state,
+      const std::string& chromeos_user,
+      const std::string& arc_salt_on_disk) {
+    return ArcSessionManager::GetOrCreateSerialNumberForTesting(
+        local_state, chromeos_user, arc_salt_on_disk);
+  }
+
+  static bool ReadSaltOnDisk(const base::FilePath& salt_path,
+                             std::string* out_salt) {
+    return ArcSessionManager::ReadSaltOnDiskForTesting(salt_path, out_salt);
   }
 
  private:
@@ -273,6 +330,7 @@ class ArcSessionManagerTestBase : public testing::Test {
   std::unique_ptr<ArcSessionManager> arc_session_manager_;
   user_manager::ScopedUserManager user_manager_enabler_;
   base::ScopedTempDir temp_dir_;
+  std::unique_ptr<TestingPrefServiceSimple> test_local_state_;
 
   DISALLOW_COPY_AND_ASSIGN(ArcSessionManagerTestBase);
 };
@@ -308,31 +366,50 @@ class ArcSessionManagerTest : public ArcSessionManagerTestBase {
 
 TEST_F(ArcSessionManagerTest, BaseWorkflow) {
   EXPECT_TRUE(arc_session_manager()->sign_in_start_time().is_null());
-  EXPECT_TRUE(arc_session_manager()->arc_start_time().is_null());
+  EXPECT_TRUE(arc_session_manager()->pre_start_time().is_null());
+  EXPECT_TRUE(arc_session_manager()->start_time().is_null());
 
   arc_session_manager()->SetProfile(profile());
   arc_session_manager()->Initialize();
 
   // By default ARC is not enabled.
   EXPECT_EQ(ArcSessionManager::State::STOPPED, arc_session_manager()->state());
+  EXPECT_TRUE(arc_session_manager()->pre_start_time().is_null());
+  EXPECT_TRUE(arc_session_manager()->start_time().is_null());
+
+  const base::TimeTicks enabled_time = base::TimeTicks::Now();
 
   // Enables ARC. First time, ToS negotiation should start.
   arc_session_manager()->RequestEnable();
   base::RunLoop().RunUntilIdle();
   ASSERT_EQ(ArcSessionManager::State::NEGOTIATING_TERMS_OF_SERVICE,
             arc_session_manager()->state());
+  const base::TimeTicks after_enabled_time = base::TimeTicks::Now();
+
+  const base::TimeTicks pre_start_time =
+      arc_session_manager()->pre_start_time();
+  EXPECT_FALSE(pre_start_time.is_null());
+  EXPECT_GE(pre_start_time, enabled_time);
+  EXPECT_GE(after_enabled_time, pre_start_time);
+  EXPECT_TRUE(arc_session_manager()->start_time().is_null());
 
   arc_session_manager()->OnTermsOfServiceNegotiatedForTesting(true);
   ASSERT_EQ(ArcSessionManager::State::CHECKING_ANDROID_MANAGEMENT,
             arc_session_manager()->state());
+  EXPECT_TRUE(arc_session_manager()->sign_in_start_time().is_null());
   arc_session_manager()->StartArcForTesting();
 
-  EXPECT_TRUE(arc_session_manager()->sign_in_start_time().is_null());
-  EXPECT_FALSE(arc_session_manager()->arc_start_time().is_null());
-
+  const base::TimeTicks start_time = arc_session_manager()->start_time();
+  EXPECT_FALSE(arc_session_manager()->sign_in_start_time().is_null());
+  EXPECT_EQ(pre_start_time, arc_session_manager()->pre_start_time());
+  EXPECT_FALSE(start_time.is_null());
+  EXPECT_GE(start_time, after_enabled_time);
   ASSERT_EQ(ArcSessionManager::State::ACTIVE, arc_session_manager()->state());
 
   arc_session_manager()->Shutdown();
+
+  EXPECT_TRUE(arc_session_manager()->pre_start_time().is_null());
+  EXPECT_TRUE(arc_session_manager()->start_time().is_null());
 }
 
 // Tests that tying to enable ARC++ with an incompatible file system fails and
@@ -375,7 +452,8 @@ TEST_F(ArcSessionManagerTest, ArcInitialStartFirstProvisioning) {
 
   EXPECT_FALSE(start_handler.was_called());
 
-  arc_session_manager()->OnProvisioningFinished(ProvisioningResult::SUCCESS);
+  arc_session_manager()->OnProvisioningFinished(ProvisioningResult::SUCCESS,
+                                                {});
   EXPECT_TRUE(start_handler.was_called());
 
   arc_session_manager()->Shutdown();
@@ -396,7 +474,8 @@ TEST_F(ArcSessionManagerTest, ArcInitialStartNextProvisioning) {
   ArcInitialStartHandler start_handler(arc_session_manager());
 
   arc_session_manager()->RequestEnable();
-  arc_session_manager()->OnProvisioningFinished(ProvisioningResult::SUCCESS);
+  arc_session_manager()->OnProvisioningFinished(ProvisioningResult::SUCCESS,
+                                                {});
   EXPECT_FALSE(start_handler.was_called());
 
   arc_session_manager()->Shutdown();
@@ -494,7 +573,8 @@ TEST_F(ArcSessionManagerTest, Provisioning_Success) {
   PrefService* const prefs = profile()->GetPrefs();
 
   EXPECT_TRUE(arc_session_manager()->sign_in_start_time().is_null());
-  EXPECT_TRUE(arc_session_manager()->arc_start_time().is_null());
+  EXPECT_TRUE(arc_session_manager()->pre_start_time().is_null());
+  EXPECT_TRUE(arc_session_manager()->start_time().is_null());
   EXPECT_FALSE(arc_session_manager()->IsPlaystoreLaunchRequestedForTesting());
 
   ASSERT_FALSE(prefs->GetBoolean(prefs::kArcSignedIn));
@@ -509,19 +589,22 @@ TEST_F(ArcSessionManagerTest, Provisioning_Success) {
   arc_session_manager()->OnTermsOfServiceNegotiatedForTesting(true);
   ASSERT_EQ(ArcSessionManager::State::CHECKING_ANDROID_MANAGEMENT,
             arc_session_manager()->state());
+  EXPECT_TRUE(arc_session_manager()->sign_in_start_time().is_null());
   arc_session_manager()->StartArcForTesting();
+  EXPECT_FALSE(arc_session_manager()->sign_in_start_time().is_null());
   EXPECT_EQ(ArcSessionManager::State::ACTIVE, arc_session_manager()->state());
 
   // Here, provisining is not yet completed, so kArcSignedIn should be false.
   EXPECT_FALSE(prefs->GetBoolean(prefs::kArcSignedIn));
-  EXPECT_FALSE(arc_session_manager()->arc_start_time().is_null());
+  EXPECT_FALSE(arc_session_manager()->pre_start_time().is_null());
+  EXPECT_FALSE(arc_session_manager()->start_time().is_null());
   EXPECT_FALSE(arc_session_manager()->IsPlaystoreLaunchRequestedForTesting());
 
   // Emulate successful provisioning.
-  arc_session_manager()->OnProvisioningFinished(ProvisioningResult::SUCCESS);
+  arc_session_manager()->OnProvisioningFinished(ProvisioningResult::SUCCESS,
+                                                {});
   EXPECT_TRUE(prefs->GetBoolean(prefs::kArcSignedIn));
   EXPECT_EQ(ArcSessionManager::State::ACTIVE, arc_session_manager()->state());
-  EXPECT_TRUE(arc_session_manager()->sign_in_start_time().is_null());
   EXPECT_TRUE(arc_session_manager()->IsPlaystoreLaunchRequestedForTesting());
 }
 
@@ -542,7 +625,8 @@ TEST_F(ArcSessionManagerTest, PlayStoreSuppressed) {
   // Second start, no fetching code is expected.
   EXPECT_EQ(ArcSessionManager::State::ACTIVE, arc_session_manager()->state());
   EXPECT_FALSE(arc_session_manager()->IsPlaystoreLaunchRequestedForTesting());
-  arc_session_manager()->OnProvisioningFinished(ProvisioningResult::SUCCESS);
+  arc_session_manager()->OnProvisioningFinished(ProvisioningResult::SUCCESS,
+                                                {});
   // Completing the provisioning resets this flag.
   EXPECT_FALSE(prefs->GetBoolean(prefs::kArcProvisioningInitiatedFromOobe));
   EXPECT_EQ(ArcSessionManager::State::ACTIVE, arc_session_manager()->state());
@@ -590,7 +674,7 @@ TEST_F(ArcSessionManagerTest, Provisioning_Restart) {
 
   // Report failure.
   arc_session_manager()->OnProvisioningFinished(
-      ProvisioningResult::GMS_NETWORK_ERROR);
+      ProvisioningResult::GMS_NETWORK_ERROR, {});
   // On error, UI to send feedback is showing. In that case,
   // the ARC is still necessary to run on background for gathering the logs.
   EXPECT_TRUE(prefs->GetBoolean(prefs::kArcSignedIn));
@@ -722,7 +806,8 @@ TEST_F(ArcSessionManagerTest, ClearArcTransitionOnShutdown) {
             arc_session_manager()->state());
   arc_session_manager()->OnTermsOfServiceNegotiatedForTesting(true);
   arc_session_manager()->StartArcForTesting();
-  arc_session_manager()->OnProvisioningFinished(ProvisioningResult::SUCCESS);
+  arc_session_manager()->OnProvisioningFinished(ProvisioningResult::SUCCESS,
+                                                {});
 
   EXPECT_EQ(
       static_cast<int>(ArcSupervisionTransition::NO_TRANSITION),
@@ -757,7 +842,8 @@ TEST_F(ArcSessionManagerTest, ClearArcTransitionOnArcDataRemoval) {
             arc_session_manager()->state());
   arc_session_manager()->OnTermsOfServiceNegotiatedForTesting(true);
   arc_session_manager()->StartArcForTesting();
-  arc_session_manager()->OnProvisioningFinished(ProvisioningResult::SUCCESS);
+  arc_session_manager()->OnProvisioningFinished(ProvisioningResult::SUCCESS,
+                                                {});
 
   EXPECT_EQ(ArcSupervisionTransition::NO_TRANSITION,
             arc::GetSupervisionTransition(profile()));
@@ -784,13 +870,13 @@ TEST_F(ArcSessionManagerTest, IgnoreSecondErrorReporting) {
 
   // Report some failure that does not stop the bridge.
   arc_session_manager()->OnProvisioningFinished(
-      ProvisioningResult::GMS_SIGN_IN_FAILED);
+      ProvisioningResult::GMS_SIGN_IN_FAILED, {});
   EXPECT_EQ(ArcSessionManager::State::ACTIVE, arc_session_manager()->state());
 
   // Try to send another error that stops the bridge if sent first. It should
   // be ignored.
   arc_session_manager()->OnProvisioningFinished(
-      ProvisioningResult::CHROME_SERVER_COMMUNICATION_ERROR);
+      ProvisioningResult::CHROME_SERVER_COMMUNICATION_ERROR, {});
   EXPECT_EQ(ArcSessionManager::State::ACTIVE, arc_session_manager()->state());
 
   arc_session_manager()->Shutdown();
@@ -810,7 +896,8 @@ TEST_F(ArcSessionManagerTest, IsDirectlyStartedFalse) {
             arc_session_manager()->state());
   arc_session_manager()->OnTermsOfServiceNegotiatedForTesting(true);
   arc_session_manager()->StartArcForTesting();
-  arc_session_manager()->OnProvisioningFinished(ProvisioningResult::SUCCESS);
+  arc_session_manager()->OnProvisioningFinished(ProvisioningResult::SUCCESS,
+                                                {});
   EXPECT_EQ(ArcSessionManager::State::ACTIVE, arc_session_manager()->state());
   EXPECT_FALSE(arc_session_manager()->is_directly_started());
   arc_session_manager()->Shutdown();
@@ -849,7 +936,8 @@ TEST_F(ArcSessionManagerTest, IsDirectlyStartedOnInternalRestart) {
             arc_session_manager()->state());
   arc_session_manager()->OnTermsOfServiceNegotiatedForTesting(true);
   arc_session_manager()->StartArcForTesting();
-  arc_session_manager()->OnProvisioningFinished(ProvisioningResult::SUCCESS);
+  arc_session_manager()->OnProvisioningFinished(ProvisioningResult::SUCCESS,
+                                                {});
   EXPECT_FALSE(arc_session_manager()->is_directly_started());
   EXPECT_EQ(ArcSessionManager::State::ACTIVE, arc_session_manager()->state());
   EXPECT_FALSE(arc_session_manager()->is_directly_started());
@@ -945,6 +1033,60 @@ TEST_F(ArcSessionManagerTest, RequestDisableDoesNotRemoveData) {
   arc_session_manager()->Shutdown();
 }
 
+// Tests that |vm_info| is initialized with base::nullopt.
+TEST_F(ArcSessionManagerTest, GetVmInfo_InitialValue) {
+  const auto& vm_info = arc_session_manager()->GetVmInfo();
+  EXPECT_EQ(base::nullopt, vm_info);
+}
+
+// Tests that |vm_info| is updated with that from VmStartedSignal.
+TEST_F(ArcSessionManagerTest, GetVmInfo_WithVmStarted) {
+  vm_tools::concierge::VmStartedSignal vm_signal;
+  vm_signal.set_name(kArcVmName);
+  vm_signal.mutable_vm_info()->set_seneschal_server_handle(1000UL);
+  arc_session_manager()->OnVmStarted(vm_signal);
+
+  const auto& vm_info = arc_session_manager()->GetVmInfo();
+  ASSERT_NE(base::nullopt, vm_info);
+  EXPECT_EQ(1000UL, vm_info->seneschal_server_handle());
+}
+
+// Tests that |vm_info| remains as base::nullopt after VM stops.
+TEST_F(ArcSessionManagerTest, GetVmInfo_WithVmStopped) {
+  vm_tools::concierge::VmStoppedSignal vm_signal;
+  vm_signal.set_name(kArcVmName);
+  arc_session_manager()->OnVmStopped(vm_signal);
+
+  const auto& vm_info = arc_session_manager()->GetVmInfo();
+  EXPECT_EQ(base::nullopt, vm_info);
+}
+
+// Tests that |vm_info| is reset to base::nullopt after VM starts and stops.
+TEST_F(ArcSessionManagerTest, GetVmInfo_WithVmStarted_ThenStopped) {
+  vm_tools::concierge::VmStartedSignal start_signal;
+  start_signal.set_name(kArcVmName);
+  start_signal.mutable_vm_info()->set_seneschal_server_handle(1000UL);
+  arc_session_manager()->OnVmStarted(start_signal);
+
+  vm_tools::concierge::VmStoppedSignal stop_signal;
+  stop_signal.set_name(kArcVmName);
+  arc_session_manager()->OnVmStopped(stop_signal);
+
+  const auto& vm_info = arc_session_manager()->GetVmInfo();
+  EXPECT_EQ(base::nullopt, vm_info);
+}
+
+// Tests that |vm_info| is not updated with non-ARCVM VmStartedSignal.
+TEST_F(ArcSessionManagerTest, GetVmInfo_WithNonVmStarted) {
+  vm_tools::concierge::VmStartedSignal non_vm_signal;
+  non_vm_signal.set_name("non-ARCVM");
+  non_vm_signal.mutable_vm_info()->set_seneschal_server_handle(1000UL);
+  arc_session_manager()->OnVmStarted(non_vm_signal);
+
+  const auto& vm_info = arc_session_manager()->GetVmInfo();
+  EXPECT_EQ(base::nullopt, vm_info);
+}
+
 class ArcSessionManagerArcAlwaysStartTest : public ArcSessionManagerTest {
  public:
   ArcSessionManagerArcAlwaysStartTest() = default;
@@ -958,10 +1100,65 @@ class ArcSessionManagerArcAlwaysStartTest : public ArcSessionManagerTest {
   DISALLOW_COPY_AND_ASSIGN(ArcSessionManagerArcAlwaysStartTest);
 };
 
+struct ProvisioningErrorDisplayTestParam {
+  // the reason for arc instance stopping
+  ArcStopReason stop_reason;
+
+  // the error sent to arc support host
+  ArcSupportHost::Error error;
+
+  // the error code sent to arc support host
+  base::Optional<int> arg;
+};
+
+constexpr ProvisioningErrorDisplayTestParam
+    kProvisioningErrorDisplayTestCases[] = {
+        {ArcStopReason::GENERIC_BOOT_FAILURE,
+         ArcSupportHost::Error::SIGN_IN_UNKNOWN_ERROR, 16 /*ARC_STOPPED*/},
+        {ArcStopReason::LOW_DISK_SPACE,
+         ArcSupportHost::Error::LOW_DISK_SPACE_ERROR,
+         {}},
+        {ArcStopReason::CRASH, ArcSupportHost::Error::SIGN_IN_UNKNOWN_ERROR,
+         16 /*ARC_STOPPED*/}};
+
+class ProvisioningErrorDisplayTest
+    : public ArcSessionManagerTest,
+      public testing::WithParamInterface<ProvisioningErrorDisplayTestParam> {
+  void SetUp() override {
+    ArcSessionManagerTest::SetUp();
+
+    arc_session_manager()->SetProfile(profile());
+    arc_session_manager()->Initialize();
+    arc_session_manager()->RequestEnable();
+  }
+
+  void TearDown() override {
+    arc_session_manager()->Shutdown();
+    ArcSessionManagerTest::TearDown();
+  }
+};
+
+INSTANTIATE_TEST_SUITE_P(
+    All,
+    ProvisioningErrorDisplayTest,
+    ::testing::ValuesIn(kProvisioningErrorDisplayTestCases));
+
+TEST_P(ProvisioningErrorDisplayTest, ArcStopped) {
+  ShowErrorObserver observer(arc_session_manager());
+
+  arc_session_manager()->OnProvisioningFinished(ProvisioningResult::ARC_STOPPED,
+                                                GetParam().stop_reason);
+
+  ASSERT_TRUE(observer.error_info());
+  EXPECT_EQ(GetParam().error, observer.error_info().value().error);
+  EXPECT_EQ(GetParam().arg, observer.error_info().value().arg);
+}
+
 TEST_F(ArcSessionManagerArcAlwaysStartTest, BaseWorkflow) {
   // TODO(victorhsieh): Consider also tracking sign-in activity, which is
   // initiated from the Android side.
-  EXPECT_TRUE(arc_session_manager()->arc_start_time().is_null());
+  EXPECT_TRUE(arc_session_manager()->pre_start_time().is_null());
+  EXPECT_TRUE(arc_session_manager()->start_time().is_null());
 
   arc_session_manager()->SetProfile(profile());
   arc_session_manager()->Initialize();
@@ -974,7 +1171,8 @@ TEST_F(ArcSessionManagerArcAlwaysStartTest, BaseWorkflow) {
   arc_session_manager()->RequestEnable();
   base::RunLoop().RunUntilIdle();
   ASSERT_EQ(ArcSessionManager::State::ACTIVE, arc_session_manager()->state());
-  EXPECT_FALSE(arc_session_manager()->arc_start_time().is_null());
+  EXPECT_FALSE(arc_session_manager()->pre_start_time().is_null());
+  EXPECT_FALSE(arc_session_manager()->start_time().is_null());
 
   arc_session_manager()->Shutdown();
 }
@@ -1109,7 +1307,8 @@ TEST_P(ArcSessionManagerPolicyTest, SkippingTerms) {
 
   arc_session_manager()->StartArcForTesting();
   EXPECT_EQ(ArcSessionManager::State::ACTIVE, arc_session_manager()->state());
-  arc_session_manager()->OnProvisioningFinished(ProvisioningResult::SUCCESS);
+  arc_session_manager()->OnProvisioningFinished(ProvisioningResult::SUCCESS,
+                                                {});
 
   // Play Store app is launched unless the Terms screen was suppressed or Tos is
   // accepted during OOBE.
@@ -1184,10 +1383,11 @@ TEST_F(ArcSessionManagerKioskTest, AuthFailure) {
   // and not invoked then, including TearDown().
   bool terminated = false;
   arc_session_manager()->SetAttemptUserExitCallbackForTesting(
-      base::Bind([](bool* terminated) { *terminated = true; }, &terminated));
+      base::BindRepeating([](bool* terminated) { *terminated = true; },
+                          &terminated));
 
   arc_session_manager()->OnProvisioningFinished(
-      ProvisioningResult::CHROME_SERVER_COMMUNICATION_ERROR);
+      ProvisioningResult::CHROME_SERVER_COMMUNICATION_ERROR, {});
   EXPECT_TRUE(terminated);
 }
 
@@ -1223,7 +1423,7 @@ TEST_F(ArcSessionManagerPublicSessionTest, AuthFailure) {
                           &terminated));
 
   arc_session_manager()->OnProvisioningFinished(
-      ProvisioningResult::CHROME_SERVER_COMMUNICATION_ERROR);
+      ProvisioningResult::CHROME_SERVER_COMMUNICATION_ERROR, {});
   EXPECT_FALSE(terminated);
   EXPECT_EQ(ArcSessionManager::State::STOPPED, arc_session_manager()->state());
 }
@@ -1380,54 +1580,107 @@ struct ArcSessionRetryTestParam {
   Negotiation negotiation;
 
   // Provisioning error to test.
-  ProvisioningResult error;
+  ProvisioningResult result;
 
   // Whether ARC++ container is alive on error.
   bool container_alive;
 
   // Whether data is removed on error.
   bool data_removed;
+
+  absl::variant<absl::monostate,
+                arc::mojom::CloudProvisionFlowError,
+                ArcStopReason>
+      error;
 };
 
 constexpr ArcSessionRetryTestParam kRetryTestCases[] = {
     {ArcSessionRetryTestParam::Negotiation::REQUIRED,
-     ProvisioningResult::UNKNOWN_ERROR, true, true},
+     ProvisioningResult::UNKNOWN_ERROR,
+     true,
+     true,
+     {}},
     {ArcSessionRetryTestParam::Negotiation::REQUIRED,
-     ProvisioningResult::GMS_NETWORK_ERROR, true, false},
+     ProvisioningResult::GMS_NETWORK_ERROR,
+     true,
+     false,
+     {}},
     {ArcSessionRetryTestParam::Negotiation::REQUIRED,
-     ProvisioningResult::GMS_SERVICE_UNAVAILABLE, true, false},
+     ProvisioningResult::GMS_SERVICE_UNAVAILABLE,
+     true,
+     false,
+     {}},
     {ArcSessionRetryTestParam::Negotiation::REQUIRED,
-     ProvisioningResult::GMS_BAD_AUTHENTICATION, true, false},
+     ProvisioningResult::GMS_BAD_AUTHENTICATION,
+     true,
+     false,
+     {}},
     {ArcSessionRetryTestParam::Negotiation::REQUIRED,
-     ProvisioningResult::DEVICE_CHECK_IN_FAILED, true, false},
+     ProvisioningResult::DEVICE_CHECK_IN_FAILED,
+     true,
+     false,
+     {}},
     {ArcSessionRetryTestParam::Negotiation::SKIPPED,
-     ProvisioningResult::CLOUD_PROVISION_FLOW_FAILED, true, true},
+     ProvisioningResult::CLOUD_PROVISION_FLOW_ERROR, true, true,
+     arc::mojom::CloudProvisionFlowError::ERROR_OTHER},
     {ArcSessionRetryTestParam::Negotiation::REQUIRED,
-     ProvisioningResult::MOJO_VERSION_MISMATCH, true, false},
+     ProvisioningResult::MOJO_VERSION_MISMATCH,
+     true,
+     false,
+     {}},
     {ArcSessionRetryTestParam::Negotiation::REQUIRED,
-     ProvisioningResult::MOJO_CALL_TIMEOUT, true, false},
+     ProvisioningResult::PROVISIONING_TIMEOUT,
+     true,
+     false,
+     {}},
     {ArcSessionRetryTestParam::Negotiation::REQUIRED,
-     ProvisioningResult::DEVICE_CHECK_IN_TIMEOUT, true, false},
+     ProvisioningResult::DEVICE_CHECK_IN_TIMEOUT,
+     true,
+     false,
+     {}},
     {ArcSessionRetryTestParam::Negotiation::REQUIRED,
-     ProvisioningResult::DEVICE_CHECK_IN_INTERNAL_ERROR, true, false},
+     ProvisioningResult::DEVICE_CHECK_IN_INTERNAL_ERROR,
+     true,
+     false,
+     {}},
     {ArcSessionRetryTestParam::Negotiation::REQUIRED,
-     ProvisioningResult::GMS_SIGN_IN_FAILED, true, false},
+     ProvisioningResult::GMS_SIGN_IN_FAILED,
+     true,
+     false,
+     {}},
     {ArcSessionRetryTestParam::Negotiation::REQUIRED,
-     ProvisioningResult::GMS_SIGN_IN_TIMEOUT, true, false},
+     ProvisioningResult::GMS_SIGN_IN_TIMEOUT,
+     true,
+     false,
+     {}},
     {ArcSessionRetryTestParam::Negotiation::REQUIRED,
-     ProvisioningResult::GMS_SIGN_IN_INTERNAL_ERROR, true, false},
+     ProvisioningResult::GMS_SIGN_IN_INTERNAL_ERROR,
+     true,
+     false,
+     {}},
     {ArcSessionRetryTestParam::Negotiation::SKIPPED,
-     ProvisioningResult::CLOUD_PROVISION_FLOW_TIMEOUT, true, true},
+     ProvisioningResult::CLOUD_PROVISION_FLOW_ERROR, true, true,
+     arc::mojom::CloudProvisionFlowError::ERROR_TIMEOUT},
     {ArcSessionRetryTestParam::Negotiation::SKIPPED,
-     ProvisioningResult::CLOUD_PROVISION_FLOW_INTERNAL_ERROR, true, true},
+     ProvisioningResult::CLOUD_PROVISION_FLOW_ERROR, true, true,
+     arc::mojom::CloudProvisionFlowError::ERROR_JSON},
     {ArcSessionRetryTestParam::Negotiation::REQUIRED,
-     ProvisioningResult::ARC_STOPPED, false, false},
+     ProvisioningResult::ARC_STOPPED, false, false, ArcStopReason::CRASH},
     {ArcSessionRetryTestParam::Negotiation::REQUIRED,
-     ProvisioningResult::OVERALL_SIGN_IN_TIMEOUT, true, true},
+     ProvisioningResult::OVERALL_SIGN_IN_TIMEOUT,
+     true,
+     true,
+     {}},
     {ArcSessionRetryTestParam::Negotiation::REQUIRED,
-     ProvisioningResult::CHROME_SERVER_COMMUNICATION_ERROR, false, false},
+     ProvisioningResult::CHROME_SERVER_COMMUNICATION_ERROR,
+     false,
+     false,
+     {}},
     {ArcSessionRetryTestParam::Negotiation::REQUIRED,
-     ProvisioningResult::NO_NETWORK_CONNECTION, true, false},
+     ProvisioningResult::NO_NETWORK_CONNECTION,
+     true,
+     false,
+     {}},
 };
 
 class ArcSessionRetryTest
@@ -1497,7 +1750,21 @@ TEST_P(ArcSessionRetryTest, ContainerRestarted) {
   arc_session_manager()->StartArcForTesting();
   EXPECT_EQ(ArcSessionManager::State::ACTIVE, arc_session_manager()->state());
 
-  arc_session_manager()->OnProvisioningFinished(GetParam().error);
+  absl::variant<absl::monostate, arc::mojom::CloudProvisionFlowError,
+                ArcStopReason>
+      error = std::move(GetParam().error);
+  absl::variant<mojom::ArcSignInErrorPtr, ArcStopReason> param;
+  if (absl::holds_alternative<arc::mojom::CloudProvisionFlowError>(error)) {
+    param = arc::mojom::ArcSignInError::NewCloudProvisionFlowError(
+        absl::get<arc::mojom::CloudProvisionFlowError>(error));
+  } else if (absl::holds_alternative<ArcStopReason>(error)) {
+    param = absl::get<ArcStopReason>(error);
+  } else if (!absl::holds_alternative<absl::monostate>(error)) {
+    FAIL() << "Unexpected value";
+  }
+
+  arc_session_manager()->OnProvisioningFinished(GetParam().result,
+                                                std::move(param));
 
   // In case of permanent error data removal request is scheduled.
   EXPECT_EQ(GetParam().data_removed,
@@ -1525,36 +1792,11 @@ TEST_P(ArcSessionRetryTest, ContainerRestarted) {
   EXPECT_EQ(ArcSessionManager::State::ACTIVE, arc_session_manager()->state());
 
   // Successful retry keeps ARC++ container running.
-  arc_session_manager()->OnProvisioningFinished(ProvisioningResult::SUCCESS);
+  arc_session_manager()->OnProvisioningFinished(ProvisioningResult::SUCCESS,
+                                                {});
   EXPECT_EQ(ArcSessionManager::State::ACTIVE, arc_session_manager()->state());
 
   arc_session_manager()->Shutdown();
-}
-
-// Verifies Initialize() generates the serial number for ARC.
-TEST_F(ArcSessionManagerTest, SerialNumber) {
-  arc_session_manager()->SetProfile(profile());
-  EXPECT_TRUE(
-      profile()->GetPrefs()->GetString(prefs::kArcSerialNumber).empty());
-  arc_session_manager()->Initialize();
-  // Check that the serial number Initialize() has generated is not empty.
-  const std::string serial_number =
-      profile()->GetPrefs()->GetString(prefs::kArcSerialNumber);
-  EXPECT_FALSE(serial_number.empty());
-  // ..and it's a hex number.
-  std::vector<uint8_t> dummy;
-  EXPECT_TRUE(base::HexStringToBytes(serial_number, &dummy));
-}
-
-// Verifies Initialize() generates the serial number for ARC.
-TEST_F(ArcSessionManagerTest, SerialNumber_Existing) {
-  constexpr char kDummySerialNumber[] = "A1C55A0D52D2F8E874D5";
-  profile()->GetPrefs()->SetString(prefs::kArcSerialNumber, kDummySerialNumber);
-  arc_session_manager()->SetProfile(profile());
-  arc_session_manager()->Initialize();
-  // Check that Initialize() does not clear the existing serial number.
-  EXPECT_EQ(kDummySerialNumber,
-            profile()->GetPrefs()->GetString(prefs::kArcSerialNumber));
 }
 
 // Test that when files have already been expaneded, AddObserver() immediately
@@ -1562,7 +1804,7 @@ TEST_F(ArcSessionManagerTest, SerialNumber_Existing) {
 TEST_F(ArcSessionManagerTest, FileExpansion_AlreadyDone) {
   arc_session_manager()->reset_property_files_expansion_result();
   FileExpansionObserver observer;
-  arc_session_manager()->OnExpandPropertyFilesForTesting(true);
+  arc_session_manager()->OnExpandPropertyFilesAndReadSaltForTesting(true);
   arc_session_manager()->AddObserver(&observer);
   ASSERT_TRUE(observer.property_files_expansion_result().has_value());
   EXPECT_TRUE(observer.property_files_expansion_result().value());
@@ -1575,7 +1817,7 @@ TEST_F(ArcSessionManagerTest, FileExpansion) {
   FileExpansionObserver observer;
   arc_session_manager()->AddObserver(&observer);
   EXPECT_FALSE(observer.property_files_expansion_result().has_value());
-  arc_session_manager()->OnExpandPropertyFilesForTesting(true);
+  arc_session_manager()->OnExpandPropertyFilesAndReadSaltForTesting(true);
   ASSERT_TRUE(observer.property_files_expansion_result().has_value());
   EXPECT_TRUE(observer.property_files_expansion_result().value());
 }
@@ -1587,9 +1829,256 @@ TEST_F(ArcSessionManagerTest, FileExpansion_Fail) {
   FileExpansionObserver observer;
   arc_session_manager()->AddObserver(&observer);
   EXPECT_FALSE(observer.property_files_expansion_result().has_value());
-  arc_session_manager()->OnExpandPropertyFilesForTesting(false);
+  arc_session_manager()->OnExpandPropertyFilesAndReadSaltForTesting(false);
   ASSERT_TRUE(observer.property_files_expansion_result().has_value());
   EXPECT_FALSE(observer.property_files_expansion_result().value());
+}
+
+TEST_F(ArcSessionManagerTest, GenerateFakeSerialNumber) {
+  // Check that the function always returns 20-character string.
+  EXPECT_EQ(20U,
+            GenerateFakeSerialNumber("mytestaccount@gmail.com", "001122aabbcc")
+                .size());
+  EXPECT_EQ(20U, GenerateFakeSerialNumber("", "").size());
+  EXPECT_EQ(20U, GenerateFakeSerialNumber("a", "b").size());
+
+  // Check that the function always returns the same ID for the same
+  // account and hwid_raw.
+  const std::string id_1 =
+      GenerateFakeSerialNumber("mytestaccount@gmail.com", "001122aabbcc");
+  const std::string id_2 =
+      GenerateFakeSerialNumber("mytestaccount@gmail.com", "001122aabbcc");
+  EXPECT_EQ(id_1, id_2);
+
+  // Generate an ID for a different account but for the same machine.
+  // Check that the ID is not the same as |id_1|.
+  const std::string id_3 =
+      GenerateFakeSerialNumber("mytestaccount2@gmail.com", "001122aabbcc");
+  EXPECT_NE(id_1, id_3);
+
+  // Generate an ID for a different machine but for the same account.
+  // Check that the ID is not the same as |id_1|.
+  const std::string id_4 =
+      GenerateFakeSerialNumber("mytestaccount@gmail.com", "001122aaddcc");
+  EXPECT_NE(id_1, id_4);
+
+  // Check that the function treats '\0' in |salt| properly.
+  using std::literals::string_literals::operator""s;
+  const std::string id_5 =
+      GenerateFakeSerialNumber("mytestaccount@gmail.com", "a\0b"s);
+  const std::string id_6 =
+      GenerateFakeSerialNumber("mytestaccount@gmail.com", "a\0c"s);
+  EXPECT_NE(id_5, id_6);
+}
+
+TEST_F(ArcSessionManagerTest, GetOrCreateSerialNumber) {
+  constexpr size_t kSerialNumberLen = 20;
+  constexpr size_t kHexSaltLen = 32;
+
+  const std::string chromeos_user = "user@gmail.com";
+  const std::string chromeos_user2 = "user2@gmail.com";
+  ASSERT_TRUE(
+      test_local_state()->GetString(prefs::kArcSerialNumberSalt).empty());
+
+  // Check that when neither the pref nor the salt file exists, a random salt
+  // is stored in the local state, and a serial number based on the salt is
+  // returned.
+  const std::string serialno_1 =
+      GetOrCreateSerialNumber(test_local_state(), chromeos_user, std::string());
+  EXPECT_FALSE(serialno_1.empty());
+  EXPECT_EQ(kSerialNumberLen, serialno_1.size());
+
+  const std::string salt_1 =
+      test_local_state()->GetString(prefs::kArcSerialNumberSalt);
+  EXPECT_FALSE(salt_1.empty());
+  EXPECT_EQ(kHexSaltLen, salt_1.size());
+
+  // Calling the function again returns the same serial/salt.
+  EXPECT_EQ(serialno_1, GetOrCreateSerialNumber(test_local_state(),
+                                                chromeos_user, std::string()));
+  EXPECT_EQ(salt_1, test_local_state()->GetString(prefs::kArcSerialNumberSalt));
+
+  // A different user gets a different serial number, but the salt stays the
+  // same.
+  const std::string serialno_2 = GetOrCreateSerialNumber(
+      test_local_state(), chromeos_user2, std::string());
+  EXPECT_FALSE(serialno_2.empty());
+  EXPECT_EQ(kSerialNumberLen, serialno_2.size());
+  EXPECT_NE(serialno_1, serialno_2);
+  EXPECT_EQ(salt_1, test_local_state()->GetString(prefs::kArcSerialNumberSalt));
+
+  // Delete the salt in local state (which is what Chrome OS PowerWash does.)
+  test_local_state()->ClearPref(prefs::kArcSerialNumberSalt);
+  ASSERT_TRUE(
+      test_local_state()->GetString(prefs::kArcSerialNumberSalt).empty());
+
+  // Generate the salt and serial for |chromeos_user| again. Verify both are
+  // different than the previous ones.
+  const std::string serialno_3 =
+      GetOrCreateSerialNumber(test_local_state(), chromeos_user, std::string());
+  EXPECT_FALSE(serialno_3.empty());
+  EXPECT_EQ(kSerialNumberLen, serialno_3.size());
+  EXPECT_NE(serialno_1, serialno_3);
+
+  const std::string salt_2 =
+      test_local_state()->GetString(prefs::kArcSerialNumberSalt);
+  EXPECT_FALSE(salt_2.empty());
+  EXPECT_EQ(kHexSaltLen, salt_2.size());
+  EXPECT_NE(salt_1, salt_2);
+
+  // Delete the salt in local state again.
+  test_local_state()->ClearPref(prefs::kArcSerialNumberSalt);
+  ASSERT_TRUE(
+      test_local_state()->GetString(prefs::kArcSerialNumberSalt).empty());
+
+  // Pass |salt_on_disk| and verify hex-encoded version of the salt is stored
+  // in local state.
+  using std::literals::string_literals::operator""s;
+  const std::string salt_on_disk = "BAADDECAFC0\0FFEE"s;
+  const std::string salt_on_disk_hex =
+      base::HexEncode(salt_on_disk.data(), salt_on_disk.size());
+  const std::string serialno_4 =
+      GetOrCreateSerialNumber(test_local_state(), chromeos_user, salt_on_disk);
+  EXPECT_FALSE(serialno_4.empty());
+  EXPECT_EQ(kSerialNumberLen, serialno_4.size());
+  EXPECT_NE(serialno_1, serialno_4);
+
+  const std::string salt_3 =
+      test_local_state()->GetString(prefs::kArcSerialNumberSalt);
+  EXPECT_EQ(salt_on_disk_hex, salt_3);
+
+  // A different user gets a different serial number, but the salt stays the
+  // same. This time, pass a different salt on disk to verify it's ignored
+  // when a salt already exists in local state.
+  const std::string serialno_5 = GetOrCreateSerialNumber(
+      test_local_state(), chromeos_user2,
+      // Reverse |salt_on_disk| and pass it.
+      std::string(salt_on_disk.rbegin(), salt_on_disk.rend()));
+  EXPECT_FALSE(serialno_5.empty());
+  EXPECT_EQ(kSerialNumberLen, serialno_5.size());
+  EXPECT_NE(serialno_4, serialno_5);
+  // Local state still has the non-reversed one.
+  EXPECT_EQ(salt_on_disk_hex,
+            test_local_state()->GetString(prefs::kArcSerialNumberSalt));
+}
+
+// That shouldn't happen, but verify that the function can recover the state
+// even if local state has an invalid hex salt.
+TEST_F(ArcSessionManagerTest, GetOrCreateSerialNumber_InvalidLocalState) {
+  constexpr size_t kSaltLen = 16;
+  const std::string chromeos_user = "user@gmail.com";
+
+  // Manually set an invalid hex salt in local state, then call
+  // GetOrCreateSerialNumber. Verify the local state is overwritten by a valid
+  // one.
+  const std::string invalid_hex_salt_1 = "THIS_IS_NOT_A_HEX_STRING";
+  test_local_state()->SetString(prefs::kArcSerialNumberSalt,
+                                invalid_hex_salt_1);
+  EXPECT_FALSE(
+      GetOrCreateSerialNumber(test_local_state(), chromeos_user, std::string())
+          .empty());
+  std::string salt = test_local_state()->GetString(prefs::kArcSerialNumberSalt);
+  EXPECT_FALSE(salt.empty());
+  EXPECT_NE(invalid_hex_salt_1, salt);
+
+  // Do the same with a too short hex salt.
+  const std::string buf(kSaltLen + 1, 'x');
+  const std::string invalid_hex_salt_2 =
+      base::HexEncode(buf.data(), kSaltLen - 1);  // too short
+  test_local_state()->SetString(prefs::kArcSerialNumberSalt,
+                                invalid_hex_salt_2);
+  EXPECT_FALSE(
+      GetOrCreateSerialNumber(test_local_state(), chromeos_user, std::string())
+          .empty());
+  salt = test_local_state()->GetString(prefs::kArcSerialNumberSalt);
+  EXPECT_FALSE(salt.empty());
+  EXPECT_NE(invalid_hex_salt_2, salt);
+
+  // Do the same with a too long one.
+  const std::string invalid_hex_salt_3 =
+      base::HexEncode(buf.data(), kSaltLen + 1);  // too long
+  test_local_state()->SetString(prefs::kArcSerialNumberSalt,
+                                invalid_hex_salt_3);
+  EXPECT_FALSE(
+      GetOrCreateSerialNumber(test_local_state(), chromeos_user, std::string())
+          .empty());
+  salt = test_local_state()->GetString(prefs::kArcSerialNumberSalt);
+  EXPECT_FALSE(salt.empty());
+  EXPECT_NE(invalid_hex_salt_3, salt);
+
+  // Test the valid case too.
+  const std::string valid_hex_salt = base::HexEncode(buf.data(), kSaltLen);
+  test_local_state()->SetString(prefs::kArcSerialNumberSalt, valid_hex_salt);
+  EXPECT_FALSE(
+      GetOrCreateSerialNumber(test_local_state(), chromeos_user, std::string())
+          .empty());
+  salt = test_local_state()->GetString(prefs::kArcSerialNumberSalt);
+  EXPECT_FALSE(salt.empty());
+  EXPECT_EQ(valid_hex_salt, salt);
+}
+
+// Verify that GetOrCreateSerialNumber uses decoded salt when computing the
+// serial number.
+TEST_F(ArcSessionManagerTest, GetOrCreateSerialNumber_SerialNumberComputation) {
+  constexpr size_t kSaltLen = 16;
+  const std::string chromeos_user = "user@gmail.com";
+
+  // Set the |hex_salt| in local state.
+  const std::string hex_salt =
+      base::HexEncode(std::string(kSaltLen, 'x').data(), kSaltLen);
+  test_local_state()->SetString(prefs::kArcSerialNumberSalt, hex_salt);
+
+  // Get a serial number based on the hex salt.
+  const std::string serial_number =
+      GetOrCreateSerialNumber(test_local_state(), chromeos_user, std::string());
+  EXPECT_FALSE(serial_number.empty());
+
+  // Directly compute the serial number with the *hex* salt (which
+  // GetOrCreateSerialNumber is NOT supposed to do). Verify the returned
+  // serial number is NOT the same as the one from GetOrCreateSerialNumber.
+  EXPECT_NE(GenerateFakeSerialNumber(chromeos_user, hex_salt), serial_number);
+}
+
+// Tests that ReadSaltOnDisk can read a non-ASCII salt.
+TEST_F(ArcSessionManagerTest, ReadSaltOnDisk) {
+  constexpr int kSaltLen = 16;
+
+  std::string salt;
+  // Verify the function returns true when the file doesn't exist.
+  EXPECT_TRUE(ReadSaltOnDisk(base::FilePath("/nonexistent/path"), &salt));
+
+  // Create a valid arc_salt file.
+  using std::literals::string_literals::operator""s;
+  const std::string expected_salt_value = "BAADDECAFC0\0FFEE"s;
+  base::ScopedTempDir temp_dir;
+  ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
+  base::FilePath arc_salt_path = temp_dir.GetPath().Append("arc_salt");
+  ASSERT_EQ(kSaltLen, base::WriteFile(arc_salt_path, expected_salt_value.data(),
+                                      expected_salt_value.size()));
+
+  // Verify the function can read the salt file even when the file contains
+  // non-ASCII characters like '\0'.
+  EXPECT_TRUE(ReadSaltOnDisk(arc_salt_path, &salt));
+  EXPECT_EQ(expected_salt_value, salt);
+
+  // Change the mode to drop the r bit. Verify the function returns false
+  // when the file exists, but not readable.
+  ASSERT_TRUE(base::SetPosixFilePermissions(arc_salt_path, 0300));
+  EXPECT_FALSE(ReadSaltOnDisk(arc_salt_path, &salt));
+
+  // Create a different salt file that has corrupted data. Verify the function
+  // returns true but an empty |salt|.
+  arc_salt_path = temp_dir.GetPath().Append("arc_salt2");
+  ASSERT_TRUE(base::WriteFile(arc_salt_path,
+                              std::string(kSaltLen - 1, 'x')));  // too short
+  EXPECT_TRUE(ReadSaltOnDisk(arc_salt_path, &salt));
+  EXPECT_TRUE(salt.empty());
+
+  arc_salt_path = temp_dir.GetPath().Append("arc_salt3");
+  ASSERT_TRUE(base::WriteFile(arc_salt_path,
+                              std::string(kSaltLen + 1, 'x')));  // too long
+  EXPECT_TRUE(ReadSaltOnDisk(arc_salt_path, &salt));
+  EXPECT_TRUE(salt.empty());
 }
 
 class ArcSessionManagerPowerwashTest : public ArcSessionManagerTestBase {

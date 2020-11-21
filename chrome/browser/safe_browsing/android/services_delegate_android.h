@@ -25,8 +25,6 @@ class ServicesDelegateAndroid : public ServicesDelegate {
   const scoped_refptr<SafeBrowsingDatabaseManager>& database_manager()
       const override;
   void Initialize() override;
-  void InitializeCsdService(scoped_refptr<network::SharedURLLoaderFactory>
-                                url_loader_factory) override;
   void SetDatabaseManagerForTest(
       SafeBrowsingDatabaseManager* database_manager) override;
   void ShutdownServices() override;
@@ -35,12 +33,12 @@ class ServicesDelegateAndroid : public ServicesDelegate {
   std::unique_ptr<prefs::mojom::TrackedPreferenceValidationDelegate>
   CreatePreferenceValidationDelegate(Profile* profile) override;
   void RegisterDelayedAnalysisCallback(
-      const DelayedAnalysisCallback& callback) override;
+      DelayedAnalysisCallback callback) override;
   void AddDownloadManager(content::DownloadManager* download_manager) override;
-  ClientSideDetectionService* GetCsdService() override;
 
   void StartOnIOThread(
-      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
+      scoped_refptr<network::SharedURLLoaderFactory> sb_url_loader_factory,
+      scoped_refptr<network::SharedURLLoaderFactory> browser_url_loader_factory,
       const V4ProtocolConfig& v4_config) override;
   void StopOnIOThread(bool shutdown) override;
 

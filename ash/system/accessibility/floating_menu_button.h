@@ -6,11 +6,10 @@
 #define ASH_SYSTEM_ACCESSIBILITY_FLOATING_MENU_BUTTON_H_
 
 #include "ash/system/tray/tray_constants.h"
-#include "ash/system/unified/top_shortcut_button.h"
-
-namespace views {
-class InkDropMask;
-}
+#include "ui/views/controls/button/button.h"
+#include "ui/views/controls/button/image_button.h"
+#include "ui/views/metadata/metadata_header_macros.h"
+#include "ui/views/metadata/view_factory.h"
 
 namespace gfx {
 struct VectorIcon;
@@ -21,48 +20,72 @@ namespace ash {
 
 // Button view that is used in floating menu.
 
-class FloatingMenuButton : public TopShortcutButton {
+class FloatingMenuButton : public views::ImageButton {
  public:
-  FloatingMenuButton(views::ButtonListener* listener,
+  METADATA_HEADER(FloatingMenuButton);
+
+  FloatingMenuButton();
+  FloatingMenuButton(views::Button::PressedCallback callback,
+                     const gfx::VectorIcon& icon,
+                     int accessible_name_id,
+                     bool flip_for_rtl);
+
+  FloatingMenuButton(views::Button::PressedCallback callback,
                      const gfx::VectorIcon& icon,
                      int accessible_name_id,
                      bool flip_for_rtl,
-                     int size = kTrayItemSize,
-                     bool draw_highlight = true);
+                     int size,
+                     bool draw_highlight,
+                     bool is_a11y_togglable);
+  FloatingMenuButton(const FloatingMenuButton&) = delete;
+  FloatingMenuButton& operator=(const FloatingMenuButton&) = delete;
 
   ~FloatingMenuButton() override;
-
-  // views::Button:
-  const char* GetClassName() const override;
 
   // Set the vector icon shown in a circle.
   void SetVectorIcon(const gfx::VectorIcon& icon);
 
-  // Change the toggle state.
+  bool GetA11yTogglable() const;
+  void SetA11yTogglable(bool a11y_togglable);
+
+  bool GetDrawHighlight() const;
+  void SetDrawHighlight(bool draw_highlight);
+
+  // Toggle state property.
+  bool GetToggled() const;
   void SetToggled(bool toggled);
 
-  bool IsToggled() { return toggled_; }
-
-  // TopShortcutButton:
+  // views::ImageButton:
   void PaintButtonContents(gfx::Canvas* canvas) override;
   gfx::Size CalculatePreferredSize() const override;
   void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
-
-  // Used in tests.
-  void SetId(int id);
+  std::unique_ptr<views::InkDrop> CreateInkDrop() override;
+  std::unique_ptr<views::InkDropRipple> CreateInkDropRipple() const override;
+  std::unique_ptr<views::InkDropHighlight> CreateInkDropHighlight()
+      const override;
+  void OnThemeChanged() override;
 
  private:
   void UpdateImage();
 
-  const gfx::VectorIcon* icon_;
+  const gfx::VectorIcon* icon_ = nullptr;
   // True if the button is currently toggled.
   bool toggled_ = false;
-  int size_;
-  const bool draw_highlight_;
-
-  DISALLOW_COPY_AND_ASSIGN(FloatingMenuButton);
+  int size_ = kTrayItemSize;
+  bool draw_highlight_ = true;
+  // Whether this button will be described as togglable to screen reading tools.
+  bool is_a11y_togglable_ = true;
 };
 
+BEGIN_VIEW_BUILDER(/* no export */, FloatingMenuButton, views::ImageButton)
+VIEW_BUILDER_PROPERTY(bool, A11yTogglable)
+VIEW_BUILDER_PROPERTY(bool, DrawHighlight)
+VIEW_BUILDER_PROPERTY(bool, Toggled)
+VIEW_BUILDER_PROPERTY(const gfx::VectorIcon&, VectorIcon)
+END_VIEW_BUILDER
+
 }  // namespace ash
+
+DEFINE_VIEW_BUILDER(/* no export */, ash::FloatingMenuButton)
 
 #endif  // ASH_SYSTEM_ACCESSIBILITY_FLOATING_MENU_BUTTON_H_

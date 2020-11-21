@@ -7,7 +7,7 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/logging.h"
+#include "base/check.h"
 #include "base/memory/ptr_util.h"
 #include "net/base/net_errors.h"
 #include "net/socket/client_socket_factory.h"
@@ -23,7 +23,10 @@ TLSClientSocket::TLSClientSocket(
     const net::NetworkTrafficAnnotationTag& traffic_annotation)
     : observer_(std::move(observer)), traffic_annotation_(traffic_annotation) {}
 
-TLSClientSocket::~TLSClientSocket() {}
+TLSClientSocket::~TLSClientSocket() {
+  if (connect_callback_)
+    OnTLSConnectCompleted(net::ERR_ABORTED);
+}
 
 void TLSClientSocket::Connect(
     const net::HostPortPair& host_port_pair,

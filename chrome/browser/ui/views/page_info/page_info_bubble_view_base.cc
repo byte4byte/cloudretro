@@ -49,19 +49,12 @@ PageInfoBubbleViewBase::PageInfoBubbleViewBase(
   g_shown_bubble_type = type;
   g_page_info_bubble = this;
 
-  DialogDelegate::SetButtons(ui::DIALOG_BUTTON_NONE);
+  SetButtons(ui::DIALOG_BUTTON_NONE);
+  SetShowCloseButton(true);
 
   set_parent_window(parent_window);
   if (!anchor_view)
     SetAnchorRect(anchor_rect);
-}
-
-base::string16 PageInfoBubbleViewBase::GetWindowTitle() const {
-  return window_title_;
-}
-
-bool PageInfoBubbleViewBase::ShouldShowCloseButton() const {
-  return true;
 }
 
 void PageInfoBubbleViewBase::OnWidgetDestroying(views::Widget* widget) {

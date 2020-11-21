@@ -4,10 +4,10 @@
 
 package org.chromium.weblayer.test;
 
-import android.os.Build;
 import android.os.Bundle;
 import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.SmallTest;
+
+import androidx.test.filters.SmallTest;
 
 import org.junit.After;
 import org.junit.Assert;
@@ -17,7 +17,6 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.test.util.CallbackHelper;
-import org.chromium.base.test.util.DisableIf;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 import org.chromium.weblayer.CrashReporterCallback;
 import org.chromium.weblayer.CrashReporterController;
@@ -76,10 +75,7 @@ public class CrashReporterTest {
 
     @Test
     @SmallTest
-    @DisableIf.Build(sdk_is_greater_than = Build.VERSION_CODES.O_MR1,
-            message = "Flaky on P, crbug.com/1073464")
-    public void
-    testCrashReporterLoading() throws Exception {
+    public void testCrashReporterLoading() throws Exception {
         BundleCallbackHelper callbackHelper = new BundleCallbackHelper();
         CallbackHelper deleteHelper = new CallbackHelper();
 
@@ -113,13 +109,13 @@ public class CrashReporterTest {
             crashReporterController.checkForPendingCrashReports();
         });
         // Expect that a Bundle containing { "foo": "bar" } is returned.
-        callbackHelper.waitForCallback(callbackHelper.getCallCount());
+        callbackHelper.waitForFirst();
         Bundle crashKeys = callbackHelper.getResult();
         Assert.assertArrayEquals(crashKeys.keySet().toArray(new String[0]), new String[] {"foo"});
         Assert.assertEquals(crashKeys.getString("foo"), "bar");
 
         // Expect that the crash report and its sidecar are deleted.
-        deleteHelper.waitForCallback(deleteHelper.getCallCount());
+        deleteHelper.waitForFirst();
         Assert.assertFalse(mCrashReport.exists());
         Assert.assertFalse(mCrashSidecar.exists());
     }

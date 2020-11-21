@@ -7,9 +7,10 @@
 #include <string>
 
 #include "base/bind.h"
+#include "base/check_op.h"
 #include "base/command_line.h"
-#include "base/logging.h"
 #include "base/macros.h"
+#include "base/notreached.h"
 #include "base/strings/string_number_conversions.h"
 #include "components/cdm/renderer/external_clear_key_key_system_properties.h"
 #include "components/web_cache/renderer/web_cache_impl.h"
@@ -23,7 +24,7 @@
 #include "mojo/public/cpp/system/message_pipe.h"
 #include "net/base/net_errors.h"
 #include "ppapi/buildflags/buildflags.h"
-#include "services/service_manager/sandbox/sandbox.h"
+#include "sandbox/policy/sandbox.h"
 #include "third_party/blink/public/platform/web_url_error.h"
 #include "third_party/blink/public/web/web_testing_support.h"
 #include "third_party/blink/public/web/web_view.h"
@@ -105,7 +106,7 @@ class TestRendererServiceImpl : public mojom::TestService {
   }
 
   void IsProcessSandboxed(IsProcessSandboxedCallback callback) override {
-    std::move(callback).Run(service_manager::Sandbox::IsProcessSandboxed());
+    std::move(callback).Run(sandbox::policy::Sandbox::IsProcessSandboxed());
   }
 
   mojo::Receiver<mojom::TestService> receiver_;
@@ -149,10 +150,6 @@ void ShellContentRendererClient::RenderFrameCreated(RenderFrame* render_frame) {
   new ShellRenderFrameObserver(render_frame);
 }
 
-bool ShellContentRendererClient::HasErrorPage(int http_status_code) {
-  return http_status_code >= 400 && http_status_code < 600;
-}
-
 void ShellContentRendererClient::PrepareErrorPage(
     RenderFrame* render_frame,
     const blink::WebURLError& error,
@@ -171,7 +168,7 @@ void ShellContentRendererClient::PrepareErrorPage(
 
 void ShellContentRendererClient::PrepareErrorPageForHttpStatusError(
     content::RenderFrame* render_frame,
-    const GURL& unreachable_url,
+    const blink::WebURLError& error,
     const std::string& http_method,
     int http_status,
     std::string* error_html) {
@@ -180,10 +177,6 @@ void ShellContentRendererClient::PrepareErrorPageForHttpStatusError(
         "<head><title>Error</title></head><body>Server returned HTTP status " +
         base::NumberToString(http_status) + "</body>";
   }
-}
-
-bool ShellContentRendererClient::IsPluginAllowedToUseDevChannelAPIs() {
-	return true;
 }
 
 void ShellContentRendererClient::DidInitializeWorkerContextOnWorkerThread(

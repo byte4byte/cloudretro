@@ -4,7 +4,7 @@
 
 #include <string>
 
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tab_dialogs.h"
@@ -13,6 +13,7 @@
 #include "chrome/test/base/interactive_test_utils.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/render_view_host.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "net/dns/mock_host_resolver.h"
 #include "ui/base/buildflags.h"
@@ -45,7 +46,7 @@ IN_PROC_BROWSER_TEST_F(HungRendererNavigationTest,
       browser()->tab_strip_model()->GetActiveWebContents();
   TabDialogs::FromWebContents(active_web_contents)
       ->ShowHungRendererDialog(
-          active_web_contents->GetRenderViewHost()->GetWidget(),
+          active_web_contents->GetMainFrame()->GetRenderViewHost()->GetWidget(),
           base::DoNothing::Repeatedly());
   ui_test_utils::NavigateToURL(
       browser(), embedded_test_server()->GetURL("b.com", "/title2.html"));

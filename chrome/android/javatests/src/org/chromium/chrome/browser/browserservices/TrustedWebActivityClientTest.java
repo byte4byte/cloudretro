@@ -16,8 +16,9 @@ import android.os.Message;
 import android.os.Messenger;
 import android.os.RemoteException;
 import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.SmallTest;
 import android.support.test.rule.ServiceTestRule;
+
+import androidx.test.filters.SmallTest;
 
 import org.junit.Assert;
 import org.junit.Before;
@@ -26,7 +27,6 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.ThreadUtils;
-import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.task.PostTask;
 import org.chromium.base.test.BaseJUnit4ClassRunner;
 import org.chromium.base.test.util.CallbackHelper;
@@ -126,7 +126,6 @@ public class TrustedWebActivityClientTest {
 
     @Before
     public void setUp() throws TimeoutException, RemoteException {
-        RecordHistogram.setDisabledForTests(true);
         mTargetContext = InstrumentationRegistry.getTargetContext();
         mBuilder = new StandardNotificationBuilder(mTargetContext);
 
@@ -200,6 +199,34 @@ public class TrustedWebActivityClientTest {
 
         Assert.assertEquals(mResponseHandler.mNotificationTag, NOTIFICATION_TAG);
         Assert.assertEquals(mResponseHandler.mNotificationId, NOTIFICATION_ID);
+    }
+
+    /**
+     * Tests that the appropriate callback is called when we try to connect to a TWA that doesn't
+     * exist.
+     */
+    @Test
+    @SmallTest
+    public void testNoClientFound() throws TimeoutException {
+        Origin scope = Origin.createOrThrow("https://www.websitewithouttwa.com/");
+
+        CallbackHelper noTwaFound = new CallbackHelper();
+
+        TrustedWebActivityClient.PermissionCheckCallback callback =
+                new TrustedWebActivityClient.PermissionCheckCallback() {
+            @Override
+            public void onPermissionCheck(ComponentName answeringApp, boolean enabled) { }
+
+            @Override
+            public void onNoTwaFound() {
+                noTwaFound.notifyCalled();
+            }
+        };
+
+        PostTask.runOrPostTask(UiThreadTaskTraits.DEFAULT,
+                () -> mClient.checkNotificationPermission(scope, callback));
+
+        noTwaFound.waitForFirst();
     }
 
     /**

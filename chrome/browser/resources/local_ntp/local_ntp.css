@@ -285,6 +285,7 @@ body.hide-fakebox #fakebox {
   font-size: 13px;
   font-weight: 500;
   line-height: 16px;
+  margin-top: 8px;
   padding-inline-start: 12px;
   text-transform: uppercase;
 }
@@ -310,19 +311,29 @@ body.hide-fakebox #fakebox {
 #realbox-matches a.has-image {
   display: flex;
   flex-direction: column;
-  height: 32px;
-  justify-content: center;
   padding-bottom: 6px;
   padding-top: 6px;
 }
 
 #realbox-matches a.has-image > span {
-  margin-bottom: 2px;
-  margin-top: 2px;
+  position: relative;
+}
+
+#realbox-matches a.has-image > span:first-of-type {
+  top: -1px; /* aligns the top of the text with the top of the image */
+}
+
+#realbox-matches a.has-image > span:last-of-type {
+  bottom: -1px; /* aligns the bottom of the text with the bottom of the image */
 }
 
 #realbox-matches a.has-image .description {
   font-size: 14px;
+  margin-top: 2px;
+}
+
+#realbox-matches a.has-image .remove-match {
+  top: 10px;
 }
 
 #realbox-matches.removable a {
@@ -362,7 +373,8 @@ html[dir=rtl] .image-container {
   background-color: var(--search-box-results-bg-hovered, rgb(232, 232, 233));
 }
 
-#realbox-matches a:-webkit-any(:focus-within, .selected) {
+#realbox-matches a:not(.header):-webkit-any(:focus-within, .selected),
+#realbox-matches a.header:focus-within:not(:focus) {
   background-color: var(--search-box-results-bg-selected, rgb(219, 219, 220));
   color: var(--search-box-results-text-selected, rgb(var(--GG900-rgb)));
 }
@@ -390,6 +402,7 @@ html[dir=rtl] .image-container {
 #realbox-matches .remove-match {
   border-radius: 50%;
   height: 24px;
+  outline: none;
   position: absolute;
   right: 16px;
   top: 4px;

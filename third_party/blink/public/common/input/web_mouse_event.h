@@ -59,6 +59,10 @@ class BLINK_COMMON_EXPORT WebMouseEvent : public WebInputEvent,
     return (GetModifiers() & kIsCompatibilityEventForTouch) != 0;
   }
 
+  int ClickCount() const { return click_count; }
+
+  WebMenuSourceType GetMenuSourceType() const { return menu_source_type; }
+
   WebMouseEvent(Type type_param,
                 const WebGestureEvent&,
                 Button button_param,
@@ -68,6 +72,8 @@ class BLINK_COMMON_EXPORT WebMouseEvent : public WebInputEvent,
                 PointerId id_param = kMousePointerId);
 
   std::unique_ptr<WebInputEvent> Clone() const override;
+  bool CanCoalesce(const WebInputEvent& event) const override;
+  void Coalesce(const WebInputEvent& event) override;
 
   gfx::PointF PositionInRootFrame() const;
 

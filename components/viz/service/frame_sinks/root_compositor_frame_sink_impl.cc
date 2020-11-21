@@ -4,13 +4,17 @@
 
 #include "components/viz/service/frame_sinks/root_compositor_frame_sink_impl.h"
 
+#include <algorithm>
 #include <utility>
+#include <vector>
 
 #include "base/compiler_specific.h"
 #include "base/memory/ptr_util.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "components/viz/common/frame_sinks/begin_frame_source.h"
+#include "components/viz/service/display/delegated_ink_point_renderer_base.h"
 #include "components/viz/service/display/display.h"
 #include "components/viz/service/display/output_surface.h"
 #include "components/viz/service/display_embedder/output_surface_provider.h"
@@ -33,13 +37,16 @@ RootCompositorFrameSinkImpl::Create(
     FrameSinkManagerImpl* frame_sink_manager,
     OutputSurfaceProvider* output_surface_provider,
     uint32_t restart_id,
-    bool run_all_compositor_stages_before_draw) {
+    bool run_all_compositor_stages_before_draw,
+    const DebugRendererSettings* debug_settings) {
   // First create an output surface.
   mojo::Remote<mojom::DisplayClient> display_client(
       std::move(params->display_client));
+  auto display_controller = output_surface_provider->CreateGpuDependency(
+      params->gpu_compositing, params->widget, params->renderer_settings);
   auto output_surface = output_surface_provider->CreateOutputSurface(
       params->widget, params->gpu_compositing, display_client.get(),
-      params->renderer_settings);
+      display_controller.get(), params->renderer_settings, debug_settings);
 
   // Creating output surface failed. The host can send a new request, possibly
   // with a different compositing mode.
@@ -50,7 +57,9 @@ RootCompositorFrameSinkImpl::Create(
   output_surface->SetNeedsSwapSizeNotifications(
       params->send_swap_size_notifications);
 
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
+// TODO(crbug.com/1052397): Revisit the macro expression once build flag switch
+// of lacros-chrome is complete.
+#if defined(OS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)
   // For X11, we need notify client about swap completion after resizing, so the
   // client can use it for synchronize with X11 WM.
   output_surface->SetNeedsSwapSizeNotifications(true);
@@ -61,8 +70,10 @@ RootCompositorFrameSinkImpl::Create(
   std::unique_ptr<ExternalBeginFrameSource> external_begin_frame_source;
   std::unique_ptr<SyntheticBeginFrameSource> synthetic_begin_frame_source;
   ExternalBeginFrameSourceMojo* external_begin_frame_source_mojo = nullptr;
+  bool hw_support_for_multiple_refresh_rates = false;
+  bool wants_vsync_updates = false;
 
-  if (params->external_begin_frame_controller.is_pending()) {
+  if (params->external_begin_frame_controller) {
     auto owned_external_begin_frame_source_mojo =
         std::make_unique<ExternalBeginFrameSourceMojo>(
             frame_sink_manager,
@@ -73,6 +84,7 @@ RootCompositorFrameSinkImpl::Create(
         std::move(owned_external_begin_frame_source_mojo);
   } else {
 #if defined(OS_ANDROID)
+    hw_support_for_multiple_refresh_rates = true;
     external_begin_frame_source =
         std::make_unique<ExternalBeginFrameSourceAndroid>(restart_id,
                                                           params->refresh_rate);
@@ -83,6 +95,14 @@ RootCompositorFrameSinkImpl::Create(
               std::make_unique<DelayBasedTimeSource>(
                   base::ThreadTaskRunnerHandle::Get().get()));
     } else if (output_surface->capabilities().supports_gpu_vsync) {
+#if defined(OS_WIN)
+      hw_support_for_multiple_refresh_rates =
+          output_surface->capabilities().supports_dc_layers &&
+          params->set_present_duration_allowed;
+#endif
+      // Vsync updates are required to update the FrameRateDecider with
+      // supported refresh rates.
+      wants_vsync_updates = params->use_preferred_interval_for_video;
       external_begin_frame_source = std::make_unique<GpuVSyncBeginFrameSource>(
           restart_id, output_surface.get());
     } else {
@@ -109,24 +129,25 @@ RootCompositorFrameSinkImpl::Create(
       begin_frame_source, task_runner.get(), max_frames_pending,
       run_all_compositor_stages_before_draw);
 
+#if !defined(OS_APPLE)
   auto* output_surface_ptr = output_surface.get();
-
+#endif
   gpu::SharedImageInterface* sii = nullptr;
   if (output_surface->context_provider())
     sii = output_surface->context_provider()->SharedImageInterface();
+  else if (display_controller)
+    sii = display_controller->shared_image_interface();
 
   auto overlay_processor = OverlayProcessorInterface::CreateOverlayProcessor(
-      output_surface->GetSurfaceHandle(), output_surface->capabilities(),
-      params->renderer_settings,
-      output_surface_provider->GetSharedImageManager(),
-      output_surface->GetMemoryTracker(),
-      output_surface->GetGpuTaskSchedulerHelper(), sii);
+      output_surface.get(), output_surface->GetSurfaceHandle(),
+      output_surface->capabilities(),
+      display_controller.get(), sii, params->renderer_settings, debug_settings);
 
   auto display = std::make_unique<Display>(
       frame_sink_manager->shared_bitmap_manager(), params->renderer_settings,
-      params->frame_sink_id, std::move(output_surface),
-      std::move(overlay_processor), std::move(scheduler),
-      std::move(task_runner));
+      debug_settings, params->frame_sink_id, std::move(display_controller),
+      std::move(output_surface), std::move(overlay_processor),
+      std::move(scheduler), std::move(task_runner));
 
   if (external_begin_frame_source_mojo)
     external_begin_frame_source_mojo->SetDisplay(display.get());
@@ -139,22 +160,21 @@ RootCompositorFrameSinkImpl::Create(
       std::move(params->display_private), std::move(display_client),
       std::move(synthetic_begin_frame_source),
       std::move(external_begin_frame_source), std::move(display),
-      params->use_preferred_interval_for_video));
+      params->use_preferred_interval_for_video,
+      hw_support_for_multiple_refresh_rates,
+      params->num_of_frames_to_toggle_interval));
 
-#if defined(OS_MACOSX)
+#if !defined(OS_APPLE)
   // On Mac vsync parameter updates come from the browser process. We don't need
   // to provide a callback to the OutputSurface since it should never use it.
-  constexpr bool wants_vsync_updates = false;
-#else
-  constexpr bool wants_vsync_updates = true;
-#endif
-  if (wants_vsync_updates && impl->synthetic_begin_frame_source_) {
+  if (wants_vsync_updates || impl->synthetic_begin_frame_source_) {
     // |impl| owns and outlives display, and display owns the output surface so
     // unretained is safe.
     output_surface_ptr->SetUpdateVSyncParametersCallback(base::BindRepeating(
         &RootCompositorFrameSinkImpl::SetDisplayVSyncParameters,
         base::Unretained(impl.get())));
   }
+#endif
 
   return impl;
 }
@@ -256,6 +276,8 @@ void RootCompositorFrameSinkImpl::UpdateVSyncParameters() {
     if (vsync_listener_)
       vsync_listener_->OnVSyncParametersUpdated(timebase, interval);
   }
+  if (external_begin_frame_source_)
+    external_begin_frame_source_->SetPreferredInterval(interval);
 }
 
 void RootCompositorFrameSinkImpl::ForceImmediateDrawAndSwapIfPossible() {
@@ -291,6 +313,12 @@ void RootCompositorFrameSinkImpl::AddVSyncParameterObserver(
     mojo::PendingRemote<mojom::VSyncParameterObserver> observer) {
   vsync_listener_ =
       std::make_unique<VSyncParameterListener>(std::move(observer));
+}
+
+void RootCompositorFrameSinkImpl::SetDelegatedInkPointRenderer(
+    mojo::PendingReceiver<mojom::DelegatedInkPointRenderer> receiver) {
+  if (auto* ink_renderer = display_->GetDelegatedInkPointRenderer())
+    ink_renderer->InitMessagePipeline(std::move(receiver));
 }
 
 void RootCompositorFrameSinkImpl::SetNeedsBeginFrame(bool needs_begin_frame) {
@@ -368,7 +396,9 @@ RootCompositorFrameSinkImpl::RootCompositorFrameSinkImpl(
     std::unique_ptr<SyntheticBeginFrameSource> synthetic_begin_frame_source,
     std::unique_ptr<ExternalBeginFrameSource> external_begin_frame_source,
     std::unique_ptr<Display> display,
-    bool use_preferred_interval_for_video)
+    bool use_preferred_interval_for_video,
+    bool hw_support_for_multiple_refresh_rates,
+    size_t num_of_frames_to_toggle_interval)
     : compositor_frame_sink_client_(std::move(frame_sink_client)),
       compositor_frame_sink_receiver_(this, std::move(frame_sink_receiver)),
       display_client_(std::move(display_client)),
@@ -383,14 +413,15 @@ RootCompositorFrameSinkImpl::RootCompositorFrameSinkImpl(
       display_(std::move(display)) {
   DCHECK(display_);
   DCHECK(begin_frame_source());
-  bool using_synthetic_bfs =
-      begin_frame_source() == synthetic_begin_frame_source_.get();
   frame_sink_manager->RegisterBeginFrameSource(begin_frame_source(),
                                                support_->frame_sink_id());
   display_->Initialize(this, support_->frame_sink_manager()->surface_manager(),
-                       Display::kEnableSharedImages, using_synthetic_bfs);
+                       Display::kEnableSharedImages,
+                       hw_support_for_multiple_refresh_rates,
+                       num_of_frames_to_toggle_interval);
   support_->SetUpHitTest(display_.get());
-  if (use_preferred_interval_for_video && using_synthetic_bfs) {
+  if (use_preferred_interval_for_video &&
+      !hw_support_for_multiple_refresh_rates) {
     display_->SetSupportedFrameIntervals(
         {display_frame_interval_, display_frame_interval_ * 2});
     use_preferred_interval_ = true;
@@ -407,7 +438,7 @@ void RootCompositorFrameSinkImpl::DisplayOutputSurfaceLost() {
 
 void RootCompositorFrameSinkImpl::DisplayWillDrawAndSwap(
     bool will_draw_and_swap,
-    RenderPassList* render_passes) {
+    AggregatedRenderPassList* render_passes) {
   DCHECK(support_->GetHitTestAggregator());
   support_->GetHitTestAggregator()->Aggregate(display_->CurrentSurfaceId(),
                                               render_passes);
@@ -419,7 +450,7 @@ base::ScopedClosureRunner RootCompositorFrameSinkImpl::GetCacheBackBufferCb() {
 
 void RootCompositorFrameSinkImpl::DisplayDidReceiveCALayerParams(
     const gfx::CALayerParams& ca_layer_params) {
-#if defined(OS_MACOSX)
+#if defined(OS_APPLE)
   // If |ca_layer_params| should have content only when there exists a client
   // to send it to.
   DCHECK(ca_layer_params.is_empty || display_client_);
@@ -436,7 +467,9 @@ void RootCompositorFrameSinkImpl::DisplayDidCompleteSwapWithSize(
 #if defined(OS_ANDROID)
   if (display_client_)
     display_client_->DidCompleteSwapWithSize(pixel_size);
-#elif defined(OS_LINUX) && !defined(OS_CHROMEOS)
+// TODO(crbug.com/1052397): Revisit the macro expression once build flag switch
+// of lacros-chrome is complete.
+#elif defined(OS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)
   if (display_client_ && pixel_size != last_swap_pixel_size_) {
     last_swap_pixel_size_ = pixel_size;
     display_client_->DidCompleteSwapWithNewSize(last_swap_pixel_size_);

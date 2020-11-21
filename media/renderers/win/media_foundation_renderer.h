@@ -19,11 +19,11 @@
 #include "base/win/windows_types.h"
 #include "media/base/buffering_state.h"
 #include "media/base/media_export.h"
-#include "media/base/media_log.h"
 #include "media/base/media_resource.h"
 #include "media/base/pipeline_status.h"
 #include "media/base/renderer.h"
 #include "media/base/renderer_client.h"
+#include "media/base/win/mf_initializer.h"
 #include "media/renderers/win/media_engine_extension.h"
 #include "media/renderers/win/media_engine_notify_impl.h"
 #include "media/renderers/win/media_foundation_protection_manager.h"
@@ -34,11 +34,16 @@ namespace media {
 
 // MediaFoundationRenderer bridges the Renderer and Windows MFMediaEngine
 // interfaces.
-class MediaFoundationRenderer : public Renderer,
-                                public MediaFoundationRendererExtension {
+class MEDIA_EXPORT MediaFoundationRenderer
+    : public Renderer,
+      public MediaFoundationRendererExtension {
  public:
+  // Whether MediaFoundationRenderer() is supported on the current device.
+  static bool IsSupported();
+
   MediaFoundationRenderer(bool muted,
-                          scoped_refptr<base::SequencedTaskRunner> task_runner);
+                          scoped_refptr<base::SequencedTaskRunner> task_runner,
+                          bool force_dcomp_mode_for_testing = false);
 
   ~MediaFoundationRenderer() override;
 
@@ -61,9 +66,6 @@ class MediaFoundationRenderer : public Renderer,
   void SetDCompMode(bool enabled, SetDCompModeCB callback) override;
   void GetDCompSurface(GetDCompSurfaceCB callback) override;
   void SetVideoStreamEnabled(bool enabled) override;
-  // SetPlaybackElementId() must be called before Initialize() as
-  // |playback_element_id| is used in Initialize().
-  void SetPlaybackElementId(uint64_t playback_element_id) override;
   void SetOutputParams(const gfx::Rect& output_rect) override;
 
  private:
@@ -77,12 +79,15 @@ class MediaFoundationRenderer : public Renderer,
   void StartSendingStatistics();
   void StopSendingStatistics();
 
+  // Callbacks for |mf_media_engine_notify_|.
   void OnPlaybackError(PipelineStatus status);
   void OnPlaybackEnded();
-  void OnBufferingStateChanged(BufferingState state,
-                               BufferingStateChangeReason reason);
-  void OnVideoNaturalSizeChanged();
-  void OnCdmProxyReceived(IMFCdmProxy* cdm);
+  void OnBufferingStateChange(BufferingState state,
+                              BufferingStateChangeReason reason);
+  void OnVideoNaturalSizeChange();
+  void OnTimeUpdate();
+
+  void OnCdmProxyReceived(Microsoft::WRL::ComPtr<IMFCdmProxy> cdm_proxy);
 
   HRESULT SetDCompModeInternal(bool enabled);
   HRESULT GetDCompSurfaceInternal(HANDLE* surface_handle);
@@ -92,10 +97,17 @@ class MediaFoundationRenderer : public Renderer,
   // TODO(crbug.com/1017943): Support Audio Indicator when using
   // media::MojoRenderer. For now, keep |muted_| as const.
   const bool muted_;
+
   // Renderer methods are running in the same sequence.
   scoped_refptr<base::SequencedTaskRunner> task_runner_;
 
-  bool mf_started_ = false;
+  // Once set, will force |mf_media_engine_| to use DirectComposition mode.
+  // This is used for testing.
+  const bool force_dcomp_mode_for_testing_;
+
+  // Keep this here so it's destroyed after all Media Foundation members below.
+  MFSessionLifetime mf_session_life_time_;
+
   RendererClient* renderer_client_;
 
   Microsoft::WRL::ComPtr<IMFMediaEngine> mf_media_engine_;
@@ -121,12 +133,6 @@ class MediaFoundationRenderer : public Renderer,
   // Used for RendererClient::OnStatisticsUpdate().
   PipelineStatistics statistics_ = {};
   base::RepeatingTimer statistics_timer_;
-
-  // An identifier corresponds to a WebMediaPlayer. It allows MFMediaEngine
-  // to track the same playback session is running as Renderer can be destroyed
-  // after a period of inactivity by Chromium media pipeliine.
-  // Init it to an invalid ID.
-  uint64_t playback_element_id_ = 0;
 
   // A fake window handle passed to MF-based rendering pipeline for OPM.
   HWND virtual_video_window_ = nullptr;

@@ -7,9 +7,10 @@
 #include <memory>
 #include <string>
 
-#include "base/logging.h"
+#include "base/check.h"
 #include "base/macros.h"
 #include "base/no_destructor.h"
+#include "base/notreached.h"
 #include "chromecast/common/cast_extensions_api_provider.h"
 #include "extensions/common/api/api_features.h"
 #include "extensions/common/api/behavior_features.h"
@@ -96,15 +97,15 @@ void CastExtensionsClient::FilterHostPermissions(
   NOTIMPLEMENTED();
 }
 
-void CastExtensionsClient::SetScriptingWhitelist(
-    const ScriptingWhitelist& whitelist) {
-  scripting_whitelist_ = whitelist;
+void CastExtensionsClient::SetScriptingAllowlist(
+    const ScriptingAllowlist& allowlist) {
+  scripting_allowlist_ = allowlist;
 }
 
-const ExtensionsClient::ScriptingWhitelist&
-CastExtensionsClient::GetScriptingWhitelist() const {
-  // TODO(jamescook): Real whitelist.
-  return scripting_whitelist_;
+const ExtensionsClient::ScriptingAllowlist&
+CastExtensionsClient::GetScriptingAllowlist() const {
+  // TODO(jamescook): Real allowlist.
+  return scripting_allowlist_;
 }
 
 URLPatternSet CastExtensionsClient::GetPermittedChromeSchemeHosts(

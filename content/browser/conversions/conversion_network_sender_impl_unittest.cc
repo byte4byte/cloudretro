@@ -4,10 +4,14 @@
 
 #include "content/browser/conversions/conversion_network_sender_impl.h"
 
+#include <string>
+#include <utility>
+
 #include "base/bind.h"
 #include "base/strings/strcat.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/task/post_task.h"
-#include "base/test/scoped_feature_list.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "base/test/simple_test_clock.h"
 #include "content/browser/conversions/conversion_test_utils.h"
 #include "content/browser/storage_partition_impl.h"
@@ -16,6 +20,7 @@
 #include "content/public/common/content_features.h"
 #include "content/public/test/browser_task_environment.h"
 #include "content/public/test/test_browser_context.h"
+#include "net/base/load_flags.h"
 #include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
@@ -41,6 +46,7 @@ ConversionReport GetReport(int64_t conversion_id) {
           .SetData(base::NumberToString(conversion_id))
           .Build(),
       /*conversion_data=*/base::NumberToString(conversion_id),
+      /*conversion_time=*/base::Time(),
       /*report_time=*/base::Time(),
       /*conversion_id=*/conversion_id);
 }
@@ -130,6 +136,7 @@ TEST_F(ConversionNetworkSenderTest, ReportSent_QueryParamsSetCorrectly) {
           .Build();
   ConversionReport report(impression,
                           /*conversion_data=*/"conversion",
+                          /*conversion_time=*/base::Time(),
                           /*report_time=*/base::Time(),
                           /*conversion_id=*/1);
   report.attribution_credit = 50;
@@ -152,6 +159,7 @@ TEST_F(ConversionNetworkSenderTest, ReportSent_RequestAttributesSet) {
           .Build();
   ConversionReport report(impression,
                           /*conversion_data=*/"1",
+                          /*conversion_time=*/base::Time(),
                           /*report_time=*/base::Time(),
                           /*conversion_id=*/1);
   network_sender_->SendReport(&report, base::DoNothing());
@@ -198,6 +206,60 @@ TEST_F(ConversionNetworkSenderTest, ManyReports_AllSentSuccessfully) {
   }
   EXPECT_EQ(10u, num_reports_sent_);
   EXPECT_EQ(0, test_url_loader_factory_.NumPending());
+}
+
+TEST_F(ConversionNetworkSenderTest, LoadFlags) {
+  auto report = GetReport(/*conversion_id=*/1);
+  network_sender_->SendReport(&report, GetSentCallback());
+  int load_flags =
+      test_url_loader_factory_.GetPendingRequest(0)->request.load_flags;
+  EXPECT_TRUE(load_flags & net::LOAD_BYPASS_CACHE);
+  EXPECT_TRUE(load_flags & net::LOAD_DISABLE_CACHE);
+}
+
+TEST_F(ConversionNetworkSenderTest, ErrorHistogram) {
+  // All OK.
+  {
+    base::HistogramTester histograms;
+    auto report = GetReport(/*conversion_id=*/1);
+    network_sender_->SendReport(&report, GetSentCallback());
+    EXPECT_TRUE(test_url_loader_factory_.SimulateResponseForPendingRequest(
+        GetReportUrl("1"), ""));
+    // kOk = 0.
+    histograms.ExpectUniqueSample("Conversions.ReportStatus", 0, 1);
+  }
+  // Internal error.
+  {
+    base::HistogramTester histograms;
+    auto report = GetReport(/*conversion_id=*/2);
+    network_sender_->SendReport(&report, GetSentCallback());
+    network::URLLoaderCompletionStatus completion_status(net::ERR_FAILED);
+    EXPECT_TRUE(test_url_loader_factory_.SimulateResponseForPendingRequest(
+        GURL(GetReportUrl("2")), completion_status,
+        network::mojom::URLResponseHead::New(), std::string()));
+    // kInternalError = 1.
+    histograms.ExpectUniqueSample("Conversions.ReportStatus", 1, 1);
+  }
+  {
+    base::HistogramTester histograms;
+    auto report = GetReport(/*conversion_id=*/3);
+    network_sender_->SendReport(&report, GetSentCallback());
+    EXPECT_TRUE(test_url_loader_factory_.SimulateResponseForPendingRequest(
+        GetReportUrl("3"), std::string(), net::HTTP_UNAUTHORIZED));
+    // kExternalError = 2.
+    histograms.ExpectUniqueSample("Conversions.ReportStatus", 2, 1);
+  }
+}
+
+TEST_F(ConversionNetworkSenderTest, TimeFromConversionToReportSendHistogram) {
+  base::HistogramTester histograms;
+  auto report = GetReport(/*conversion_id=*/1);
+  report.report_time = base::Time() + base::TimeDelta::FromHours(5);
+  network_sender_->SendReport(&report, GetSentCallback());
+  EXPECT_TRUE(test_url_loader_factory_.SimulateResponseForPendingRequest(
+      GetReportUrl("1"), ""));
+  histograms.ExpectUniqueSample("Conversions.TimeFromConversionToReportSend", 5,
+                                1);
 }
 
 }  // namespace content

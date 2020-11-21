@@ -7,8 +7,9 @@
 #include <limits>
 #include <utility>
 
+#include "base/check_op.h"
 #include "base/lazy_instance.h"
-#include "base/logging.h"
+#include "base/notreached.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
@@ -498,8 +499,8 @@ bool WebRequestAction::HasPermission(ApplyInfo* apply_info,
   return WebRequestPermissions::CanExtensionAccessURL(
              permission_helper, extension_id, request->url, -1,
              apply_info->crosses_incognito, permission_check,
-             request->initiator,
-             request->type) == PermissionsData::PageAccess::kAllowed;
+             request->initiator, request->web_request_type) ==
+         PermissionsData::PageAccess::kAllowed;
 }
 
 // static

@@ -5,11 +5,19 @@
 #ifndef IOS_CHROME_BROWSER_SAFE_BROWSING_FAKE_SAFE_BROWSING_SERVICE_H_
 #define IOS_CHROME_BROWSER_SAFE_BROWSING_FAKE_SAFE_BROWSING_SERVICE_H_
 
-#include "ios/chrome/browser/safe_browsing/safe_browsing_service.h"
+#include <string>
 
-// A fake SafeBrowsingService whose database treats all URLs as safe.
+#include "ios/chrome/browser/safe_browsing/safe_browsing_service.h"
+#include "services/network/test/test_url_loader_factory.h"
+
+// A fake SafeBrowsingService whose database treats URLs from host
+// safe.browsing.unsafe.chromium.test as unsafe, and treats all other URLs as
+// safe.
 class FakeSafeBrowsingService : public SafeBrowsingService {
  public:
+  // URLs with this host are treated as unsafe.
+  static const std::string kUnsafeHost;
+
   FakeSafeBrowsingService();
 
   FakeSafeBrowsingService(const FakeSafeBrowsingService&) = delete;
@@ -22,9 +30,16 @@ class FakeSafeBrowsingService : public SafeBrowsingService {
   std::unique_ptr<safe_browsing::SafeBrowsingUrlCheckerImpl> CreateUrlChecker(
       safe_browsing::ResourceType resource_type,
       web::WebState* web_state) override;
+  bool CanCheckUrl(const GURL& url) const override;
+  scoped_refptr<network::SharedURLLoaderFactory> GetURLLoaderFactory() override;
+  void ClearCookies(const net::CookieDeletionInfo::TimeRange& creation_range,
+                    base::OnceClosure callback) override;
 
  protected:
   ~FakeSafeBrowsingService() override;
+
+ private:
+  network::TestURLLoaderFactory url_loader_factory_;
 };
 
 #endif  // IOS_CHROME_BROWSER_SAFE_BROWSING_FAKE_SAFE_BROWSING_SERVICE_H_

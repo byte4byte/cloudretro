@@ -26,6 +26,7 @@
 #include "components/prefs/pref_service.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "net/dns/mock_host_resolver.h"
@@ -159,7 +160,7 @@ IN_PROC_BROWSER_TEST_F(BookmarkBarNavigationTest, SecFetchFromEmptyTab) {
   }
 }
 
-#if defined(OS_MACOSX) || defined(OS_WIN)
+#if defined(OS_MAC) || defined(OS_WIN)
 //  TODO(crbug.com/1006033): Test flaky on Mac and Windows.
 #define MAYBE_SecFetchSiteNoneFromNonEmptyTab \
   DISABLED_SecFetchSiteNoneFromNonEmptyTab

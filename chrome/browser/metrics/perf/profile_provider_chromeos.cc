@@ -96,8 +96,7 @@ void ProfileProvider::Init() {
 
   if (base::FeatureList::IsEnabled(kBrowserJankinessProfiling)) {
     // Set up the JankMonitor for watching browser jankiness.
-    jank_monitor_ =
-        base::MakeRefCounted<content::responsiveness::JankMonitor>();
+    jank_monitor_ = content::JankMonitor::Create();
     jank_monitor_->SetUp();
     jank_monitor_->AddObserver(this);
   }
@@ -111,6 +110,18 @@ bool ProfileProvider::GetSampledProfiles(
     result = result || written;
   }
   return result;
+}
+
+void ProfileProvider::OnRecordingEnabled() {
+  for (auto& collector : collectors_) {
+    collector->EnableRecording();
+  }
+}
+
+void ProfileProvider::OnRecordingDisabled() {
+  for (auto& collector : collectors_) {
+    collector->DisableRecording();
+  }
 }
 
 void ProfileProvider::LoggedInStateChanged() {

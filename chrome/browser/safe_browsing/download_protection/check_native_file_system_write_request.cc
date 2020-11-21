@@ -151,13 +151,15 @@ void CheckNativeFileSystemWriteRequest::MaybeStorePingsForDownload(
   // TODO(https://crbug.com/996797): Integrate with DownloadFeedbackService.
 }
 
-bool CheckNativeFileSystemWriteRequest::ShouldUploadBinary(
+base::Optional<enterprise_connectors::AnalysisSettings>
+CheckNativeFileSystemWriteRequest::ShouldUploadBinary(
     DownloadCheckResultReason reason) {
-  return false;
+  return base::nullopt;
 }
 
 void CheckNativeFileSystemWriteRequest::UploadBinary(
-    DownloadCheckResultReason reason) {}
+    DownloadCheckResultReason reason,
+    enterprise_connectors::AnalysisSettings settings) {}
 
 bool CheckNativeFileSystemWriteRequest::ShouldPromptForDeepScanning(
     DownloadCheckResultReason reason) const {
@@ -169,6 +171,13 @@ void CheckNativeFileSystemWriteRequest::NotifyRequestFinished(
     DownloadCheckResultReason reason) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   weakptr_factory_.InvalidateWeakPtrs();
+}
+
+bool CheckNativeFileSystemWriteRequest::IsWhitelistedByPolicy() const {
+  Profile* profile = Profile::FromBrowserContext(item_->browser_context);
+  if (!profile)
+    return false;
+  return IsURLWhitelistedByPolicy(item_->frame_url, *profile->GetPrefs());
 }
 
 }  // namespace safe_browsing

@@ -103,9 +103,6 @@ class PerFrameTranslateAgent : public content::RenderFrameObserver,
   // Converts language code to the one used in server supporting list.
   static void ConvertLanguageCodeSynonym(std::string* code);
 
-  // Ensures that the isolated world for executing translation JS.
-  void EnsureIsolatedWorldInitialized();
-
   // Sets receiver for translate messages from browser process.
   void BindReceiver(
       mojo::PendingAssociatedReceiver<mojom::TranslateAgent> receiver);
@@ -124,8 +121,9 @@ class PerFrameTranslateAgent : public content::RenderFrameObserver,
 
   // Checks if the current running page translation is finished or errored and
   // notifies the browser accordingly.  If the translation has not terminated,
-  // posts a task to check again later.
-  void CheckTranslateStatus();
+  // posts a task to check again later. |check_count| is used to limit the
+  // number of retries.
+  void CheckTranslateStatus(int check_count);
 
   // Called by TranslateFrame to do the actual translation.  |count| is used to
   // limit the number of retries.
@@ -146,9 +144,6 @@ class PerFrameTranslateAgent : public content::RenderFrameObserver,
 
   // The world ID to use for script execution.
   int world_id_;
-
-  // Whether the isolated world info has been initialized.
-  bool isolated_world_initialized_ = false;
 
   mojo::AssociatedReceiver<mojom::TranslateAgent> receiver_{this};
 

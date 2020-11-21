@@ -18,9 +18,11 @@ enum ShellWindowId {
   // Used to indicate no shell window id.
   kShellWindowId_Invalid = -1,
 
-  // The screen rotation container in between root window and its children, used
-  // for screen rotation animation.
-  kShellWindowId_ScreenRotationContainer = 0,
+  // This container is used for animations which take a screenshot of the
+  // contents, place them on top of the root and animate the screenshot layer.
+  // We can't take a screenshot of the root itself, otherwise subsequent
+  // screenshots will screenshot previous screenshots.
+  kShellWindowId_ScreenAnimationContainer = 0,
 
   // The magnified container which contains everything that would be magnified
   // when docked magnifier is enabled.
@@ -143,18 +145,25 @@ enum ShellWindowId {
   // TODO(jamescook): Consolidate this with DockedMagnifierContainer.
   kShellWindowId_AccessibilityPanelContainer,
 
-  // The container for the Autoclick bubble that overlays the work area and any
-  // menus and bubbles, but appears under the Autoclick mouse UX in
-  // kShellWindowId_OverlayContainer. Autoclick needs to work with dialogs and
-  // menus, so it must be shown above kShellWindowId_SettingBubbleContainer to
-  // allow the user to access these settings. However, the Autoclick bubble has
-  // buttons with tooltips which must be shown above the Autoclick bubble, so it
-  // must be under kShellWindowId_DragImageAndTooltipContainer.
-  kShellWindowId_AutoclickContainer,
+  // The container for accessibility bubbles that overlay the work area and any
+  // other menus and bubbles, but appear under the Autoclick mouse UX in
+  // kShellWindowId_OverlayContainer. Both Autoclick and Switch Access have
+  // bubbles that appear in this layer. These features need to work with dialogs
+  // and menus, so they must be shown above
+  // kShellWindowId_SettingBubbleContainer to allow the user to access these
+  // settings. However, these bubbles may have buttons with tooltips which must
+  // be shown above the bubbles, so it must be under
+  // kShellWindowId_DragImageAndTooltipContainer.
+  // TODO(crbug/1076973): Investigate merging this container with
+  // AccessibilityPanelContainer.
+  kShellWindowId_AccessibilityBubbleContainer,
 
   // The container for special components overlaid onscreen, such as the
   // region selector for partial screenshots.
   kShellWindowId_OverlayContainer,
+
+  // The container for ambient mode screen saver.
+  kShellWindowId_AmbientModeContainer,
 
   // The container for mouse cursor.
   kShellWindowId_MouseCursorContainer,
@@ -166,7 +175,7 @@ enum ShellWindowId {
   // The topmost container, used for power off animation.
   kShellWindowId_PowerButtonAnimationContainer,
 
-  kShellWindowId_MinContainer = kShellWindowId_ScreenRotationContainer,
+  kShellWindowId_MinContainer = kShellWindowId_ScreenAnimationContainer,
   kShellWindowId_MaxContainer = kShellWindowId_PowerButtonAnimationContainer,
 };
 

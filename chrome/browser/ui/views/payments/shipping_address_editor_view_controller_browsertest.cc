@@ -19,6 +19,7 @@
 #include "components/autofill/core/browser/ui/country_combobox_model.h"
 #include "components/autofill/core/browser/ui/region_combobox_model.h"
 #include "components/payments/content/payment_request_spec.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/libaddressinput/src/cpp/include/libaddressinput/null_storage.h"
@@ -165,7 +166,8 @@ class PaymentRequestShippingAddressEditorTest
     DCHECK(country_combobox);
     int selected_country_row = country_combobox->GetSelectedRow();
     autofill::CountryComboboxModel* country_model =
-        static_cast<autofill::CountryComboboxModel*>(country_combobox->model());
+        static_cast<autofill::CountryComboboxModel*>(
+            country_combobox->GetModel());
 
     return country_model->countries()[selected_country_row]->country_code();
   }
@@ -177,7 +179,8 @@ class PaymentRequestShippingAddressEditorTest
             autofill::ADDRESS_HOME_COUNTRY)));
     ASSERT_NE(nullptr, country_combobox);
     autofill::CountryComboboxModel* country_model =
-        static_cast<autofill::CountryComboboxModel*>(country_combobox->model());
+        static_cast<autofill::CountryComboboxModel*>(
+            country_combobox->GetModel());
     int i = 0;
     for (; i < country_model->GetItemCount(); i++) {
       if (country_model->GetItemAt(i) == country_name)
@@ -290,7 +293,9 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestShippingAddressEditorTest,
                                /*accept_empty_phone_number=*/false);
 }
 
-IN_PROC_BROWSER_TEST_F(PaymentRequestShippingAddressEditorTest, AsyncData) {
+// TODO(crbug.com/1150496): flaky.
+IN_PROC_BROWSER_TEST_F(PaymentRequestShippingAddressEditorTest,
+                       DISABLED_AsyncData) {
   NavigateTo("/payment_request_dynamic_shipping_test.html");
   InvokePaymentRequestUI();
   SetRegionDataLoader(&test_region_data_loader_);
@@ -361,7 +366,8 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestShippingAddressEditorTest,
   ASSERT_NE(nullptr, country_combobox);
   ASSERT_EQ(0, country_combobox->GetSelectedRow());
   autofill::CountryComboboxModel* country_model =
-      static_cast<autofill::CountryComboboxModel*>(country_combobox->model());
+      static_cast<autofill::CountryComboboxModel*>(
+          country_combobox->GetModel());
   size_t num_countries = country_model->countries().size();
   ASSERT_GT(num_countries, 10UL);
 
@@ -382,7 +388,8 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestShippingAddressEditorTest,
     // Some countries don't have a state combobox.
     if (region_combobox) {
       autofill::RegionComboboxModel* region_model =
-          static_cast<autofill::RegionComboboxModel*>(region_combobox->model());
+          static_cast<autofill::RegionComboboxModel*>(
+              region_combobox->GetModel());
       if (use_regions1) {
         ASSERT_EQ(2, region_model->GetItemCount());
         EXPECT_EQ(base::ASCIIToUTF16("---"), region_model->GetItemAt(0));
@@ -434,8 +441,8 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestShippingAddressEditorTest,
     DCHECK(country_combobox);
     EXPECT_EQ(country_index,
               static_cast<size_t>(country_combobox->GetSelectedRow()));
-    country_model =
-        static_cast<autofill::CountryComboboxModel*>(country_combobox->model());
+    country_model = static_cast<autofill::CountryComboboxModel*>(
+        country_combobox->GetModel());
     ASSERT_EQ(num_countries, country_model->countries().size());
 
     // Update regions.

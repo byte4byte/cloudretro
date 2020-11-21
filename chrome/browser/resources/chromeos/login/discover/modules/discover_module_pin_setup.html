@@ -1,4 +1,3 @@
-<link rel="import" href="chrome://resources/polymer/v1_0/iron-flex-layout/iron-flex-layout-classes.html">
 <link rel="import" href="chrome://resources/cr_elements/shared_style_css.html">
 
 <link rel="import" href="chrome://resources/html/i18n_behavior.html">
@@ -7,6 +6,11 @@
 <link rel="import" href="chrome://resources/html/i18n_behavior.html">
 <link rel="import" href="chrome://resources/cr_components/chromeos/quick_unlock/setup_pin_keyboard.html">
 <link rel="import" href="chrome://resources/cr_elements/cr_input/cr_input.html">
+
+<link rel="import" href="/components/common_styles.html">
+<link rel="import" href="/components/hd_iron_icon.html">
+<link rel="import" href="/components/oobe_dialog.html">
+<link rel="import" href="/components/throbber_notice.html">
 
 <dom-module id="discover-pin-setup-card">
   <template>
@@ -25,12 +29,8 @@
 
 <dom-module id="discover-pin-setup-module">
   <template>
-    <link rel="stylesheet" href="../../oobe_dialog_host.css">
-    <link rel="stylesheet" href="../../oobe_flex_layout.css">
-    <style include="iron-flex iron-flex-alignment iron-positioning
-                    cr-shared-style">
+    <style include="cr-shared-style oobe-dialog-host">
     </style>
-    <style include="settings-shared"></style>
     <link rel="stylesheet" href="discover_module_pin_setup.css">
     <oobe-dialog id="loading" role="dialog" no-header no-footer-padding
         hidden="[[isStepHidden_(step_, 'loading')]]">
@@ -59,10 +59,10 @@
         </cr-input>
       </div>
       <div slot="bottom-buttons" class="flex layout horizontal end-justified">
-        <oobe-text-button on-tap="onSkipButton_"
+        <oobe-text-button on-click="onSkipButton_"
             text-key="discoverPinSetupSkip"></oobe-text-button>
         <oobe-next-button inverse disabled="[[!password_]]"
-            on-tap="onPasswordSubmitButton_">
+            on-click="onPasswordSubmitButton_">
         </oobe-next-button>
       </div>
     </oobe-dialog>
@@ -111,20 +111,21 @@
             srcset="images/pin_illustration_1x.svg 1x,
                     images/pin_illustration_2x.svg 2x">
       </div>
-      <div slot="bottom-buttons" class="flex layout horizontal end-justified">
+      <div slot="back-navigation">
         <oobe-back-button
             hidden="[[isStepHidden_(step_, 'confirm')]]"
-            on-tap="onBackButton_"></oobe-back-button>
-        <div class="flex"></div>
-        <oobe-text-button id="setupSkipButton" on-tap="onSkipButton_"
+            on-click="onBackButton_"></oobe-back-button>
+      </div>
+      <div slot="bottom-buttons">
+        <oobe-text-button id="setupSkipButton" on-click="onSkipButton_"
             text-key="discoverPinSetupSkip"
             hidden="[[!isStepHidden_(step_, 'done')]]">
         </oobe-text-button>
         <oobe-next-button inverse
             disabled="[[isNextDisabled_(step_, enableSubmit_)]]"
-            on-tap="onNextButton_" class="focus-on-show"
+            on-click="onNextButton_" class="focus-on-show"
             hidden="[[!isStepHidden_(step_, 'done')]]"></oobe-next-button>
-        <oobe-text-button inverse on-tap="onDoneButton_" class="focus-on-show"
+        <oobe-text-button inverse on-click="onDoneButton_" class="focus-on-show"
             text-key="discoverPinSetupDone"
             hidden="[[isStepHidden_(step_, 'done')]]">
         </oobe-text-button>

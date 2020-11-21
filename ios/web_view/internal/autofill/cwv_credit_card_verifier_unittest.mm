@@ -9,15 +9,14 @@
 
 #include "base/base_paths.h"
 #include "base/bind.h"
-#include "base/bind_helpers.h"
 #include "base/callback.h"
+#include "base/callback_helpers.h"
 #include "base/memory/weak_ptr.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/task/post_task.h"
 #import "base/test/ios/wait_util.h"
-#include "base/test/scoped_feature_list.h"
 #include "components/autofill/core/browser/autofill_test_utils.h"
 #include "components/autofill/core/browser/data_model/credit_card.h"
 #include "components/autofill/core/browser/payments/card_unmask_delegate.h"
@@ -143,7 +142,6 @@ class CWVCreditCardVerifierTest : public PlatformTest {
 // Tests CWVCreditCardVerifier properties.
 TEST_F(CWVCreditCardVerifierTest, Properties) {
   EXPECT_TRUE(credit_card_verifier_.creditCard);
-  EXPECT_FALSE(credit_card_verifier_.lastStoreLocallyValue);
   EXPECT_TRUE(credit_card_verifier_.navigationTitle);
   EXPECT_TRUE(credit_card_verifier_.instructionMessage);
   EXPECT_TRUE(credit_card_verifier_.confirmButtonLabel);
@@ -157,22 +155,6 @@ TEST_F(CWVCreditCardVerifierTest, Properties) {
   EXPECT_FALSE(credit_card_verifier_.shouldRequestUpdateForExpirationDate);
   [credit_card_verifier_ requestUpdateForExpirationDate];
   EXPECT_TRUE(credit_card_verifier_.shouldRequestUpdateForExpirationDate);
-}
-
-// Tests CWVCreditCardVerifier's |canStoreLocally| property.
-TEST_F(CWVCreditCardVerifierTest, CanStoreLocallyProperty) {
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitAndEnableFeature(
-      autofill::features::kAutofillNoLocalSaveOnUnmaskSuccess);
-  EXPECT_FALSE(credit_card_verifier_.canStoreLocally);
-}
-
-// Tests CWVCreditCardVerifier's |canStoreLocally| property.
-TEST_F(CWVCreditCardVerifierTest, CanStoreLocallyPropertyFlagOff) {
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitAndDisableFeature(
-      autofill::features::kAutofillNoLocalSaveOnUnmaskSuccess);
-  EXPECT_TRUE(credit_card_verifier_.canStoreLocally);
 }
 
 // Tests CWVCreditCardVerifier's |isCVCValid| method.
@@ -206,13 +188,11 @@ TEST_F(CWVCreditCardVerifierTest, VerifyCardSucceeded) {
           verifyWithCVC:cvc
         expirationMonth:@""  // Expiration dates are ignored here because
          expirationYear:@""  // |needsUpdateForExpirationDate| is NO.
-           storeLocally:store_locally
                riskData:@"dummy-risk-data"
       completionHandler:^(NSError* error) {
         completionCalled = YES;
         completionError = error;
       }];
-  EXPECT_FALSE(credit_card_verifier_.lastStoreLocallyValue);
 
   const FakeCardUnmaskDelegate::UserProvidedUnmaskDetails& unmask_details_ =
       card_unmask_delegate_.GetUserProvidedUnmaskDetails();
@@ -235,12 +215,10 @@ TEST_F(CWVCreditCardVerifierTest, VerifyCardFailed) {
           verifyWithCVC:cvc
         expirationMonth:@""  // Expiration dates are ignored here because
          expirationYear:@""  // |needsUpdateForExpirationDate| is NO.
-           storeLocally:store_locally
                riskData:@"dummy-risk-data"
       completionHandler:^(NSError* error) {
         completionError = error;
       }];
-  EXPECT_FALSE(credit_card_verifier_.lastStoreLocallyValue);
 
   const FakeCardUnmaskDelegate::UserProvidedUnmaskDetails& unmask_details_ =
       card_unmask_delegate_.GetUserProvidedUnmaskDetails();

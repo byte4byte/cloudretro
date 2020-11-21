@@ -8,7 +8,7 @@
 #include "content/public/common/content_switches.h"
 #include "net/base/features.h"
 #include "services/network/public/cpp/features.h"
-#include "ui/base/ui_base_features.h"
+#include "third_party/blink/public/common/features.h"
 
 namespace content {
 
@@ -24,21 +24,33 @@ GetSwitchDependentFeatureOverrides(const base::CommandLine& command_line) {
     // State to override the feature with.
     base::FeatureList::OverrideState override_state;
   } override_info[] = {
+      {switches::kAppCacheForceEnabled,
+       std::cref(blink::features::kAppCacheRequireOriginTrial),
+       base::FeatureList::OVERRIDE_DISABLE_FEATURE},
       // Overrides for --enable-experimental-web-platform-features.
       {switches::kEnableExperimentalWebPlatformFeatures,
        std::cref(features::kCookieDeprecationMessages),
        base::FeatureList::OVERRIDE_ENABLE_FEATURE},
       {switches::kEnableExperimentalWebPlatformFeatures,
-       std::cref(network::features::kCrossOriginOpenerPolicy),
+       std::cref(network::features::kCrossOriginOpenerPolicyReporting),
+       base::FeatureList::OVERRIDE_ENABLE_FEATURE},
+      {switches::kEnableExperimentalWebPlatformFeatures,
+       std::cref(network::features::kCrossOriginOpenerPolicyAccessReporting),
+       base::FeatureList::OVERRIDE_ENABLE_FEATURE},
+      {switches::kEnableExperimentalWebPlatformFeatures,
+       std::cref(network::features::kCrossOriginIsolated),
        base::FeatureList::OVERRIDE_ENABLE_FEATURE},
       {switches::kEnableExperimentalWebPlatformFeatures,
        std::cref(network::features::kCrossOriginEmbedderPolicy),
        base::FeatureList::OVERRIDE_ENABLE_FEATURE},
       {switches::kEnableExperimentalWebPlatformFeatures,
-       std::cref(features::kDocumentPolicy),
+       std::cref(features::kDocumentPolicyNegotiation),
        base::FeatureList::OVERRIDE_ENABLE_FEATURE},
       {switches::kEnableExperimentalWebPlatformFeatures,
        std::cref(features::kFeaturePolicyForClientHints),
+       base::FeatureList::OVERRIDE_ENABLE_FEATURE},
+      {switches::kEnableExperimentalWebPlatformFeatures,
+       std::cref(features::kLangClientHintHeader),
        base::FeatureList::OVERRIDE_ENABLE_FEATURE},
       {switches::kEnableExperimentalWebPlatformFeatures,
        std::cref(features::kUserAgentClientHint),
@@ -49,13 +61,20 @@ GetSwitchDependentFeatureOverrides(const base::CommandLine& command_line) {
       {switches::kEnableExperimentalWebPlatformFeatures,
        std::cref(features::kOriginIsolationHeader),
        base::FeatureList::OVERRIDE_ENABLE_FEATURE},
-
-      // Overrides for --use-legacy-form-controls.
-      {switches::kUseLegacyFormControls,
-       std::cref(features::kFormControlsRefresh),
-       base::FeatureList::OVERRIDE_DISABLE_FEATURE},
+      {switches::kEnableExperimentalWebPlatformFeatures,
+       std::cref(features::kEnableNewCanvas2DAPI),
+       base::FeatureList::OVERRIDE_ENABLE_FEATURE},
+      {switches::kEnableExperimentalWebPlatformFeatures,
+       std::cref(features::kCriticalClientHint),
+       base::FeatureList::OVERRIDE_ENABLE_FEATURE},
+      {switches::kEnableExperimentalWebPlatformFeatures,
+       std::cref(net::features::kSchemefulSameSite),
+       base::FeatureList::OVERRIDE_ENABLE_FEATURE},
 
       // Overrides for --enable-experimental-cookie-features.
+      {switches::kEnableExperimentalCookieFeatures,
+       std::cref(features::kCookieDeprecationMessages),
+       base::FeatureList::OVERRIDE_ENABLE_FEATURE},
       {switches::kEnableExperimentalCookieFeatures,
        std::cref(net::features::kCookiesWithoutSameSiteMustBeSecure),
        base::FeatureList::OVERRIDE_ENABLE_FEATURE},
@@ -65,7 +84,9 @@ GetSwitchDependentFeatureOverrides(const base::CommandLine& command_line) {
       {switches::kEnableExperimentalCookieFeatures,
        std::cref(net::features::kSameSiteDefaultChecksMethodRigorously),
        base::FeatureList::OVERRIDE_ENABLE_FEATURE},
-      // TODO(crbug.com/1030938): Add Schemeful Same-Site.
+      {switches::kEnableExperimentalCookieFeatures,
+       std::cref(net::features::kSchemefulSameSite),
+       base::FeatureList::OVERRIDE_ENABLE_FEATURE},
   };
 
   std::vector<base::FeatureList::FeatureOverrideInfo> overrides;

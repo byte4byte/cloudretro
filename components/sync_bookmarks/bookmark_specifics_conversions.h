@@ -6,7 +6,12 @@
 #define COMPONENTS_SYNC_BOOKMARKS_BOOKMARK_SPECIFICS_CONVERSIONS_H_
 
 #include <stddef.h>
+
 #include <string>
+
+namespace base {
+class GUID;
+}  // namespace base
 
 namespace bookmarks {
 class BookmarkModel;
@@ -18,6 +23,10 @@ class BookmarkSpecifics;
 class EntitySpecifics;
 }  // namespace sync_pb
 
+namespace syncer {
+struct EntityData;
+}  // namespace syncer
+
 namespace favicon {
 class FaviconService;
 }  // namespace favicon
@@ -28,9 +37,9 @@ namespace sync_bookmarks {
 // truncating and the appending ' ' in some cases.
 std::string FullTitleToLegacyCanonicalizedTitle(const std::string& node_title);
 
-// Used to decide if entity needs to be reuploaded for each remote change which
-// is true if the proto field for the full title is missing.
-bool IsFullTitleReuploadNeeded(const sync_pb::BookmarkSpecifics& specifics);
+// Used to decide if entity needs to be reuploaded for each remote change.
+bool IsBookmarkEntityReuploadNeeded(
+    const syncer::EntityData& remote_entity_data);
 
 // TODO(crbug.com/978430): Remove argument |include_guid| once the client tag
 // hash is required to be populated during sync metadata validation upon
@@ -67,7 +76,7 @@ void UpdateBookmarkNodeFromSpecifics(
 // the newly created node, and the original node gets deleted.
 const bookmarks::BookmarkNode* ReplaceBookmarkNodeGUID(
     const bookmarks::BookmarkNode* node,
-    const std::string& guid,
+    const base::GUID& guid,
     bookmarks::BookmarkModel* model);
 
 // Checks if a bookmark specifics represents a valid bookmark. |is_folder| is

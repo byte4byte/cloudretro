@@ -10,7 +10,7 @@
 
 #include "base/callback.h"
 #include "base/optional.h"
-#include "content/browser/frame_host/navigation_request.h"
+#include "content/browser/renderer_host/navigation_request.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_throttle.h"
 #include "content/public/browser/web_contents_observer.h"
@@ -23,10 +23,8 @@
 #include "net/base/ip_endpoint.h"
 #include "net/dns/public/resolve_error_info.h"
 #include "services/service_manager/public/cpp/interface_provider.h"
-#include "third_party/blink/public/mojom/referrer.mojom-forward.h"
+#include "third_party/blink/public/mojom/loader/referrer.mojom-forward.h"
 #include "url/gurl.h"
-
-struct FrameHostMsg_DidCommitProvisionalLoad_Params;
 
 namespace content {
 
@@ -71,9 +69,6 @@ class NavigationSimulatorImpl : public NavigationSimulator,
   void Commit() override;
   void AbortCommit() override;
   void AbortFromRenderer() override;
-  void FailWithResponseHeaders(
-      int error_code,
-      scoped_refptr<net::HttpResponseHeaders> response_headers) override;
   void Fail(int error_code) override;
   void CommitErrorPage() override;
   void CommitSameDocument() override;
@@ -81,21 +76,20 @@ class NavigationSimulatorImpl : public NavigationSimulator,
   void Wait() override;
   bool IsDeferred() override;
 
+  void SetInitiatorFrame(RenderFrameHost* initiator_frame_host) override;
   void SetTransition(ui::PageTransition transition) override;
   void SetHasUserGesture(bool has_user_gesture) override;
   void SetReloadType(ReloadType reload_type) override;
   void SetMethod(const std::string& method) override;
   void SetIsFormSubmission(bool is_form_submission) override;
-  void SetWasInitiatedByLinkClick(bool was_initiated_by_link_click) override;
   void SetReferrer(blink::mojom::ReferrerPtr referrer) override;
   void SetSocketAddress(const net::IPEndPoint& remote_endpoint) override;
   void SetWasFetchedViaCache(bool was_fetched_via_cache) override;
   void SetIsSignedExchangeInnerResponse(
       bool is_signed_exchange_inner_response) override;
-  void SetInterfaceProviderReceiver(
-      mojo::PendingReceiver<service_manager::mojom::InterfaceProvider> receiver)
-      override;
   void SetContentsMimeType(const std::string& contents_mime_type) override;
+  void SetResponseHeaders(
+      scoped_refptr<net::HttpResponseHeaders> response_headers) override;
   void SetAutoAdvance(bool auto_advance) override;
   void SetResolveErrorInfo(
       const net::ResolveErrorInfo& resolve_error_info) override;
@@ -107,7 +101,6 @@ class NavigationSimulatorImpl : public NavigationSimulator,
 
   void SetKeepLoading(bool keep_loading) override;
   void StopLoading() override;
-  void FailLoading(const GURL& url, int error_code) override;
 
   // Additional utilities usable only inside content/.
 
@@ -164,7 +157,9 @@ class NavigationSimulatorImpl : public NavigationSimulator,
         block_invoking_before_unload_completed_callback;
   }
 
-  void set_page_state(const PageState& page_state) { page_state_ = page_state; }
+  void set_page_state(const blink::PageState& page_state) {
+    page_state_ = page_state;
+  }
 
   void set_origin(const url::Origin& origin) { origin_ = origin; }
 
@@ -228,10 +223,6 @@ class NavigationSimulatorImpl : public NavigationSimulator,
   // NavigationRequest.
   void PrepareCompleteCallbackOnRequest();
 
-  // Check if the navigation corresponds to a same-document navigation.
-  // Only use on renderer-initiated navigations.
-  bool CheckIfSameDocument();
-
   // Infers from internal parameters whether the navigation created a new
   // entry.
   bool DidCreateNewEntry();
@@ -242,9 +233,9 @@ class NavigationSimulatorImpl : public NavigationSimulator,
 
   // Build DidCommitProvisionalLoadParams to commit the ongoing navigation,
   // based on internal NavigationSimulator state and given parameters.
-  std::unique_ptr<FrameHostMsg_DidCommitProvisionalLoad_Params>
-  BuildDidCommitProvisionalLoadParams(bool same_document,
-                                      bool failed_navigation);
+  mojom::DidCommitProvisionalLoadParamsPtr BuildDidCommitProvisionalLoadParams(
+      bool same_document,
+      bool failed_navigation);
 
   // Simulate the UnloadACK in the old RenderFrameHost if it was unloaded at the
   // commit time.
@@ -286,12 +277,12 @@ class NavigationSimulatorImpl : public NavigationSimulator,
   bool is_signed_exchange_inner_response_ = false;
   std::string initial_method_;
   bool is_form_submission_ = false;
-  bool was_initiated_by_link_click_ = false;
   bool browser_initiated_;
   bool same_document_ = false;
   TestRenderFrameHost::LoadingScenario loading_scenario_ =
       TestRenderFrameHost::LoadingScenario::kOther;
   blink::mojom::ReferrerPtr referrer_;
+  RenderFrameHost* initiator_frame_host_ = nullptr;
   ui::PageTransition transition_;
   ReloadType reload_type_ = ReloadType::NONE;
   int session_history_offset_ = 0;
@@ -301,13 +292,14 @@ class NavigationSimulatorImpl : public NavigationSimulator,
   mojo::PendingReceiver<blink::mojom::BrowserInterfaceBroker>
       browser_interface_broker_receiver_;
   std::string contents_mime_type_;
+  scoped_refptr<net::HttpResponseHeaders> response_headers_;
   network::mojom::CSPDisposition should_check_main_world_csp_ =
       network::mojom::CSPDisposition::CHECK;
   net::HttpResponseInfo::ConnectionInfo http_connection_info_ =
       net::HttpResponseInfo::CONNECTION_INFO_UNKNOWN;
   net::ResolveErrorInfo resolve_error_info_ = net::ResolveErrorInfo(net::OK);
   base::Optional<net::SSLInfo> ssl_info_;
-  base::Optional<PageState> page_state_;
+  base::Optional<blink::PageState> page_state_;
   base::Optional<url::Origin> origin_;
   base::Optional<Impression> impression_;
   int64_t post_id_ = -1;

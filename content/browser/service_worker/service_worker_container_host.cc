@@ -4,7 +4,9 @@
 
 #include "content/browser/service_worker/service_worker_container_host.h"
 
-#include "base/bind_helpers.h"
+#include <set>
+#include <utility>
+
 #include "base/callback_helpers.h"
 #include "base/guid.h"
 #include "content/browser/child_process_security_policy_impl.h"
@@ -13,14 +15,15 @@
 #include "content/browser/service_worker/service_worker_context_wrapper.h"
 #include "content/browser/service_worker/service_worker_object_host.h"
 #include "content/browser/service_worker/service_worker_registration_object_host.h"
-#include "content/browser/web_contents/frame_tree_node_id_registry.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/common/content_navigation_policy.h"
 #include "content/common/service_worker/service_worker_utils.h"
+#include "content/public/browser/global_routing_id.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/origin_util.h"
 #include "mojo/public/cpp/bindings/callback_helpers.h"
 #include "third_party/blink/public/common/features.h"
+#include "third_party/blink/public/common/service_worker/service_worker_scope_match.h"
 
 namespace content {
 
@@ -80,123 +83,59 @@ class ServiceWorkerContainerHost::PendingUpdateVersion {
   DISALLOW_COPY_AND_ASSIGN(PendingUpdateVersion);
 };
 
-// static
-base::WeakPtr<ServiceWorkerContainerHost>
-ServiceWorkerContainerHost::CreateForWindow(
-    bool are_ancestors_secure,
-    int frame_tree_node_id,
-    mojo::PendingAssociatedReceiver<blink::mojom::ServiceWorkerContainerHost>
-        host_receiver,
-    mojo::PendingAssociatedRemote<blink::mojom::ServiceWorkerContainer>
-        container_remote,
-    base::WeakPtr<ServiceWorkerContextCore> context) {
-  DCHECK(context);
-  auto container_host = std::make_unique<ServiceWorkerContainerHost>(
-      blink::mojom::ServiceWorkerClientType::kWindow, are_ancestors_secure,
-      frame_tree_node_id, std::move(host_receiver), std::move(container_remote),
-      context);
-
-  std::string client_uuid = container_host->client_uuid();
-  base::WeakPtr<ServiceWorkerContainerHost> weak_ptr =
-      container_host->GetWeakPtr();
-  context->RegisterContainerHostByClientID(client_uuid,
-                                           std::move(container_host));
-  DCHECK(weak_ptr->receiver_.is_bound());
-  weak_ptr->receiver_.set_disconnect_handler(base::BindOnce(
-      &ServiceWorkerContextCore::UnregisterContainerHostByClientID, context,
-      client_uuid));
-  return weak_ptr;
-}
-
-// static
-base::WeakPtr<ServiceWorkerContainerHost>
-ServiceWorkerContainerHost::CreateForWebWorker(
-    blink::mojom::ServiceWorkerClientType client_type,
-    int process_id,
-    mojo::PendingAssociatedReceiver<blink::mojom::ServiceWorkerContainerHost>
-        host_receiver,
-    mojo::PendingAssociatedRemote<blink::mojom::ServiceWorkerContainer>
-        container_remote,
-    base::WeakPtr<ServiceWorkerContextCore> context) {
-  DCHECK(context);
-  using blink::mojom::ServiceWorkerClientType;
-  DCHECK(client_type == ServiceWorkerClientType::kDedicatedWorker ||
-         client_type == ServiceWorkerClientType::kSharedWorker);
-  if (client_type == ServiceWorkerClientType::kDedicatedWorker)
-    DCHECK(base::FeatureList::IsEnabled(blink::features::kPlzDedicatedWorker));
-
-  auto container_host = std::make_unique<ServiceWorkerContainerHost>(
-      client_type, /*is_parent_frame_secure=*/true,
-      FrameTreeNode::kFrameTreeNodeInvalidId, std::move(host_receiver),
-      std::move(container_remote), context);
-  container_host->SetContainerProcessId(process_id);
-
-  std::string client_uuid = container_host->client_uuid();
-  base::WeakPtr<ServiceWorkerContainerHost> weak_ptr =
-      container_host->GetWeakPtr();
-  context->RegisterContainerHostByClientID(client_uuid,
-                                           std::move(container_host));
-  DCHECK(weak_ptr->receiver_.is_bound());
-  weak_ptr->receiver_.set_disconnect_handler(base::BindOnce(
-      &ServiceWorkerContextCore::UnregisterContainerHostByClientID, context,
-      client_uuid));
-  return weak_ptr;
+ServiceWorkerContainerHost::ServiceWorkerContainerHost(
+    base::WeakPtr<ServiceWorkerContextCore> context)
+    : context_(std::move(context)), create_time_(base::TimeTicks::Now()) {
+  DCHECK_CURRENTLY_ON(ServiceWorkerContext::GetCoreThreadId());
+  DCHECK(IsContainerForServiceWorker());
+  DCHECK(context_);
 }
 
 ServiceWorkerContainerHost::ServiceWorkerContainerHost(
-    base::Optional<blink::mojom::ServiceWorkerClientType> client_type,
+    base::WeakPtr<ServiceWorkerContextCore> context,
     bool is_parent_frame_secure,
-    int frame_tree_node_id,
-    mojo::PendingAssociatedReceiver<blink::mojom::ServiceWorkerContainerHost>
-        host_receiver,
     mojo::PendingAssociatedRemote<blink::mojom::ServiceWorkerContainer>
         container_remote,
-    base::WeakPtr<ServiceWorkerContextCore> context)
-    : client_type_(client_type),
+    int frame_tree_node_id)
+    : context_(std::move(context)),
       create_time_(base::TimeTicks::Now()),
+      client_uuid_(base::GenerateGUID()),
       is_parent_frame_secure_(is_parent_frame_secure),
-      frame_tree_node_id_(frame_tree_node_id),
-      web_contents_getter_(
-          frame_tree_node_id == FrameTreeNode::kFrameTreeNodeInvalidId
-              ? base::NullCallback()
-              : base::BindRepeating(&WebContents::FromFrameTreeNodeId,
-                                    frame_tree_node_id)),
-      client_uuid_(IsContainerForClient() ? base::GenerateGUID()
-                                          : std::string()),
-      context_(std::move(context)) {
+      container_(std::move(container_remote)),
+      client_info_(frame_tree_node_id) {
   DCHECK_CURRENTLY_ON(ServiceWorkerContext::GetCoreThreadId());
-  DCHECK(!client_type_ ||
-         *client_type_ != blink::mojom::ServiceWorkerClientType::kAll);
+  DCHECK(IsContainerForWindowClient());
   DCHECK(context_);
+  DCHECK(container_.is_bound());
+}
 
-  DCHECK(host_receiver.is_valid());
-  receiver_.Bind(std::move(host_receiver));
-
-  if (IsContainerForClient()) {
-    DCHECK(container_remote);
-    container_.Bind(std::move(container_remote));
-  } else {
-    DCHECK(IsContainerForServiceWorker());
-  }
+ServiceWorkerContainerHost::ServiceWorkerContainerHost(
+    base::WeakPtr<ServiceWorkerContextCore> context,
+    int process_id,
+    mojo::PendingAssociatedRemote<blink::mojom::ServiceWorkerContainer>
+        container_remote,
+    ServiceWorkerClientInfo client_info)
+    : context_(std::move(context)),
+      create_time_(base::TimeTicks::Now()),
+      client_uuid_(base::GenerateGUID()),
+      process_id_(process_id),
+      container_(std::move(container_remote)),
+      client_info_(client_info) {
+  DCHECK_CURRENTLY_ON(ServiceWorkerContext::GetCoreThreadId());
+  DCHECK(IsContainerForWorkerClient());
+  DCHECK(context_);
+  DCHECK_NE(process_id_, ChildProcessHost::kInvalidUniqueID);
+  DCHECK(container_.is_bound());
 }
 
 ServiceWorkerContainerHost::~ServiceWorkerContainerHost() {
   DCHECK_CURRENTLY_ON(ServiceWorkerContext::GetCoreThreadId());
 
-  if (IsBackForwardCacheEnabled() && IsContainerForClient()) {
-    RunOrPostTaskOnThread(
-        FROM_HERE, BrowserThread::UI,
-        base::BindOnce(
-            [](int process_id, int frame_id, const std::string& uuid) {
-              auto* rfh = RenderFrameHostImpl::FromID(process_id, frame_id);
-              if (rfh)
-                rfh->RemoveServiceWorkerContainerHost(uuid);
-            },
-            process_id(), frame_id(), client_uuid()));
+  if (IsContainerForClient()) {
+    auto* rfh = RenderFrameHostImpl::FromID(process_id(), frame_id());
+    if (rfh)
+      rfh->RemoveServiceWorkerContainerHost(client_uuid());
   }
-
-  if (fetch_request_window_id_)
-    FrameTreeNodeIdRegistry::GetInstance()->Remove(fetch_request_window_id_);
 
   if (IsContainerForClient() && controller_)
     controller_->OnControlleeDestroyed(client_uuid());
@@ -207,7 +146,8 @@ ServiceWorkerContainerHost::~ServiceWorkerContainerHost() {
   controller_registration_.reset();
 
   // Ensure callbacks awaiting execution ready are notified.
-  RunExecutionReadyCallbacks();
+  if (IsContainerForClient())
+    RunExecutionReadyCallbacks();
 
   RemoveAllMatchingRegistrations();
 }
@@ -332,7 +272,7 @@ void ServiceWorkerContainerHost::GetRegistrations(
                            "ServiceWorkerContainerHost::GetRegistrations",
                            trace_id);
   context_->registry()->GetRegistrationsForOrigin(
-      url_.GetOrigin(),
+      url::Origin::Create(url_),
       base::AdaptCallbackForRepeating(base::BindOnce(
           &ServiceWorkerContainerHost::GetRegistrationsComplete,
           weak_factory_.GetWeakPtr(), std::move(callback), trace_id)));
@@ -449,8 +389,7 @@ void ServiceWorkerContainerHost::OnExecutionReady() {
 
 void ServiceWorkerContainerHost::OnVersionAttributesChanged(
     ServiceWorkerRegistration* registration,
-    blink::mojom::ChangedServiceWorkerObjectsMaskPtr changed_mask,
-    const ServiceWorkerRegistrationInfo& /* info */) {
+    blink::mojom::ChangedServiceWorkerObjectsMaskPtr changed_mask) {
   DCHECK_CURRENTLY_ON(ServiceWorkerContext::GetCoreThreadId());
   if (!get_ready_callback_ || get_ready_callback_->is_null())
     return;
@@ -506,8 +445,9 @@ void ServiceWorkerContainerHost::OnSkippedWaiting(
 void ServiceWorkerContainerHost::AddMatchingRegistration(
     ServiceWorkerRegistration* registration) {
   DCHECK_CURRENTLY_ON(ServiceWorkerContext::GetCoreThreadId());
-  DCHECK(ServiceWorkerUtils::ScopeMatches(registration->scope(), url_));
-  if (!IsContextSecureForServiceWorker())
+  DCHECK(blink::ServiceWorkerScopeMatches(registration->scope(),
+                                          GetUrlForScopeMatch()));
+  if (!IsEligibleForServiceWorkerController())
     return;
   size_t key = registration->scope().spec().size();
   if (base::Contains(matching_registrations_, key))
@@ -579,6 +519,12 @@ void ServiceWorkerContainerHost::CountFeature(
 
   // And only when loading finished so the controller is really settled.
   if (!is_execution_ready())
+    return;
+
+  // `container_` shouldn't be disconnected during the lifetime of `this` but
+  // there seems a situation where `container_` is disconnected.
+  // TODO(crbug.com/1136843): Figure out the cause and remove this check.
+  if (!container_.is_connected())
     return;
 
   container_->CountFeature(feature);
@@ -676,6 +622,30 @@ void ServiceWorkerContainerHost::RemoveServiceWorkerRegistrationObjectHost(
     int64_t registration_id) {
   DCHECK_CURRENTLY_ON(ServiceWorkerContext::GetCoreThreadId());
   DCHECK(base::Contains(registration_object_hosts_, registration_id));
+  // This is a workaround for a really unfavorable ownership structure of
+  // service worker content code. This boils down to the following ownership
+  // cycle:
+  // 1. This class owns ServiceWorkerRegistrationObjectHost via std::unique_ptr
+  //    in registration_object_hosts_.
+  // 2. The ServiceWorkerRegistrationObjectHost has a
+  //    scoped_refptr<ServiceWorkerRegistration> registration_ member.
+  // 3. The ServiceWorkerRegistration has multiple
+  //    scoped_refptr<ServiceWorkerVersion> members.
+  // 4. ServiceWorkerVersion has a std::unique_ptr<ServiceWorkerHost>
+  //    worker_host_ member.
+  // 5. ServiceWorkerHost in turn owns an instance of this class via
+  //    its worker_host_ member.
+  // What this all means is that erasing the registration_id here can actually
+  // lead to "this" ending up being destroyed after we exit from the erase
+  // call. This might not seem fatal, but is when using libstdc++. Apparently
+  // the C++ standard does not define when the destructor of the value from the
+  // map gets called. In libcxx its called after the key has been removed from
+  // the map, while in libstdc++ the destructor gets called first and then
+  // the key is removed before the erase call returns. This means that in
+  // case of libstdc++ the value we're removing from the map in the erase call
+  // can be deleted a second time when registration_object_hosts_ destructor
+  // gets called in ~ServiceWorkerContainerHost.
+  auto to_be_deleted = std::move(registration_object_hosts_[registration_id]);
   registration_object_hosts_.erase(registration_id);
 }
 
@@ -717,40 +687,50 @@ void ServiceWorkerContainerHost::RemoveServiceWorkerObjectHost(
     int64_t version_id) {
   DCHECK_CURRENTLY_ON(ServiceWorkerContext::GetCoreThreadId());
   DCHECK(base::Contains(service_worker_object_hosts_, version_id));
+
+  // ServiceWorkerObjectHost to be deleted may have the last reference to
+  // ServiceWorkerVersion that indirectly owns this ServiceWorkerContainerHost.
+  // If we erase the object host directly from the map, |this| could be deleted
+  // during the map operation and may crash. To avoid the case, we take the
+  // ownership of the object host from the map first, and then erase the entry
+  // from the map. See https://crbug.com/1056598 for details.
+  std::unique_ptr<ServiceWorkerObjectHost> to_be_deleted =
+      std::move(service_worker_object_hosts_[version_id]);
+  DCHECK(to_be_deleted);
   service_worker_object_hosts_.erase(version_id);
 }
 
 bool ServiceWorkerContainerHost::IsContainerForServiceWorker() const {
   DCHECK_CURRENTLY_ON(ServiceWorkerContext::GetCoreThreadId());
-  return client_type_ == base::nullopt;
+  return client_info_ == base::nullopt;
 }
 
 bool ServiceWorkerContainerHost::IsContainerForClient() const {
   DCHECK_CURRENTLY_ON(ServiceWorkerContext::GetCoreThreadId());
-  return client_type_ != base::nullopt;
+  return client_info_ != base::nullopt;
 }
 
 blink::mojom::ServiceWorkerClientType
 ServiceWorkerContainerHost::GetClientType() const {
   DCHECK_CURRENTLY_ON(ServiceWorkerContext::GetCoreThreadId());
-  DCHECK(client_type_);
-  return *client_type_;
+  DCHECK(client_info_);
+  return client_info_->type();
 }
 
 bool ServiceWorkerContainerHost::IsContainerForWindowClient() const {
   DCHECK_CURRENTLY_ON(ServiceWorkerContext::GetCoreThreadId());
-  return client_type_ &&
-         *client_type_ == blink::mojom::ServiceWorkerClientType::kWindow;
+  return client_info_ &&
+         client_info_->type() == blink::mojom::ServiceWorkerClientType::kWindow;
 }
 
 bool ServiceWorkerContainerHost::IsContainerForWorkerClient() const {
   DCHECK_CURRENTLY_ON(ServiceWorkerContext::GetCoreThreadId());
   using blink::mojom::ServiceWorkerClientType;
-  if (!client_type_)
+  if (!client_info_)
     return false;
 
-  return *client_type_ == ServiceWorkerClientType::kDedicatedWorker ||
-         *client_type_ == ServiceWorkerClientType::kSharedWorker;
+  return client_info_->type() == ServiceWorkerClientType::kDedicatedWorker ||
+         client_info_->type() == ServiceWorkerClientType::kSharedWorker;
 }
 
 ServiceWorkerClientInfo ServiceWorkerContainerHost::GetServiceWorkerClientInfo()
@@ -758,8 +738,7 @@ ServiceWorkerClientInfo ServiceWorkerContainerHost::GetServiceWorkerClientInfo()
   DCHECK_CURRENTLY_ON(ServiceWorkerContext::GetCoreThreadId());
   DCHECK(IsContainerForClient());
 
-  return ServiceWorkerClientInfo(process_id_, frame_id_, web_contents_getter_,
-                                 *client_type_);
+  return *client_info_;
 }
 
 void ServiceWorkerContainerHost::OnBeginNavigationCommit(
@@ -767,11 +746,16 @@ void ServiceWorkerContainerHost::OnBeginNavigationCommit(
     int container_frame_id,
     const network::CrossOriginEmbedderPolicy& cross_origin_embedder_policy,
     mojo::PendingRemote<network::mojom::CrossOriginEmbedderPolicyReporter>
-        coep_reporter) {
+        coep_reporter,
+    ukm::SourceId document_ukm_source_id) {
   DCHECK_CURRENTLY_ON(ServiceWorkerContext::GetCoreThreadId());
   DCHECK(IsContainerForWindowClient());
 
-  SetContainerProcessId(container_process_id);
+  DCHECK_EQ(ChildProcessHost::kInvalidUniqueID, process_id_);
+  DCHECK_NE(ChildProcessHost::kInvalidUniqueID, container_process_id);
+  process_id_ = container_process_id;
+  if (controller_)
+    controller_->UpdateForegroundPriority();
 
   DCHECK_EQ(MSG_ROUTING_NONE, frame_id_);
   DCHECK_NE(MSG_ROUTING_NONE, container_frame_id);
@@ -794,26 +778,33 @@ void ServiceWorkerContainerHost::OnBeginNavigationCommit(
                                      std::move(coep_reporter_to_be_passed));
   }
 
-  if (IsBackForwardCacheEnabled()) {
-    RunOrPostTaskOnThread(
-        FROM_HERE, BrowserThread::UI,
-        base::BindOnce(
-            [](int process_id, int frame_id, const std::string& uuid,
-               base::WeakPtr<ServiceWorkerContainerHost> self) {
-              auto* rfh = RenderFrameHostImpl::FromID(process_id, frame_id);
-              // |rfh| may be null in tests (but it should not happen in
-              // production).
-              if (rfh)
-                rfh->AddServiceWorkerContainerHost(uuid, self);
-            },
-            container_process_id, frame_id_, client_uuid(), GetWeakPtr()));
-  }
+  auto* rfh = RenderFrameHostImpl::FromID(container_process_id, frame_id());
+  // |rfh| may be null in tests (but it should not happen in production).
+  if (rfh)
+    rfh->AddServiceWorkerContainerHost(client_uuid(), GetWeakPtr());
+
+  DCHECK_EQ(ukm_source_id_, ukm::kInvalidSourceId);
+  ukm_source_id_ = document_ukm_source_id;
 
   TransitionToClientPhase(ClientPhase::kResponseCommitted);
 }
 
+void ServiceWorkerContainerHost::OnEndNavigationCommit() {
+  DCHECK_CURRENTLY_ON(ServiceWorkerContext::GetCoreThreadId());
+  DCHECK(IsContainerForWindowClient());
+
+  DCHECK(!navigation_commit_ended_);
+  navigation_commit_ended_ = true;
+
+  if (controller_) {
+    controller_->OnControlleeNavigationCommitted(client_uuid_, process_id_,
+                                                 frame_id_);
+  }
+}
+
 void ServiceWorkerContainerHost::CompleteWebWorkerPreparation(
-    const network::CrossOriginEmbedderPolicy& cross_origin_embedder_policy) {
+    const network::CrossOriginEmbedderPolicy& cross_origin_embedder_policy,
+    ukm::SourceId worker_ukm_source_id) {
   DCHECK_CURRENTLY_ON(ServiceWorkerContext::GetCoreThreadId());
   DCHECK(IsContainerForWorkerClient());
 
@@ -827,6 +818,9 @@ void ServiceWorkerContainerHost::CompleteWebWorkerPreparation(
                                      cross_origin_embedder_policy_.value(),
                                      mojo::NullRemote());
   }
+
+  DCHECK_EQ(ukm_source_id_, ukm::kInvalidSourceId);
+  ukm_source_id_ = worker_ukm_source_id;
 
   TransitionToClientPhase(ClientPhase::kResponseCommitted);
   SetExecutionReady();
@@ -853,12 +847,8 @@ void ServiceWorkerContainerHost::UpdateUrls(
     // Revoke the token on URL change since any service worker holding the token
     // may no longer be the potential controller of this frame and shouldn't
     // have the power to display SSL dialogs for it.
-    if (IsContainerForWindowClient()) {
-      auto* registry = FrameTreeNodeIdRegistry::GetInstance();
-      registry->Remove(fetch_request_window_id_);
+    if (IsContainerForWindowClient())
       fetch_request_window_id_ = base::UnguessableToken::Create();
-      registry->Add(fetch_request_window_id_, frame_tree_node_id_);
-    }
   }
 
   auto previous_origin = url::Origin::Create(previous_url);
@@ -882,14 +872,8 @@ void ServiceWorkerContainerHost::UpdateUrls(
     // Set UUID to the new one.
     std::string previous_client_uuid = client_uuid_;
     client_uuid_ = base::GenerateGUID();
-    if (context_) {
+    if (context_)
       context_->UpdateContainerHostClientID(previous_client_uuid, client_uuid_);
-      // Update the disconnect handler, too.
-      DCHECK(receiver_.is_bound());
-      receiver_.set_disconnect_handler(base::BindOnce(
-          &ServiceWorkerContextCore::UnregisterContainerHostByClientID,
-          context_, client_uuid_));
-    }
   }
 
   SyncMatchingRegistrations();
@@ -902,7 +886,7 @@ void ServiceWorkerContainerHost::SetControllerRegistration(
   DCHECK(IsContainerForClient());
 
   if (controller_registration) {
-    CHECK(IsContextSecureForServiceWorker());
+    CHECK(IsEligibleForServiceWorkerController());
     DCHECK(controller_registration->active_version());
 #if DCHECK_IS_ON()
     DCHECK(IsMatchingRegistration(controller_registration.get()));
@@ -916,6 +900,8 @@ void ServiceWorkerContainerHost::SetControllerRegistration(
 mojo::Remote<blink::mojom::ControllerServiceWorker>
 ServiceWorkerContainerHost::GetRemoteControllerServiceWorker() {
   DCHECK_CURRENTLY_ON(ServiceWorkerContext::GetCoreThreadId());
+  DCHECK(IsContainerForClient());
+
   DCHECK(controller_);
   if (controller_->fetch_handler_existence() ==
       ServiceWorkerVersion::FetchHandlerExistence::DOES_NOT_EXIST) {
@@ -972,36 +958,34 @@ bool ServiceWorkerContainerHost::AllowServiceWorker(const GURL& scope,
                                                     const GURL& script_url) {
   DCHECK_CURRENTLY_ON(ServiceWorkerContext::GetCoreThreadId());
   DCHECK(context_);
-  AllowServiceWorkerResult allowed = AllowServiceWorkerResult::No();
-  if (ServiceWorkerContext::IsServiceWorkerOnUIEnabled()) {
-    allowed = GetContentClient()->browser()->AllowServiceWorkerOnUI(
-        scope, site_for_cookies().RepresentativeUrl(), top_frame_origin(),
-        script_url, context_->wrapper()->browser_context());
-  } else {
-    allowed = GetContentClient()->browser()->AllowServiceWorkerOnIO(
-        scope, site_for_cookies().RepresentativeUrl(), top_frame_origin(),
-        script_url, context_->wrapper()->resource_context());
-  }
-  RunOrPostTaskOnThread(FROM_HERE, BrowserThread::UI,
-                        base::BindOnce(&ReportServiceWorkerAccess, process_id_,
-                                       frame_id_, scope, allowed));
+  AllowServiceWorkerResult allowed =
+      GetContentClient()->browser()->AllowServiceWorker(
+          scope, site_for_cookies().RepresentativeUrl(), top_frame_origin(),
+          script_url, context_->wrapper()->browser_context());
+  ReportServiceWorkerAccess(process_id(), frame_id(), scope, allowed);
   return allowed;
 }
 
-bool ServiceWorkerContainerHost::IsContextSecureForServiceWorker() const {
+bool ServiceWorkerContainerHost::IsEligibleForServiceWorkerController() const {
   DCHECK_CURRENTLY_ON(ServiceWorkerContext::GetCoreThreadId());
   DCHECK(IsContainerForClient());
 
   if (!url_.is_valid())
     return false;
-  if (!OriginCanAccessServiceWorkers(url_))
+  // Pass GetUrlForScopeMatch() instead of `url_` because we cannot take the
+  // origin of `url_` when it's a blob URL (see https://crbug.com/1144717). It's
+  // guaranteed that the URL returned by GetURLForScopeMatch() has the same
+  // logical origin as `url_`.
+  // TODO(asamidoi): Add url::Origin member for ServiceWorkerContainerHost and
+  // use it as the argument of OriginCanAccessServiceWorkers().
+  if (!OriginCanAccessServiceWorkers(GetUrlForScopeMatch()))
     return false;
 
   if (is_parent_frame_secure_)
     return true;
 
   std::set<std::string> schemes;
-  GetContentClient()->browser()->GetSchemesBypassingSecureContextCheckWhitelist(
+  GetContentClient()->browser()->GetSchemesBypassingSecureContextCheckAllowlist(
       &schemes);
   return schemes.find(url_.scheme()) != schemes.end();
 }
@@ -1023,6 +1007,8 @@ bool ServiceWorkerContainerHost::is_response_committed() const {
 void ServiceWorkerContainerHost::AddExecutionReadyCallback(
     ExecutionReadyCallback callback) {
   DCHECK_CURRENTLY_ON(ServiceWorkerContext::GetCoreThreadId());
+  DCHECK(IsContainerForClient());
+
   DCHECK(!is_execution_ready());
   execution_ready_callbacks_.push_back(std::move(callback));
 }
@@ -1030,17 +1016,8 @@ void ServiceWorkerContainerHost::AddExecutionReadyCallback(
 bool ServiceWorkerContainerHost::is_execution_ready() const {
   DCHECK_CURRENTLY_ON(ServiceWorkerContext::GetCoreThreadId());
   DCHECK(IsContainerForClient());
-  return client_phase_ == ClientPhase::kExecutionReady;
-}
 
-void ServiceWorkerContainerHost::SetContainerProcessId(
-    int container_process_id) {
-  DCHECK_CURRENTLY_ON(ServiceWorkerContext::GetCoreThreadId());
-  DCHECK_EQ(ChildProcessHost::kInvalidUniqueID, process_id_);
-  DCHECK_NE(ChildProcessHost::kInvalidUniqueID, container_process_id);
-  process_id_ = container_process_id;
-  if (controller_)
-    controller_->UpdateForegroundPriority();
+  return client_phase_ == ClientPhase::kExecutionReady;
 }
 
 const std::string& ServiceWorkerContainerHost::client_uuid() const {
@@ -1087,14 +1064,14 @@ ServiceWorkerRegistration* ServiceWorkerContainerHost::controller_registration()
 }
 
 void ServiceWorkerContainerHost::set_service_worker_host(
-    ServiceWorkerProviderHost* service_worker_host) {
+    ServiceWorkerHost* service_worker_host) {
   DCHECK(IsContainerForServiceWorker());
   DCHECK(!service_worker_host_);
   DCHECK(service_worker_host);
   service_worker_host_ = service_worker_host;
 }
 
-ServiceWorkerProviderHost* ServiceWorkerContainerHost::service_worker_host() {
+ServiceWorkerHost* ServiceWorkerContainerHost::service_worker_host() {
   DCHECK_CURRENTLY_ON(ServiceWorkerContext::GetCoreThreadId());
   DCHECK(IsContainerForServiceWorker());
   return service_worker_host_;
@@ -1111,18 +1088,11 @@ void ServiceWorkerContainerHost::EvictFromBackForwardCache(
   DCHECK(IsBackForwardCacheEnabled());
   DCHECK(IsContainerForWindowClient());
   is_in_back_forward_cache_ = false;
-  RunOrPostTaskOnThread(
-      FROM_HERE, BrowserThread::UI,
-      base::BindOnce(
-          [](int process_id, int frame_id,
-             BackForwardCacheMetrics::NotRestoredReason reason) {
-            auto* rfh = RenderFrameHostImpl::FromID(process_id, frame_id);
-            // |rfh| could be evicted before this function is called.
-            if (!rfh || !rfh->IsInBackForwardCache())
-              return;
-            rfh->EvictFromBackForwardCacheWithReason(reason);
-          },
-          process_id_, frame_id_, reason));
+
+  auto* rfh = RenderFrameHostImpl::FromID(process_id(), frame_id());
+  // |rfh| could be evicted before this function is called.
+  if (rfh && rfh->IsInBackForwardCache())
+    rfh->EvictFromBackForwardCacheWithReason(reason);
 }
 
 void ServiceWorkerContainerHost::OnEnterBackForwardCache() {
@@ -1160,7 +1130,8 @@ void ServiceWorkerContainerHost::SyncMatchingRegistrations() {
   for (const auto& key_registration : registrations) {
     ServiceWorkerRegistration* registration = key_registration.second;
     if (!registration->is_uninstalled() &&
-        ServiceWorkerUtils::ScopeMatches(registration->scope(), url_)) {
+        blink::ServiceWorkerScopeMatches(registration->scope(),
+                                         GetUrlForScopeMatch())) {
       AddMatchingRegistration(registration);
     }
   }
@@ -1218,10 +1189,15 @@ void ServiceWorkerContainerHost::SetExecutionReady() {
   DCHECK(!is_execution_ready());
   TransitionToClientPhase(ClientPhase::kExecutionReady);
   RunExecutionReadyCallbacks();
+
+  if (context_)
+    context_->NotifyClientIsExecutionReady(*this);
 }
 
 void ServiceWorkerContainerHost::RunExecutionReadyCallbacks() {
   DCHECK_CURRENTLY_ON(ServiceWorkerContext::GetCoreThreadId());
+  DCHECK(IsContainerForClient());
+
   std::vector<ExecutionReadyCallback> callbacks;
   execution_ready_callbacks_.swap(callbacks);
   base::ThreadTaskRunnerHandle::Get()->PostTask(
@@ -1253,7 +1229,7 @@ void ServiceWorkerContainerHost::UpdateController(
   ServiceWorkerVersion* version =
       controller_registration_ ? controller_registration_->active_version()
                                : nullptr;
-  CHECK(!version || IsContextSecureForServiceWorker());
+  CHECK(!version || IsEligibleForServiceWorkerController());
   if (version == controller_.get())
     return;
 
@@ -1305,9 +1281,6 @@ void ServiceWorkerContainerHost::CheckControllerConsistency(
       break;
     case ServiceWorkerVersion::REDUNDANT: {
       if (should_crash) {
-        DEBUG_ALIAS_FOR_CSTR(
-            redundant_callstack_str,
-            controller_->redundant_state_callstack().ToString().c_str(), 1024);
         CHECK(false);
       }
       break;
@@ -1324,6 +1297,8 @@ void ServiceWorkerContainerHost::StartControllerComplete(
     mojo::PendingReceiver<blink::mojom::ControllerServiceWorker> receiver,
     blink::ServiceWorkerStatusCode status) {
   DCHECK_CURRENTLY_ON(ServiceWorkerContext::GetCoreThreadId());
+  DCHECK(IsContainerForClient());
+
   if (status == blink::ServiceWorkerStatusCode::kOk) {
     DCHECK(is_response_committed());
 
@@ -1608,6 +1583,37 @@ bool ServiceWorkerContainerHost::CanServeContainerHostMethods(
   }
 
   return true;
+}
+
+const GURL& ServiceWorkerContainerHost::GetUrlForScopeMatch() const {
+  DCHECK(IsContainerForClient());
+  if (!scope_match_url_for_blob_client_.is_empty())
+    return scope_match_url_for_blob_client_;
+  return url_;
+}
+
+void ServiceWorkerContainerHost::InheritControllerFrom(
+    ServiceWorkerContainerHost& creator_host,
+    const GURL& blob_url) {
+  DCHECK_CURRENTLY_ON(ServiceWorkerContext::GetCoreThreadId());
+  DCHECK(IsContainerForClient());
+  DCHECK_EQ(blink::mojom::ServiceWorkerClientType::kDedicatedWorker,
+            GetClientType());
+  DCHECK(blob_url.SchemeIsBlob());
+
+  UpdateUrls(blob_url, net::SiteForCookies::FromUrl(blob_url),
+             creator_host.top_frame_origin());
+
+  // Let `scope_match_url_for_blob_client_` be the creator's url for scope match
+  // because a client should be handled by the service worker of its creator.
+  scope_match_url_for_blob_client_ = creator_host.GetUrlForScopeMatch();
+
+  // Inherit the controller of the creator.
+  if (creator_host.controller_registration()) {
+    AddMatchingRegistration(creator_host.controller_registration());
+    SetControllerRegistration(creator_host.controller_registration(),
+                              false /* notify_controllerchange */);
+  }
 }
 
 }  // namespace content

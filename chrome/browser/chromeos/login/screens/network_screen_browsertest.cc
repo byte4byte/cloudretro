@@ -22,6 +22,7 @@
 #include "chrome/browser/ui/webui/chromeos/login/network_screen_handler.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chromeos/constants/chromeos_switches.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -36,11 +37,6 @@ using ::testing::ReturnRef;
 using views::Button;
 
 namespace chromeos {
-
-class DummyButtonListener : public views::ButtonListener {
- public:
-  void ButtonPressed(views::Button* sender, const ui::Event& event) override {}
-};
 
 class NetworkScreenTest : public InProcessBrowserTest {
  public:
@@ -60,8 +56,8 @@ class NetworkScreenTest : public InProcessBrowserTest {
   void SetUpOnMainThread() override {
     InProcessBrowserTest::SetUpOnMainThread();
     ShowLoginWizard(NetworkScreenView::kScreenId);
-    network_screen_ = NetworkScreen::Get(
-        WizardController::default_controller()->screen_manager());
+    network_screen_ =
+        WizardController::default_controller()->GetScreen<NetworkScreen>();
     ASSERT_EQ(WizardController::default_controller()->current_screen(),
               network_screen_);
     network_screen_->set_exit_callback_for_testing(base::BindRepeating(

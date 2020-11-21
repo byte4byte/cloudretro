@@ -15,7 +15,6 @@
 #include "chrome/browser/extensions/component_loader.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/speech/extension_api/tts_engine_extension_observer.h"
 #include "chrome/browser/speech/extension_api/tts_extension_api.h"
 #include "chrome/browser/speech/extension_api/tts_extension_api_constants.h"
 #include "chrome/common/extensions/api/speech/tts_engine_manifest_handler.h"
@@ -34,6 +33,10 @@
 #include "net/base/network_change_notifier.h"
 #include "third_party/blink/public/mojom/devtools/console_message.mojom.h"
 #include "ui/base/l10n/l10n_util.h"
+
+#if defined(OS_CHROMEOS)
+#include "chrome/common/extensions/extension_constants.h"
+#endif
 
 using extensions::EventRouter;
 using extensions::Extension;
@@ -329,6 +332,9 @@ void TtsExtensionEngine::Resume(content::TtsUtterance* utterance) {
 
 bool TtsExtensionEngine::LoadBuiltInTtsEngine(
     content::BrowserContext* browser_context) {
+  if (disable_built_in_tts_engine_for_testing_)
+    return false;
+
 #if defined(OS_CHROMEOS)
   Profile* profile = Profile::FromBrowserContext(browser_context);
 
@@ -340,6 +346,29 @@ bool TtsExtensionEngine::LoadBuiltInTtsEngine(
   return true;
 #else
   return false;
+#endif
+}
+
+bool TtsExtensionEngine::IsBuiltInTtsEngineInitialized(
+    content::BrowserContext* browser_context) {
+  if (!browser_context || disable_built_in_tts_engine_for_testing_)
+    return true;
+
+#if defined(OS_CHROMEOS)
+  std::vector<content::VoiceData> voices;
+  GetVoices(browser_context, &voices);
+  bool saw_google_tts = false;
+  bool saw_espeak = false;
+  for (const auto& voice : voices) {
+    saw_google_tts |=
+        voice.engine_id == extension_misc::kGoogleSpeechSynthesisExtensionId;
+    saw_espeak |=
+        voice.engine_id == extension_misc::kEspeakSpeechSynthesisExtensionId;
+  }
+  return saw_google_tts && saw_espeak;
+#else
+  // Vacuously; no built in engines on other platforms yet. TODO: network tts?
+  return true;
 #endif
 }
 

@@ -104,6 +104,10 @@ class ArcBluetoothBridge
                                    int16_t rssi,
                                    const std::vector<uint8_t>& eir) override;
 
+  void DeviceConnectedStateChanged(device::BluetoothAdapter* adapter,
+                                   device::BluetoothDevice* device,
+                                   bool is_now_connected) override;
+
   void DeviceRemoved(device::BluetoothAdapter* adapter,
                      device::BluetoothDevice* device) override;
 
@@ -263,7 +267,8 @@ class ArcBluetoothBridge
   void ReadRemoteRssi(mojom::BluetoothAddressPtr remote_addr,
                       ReadRemoteRssiCallback callback) override;
 
-  void OpenBluetoothSocket(OpenBluetoothSocketCallback callback) override;
+  void OpenBluetoothSocketDeprecated(
+      OpenBluetoothSocketDeprecatedCallback callback) override;
 
   // Bluetooth Mojo host interface - Bluetooth Gatt Server functions
   // Android counterpart link:
@@ -312,13 +317,25 @@ class ArcBluetoothBridge
                        RemoveSdpRecordCallback callback) override;
 
   // Bluetooth Mojo host interface - Bluetooth RFCOMM functions
-  void RfcommListen(int32_t channel,
-                    int32_t optval,
-                    RfcommListenCallback callback) override;
-  void RfcommConnect(mojom::BluetoothAddressPtr remote_addr,
-                     int32_t channel,
-                     int32_t optval,
-                     RfcommConnectCallback callback) override;
+  void RfcommListenDeprecated(int32_t channel,
+                              int32_t optval,
+                              RfcommListenDeprecatedCallback callback) override;
+  void RfcommConnectDeprecated(
+      mojom::BluetoothAddressPtr remote_addr,
+      int32_t channel,
+      int32_t optval,
+      RfcommConnectDeprecatedCallback callback) override;
+
+  // Bluetooth Mojo host interface - Bluetooth socket functions
+  void BluetoothSocketListen(mojom::BluetoothSocketType sock_type,
+                             mojom::BluetoothSocketFlagsPtr sock_flags,
+                             int32_t port,
+                             BluetoothSocketListenCallback callback) override;
+  void BluetoothSocketConnect(mojom::BluetoothSocketType sock_type,
+                              mojom::BluetoothSocketFlagsPtr sock_flags,
+                              mojom::BluetoothAddressPtr remote_addr,
+                              int32_t port,
+                              BluetoothSocketConnectCallback callback) override;
 
   // Set up or disable multiple advertising.
   void ReserveAdvertisementHandle(
@@ -374,7 +391,7 @@ class ArcBluetoothBridge
   void OnPairedError(
       mojom::BluetoothAddressPtr addr,
       device::BluetoothDevice::ConnectErrorCode error_code) const;
-  void OnForgetDone(mojom::BluetoothAddressPtr addr) const;
+  void OnForgetDone(mojom::BluetoothAddressPtr addr);
   void OnForgetError(mojom::BluetoothAddressPtr addr) const;
 
   void OnGattConnectStateChanged(mojom::BluetoothAddressPtr addr,
@@ -535,48 +552,69 @@ class ArcBluetoothBridge
 
   void SendDevice(const device::BluetoothDevice* device) const;
 
-  // Data structures for RFCOMM listening/connecting sockets that live in
+  // Detects the pairing state change from DeviceChanged(). Two actions will be
+  // taken in this function:
+  // - Updates |devices_pairing_| to reflect the set of ongoing pairing requests
+  //   initiated by ARC;
+  // - Notifies Android of the pairing failure.
+  // Note that notifying Android of the pairing success is handled in
+  // DevicePairedChange() but not in this function.
+  void TrackPairingState(const device::BluetoothDevice* device);
+
+  // Data structures for Bluetooth listening/connecting sockets that live in
   // Chrome.
-  struct RfcommListeningSocket {
-    mojo::Remote<mojom::RfcommListeningSocketClient> remote;
+  struct BluetoothListeningSocket {
+    mojom::BluetoothSocketType sock_type;
+    // TODO(b/163099156): Remove the following two fields when
+    // RfcommListenDeprecated()/RfcommConnectDeprecated() are removed.
+    bool created_by_deprecated_method = false;
+    mojo::Remote<mojom::RfcommListeningSocketClient> deprecated_remote;
+    mojo::Remote<mojom::BluetoothListenSocketClient> remote;
     base::ScopedFD file;
     std::unique_ptr<base::FileDescriptorWatcher::Controller> controller;
-    RfcommListeningSocket();
-    ~RfcommListeningSocket();
+    BluetoothListeningSocket();
+    ~BluetoothListeningSocket();
   };
-  struct RfcommConnectingSocket {
-    mojo::Remote<mojom::RfcommConnectingSocketClient> remote;
+  struct BluetoothConnectingSocket {
+    mojom::BluetoothSocketType sock_type;
+    // TODO(b/163099156): Remove the following two fields when
+    // RfcommListenDeprecated()/RfcommConnectDeprecated() are removed.
+    bool created_by_deprecated_method = false;
+    mojo::Remote<mojom::RfcommConnectingSocketClient> deprecated_remote;
+    mojo::Remote<mojom::BluetoothConnectSocketClient> remote;
     base::ScopedFD file;
     std::unique_ptr<base::FileDescriptorWatcher::Controller> controller;
-    RfcommConnectingSocket();
-    ~RfcommConnectingSocket();
+    BluetoothConnectingSocket();
+    ~BluetoothConnectingSocket();
   };
 
-  // Creates a bluetooth socket with socket option |optval|, and then bind()
-  // and listen() with requested RFCOMM |channel| number. The actual channel
-  // number will be filled in |channel| as the return value. Returns a
-  // RfcommListeningSocket that holds the socket.
-  std::unique_ptr<RfcommListeningSocket> RfcommCreateListenSocket(
+  // Creates a Bluetooth socket with socket option |optval|, and then bind() and
+  // listen() with requested |port| number. The actual port number will be
+  // filled in |port| as the return value. Returns a BluetoothListeningSocket
+  // that holds the socket.
+  std::unique_ptr<BluetoothListeningSocket> CreateBluetoothListenSocket(
+      mojom::BluetoothSocketType type,
       int32_t optval,
-      uint8_t* channel);
-  // Creates a bluetooth socket with socket option |optval|, and then calls
-  // connect() to (|addr|, |channel|). This connect() call is non-blocking.
-  // Returns a RfcommConnectingSocket that holds the socket.
-  std::unique_ptr<RfcommConnectingSocket> RfcommCreateConnectSocket(
+      uint16_t* port);
+  // Creates a Bluetooth socket with socket option |optval|, and then calls
+  // connect() to (|addr|, |port|). This connect() call is non-blocking.
+  // Returns a BluetoothConnectingSocket that holds the socket.
+  std::unique_ptr<BluetoothConnectingSocket> CreateBluetoothConnectSocket(
+      mojom::BluetoothSocketType type,
+      int32_t optval,
       mojom::BluetoothAddressPtr addr,
-      uint8_t channel,
-      int32_t optval);
+      uint16_t port);
 
-  // Closes RFCOMM sockets. Releases the corresponding resources.
-  void RfcommCloseListeningSocket(RfcommListeningSocket* socket);
-  void RfcommCloseConnectingSocket(RfcommConnectingSocket* socket);
+  // Closes Bluetooth sockets. Releases the corresponding resources.
+  void CloseBluetoothListeningSocket(BluetoothListeningSocket* socket);
+  void CloseBluetoothConnectingSocket(BluetoothConnectingSocket* socket);
 
   // Called when the listening socket is ready to accept().
-  void OnRfcommListeningSocketReady(
-      ArcBluetoothBridge::RfcommListeningSocket* socket);
+  void OnBluetoothListeningSocketReady(
+      ArcBluetoothBridge::BluetoothListeningSocket* socket);
   // Called when the connecting socket is ready.
-  void OnRfcommConnectingSocketReady(
-      ArcBluetoothBridge::RfcommConnectingSocket* socket);
+  void OnBluetoothConnectingSocketReady(
+      ArcBluetoothBridge::BluetoothConnectingSocket* socket);
 
   ArcBridgeService* const arc_bridge_service_;  // Owned by ArcServiceManager.
 
@@ -605,14 +643,38 @@ class ArcBluetoothBridge
   // Monotonically increasing value to use as handle to give to Android side.
   int32_t gatt_server_attribute_next_handle_ = 0;
 
-  // For established connection from remote device, this is { CONNECTED, null }.
-  // For ongoing connection to remote device, this is { CONNECTING, null }.
-  // For established connection to remote device, this is { CONNECTED, ptr }.
+  // The devices that ARC has tried to pair by CreateBond() (including the
+  // devices that the pair request is ongoing) but there is no
+  // BluetoothGattConnection object associated to, during the lifetime of
+  // Android BT service. The main reason we need to maintain this set is that we
+  // need to manually close the links created by pair but not used by any GATT
+  // connection when Android BT service goes down, otherwise these links will be
+  // lingering.
+  std::set<std::string> devices_paired_by_arc_;
+
+  // The devices that ARC has tried to pair by CreateBond() and is in pairing
+  // state. This should be a subset of |devices_paired_by_arc_|. We maintain
+  // this set to detect the pairing failure signal. Please refer to
+  // TrackPairingState() for more details.
+  std::set<std::string> devices_pairing_;
+
+  // {state, connection}
+  // - For established connection from remote device, this is {CONNECTED, null}.
+  // - For ongoing connection to remote device, this is {CONNECTING, null}.
+  // - For established connection to remote device, this is {CONNECTED, ptr}.
   struct GattConnection {
     enum class ConnectionState { CONNECTING, CONNECTED } state;
     std::unique_ptr<device::BluetoothGattConnection> connection;
+    // Indicates whether we should call BluetoothDevice::Disconnect() when
+    // |connection| is closed. This field is true when the connection is
+    // initiated by ARC, i.e, when ConnectLEDevice is called, either 1) the link
+    // is down or 2) the remote device is paired by ARC firstly.
+    // TODO(b/151573141): Remove this field when Chrome can perform hard
+    // disconnect on a paired device correctly.
+    bool need_hard_disconnect;
     GattConnection(ConnectionState state,
-                   std::unique_ptr<device::BluetoothGattConnection> connection);
+                   std::unique_ptr<device::BluetoothGattConnection> connection,
+                   bool need_hard_disconnect);
     GattConnection();
     ~GattConnection();
     GattConnection(GattConnection&&);
@@ -662,10 +724,11 @@ class ArcBluetoothBridge
   // Start/StopLEScan().
   ArcBluetoothTaskQueue discovery_queue_;
 
-  // Rfcomm sockets that live in Chrome.
-  std::set<std::unique_ptr<RfcommListeningSocket>, base::UniquePtrComparator>
+  // Bluetooth sockets that live in Chrome.
+  std::set<std::unique_ptr<BluetoothListeningSocket>, base::UniquePtrComparator>
       listening_sockets_;
-  std::set<std::unique_ptr<RfcommConnectingSocket>, base::UniquePtrComparator>
+  std::set<std::unique_ptr<BluetoothConnectingSocket>,
+           base::UniquePtrComparator>
       connecting_sockets_;
 
   // Observes the ARC connection to Bluetooth service in Android. We need to do

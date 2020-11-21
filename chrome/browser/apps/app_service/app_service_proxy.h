@@ -8,17 +8,18 @@
 #include <map>
 #include <memory>
 #include <set>
+#include <vector>
 
 #include "base/callback.h"
 #include "base/containers/unique_ptr_adapters.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/apps/app_service/browser_app_launcher.h"
-#include "chrome/services/app_service/public/cpp/app_registry_cache.h"
-#include "chrome/services/app_service/public/cpp/icon_cache.h"
-#include "chrome/services/app_service/public/cpp/icon_coalescer.h"
-#include "chrome/services/app_service/public/cpp/preferred_apps_list.h"
 #include "components/keyed_service/core/keyed_service.h"
+#include "components/services/app_service/public/cpp/app_registry_cache.h"
+#include "components/services/app_service/public/cpp/icon_cache.h"
+#include "components/services/app_service/public/cpp/icon_coalescer.h"
+#include "components/services/app_service/public/cpp/preferred_apps_list.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/receiver_set.h"
 #include "mojo/public/cpp/bindings/remote.h"
@@ -26,23 +27,28 @@
 #include "url/gurl.h"
 
 #if defined(OS_CHROMEOS)
+#include "chrome/browser/apps/app_service/borealis_apps.h"
 #include "chrome/browser/apps/app_service/built_in_chromeos_apps.h"
 #include "chrome/browser/apps/app_service/crostini_apps.h"
-#include "chrome/browser/apps/app_service/extension_apps.h"
+#include "chrome/browser/apps/app_service/extension_apps_chromeos.h"
 #include "chrome/browser/apps/app_service/plugin_vm_apps.h"
+#include "chrome/browser/apps/app_service/web_apps_chromeos.h"
+#include "components/services/app_service/public/cpp/instance_registry.h"
+#else
+#include "chrome/browser/apps/app_service/extension_apps.h"
 #include "chrome/browser/apps/app_service/web_apps.h"
-#include "chrome/services/app_service/public/cpp/instance_registry.h"
 #endif  // OS_CHROMEOS
 
-class PrefRegistrySimple;
 class Profile;
 
 namespace apps {
 
 class AppServiceImpl;
-class UninstallDialog;
 
 #if defined(OS_CHROMEOS)
+class LacrosApps;
+class UninstallDialog;
+
 struct PauseData {
   int hours = 0;
   int minutes = 0;
@@ -50,13 +56,23 @@ struct PauseData {
 };
 #endif
 
+struct IntentLaunchInfo {
+  std::string app_id;
+  std::string activity_name;
+  std::string activity_label;
+};
+
 // Singleton (per Profile) proxy and cache of an App Service's apps.
 //
 // Singleton-ness means that //chrome/browser code (e.g UI code) can find *the*
 // proxy for a given Profile, and therefore share its caches.
 // Observe AppRegistryCache to delete the preferred app on app removed.
 //
-// See chrome/services/app_service/README.md.
+// On all platforms, there is no instance for incognito profiles.
+// On Chrome OS, an instance is created for the guest session profile and the
+// lock screen apps profile, but not for the signin profile.
+//
+// See components/services/app_service/README.md.
 class AppServiceProxy : public KeyedService,
                         public apps::IconLoader,
                         public apps::mojom::Subscriber,
@@ -69,8 +85,6 @@ class AppServiceProxy : public KeyedService,
   explicit AppServiceProxy(Profile* profile);
   ~AppServiceProxy() override;
 
-  static void RegisterProfilePrefs(PrefRegistrySimple* registry);
-
   void ReInitializeForTesting(Profile* profile);
 
   mojo::Remote<apps::mojom::AppService>& AppService();
@@ -80,7 +94,7 @@ class AppServiceProxy : public KeyedService,
   apps::InstanceRegistry& InstanceRegistry();
 #endif
 
-  BrowserAppLauncher& BrowserAppLauncher();
+  apps::BrowserAppLauncher* BrowserAppLauncher();
 
   apps::PreferredAppsList& PreferredApps();
 
@@ -90,7 +104,7 @@ class AppServiceProxy : public KeyedService,
       apps::mojom::AppType app_type,
       const std::string& app_id,
       apps::mojom::IconKeyPtr icon_key,
-      apps::mojom::IconCompression icon_compression,
+      apps::mojom::IconType icon_type,
       int32_t size_hint_in_dip,
       bool allow_placeholder_icon,
       apps::mojom::Publisher::LoadIconCallback callback) override;
@@ -117,6 +131,18 @@ class AppServiceProxy : public KeyedService,
                           int32_t event_flags,
                           apps::mojom::LaunchSource launch_source,
                           apps::mojom::FilePathsPtr file_paths);
+
+  // Launches the app for the given |app_id| with files from |file_urls| and
+  // their |mime_types|.
+  // |event_flags| provides additional context about the action which launches
+  // the app (e.g. a middle click indicating opening a background tab).
+  // |launch_source| is the possible app launch sources, e.g. from Shelf, from
+  // the search box, etc.
+  void LaunchAppWithFileUrls(const std::string& app_id,
+                             int32_t event_flags,
+                             apps::mojom::LaunchSource launch_source,
+                             const std::vector<GURL>& file_urls,
+                             const std::vector<std::string>& mime_types);
 
   // Launches an app for the given |app_id|, passing |intent| to the app.
   // |event_flags| provides additional context about the action which launch the
@@ -149,6 +175,11 @@ class AppServiceProxy : public KeyedService,
   // |parent_window|. Otherwise, the browser window will be used as the anchor.
   void Uninstall(const std::string& app_id, gfx::NativeWindow parent_window);
 
+  // Uninstalls an app for the given |app_id| without prompting the user to
+  // confirm.
+  void UninstallSilently(const std::string& app_id,
+                         apps::mojom::UninstallSource uninstall_source);
+
 #if defined(OS_CHROMEOS)
   // Pauses apps. |pause_data|'s key is the app_id. |pause_data|'s PauseData
   // is the time limit setting for the app, which is shown in the pause app
@@ -162,6 +193,9 @@ class AppServiceProxy : public KeyedService,
   void UnpauseApps(const std::set<std::string>& app_ids);
 #endif
 
+  // Stops the current running app for the given |app_id|.
+  void StopApp(const std::string& app_id);
+
   // Returns the menu items for the given |app_id|. |display_id| is the id of
   // the display from which the app is launched.
   void GetMenuModel(const std::string& app_id,
@@ -169,24 +203,45 @@ class AppServiceProxy : public KeyedService,
                     int64_t display_id,
                     apps::mojom::Publisher::GetMenuModelCallback callback);
 
+  // Executes a shortcut menu |command_id| and |shortcut_id| for a menu item
+  // previously built with GetMenuModel(). |app_id| is the menu app.
+  // |display_id| is the id of the display from which the app is launched.
+  void ExecuteContextMenuCommand(const std::string& app_id,
+                                 int command_id,
+                                 const std::string& shortcut_id,
+                                 int64_t display_id);
+
   // Opens native settings for the app with |app_id|.
   void OpenNativeSettings(const std::string& app_id);
 
   void FlushMojoCallsForTesting();
   apps::IconLoader* OverrideInnerIconLoaderForTesting(
       apps::IconLoader* icon_loader);
+#if defined(OS_CHROMEOS)
   void ReInitializeCrostiniForTesting(Profile* profile);
   void SetDialogCreatedCallbackForTesting(base::OnceClosure callback);
   void UninstallForTesting(const std::string& app_id,
                            gfx::NativeWindow parent_window,
                            base::OnceClosure callback);
+#endif
 
   // Returns a list of apps (represented by their ids) which can handle |url|.
-  std::vector<std::string> GetAppIdsForUrl(const GURL& url);
+  // If |exclude_browsers| is true, then exclude the browser apps.
+  std::vector<std::string> GetAppIdsForUrl(const GURL& url,
+                                           bool exclude_browsers = false);
 
-  // Returns a list of apps (represented by their ids) which can handle
-  // |intent|.
-  std::vector<std::string> GetAppIdsForIntent(apps::mojom::IntentPtr intent);
+  // Returns a list of apps (represented by their ids) and activities (if
+  // applied) which can handle |intent|. If |exclude_browsers| is true, then
+  // exclude the browser apps.
+  std::vector<IntentLaunchInfo> GetAppsForIntent(
+      const apps::mojom::IntentPtr& intent,
+      bool exclude_browsers = false);
+
+  // Returns a list of apps (represented by their ids) and activities (if
+  // applied) which can handle |filesystem_urls| and |mime_types|.
+  std::vector<IntentLaunchInfo> GetAppsForFiles(
+      const std::vector<GURL>& filesystem_urls,
+      const std::vector<std::string>& mime_types);
 
   // Sets |extension_apps_| and |web_apps_| to observe the ARC apps to set the
   // badge on the equivalent Chrome app's icon, when ARC is available.
@@ -249,7 +304,7 @@ class AppServiceProxy : public KeyedService,
         apps::mojom::AppType app_type,
         const std::string& app_id,
         apps::mojom::IconKeyPtr icon_key,
-        apps::mojom::IconCompression icon_compression,
+        apps::mojom::IconType icon_type,
         int32_t size_hint_in_dip,
         bool allow_placeholder_icon,
         apps::mojom::Publisher::LoadIconCallback callback) override;
@@ -291,6 +346,7 @@ class AppServiceProxy : public KeyedService,
   void InitializePreferredApps(
       PreferredAppsList::PreferredApps preferred_apps) override;
 
+#if defined(OS_CHROMEOS)
   void UninstallImpl(const std::string& app_id,
                      gfx::NativeWindow parent_window,
                      base::OnceClosure callback);
@@ -309,7 +365,6 @@ class AppServiceProxy : public KeyedService,
                                bool report_abuse,
                                UninstallDialog* uninstall_dialog);
 
-#if defined(OS_CHROMEOS)
   // Returns true if the app cannot be launched and a launch prevention dialog
   // is shown to the user (e.g. the app is paused or blocked). Returns false
   // otherwise (and the app can be launched).
@@ -367,12 +422,11 @@ class AppServiceProxy : public KeyedService,
 #if defined(OS_CHROMEOS)
   std::unique_ptr<BuiltInChromeOsApps> built_in_chrome_os_apps_;
   std::unique_ptr<CrostiniApps> crostini_apps_;
-  std::unique_ptr<ExtensionApps> extension_apps_;
+  std::unique_ptr<ExtensionAppsChromeOs> extension_apps_;
   std::unique_ptr<PluginVmApps> plugin_vm_apps_;
-  // TODO(crbug.com/877898): Erase extension_web_apps_. One of these is always
-  // nullptr.
-  std::unique_ptr<ExtensionApps> extension_web_apps_;
-  std::unique_ptr<WebApps> web_apps_;
+  std::unique_ptr<LacrosApps> lacros_apps_;
+  std::unique_ptr<WebAppsChromeOs> web_apps_;
+  std::unique_ptr<BorealisApps> borealis_apps_;
 
   bool arc_is_registered_ = false;
 
@@ -384,7 +438,14 @@ class AppServiceProxy : public KeyedService,
   // |pending_pause_requests|. If the app status is paused in AppRegistryCache
   // or pending_pause_requests, the app can't be launched.
   PausedApps pending_pause_requests_;
-#endif  // OS_CHROMEOS
+
+  using UninstallDialogs = std::set<std::unique_ptr<apps::UninstallDialog>,
+                                    base::UniquePtrComparator>;
+  UninstallDialogs uninstall_dialogs_;
+#else
+  std::unique_ptr<WebApps> web_apps_;
+  std::unique_ptr<ExtensionApps> extension_apps_;
+#endif
 
   Profile* profile_;
 
@@ -393,16 +454,40 @@ class AppServiceProxy : public KeyedService,
   // Chrome.
   std::unique_ptr<apps::BrowserAppLauncher> browser_app_launcher_;
 
-  using UninstallDialogs = std::set<std::unique_ptr<apps::UninstallDialog>,
-                                    base::UniquePtrComparator>;
-  UninstallDialogs uninstall_dialogs_;
-
   bool is_using_testing_profile_ = false;
   base::OnceClosure dialog_created_callback_;
 
   base::WeakPtrFactory<AppServiceProxy> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(AppServiceProxy);
+};
+
+class ScopedOmitBuiltInAppsForTesting {
+ public:
+  ScopedOmitBuiltInAppsForTesting();
+  ~ScopedOmitBuiltInAppsForTesting();
+
+ private:
+  ScopedOmitBuiltInAppsForTesting(const ScopedOmitBuiltInAppsForTesting&) =
+      delete;
+  ScopedOmitBuiltInAppsForTesting& operator=(
+      const ScopedOmitBuiltInAppsForTesting&) = delete;
+
+  const bool previous_omit_built_in_apps_for_testing_;
+};
+
+class ScopedOmitPluginVmAppsForTesting {
+ public:
+  ScopedOmitPluginVmAppsForTesting();
+  ~ScopedOmitPluginVmAppsForTesting();
+
+ private:
+  ScopedOmitPluginVmAppsForTesting(const ScopedOmitPluginVmAppsForTesting&) =
+      delete;
+  ScopedOmitPluginVmAppsForTesting& operator=(
+      const ScopedOmitPluginVmAppsForTesting&) = delete;
+
+  const bool previous_omit_plugin_vm_apps_for_testing_;
 };
 
 }  // namespace apps

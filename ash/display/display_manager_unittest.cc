@@ -22,7 +22,6 @@
 #include "ash/screen_util.h"
 #include "ash/shelf/shelf.h"
 #include "ash/shell.h"
-#include "ash/shell_state.h"
 #include "ash/strings/grit/ash_strings.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/wm/tablet_mode/tablet_mode_controller.h"
@@ -34,7 +33,6 @@
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
-#include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/env.h"
@@ -1168,14 +1166,12 @@ TEST_F(DisplayManagerTest, TouchCalibrationTest) {
   const ui::TouchscreenDevice touchdevice(
       11, ui::InputDeviceType::INPUT_DEVICE_USB,
       std::string("test touch device"), gfx::Size(123, 456), 1);
-  const display::TouchDeviceIdentifier touch_device_identifier_2 =
-      display::TouchDeviceIdentifier::FromDevice(touchdevice);
 
   ASSERT_EQ(2u, display_manager()->GetNumDisplays());
   const display::ManagedDisplayInfo display_info1 = GetDisplayInfoAt(0);
   const display::ManagedDisplayInfo display_info2 = GetDisplayInfoAt(1);
 
-  EXPECT_FALSE(tdm_test_api.GetTouchDeviceCount(display_info2));
+  EXPECT_FALSE(tdm_test_api.AreAssociated(display_info2, touchdevice));
 
   const display::TouchCalibrationData::CalibrationPointPairQuad
       point_pair_quad = {
@@ -1189,15 +1185,14 @@ TEST_F(DisplayManagerTest, TouchCalibrationTest) {
 
   // Set the touch calibration data for the secondary display.
   display_manager()->SetTouchCalibrationData(
-      display_info2.id(), point_pair_quad, bounds_at_calibration,
-      touch_device_identifier_2);
+      display_info2.id(), point_pair_quad, bounds_at_calibration, touchdevice);
 
-  EXPECT_TRUE(tdm_test_api.GetTouchDeviceCount(display_info2));
+  EXPECT_TRUE(tdm_test_api.AreAssociated(display_info2, touchdevice));
   EXPECT_EQ(touch_data, touch_device_manager->GetCalibrationData(
                             touchdevice, display_info2.id()));
 
   // Clearing touch calibration data from the secondary display.
-  touch_device_manager->ClearTouchCalibrationData(touch_device_identifier_2,
+  touch_device_manager->ClearTouchCalibrationData(touchdevice,
                                                   GetDisplayInfoAt(1).id());
 
   EXPECT_TRUE(touch_device_manager
@@ -1213,7 +1208,7 @@ TEST_F(DisplayManagerTest, TouchCalibrationTest) {
                                              bounds_at_calibration);
   display_manager()->SetTouchCalibrationData(
       display_info2.id(), point_pair_quad_2, bounds_at_calibration,
-      touch_device_identifier_2);
+      touchdevice);
 
   EXPECT_EQ(touch_data_2, touch_device_manager->GetCalibrationData(
                               touchdevice, GetDisplayInfoAt(1).id()));
@@ -1234,8 +1229,7 @@ TEST_F(DisplayManagerTest, TouchCalibrationTest) {
 
   // Make sure multiple touch devices works.
   display_manager()->SetTouchCalibrationData(
-      display_info2.id(), point_pair_quad, bounds_at_calibration,
-      touch_device_identifier_2);
+      display_info2.id(), point_pair_quad, bounds_at_calibration, touchdevice);
 
   EXPECT_EQ(touch_data, touch_device_manager->GetCalibrationData(
                             touchdevice, GetDisplayInfoAt(1).id()));
@@ -1243,12 +1237,10 @@ TEST_F(DisplayManagerTest, TouchCalibrationTest) {
   const ui::TouchscreenDevice touchdevice_2(
       12, ui::InputDeviceType::INPUT_DEVICE_USB,
       std::string("test touch device 2"), gfx::Size(234, 567), 1);
-  display::TouchDeviceIdentifier touch_device_identifier_2_2 =
-      display::TouchDeviceIdentifier::FromDevice(touchdevice_2);
 
   display_manager()->SetTouchCalibrationData(
       display_info2.id(), point_pair_quad_2, bounds_at_calibration,
-      touch_device_identifier_2_2);
+      touchdevice_2);
   EXPECT_EQ(touch_data_2, touch_device_manager->GetCalibrationData(
                               touchdevice_2, GetDisplayInfoAt(1).id()));
   EXPECT_EQ(touch_data, touch_device_manager->GetCalibrationData(
@@ -1755,8 +1747,8 @@ TEST_F(DisplayManagerTest, DontRememberBestResolution) {
   display_info_list.push_back(native_display_info);
   display_manager()->OnNativeDisplaysChanged(display_info_list);
 
-  display::ManagedDisplayMode expected_mode(gfx::Size(1000, 500), 0.0f, false,
-                                            false);
+  display::ManagedDisplayMode expected_mode(gfx::Size(1000, 500), 58.0f, false,
+                                            true);
 
   display::ManagedDisplayMode mode;
   EXPECT_FALSE(
@@ -1785,7 +1777,7 @@ TEST_F(DisplayManagerTest, DontRememberBestResolution) {
   EXPECT_FALSE(mode.native());
 
   expected_mode =
-      display::ManagedDisplayMode(gfx::Size(800, 300), 0.0f, false, false);
+      display::ManagedDisplayMode(gfx::Size(800, 300), 59.0f, false, false);
 
   EXPECT_TRUE(
       display_manager()->GetActiveModeForDisplayId(display_id, &active_mode));
@@ -1801,7 +1793,7 @@ TEST_F(DisplayManagerTest, DontRememberBestResolution) {
   EXPECT_TRUE(mode.native());
 
   expected_mode =
-      display::ManagedDisplayMode(gfx::Size(1000, 500), 0.0f, false, false);
+      display::ManagedDisplayMode(gfx::Size(1000, 500), 58.0f, false, true);
 
   EXPECT_TRUE(
       display_manager()->GetActiveModeForDisplayId(display_id, &active_mode));
@@ -1814,7 +1806,7 @@ TEST_F(DisplayManagerTest, ResolutionFallback) {
       display::CreateDisplayInfo(display_id, gfx::Rect(0, 0, 1000, 500));
   display::ManagedDisplayInfo::ManagedDisplayModeList display_modes;
   display_modes.push_back(
-      display::ManagedDisplayMode(gfx::Size(1000, 500), 58.0f, false, true));
+      display::ManagedDisplayMode(gfx::Size(1000, 500), 60.0f, false, true));
   display_modes.push_back(
       display::ManagedDisplayMode(gfx::Size(800, 300), 59.0f, false, false));
   display_modes.push_back(
@@ -1850,6 +1842,7 @@ TEST_F(DisplayManagerTest, ResolutionFallback) {
                                         gfx::Size(800, 300));
     display::ManagedDisplayInfo new_native_display_info =
         display::CreateDisplayInfo(display_id, gfx::Rect(0, 0, 1000, 500));
+    new_native_display_info.set_native(true);
     display::ManagedDisplayInfo::ManagedDisplayModeList copy = display_modes;
     new_native_display_info.SetManagedDisplayModes(copy);
     std::vector<display::ManagedDisplayInfo> new_display_info_list;
@@ -1860,7 +1853,7 @@ TEST_F(DisplayManagerTest, ResolutionFallback) {
     EXPECT_TRUE(
         display_manager()->GetSelectedModeForDisplayId(display_id, &mode));
     EXPECT_EQ("1000x500", mode.size().ToString());
-    EXPECT_EQ(58.0f, mode.refresh_rate());
+    EXPECT_EQ(60.0f, mode.refresh_rate());
     EXPECT_TRUE(mode.native());
   }
 }
@@ -3555,11 +3548,11 @@ class DisplayManagerOrientationTest : public DisplayManagerTest {
 
   void SetUp() override {
     DisplayManagerTest::SetUp();
-    portrait_primary->Set(ACCELEROMETER_SOURCE_SCREEN, false,
-                          -base::kMeanGravityFloat, 0.f, 0.f);
-    portrait_secondary->Set(ACCELEROMETER_SOURCE_SCREEN, false,
+    portrait_primary->Set(ACCELEROMETER_SOURCE_SCREEN, -base::kMeanGravityFloat,
+                          0.f, 0.f);
+    portrait_secondary->Set(ACCELEROMETER_SOURCE_SCREEN,
                             base::kMeanGravityFloat, 0.f, 0.f);
-    landscape_primary->Set(ACCELEROMETER_SOURCE_SCREEN, false, 0,
+    landscape_primary->Set(ACCELEROMETER_SOURCE_SCREEN, 0,
                            -base::kMeanGravityFloat, 0.f);
   }
 
@@ -4604,8 +4597,7 @@ TEST_F(DisplayManagerTest, UpdateRootWindowForNewWindows) {
   const auto test_removing_secondary = [this](size_t before, size_t after) {
     UpdateDisplay("800x600,800x600,800x600");
     aura::Window::Windows root_windows = Shell::GetAllRootWindows();
-    Shell::Get()->shell_state()->SetRootWindowForNewWindows(
-        root_windows[before]);
+    Shell::SetRootWindowForNewWindows(root_windows[before]);
     UpdateDisplay("800x600,800x600");
     EXPECT_EQ(root_windows[after], Shell::GetRootWindowForNewWindows());
   };
@@ -4619,8 +4611,7 @@ TEST_F(DisplayManagerTest, UpdateRootWindowForNewWindows) {
   // primary one.
   for (size_t before = 0u; before < 3u; ++before) {
     UpdateDisplay("800x600,800x600,800x600");
-    Shell::Get()->shell_state()->SetRootWindowForNewWindows(
-        Shell::GetAllRootWindows()[before]);
+    Shell::SetRootWindowForNewWindows(Shell::GetAllRootWindows()[before]);
     display_manager()->SetUnifiedDesktopEnabled(true);
     EXPECT_EQ(Shell::GetPrimaryRootWindow(),
               Shell::GetRootWindowForNewWindows());

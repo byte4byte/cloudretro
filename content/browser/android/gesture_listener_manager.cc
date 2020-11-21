@@ -137,6 +137,16 @@ void GestureListenerManager::SetMultiTouchZoomSupportEnabled(
     rwhva_->SetMultiTouchZoomSupportEnabled(enabled);
 }
 
+void GestureListenerManager::SetHasListenersAttached(JNIEnv* env,
+                                                     jboolean enabled) {
+  if (has_listeners_attached_ == enabled)
+    return;
+
+  has_listeners_attached_ = enabled;
+  if (rwhva_)
+    rwhva_->UpdateReportAllRootScrolls();
+}
+
 void GestureListenerManager::GestureEventAck(
     const blink::WebGestureEvent& event,
     blink::mojom::InputEventResultState ack_result) {
@@ -149,7 +159,7 @@ void GestureListenerManager::GestureEventAck(
   if (j_obj.is_null())
     return;
   Java_GestureListenerManagerImpl_onEventAck(
-      env, j_obj, event.GetType(),
+      env, j_obj, static_cast<int>(event.GetType()),
       ack_result == blink::mojom::InputEventResultState::kConsumed);
 }
 
@@ -219,14 +229,24 @@ void GestureListenerManager::UpdateOnTouchDown() {
   Java_GestureListenerManagerImpl_updateOnTouchDown(env, obj);
 }
 
+void GestureListenerManager::OnRootScrollOffsetChanged(
+    const gfx::Vector2dF& root_scroll_offset) {
+  JNIEnv* env = AttachCurrentThread();
+  ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
+  if (obj.is_null())
+    return;
+
+  Java_GestureListenerManagerImpl_onRootScrollOffsetChanged(
+      env, obj, root_scroll_offset.x(), root_scroll_offset.y());
+}
+
 void GestureListenerManager::UpdateRenderProcessConnection(
     RenderWidgetHostViewAndroid* old_rwhva,
     RenderWidgetHostViewAndroid* new_rwhva) {
   if (old_rwhva)
-    old_rwhva->set_gesture_listener_manager(nullptr);
-  if (new_rwhva) {
-    new_rwhva->set_gesture_listener_manager(this);
-  }
+    old_rwhva->SetGestureListenerManager(nullptr);
+  if (new_rwhva)
+    new_rwhva->SetGestureListenerManager(this);
   rwhva_ = new_rwhva;
 }
 

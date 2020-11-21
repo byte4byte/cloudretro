@@ -2,6 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+/** @const {number} */
+const DEFAULT_BLACK_CURSOR_COLOR = 0;
+
 /**
  * @fileoverview
  * 'settings-manage-a11y-page' is the subpage with the accessibility
@@ -10,7 +13,12 @@
 Polymer({
   is: 'settings-manage-a11y-page',
 
-  behaviors: [WebUIListenerBehavior, settings.RouteOriginBehavior],
+  behaviors: [
+    DeepLinkingBehavior,
+    settings.RouteObserverBehavior,
+    settings.RouteOriginBehavior,
+    WebUIListenerBehavior,
+  ],
 
   properties: {
     /**
@@ -98,12 +106,67 @@ Polymer({
       },
     },
 
-    showExperimentalSwitchAccess_: {
+    /** @private {!Array<{name: string, value: number}>} */
+    cursorColorOptions_: {
+      readOnly: true,
+      type: Array,
+      value() {
+        return [
+          {
+            value: DEFAULT_BLACK_CURSOR_COLOR,
+            name: loadTimeData.getString('cursorColorBlack'),
+          },
+          {
+            value: 0xd93025,  // Red 600
+            name: loadTimeData.getString('cursorColorRed'),
+          },
+          {
+            value: 0xf29900,  //  Yellow 700
+            name: loadTimeData.getString('cursorColorYellow'),
+          },
+          {
+            value: 0x1e8e3e,  // Green 600
+            name: loadTimeData.getString('cursorColorGreen'),
+          },
+          {
+            value: 0x03b6be,  // Cyan 600
+            name: loadTimeData.getString('cursorColorCyan'),
+          },
+          {
+            value: 0x1a73e8,  // Blue 600
+            name: loadTimeData.getString('cursorColorBlue'),
+          },
+          {
+            value: 0xc61ad9,  // Magenta 600
+            name: loadTimeData.getString('cursorColorMagenta'),
+          },
+          {
+            value: 0xf50057,  // Pink A400
+            name: loadTimeData.getString('cursorColorPink'),
+          },
+
+        ];
+      },
+    },
+
+    /** @private */
+    shouldShowExperimentalCursorColor_: {
       type: Boolean,
       value() {
         return loadTimeData.getBoolean(
-            'showExperimentalAccessibilitySwitchAccess');
+            'showExperimentalAccessibilityCursorColor');
       },
+    },
+
+    /**
+     * Whether the user is in kiosk mode.
+     * @private
+     */
+    isKioskModeActive_: {
+      type: Boolean,
+      value() {
+        return loadTimeData.getBoolean('isKioskModeActive');
+      }
     },
 
     /**
@@ -113,10 +176,8 @@ Polymer({
      */
     showShelfNavigationButtonsSettings_: {
       type: Boolean,
-      value() {
-        return loadTimeData.getBoolean(
-            'showTabletModeShelfNavigationButtonsSettings');
-      },
+      computed:
+          'computeShowShelfNavigationButtonsSettings_(isKioskModeActive_)',
     },
 
     /** @private */
@@ -128,14 +189,18 @@ Polymer({
     },
 
     /**
-     * |hasKeyboard_|, |hasMouse_|, and |hasTouchpad_| start undefined so
-     * observers don't trigger until they have been populated.
+     * |hasKeyboard_|, |hasMouse_|, |hasPointingStick_|, and |hasTouchpad_|
+     * start undefined so observers don't trigger until they have been
+     * populated.
      * @private
      */
     hasKeyboard_: Boolean,
 
     /** @private */
     hasMouse_: Boolean,
+
+    /** @private */
+    hasPointingStick_: Boolean,
 
     /** @private */
     hasTouchpad_: Boolean,
@@ -167,34 +232,78 @@ Polymer({
           'shelfNavigationButtonsImplicitlyEnabled_,' +
           'prefs.settings.a11y.tablet_mode_shelf_nav_buttons_enabled)',
     },
+
+    /**
+     * Used by DeepLinkingBehavior to focus this page's deep links.
+     * @type {!Set<!chromeos.settings.mojom.Setting>}
+     */
+    supportedSettingIds: {
+      type: Object,
+      value: () => new Set([
+        chromeos.settings.mojom.Setting.kChromeVox,
+        chromeos.settings.mojom.Setting.kSelectToSpeak,
+        chromeos.settings.mojom.Setting.kHighContrastMode,
+        chromeos.settings.mojom.Setting.kFullscreenMagnifier,
+        chromeos.settings.mojom.Setting.kFullscreenMagnifierFocusFollowing,
+        chromeos.settings.mojom.Setting.kDockedMagnifier,
+        chromeos.settings.mojom.Setting.kStickyKeys,
+        chromeos.settings.mojom.Setting.kOnScreenKeyboard,
+        chromeos.settings.mojom.Setting.kDictation,
+        chromeos.settings.mojom.Setting.kHighlightKeyboardFocus,
+        chromeos.settings.mojom.Setting.kHighlightTextCaret,
+        chromeos.settings.mojom.Setting.kAutoClickWhenCursorStops,
+        chromeos.settings.mojom.Setting.kLargeCursor,
+        chromeos.settings.mojom.Setting.kHighlightCursorWhileMoving,
+        chromeos.settings.mojom.Setting.kTabletNavigationButtons,
+        chromeos.settings.mojom.Setting.kMonoAudio,
+        chromeos.settings.mojom.Setting.kStartupSound,
+        chromeos.settings.mojom.Setting.kEnableSwitchAccess,
+        chromeos.settings.mojom.Setting.kEnableCursorColor,
+      ]),
+    },
   },
 
   observers: [
-    'pointersChanged_(hasMouse_, hasTouchpad_)',
+    'pointersChanged_(hasMouse_, hasPointingStick_, hasTouchpad_, ' +
+        'isKioskModeActive_)',
   ],
 
   /** settings.RouteOriginBehavior override */
   route_: settings.routes.MANAGE_ACCESSIBILITY,
+
+  /** @private {?ManageA11yPageBrowserProxy} */
+  manageBrowserProxy_: null,
+
+  /** @private {?settings.DevicePageBrowserProxy} */
+  deviceBrowserProxy_: null,
+
+  /** @override */
+  created() {
+    this.manageBrowserProxy_ = ManageA11yPageBrowserProxyImpl.getInstance();
+    this.deviceBrowserProxy_ =
+        settings.DevicePageBrowserProxyImpl.getInstance();
+  },
 
   /** @override */
   attached() {
     this.addWebUIListener(
         'has-mouse-changed', this.set.bind(this, 'hasMouse_'));
     this.addWebUIListener(
+        'has-pointing-stick-changed', this.set.bind(this, 'hasPointingStick_'));
+    this.addWebUIListener(
         'has-touchpad-changed', this.set.bind(this, 'hasTouchpad_'));
-    settings.DevicePageBrowserProxyImpl.getInstance().initializePointers();
+    this.deviceBrowserProxy_.initializePointers();
 
     this.addWebUIListener(
         'has-hardware-keyboard', this.set.bind(this, 'hasKeyboard_'));
-    chrome.send('initializeKeyboardWatcher');
+    this.deviceBrowserProxy_.initializeKeyboardWatcher();
   },
 
   /** @override */
   ready() {
     this.addWebUIListener(
-        'startup-sound-enabled-updated',
-        this.updateStartupSoundEnabled_.bind(this));
-    chrome.send('getStartupSoundEnabled');
+        'initial-data-ready', this.onManageAllyPageReady_.bind(this));
+    this.manageBrowserProxy_.manageA11yPageReady();
 
     const r = settings.routes;
     this.addFocusConfig_(r.MANAGE_TTS_SETTINGS, '#ttsSubpageButton');
@@ -207,12 +316,27 @@ Polymer({
   },
 
   /**
+   * @param {!settings.Route} route
+   * @param {!settings.Route} oldRoute
+   */
+  currentRouteChanged(route, oldRoute) {
+    // Does not apply to this page.
+    if (route !== settings.routes.MANAGE_ACCESSIBILITY) {
+      return;
+    }
+
+    this.attemptDeepLink();
+  },
+
+  /**
    * @param {boolean} hasMouse
+   * @param {boolean} hasPointingStick
    * @param {boolean} hasTouchpad
    * @private
    */
-  pointersChanged_(hasMouse, hasTouchpad) {
-    this.$.pointerSubpageButton.hidden = !hasMouse && !hasTouchpad;
+  pointersChanged_(hasMouse, hasTouchpad, hasPointingStick, isKioskModeActive) {
+    this.$.pointerSubpageButton.hidden =
+        (!hasMouse && !hasPointingStick && !hasTouchpad) || isKioskModeActive;
   },
 
   /**
@@ -239,15 +363,7 @@ Polymer({
    * @private
    */
   toggleStartupSoundEnabled_(e) {
-    chrome.send('setStartupSoundEnabled', [e.detail]);
-  },
-
-  /**
-   * @param {boolean} enabled
-   * @private
-   */
-  updateStartupSoundEnabled_(enabled) {
-    this.$.startupSoundEnabled.checked = enabled;
+    this.manageBrowserProxy_.setStartupSoundEnabled(e.detail);
   },
 
   /** @private */
@@ -258,7 +374,7 @@ Polymer({
 
   /** @private */
   onChromeVoxSettingsTap_() {
-    chrome.send('showChromeVoxSettings');
+    this.manageBrowserProxy_.showChromeVoxSettings();
   },
 
   /** @private */
@@ -269,7 +385,7 @@ Polymer({
 
   /** @private */
   onSelectToSpeakSettingsTap_() {
-    chrome.send('showSelectToSpeakSettings');
+    this.manageBrowserProxy_.showSelectToSpeakSettings();
   },
 
   /** @private */
@@ -296,6 +412,29 @@ Polymer({
     settings.Router.getInstance().navigateTo(
         settings.routes.KEYBOARD,
         /* dynamicParams */ null, /* removeSearch */ true);
+  },
+
+  /**
+   * @param {!Event} event
+   * @private
+   */
+  onA11yCaretBrowsingChange_(event) {
+    if (event.target.checked) {
+      chrome.metricsPrivate.recordUserAction(
+          'Accessibility.CaretBrowsing.EnableWithSettings');
+    } else {
+      chrome.metricsPrivate.recordUserAction(
+          'Accessibility.CaretBrowsing.DisableWithSettings');
+    }
+  },
+
+  /**
+   * @return {boolean}
+   * @private
+   */
+  computeShowShelfNavigationButtonsSettings_() {
+    return !this.isKioskModeActive_ &&
+        loadTimeData.getBoolean('showTabletModeShelfNavigationButtonsSettings');
   },
 
   /**
@@ -358,17 +497,49 @@ Polymer({
       return;
     }
 
-    const enabled = this.$.shelfNavigationButtonsEnabledControl.checked;
+    const enabled = this.$$('#shelfNavigationButtonsEnabledControl').checked;
     this.set(
         'prefs.settings.a11y.tablet_mode_shelf_nav_buttons_enabled.value',
         enabled);
-    chrome.send('recordSelectedShowShelfNavigationButtonValue', [enabled]);
+    this.manageBrowserProxy_.recordSelectedShowShelfNavigationButtonValue(
+        enabled);
   },
+
+  /** @private */
+  onA11yCursorColorChange_() {
+    // Custom cursor color is enabled when the color is not set to black.
+    const a11yCursorColorOn =
+        this.get('prefs.settings.a11y.cursor_color.value') !==
+        DEFAULT_BLACK_CURSOR_COLOR;
+    this.set(
+        'prefs.settings.a11y.cursor_color_enabled.value', a11yCursorColorOn);
+  },
+
 
   /** @private */
   onMouseTap_() {
     settings.Router.getInstance().navigateTo(
         settings.routes.POINTERS,
         /* dynamicParams */ null, /* removeSearch */ true);
+  },
+
+  /**
+   * Handles updating the visibility of the shelf navigation buttons setting
+   * and updating whether startupSoundEnabled is checked.
+   * @param {boolean} startup_sound_enabled Whether startup sound is enabled.
+   * @private
+   */
+  onManageAllyPageReady_(startup_sound_enabled) {
+    this.$.startupSoundEnabled.checked = startup_sound_enabled;
+  },
+  /*
+   * Whether additional features link should be shown.
+   * @param {boolean} isKiosk
+   * @param {boolean} isGuest
+   * @return {boolean}
+   * @private
+   */
+  shouldShowAdditionalFeaturesLink_(isKiosk, isGuest) {
+    return !isKiosk && !isGuest;
   },
 });

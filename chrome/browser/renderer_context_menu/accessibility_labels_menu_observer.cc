@@ -32,25 +32,6 @@
 
 using content::BrowserThread;
 
-namespace {
-
-// These enums are logged and must match AccessibilityImageLabelMode in
-// enums.xml.
-enum class AccessibilityImageLabelMode {
-  kModeEnabled = 1,
-  kModeEnabledOnce = 2,
-  kModeDisabled = 3,
-  kMaxValue = kModeDisabled,
-};
-
-// Static
-void RecordContextMenuOptionSelected(AccessibilityImageLabelMode option) {
-  UMA_HISTOGRAM_ENUMERATION("Accessibility.ImageLabels.ContextMenuOption",
-                            option);
-}
-
-}  // namespace
-
 AccessibilityLabelsMenuObserver::AccessibilityLabelsMenuObserver(
     RenderViewContextMenuProxy* proxy)
     : proxy_(proxy) {}
@@ -108,13 +89,9 @@ void AccessibilityLabelsMenuObserver::ExecuteCommand(int command_id) {
       // Always show the confirm bubble when enabling the full feature,
       // regardless of whether it's been shown before.
       ShowConfirmBubble(profile, true /* enable always */);
-      RecordContextMenuOptionSelected(
-          AccessibilityImageLabelMode::kModeEnabled);
     } else {
       profile->GetPrefs()->SetBoolean(prefs::kAccessibilityImageLabelsEnabled,
                                       false);
-      RecordContextMenuOptionSelected(
-          AccessibilityImageLabelMode::kModeDisabled);
     }
   } else if (command_id ==
              IDC_CONTENT_CONTEXT_ACCESSIBILITY_LABELS_TOGGLE_ONCE) {
@@ -126,8 +103,6 @@ void AccessibilityLabelsMenuObserver::ExecuteCommand(int command_id) {
       AccessibilityLabelsServiceFactory::GetForProfile(profile)
           ->EnableLabelsServiceOnce();
     }
-    RecordContextMenuOptionSelected(
-        AccessibilityImageLabelMode::kModeEnabledOnce);
   }
 }
 
@@ -135,6 +110,15 @@ bool AccessibilityLabelsMenuObserver::ShouldShowLabelsItem() {
   // Hidden behind a feature flag.
   if (!base::FeatureList::IsEnabled(features::kExperimentalAccessibilityLabels))
     return false;
+
+  // Disabled by policy.
+  Profile* profile = Profile::FromBrowserContext(proxy_->GetBrowserContext());
+  if (!profile->GetPrefs()->GetBoolean(
+          prefs::kAccessibilityImageLabelsEnabled) &&
+      profile->GetPrefs()->IsManagedPreference(
+          prefs::kAccessibilityImageLabelsEnabled)) {
+    return false;
+  }
 
   return accessibility_state_utils::IsScreenReaderEnabled();
 }

@@ -9,7 +9,7 @@
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/pref_names.h"
-#include "components/content_settings/browser/tab_specific_content_settings.h"
+#include "components/content_settings/browser/page_specific_content_settings.h"
 #include "components/content_settings/core/common/content_settings_utils.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
@@ -17,7 +17,6 @@
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/common/url_constants.h"
-#include "media/base/media_switches.h"
 #include "services/metrics/public/cpp/ukm_builders.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
 #include "third_party/blink/public/mojom/autoplay/autoplay.mojom.h"
@@ -52,9 +51,6 @@ void SoundContentSettingObserver::ReadyToCommitNavigation(
   if (navigation_handle->IsSameDocument())
     return;
 
-  if (!base::FeatureList::IsEnabled(media::kAutoplayWhitelistSettings))
-    return;
-
   GURL url = navigation_handle->IsInMainFrame()
                  ? navigation_handle->GetURL()
                  : navigation_handle->GetWebContents()->GetLastCommittedURL();
@@ -63,7 +59,7 @@ void SoundContentSettingObserver::ReadyToCommitNavigation(
   std::unique_ptr<base::Value> setting =
       host_content_settings_map_->GetWebsiteSetting(
           url, navigation_handle->GetURL(), ContentSettingsType::SOUND,
-          std::string(), &setting_info);
+          &setting_info);
 
   if (content_settings::ValueToContentSetting(setting.get()) !=
       CONTENT_SETTING_ALLOW) {
@@ -102,15 +98,13 @@ void SoundContentSettingObserver::OnAudioStateChanged(bool audible) {
 void SoundContentSettingObserver::OnContentSettingChanged(
     const ContentSettingsPattern& primary_pattern,
     const ContentSettingsPattern& secondary_pattern,
-    ContentSettingsType content_type,
-    const std::string& resource_identifier) {
+    ContentSettingsType content_type) {
   if (content_type != ContentSettingsType::SOUND)
     return;
 
 #if !defined(OS_ANDROID)
   if (primary_pattern == ContentSettingsPattern() &&
-      secondary_pattern == ContentSettingsPattern() &&
-      resource_identifier.empty()) {
+      secondary_pattern == ContentSettingsPattern()) {
     UpdateAutoplayPolicy();
   }
 #endif
@@ -152,15 +146,18 @@ void SoundContentSettingObserver::MuteOrUnmuteIfNecessary() {
 ContentSetting SoundContentSettingObserver::GetCurrentContentSetting() {
   GURL url = web_contents()->GetLastCommittedURL();
   return host_content_settings_map_->GetContentSetting(
-      url, url, ContentSettingsType::SOUND, std::string());
+      url, url, ContentSettingsType::SOUND);
 }
 
 void SoundContentSettingObserver::CheckSoundBlocked(bool is_audible) {
   if (is_audible && GetCurrentContentSetting() == CONTENT_SETTING_BLOCK) {
     // The tab has tried to play sound, but was muted.
-    content_settings::TabSpecificContentSettings* settings =
-        content_settings::TabSpecificContentSettings::FromWebContents(
-            web_contents());
+    // This is a page level event so it is OK to get the main frame here.
+    // TODO(https://crbug.com/1103176): We should figure a way of not having to
+    // use GetMainFrame here. (pass the source frame somehow)
+    content_settings::PageSpecificContentSettings* settings =
+        content_settings::PageSpecificContentSettings::GetForFrame(
+            web_contents()->GetMainFrame());
     if (settings)
       settings->OnAudioBlocked();
 
@@ -185,7 +182,7 @@ SoundContentSettingObserver::GetSiteMutedReason() {
   const GURL url = web_contents()->GetLastCommittedURL();
   content_settings::SettingInfo info;
   host_content_settings_map_->GetWebsiteSetting(
-      url, url, ContentSettingsType::SOUND, std::string(), &info);
+      url, url, ContentSettingsType::SOUND, &info);
 
   DCHECK_EQ(content_settings::SETTING_SOURCE_USER, info.source);
 
@@ -199,7 +196,7 @@ SoundContentSettingObserver::GetSiteMutedReason() {
 #if !defined(OS_ANDROID)
 void SoundContentSettingObserver::UpdateAutoplayPolicy() {
   // Force a WebkitPreferences update to update the autoplay policy.
-  web_contents()->GetRenderViewHost()->OnWebkitPreferencesChanged();
+  web_contents()->OnWebPreferencesChanged();
 }
 #endif
 

@@ -88,13 +88,10 @@ public class GrandfatheredChromePreferenceKeys {
                 ChromePreferenceKeys.FIRST_RUN_LIGHTWEIGHT_FLOW_COMPLETE,
                 ChromePreferenceKeys.FIRST_RUN_SKIP_WELCOME_PAGE,
                 ChromePreferenceKeys.FLAGS_CACHED_ADAPTIVE_TOOLBAR_ENABLED,
-                ChromePreferenceKeys.FLAGS_CACHED_BOTTOM_TOOLBAR_ENABLED,
                 ChromePreferenceKeys.FLAGS_CACHED_COMMAND_LINE_ON_NON_ROOTED_ENABLED,
                 ChromePreferenceKeys.FLAGS_CACHED_DOWNLOAD_AUTO_RESUMPTION_IN_NATIVE,
                 ChromePreferenceKeys.FLAGS_CACHED_GRID_TAB_SWITCHER_ENABLED,
                 ChromePreferenceKeys.FLAGS_CACHED_IMMERSIVE_UI_MODE_ENABLED,
-                ChromePreferenceKeys.FLAGS_CACHED_INTEREST_FEED_CONTENT_SUGGESTIONS,
-                ChromePreferenceKeys.FLAGS_CACHED_LABELED_BOTTOM_TOOLBAR_ENABLED,
                 ChromePreferenceKeys.FLAGS_CACHED_NETWORK_SERVICE_WARM_UP_ENABLED,
                 ChromePreferenceKeys.FLAGS_CACHED_PRIORITIZE_BOOTSTRAP_TASKS,
                 ChromePreferenceKeys.FLAGS_CACHED_SERVICE_MANAGER_FOR_BACKGROUND_PREFETCH,
@@ -109,7 +106,6 @@ public class GrandfatheredChromePreferenceKeys {
                 ChromePreferenceKeys.HOMEPAGE_ENABLED,
                 ChromePreferenceKeys.HOMEPAGE_USE_DEFAULT_URI,
                 ChromePreferenceKeys.INCOGNITO_SHORTCUT_ADDED,
-                ChromePreferenceKeys.INVALIDATIONS_UUID_PREF_KEY,
                 ChromePreferenceKeys.LATEST_UNSUPPORTED_VERSION,
                 ChromePreferenceKeys.LOCALE_MANAGER_AUTO_SWITCH,
                 ChromePreferenceKeys.LOCALE_MANAGER_PROMO_SHOWN,
@@ -145,6 +141,9 @@ public class GrandfatheredChromePreferenceKeys {
                 ChromePreferenceKeys.SEARCH_ENGINE_CHOICE_DEFAULT_TYPE_BEFORE,
                 ChromePreferenceKeys.SEARCH_ENGINE_CHOICE_PRESENTED_VERSION,
                 ChromePreferenceKeys.SEARCH_ENGINE_CHOICE_REQUESTED_TIMESTAMP,
+                ChromePreferenceKeys.SEARCH_WIDGET_IS_VOICE_SEARCH_AVAILABLE,
+                ChromePreferenceKeys.SEARCH_WIDGET_NUM_CONSECUTIVE_CRASHES,
+                ChromePreferenceKeys.SEARCH_WIDGET_SEARCH_ENGINE_SHORTNAME,
                 ChromePreferenceKeys.SEND_TAB_TO_SELF_ACTIVE_NOTIFICATIONS,
                 ChromePreferenceKeys.SEND_TAB_TO_SELF_NEXT_NOTIFICATION_ID,
                 ChromePreferenceKeys.SETTINGS_DEVELOPER_ENABLED,
@@ -167,8 +166,8 @@ public class GrandfatheredChromePreferenceKeys {
                 ChromePreferenceKeys.SIGNIN_PROMO_NTP_PROMO_SUPPRESSION_PERIOD_START,
                 ChromePreferenceKeys.SIGNIN_PROMO_PERSONALIZED_DECLINED,
                 ChromePreferenceKeys.SIGNIN_PROMO_SETTINGS_PERSONALIZED_DISMISSED,
+                ChromePreferenceKeys.SIGNIN_LEGACY_SYNC_ACCOUNT_EMAIL,
                 ChromePreferenceKeys.SNAPSHOT_DATABASE_REMOVED,
-                ChromePreferenceKeys.START_SURFACE_SINGLE_PANE_ENABLED_KEY,
                 ChromePreferenceKeys.SURVEY_DATE_LAST_ROLLED,
                 ChromePreferenceKeys.SURVEY_INFO_BAR_DISPLAYED,
                 ChromePreferenceKeys.SYNC_SESSIONS_UUID,
@@ -184,14 +183,15 @@ public class GrandfatheredChromePreferenceKeys {
                 ChromePreferenceKeys.TWA_DISCLOSURE_ACCEPTED_PACKAGES,
                 ChromePreferenceKeys.UI_THEME_DARKEN_WEBSITES_ENABLED,
                 ChromePreferenceKeys.UI_THEME_SETTING,
-                ChromePreferenceKeys.VARIATION_CACHED_BOTTOM_TOOLBAR,
                 ChromePreferenceKeys.VERIFIED_DIGITAL_ASSET_LINKS,
                 ChromePreferenceKeys.VR_EXIT_TO_2D_COUNT,
                 ChromePreferenceKeys.VR_FEEDBACK_OPT_OUT,
                 ChromePreferenceKeys.VR_SHOULD_REGISTER_ASSETS_COMPONENT_ON_STARTUP,
                 ChromePreferenceKeys.WEBAPK_EXTRACTED_DEX_VERSION,
                 ChromePreferenceKeys.WEBAPK_LAST_SDK_VERSION,
-                ChromePreferenceKeys.WEBAPK_UNINSTALLED_PACKAGES
+                ChromePreferenceKeys.WEBAPK_UNINSTALLED_PACKAGES,
+                ChromePreferenceKeys.KEY_ZERO_SUGGEST_LIST_SIZE,
+                ChromePreferenceKeys.KEY_ZERO_SUGGEST_HEADER_LIST_SIZE
         );
         // clang-format on
     }
@@ -203,7 +203,22 @@ public class GrandfatheredChromePreferenceKeys {
                 ChromePreferenceKeys.CONTEXTUAL_SEARCH_IMPRESSIONS_WEEK_PREFIX,
                 ChromePreferenceKeys.CUSTOM_TABS_DEX_LAST_UPDATE_TIME_PREF_PREFIX,
                 ChromePreferenceKeys.PAYMENTS_PAYMENT_INSTRUMENT_USE_COUNT,
-                ChromePreferenceKeys.PAYMENTS_PAYMENT_INSTRUMENT_USE_DATE
+                ChromePreferenceKeys.PAYMENTS_PAYMENT_INSTRUMENT_USE_DATE,
+                ChromePreferenceKeys.KEY_ZERO_SUGGEST_URL_PREFIX,
+                ChromePreferenceKeys.KEY_ZERO_SUGGEST_DISPLAY_TEXT_PREFIX,
+                ChromePreferenceKeys.KEY_ZERO_SUGGEST_DESCRIPTION_PREFIX,
+                ChromePreferenceKeys.KEY_ZERO_SUGGEST_NATIVE_TYPE_PREFIX,
+                ChromePreferenceKeys.KEY_ZERO_SUGGEST_NATIVE_SUBTYPES_PREFIX,
+                ChromePreferenceKeys.KEY_ZERO_SUGGEST_IS_SEARCH_TYPE_PREFIX,
+                ChromePreferenceKeys.KEY_ZERO_SUGGEST_ANSWER_TEXT_PREFIX,
+                ChromePreferenceKeys.KEY_ZERO_SUGGEST_GROUP_ID_PREFIX,
+                ChromePreferenceKeys.KEY_ZERO_SUGGEST_IS_DELETABLE_PREFIX,
+                ChromePreferenceKeys.KEY_ZERO_SUGGEST_IS_STARRED_PREFIX,
+                ChromePreferenceKeys.KEY_ZERO_SUGGEST_POST_CONTENT_TYPE_PREFIX,
+                ChromePreferenceKeys.KEY_ZERO_SUGGEST_POST_CONTENT_DATA_PREFIX,
+                ChromePreferenceKeys.KEY_ZERO_SUGGEST_HEADER_GROUP_ID_PREFIX,
+                ChromePreferenceKeys.KEY_ZERO_SUGGEST_HEADER_GROUP_TITLE_PREFIX,
+                ChromePreferenceKeys.KEY_ZERO_SUGGEST_HEADER_GROUP_COLLAPSED_BY_DEFAULT_PREFIX
         );
         // clang-format on
     }

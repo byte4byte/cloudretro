@@ -18,7 +18,6 @@
 
 #include <stdint.h>
 
-#include "base/logging.h"
 #include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -350,11 +349,11 @@ TEST_F(FinancialPingTest, RlzEmbargoEndDate) {
       rlz_lib::FinancialPing::IsPingTime(rlz_lib::TOOLBAR_NOTIFIER, false));
 
   // Simulate writing a future embargo date (less than
-  // |kRlzEmbargoEndDateGarbageDateThresholdDays|) to VPD, verify that
+  // |kEmbargoEndDateGarbageDateThresholdDays|) to VPD, verify that
   // |IsPingTime| is false.
   base::Time future_rlz_embargo_date =
       base::Time::NowFromSystemTime() +
-      chromeos::system::kRlzEmbargoEndDateGarbageDateThreshold -
+      chromeos::system::kEmbargoEndDateGarbageDateThreshold -
       base::TimeDelta::FromDays(1);
   future_rlz_embargo_date.LocalExplode(&exploded);
   std::string future_rlz_embargo_date_value =
@@ -366,11 +365,11 @@ TEST_F(FinancialPingTest, RlzEmbargoEndDate) {
       rlz_lib::FinancialPing::IsPingTime(rlz_lib::TOOLBAR_NOTIFIER, false));
 
   // Simulate writing a future embargo date (more than
-  // |kRlzEmbargoEndDateGarbageDateThresholdDays|) to VPD, verify that
+  // |kEmbargoEndDateGarbageDateThresholdDays|) to VPD, verify that
   // |IsPingTime| is true.
   future_rlz_embargo_date =
       base::Time::NowFromSystemTime() +
-      chromeos::system::kRlzEmbargoEndDateGarbageDateThreshold +
+      chromeos::system::kEmbargoEndDateGarbageDateThreshold +
       base::TimeDelta::FromDays(1);
   future_rlz_embargo_date.LocalExplode(&exploded);
   future_rlz_embargo_date_value = ConvertExplodedToRlzEmbargoDate(exploded);

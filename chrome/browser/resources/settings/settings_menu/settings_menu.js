@@ -8,19 +8,19 @@
  */
 import 'chrome://resources/cr_elements/cr_button/cr_button.m.js';
 import 'chrome://resources/cr_elements/cr_icons_css.m.js';
+import 'chrome://resources/cr_elements/cr_menu_selector/cr_menu_selector.js';
 import 'chrome://resources/cr_elements/icons.m.js';
 import 'chrome://resources/polymer/v3_0/iron-collapse/iron-collapse.js';
 import 'chrome://resources/polymer/v3_0/iron-icon/iron-icon.js';
 import 'chrome://resources/polymer/v3_0/iron-selector/iron-selector.js';
-import '../i18n_setup.m.js';
+import '../i18n_setup.js';
 import '../icons.m.js';
 import '../settings_shared_css.m.js';
 
 import {assert} from 'chrome://resources/js/assert.m.js';
-import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
 import {html, Polymer} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
-import {PageVisibility} from '../page_visibility.m.js';
+import {PageVisibility} from '../page_visibility.js';
 import {Route, RouteObserverBehavior, Router} from '../router.m.js';
 
 Polymer({
@@ -35,14 +35,6 @@ Polymer({
       type: Boolean,
       value: false,
       notify: true,
-    },
-
-    /** @private */
-    privacySettingsRedesignEnabled_: {
-      type: Boolean,
-      value: function() {
-        return loadTimeData.getBoolean('privacySettingsRedesignEnabled');
-      },
     },
 
     /**

@@ -9,6 +9,7 @@
 
 #include "base/base64.h"
 #include "base/location.h"
+#include "base/notreached.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -48,23 +49,38 @@ using guest_view::GuestViewBase;
 
 namespace extensions {
 
+namespace {
+std::string GetPartitionName(WebAuthFlow::Partition partition) {
+  switch (partition) {
+    case WebAuthFlow::LAUNCH_WEB_AUTH_FLOW:
+      return "launchWebAuthFlow";
+    case WebAuthFlow::GET_AUTH_TOKEN:
+      return "getAuthFlow";
+  }
+
+  NOTREACHED() << "Unexpected partition value " << partition;
+  return std::string();
+}
+}  // namespace
+
 namespace identity_private = api::identity_private;
 
-WebAuthFlow::WebAuthFlow(
-    Delegate* delegate,
-    Profile* profile,
-    const GURL& provider_url,
-    Mode mode)
+WebAuthFlow::WebAuthFlow(Delegate* delegate,
+                         Profile* profile,
+                         const GURL& provider_url,
+                         Mode mode,
+                         Partition partition)
     : delegate_(delegate),
       profile_(profile),
       provider_url_(provider_url),
       mode_(mode),
+      partition_(partition),
       embedded_window_created_(false) {
   TRACE_EVENT_NESTABLE_ASYNC_BEGIN0("identity", "WebAuthFlow", this);
 }
 
 WebAuthFlow::~WebAuthFlow() {
-  DCHECK(delegate_ == NULL);
+  DCHECK(!delegate_);
 
   // Stop listening to notifications first since some of the code
   // below may generate notifications.
@@ -97,6 +113,7 @@ void WebAuthFlow::Start() {
     args->AppendString("interactive");
   else
     args->AppendString("silent");
+  args->AppendString(GetPartitionName(partition_));
 
   auto event =
       std::make_unique<Event>(events::IDENTITY_PRIVATE_ON_WEB_FLOW_REQUEST,
@@ -117,13 +134,13 @@ void WebAuthFlow::Start() {
 }
 
 void WebAuthFlow::DetachDelegateAndDelete() {
-  delegate_ = NULL;
+  delegate_ = nullptr;
   base::ThreadTaskRunnerHandle::Get()->DeleteSoon(FROM_HERE, this);
 }
 
-content::StoragePartition* WebAuthFlow::GetGuestPartition() const {
-  return content::BrowserContext::GetStoragePartitionForSite(
-      profile_, GetWebViewSiteURL());
+content::StoragePartition* WebAuthFlow::GetGuestPartition() {
+  return content::BrowserContext::GetStoragePartition(
+      profile_, GetWebViewPartitionConfig(partition_, profile_));
 }
 
 const std::string& WebAuthFlow::GetAppWindowKey() const {
@@ -131,10 +148,21 @@ const std::string& WebAuthFlow::GetAppWindowKey() const {
 }
 
 // static
-GURL WebAuthFlow::GetWebViewSiteURL() {
-  return extensions::WebViewGuest::GetSiteForGuestPartitionConfig(
-      extension_misc::kIdentityApiUiAppId, /*partition_name=*/std::string(),
+content::StoragePartitionConfig WebAuthFlow::GetWebViewPartitionConfig(
+    Partition partition,
+    content::BrowserContext* browser_context) {
+  // This has to mirror the logic in WebViewGuest::CreateWebContents for
+  // creating the correct StoragePartitionConfig.
+  auto result = content::StoragePartitionConfig::Create(
+      extension_misc::kIdentityApiUiAppId, GetPartitionName(partition),
       /*in_memory=*/true);
+  result.set_fallback_to_partition_domain_for_blob_urls(
+      browser_context->IsOffTheRecord()
+          ? content::StoragePartitionConfig::FallbackMode::
+                kFallbackPartitionInMemory
+          : content::StoragePartitionConfig::FallbackMode::
+                kFallbackPartitionOnDisk);
+  return result;
 }
 
 void WebAuthFlow::OnAppWindowAdded(AppWindow* app_window) {
@@ -153,7 +181,7 @@ void WebAuthFlow::OnAppWindowAdded(AppWindow* app_window) {
 void WebAuthFlow::OnAppWindowRemoved(AppWindow* app_window) {
   if (app_window->window_key() == app_window_key_ &&
       app_window->extension_id() == extension_misc::kIdentityApiUiAppId) {
-    app_window_ = NULL;
+    app_window_ = nullptr;
     registrar_.RemoveAll();
     WebContentsObserver::Observe(nullptr);
 

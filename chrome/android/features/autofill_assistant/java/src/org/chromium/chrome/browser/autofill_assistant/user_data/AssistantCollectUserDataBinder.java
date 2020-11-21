@@ -11,7 +11,6 @@ import android.view.ViewGroup;
 import androidx.annotation.Nullable;
 
 import org.chromium.base.task.PostTask;
-import org.chromium.chrome.browser.ChromeVersionInfo;
 import org.chromium.chrome.browser.autofill.prefeditor.EditorDialog;
 import org.chromium.chrome.browser.autofill_assistant.generic_ui.AssistantValue;
 import org.chromium.chrome.browser.autofill_assistant.user_data.additional_sections.AssistantAdditionalSection.Delegate;
@@ -20,9 +19,11 @@ import org.chromium.chrome.browser.payments.AddressEditor;
 import org.chromium.chrome.browser.payments.AutofillAddress;
 import org.chromium.chrome.browser.payments.AutofillContact;
 import org.chromium.chrome.browser.payments.AutofillPaymentInstrument;
-import org.chromium.chrome.browser.payments.BasicCardUtils;
 import org.chromium.chrome.browser.payments.CardEditor;
 import org.chromium.chrome.browser.payments.ContactEditor;
+import org.chromium.chrome.browser.profiles.Profile;
+import org.chromium.chrome.browser.version.ChromeVersionInfo;
+import org.chromium.components.payments.BasicCardUtils;
 import org.chromium.components.payments.MethodStrings;
 import org.chromium.content_public.browser.UiThreadTaskTraits;
 import org.chromium.content_public.browser.WebContents;
@@ -173,11 +174,20 @@ class AssistantCollectUserDataBinder
             view.mContactDetailsSection.setListener(collectUserDataDelegate != null
                             ? collectUserDataDelegate::onContactInfoChanged
                             : null);
+            view.mContactDetailsSection.setCompletenessDelegate(collectUserDataDelegate != null
+                            ? collectUserDataDelegate::isContactComplete
+                            : null);
             view.mPaymentMethodSection.setListener(collectUserDataDelegate != null
                             ? collectUserDataDelegate::onPaymentMethodChanged
                             : null);
+            view.mPaymentMethodSection.setCompletenessDelegate(collectUserDataDelegate != null
+                            ? collectUserDataDelegate::isPaymentInstrumentComplete
+                            : null);
             view.mShippingAddressSection.setListener(collectUserDataDelegate != null
                             ? collectUserDataDelegate::onShippingAddressChanged
+                            : null);
+            view.mShippingAddressSection.setCompletenessDelegate(collectUserDataDelegate != null
+                            ? collectUserDataDelegate::isShippingAddressComplete
                             : null);
             view.mLoginSection.setListener(collectUserDataDelegate != null
                             ? collectUserDataDelegate::onLoginChoiceChanged
@@ -218,9 +228,17 @@ class AssistantCollectUserDataBinder
 
     private boolean updateSectionTitles(
             AssistantCollectUserDataModel model, PropertyKey propertyKey, ViewHolder view) {
-        if (propertyKey == AssistantCollectUserDataModel.LOGIN_SECTION_TITLE) {
+        if (propertyKey == AssistantCollectUserDataModel.CONTACT_SECTION_TITLE) {
+            view.mContactDetailsSection.setTitle(
+                    model.get(AssistantCollectUserDataModel.CONTACT_SECTION_TITLE));
+            return true;
+        } else if (propertyKey == AssistantCollectUserDataModel.LOGIN_SECTION_TITLE) {
             view.mLoginSection.setTitle(
                     model.get(AssistantCollectUserDataModel.LOGIN_SECTION_TITLE));
+            return true;
+        } else if (propertyKey == AssistantCollectUserDataModel.SHIPPING_SECTION_TITLE) {
+            view.mShippingAddressSection.setTitle(
+                    model.get(AssistantCollectUserDataModel.SHIPPING_SECTION_TITLE));
             return true;
         } else if (propertyKey == AssistantCollectUserDataModel.DATE_RANGE_START_DATE_LABEL) {
             view.mDateRangeStartSection.setDateTitle(
@@ -356,6 +374,10 @@ class AssistantCollectUserDataBinder
             return true;
         } else if (propertyKey == AssistantCollectUserDataModel.INFO_SECTION_TEXT) {
             view.mInfoSection.setText(model.get(AssistantCollectUserDataModel.INFO_SECTION_TEXT));
+            return true;
+        } else if (propertyKey == AssistantCollectUserDataModel.INFO_SECTION_TEXT_CENTER) {
+            view.mInfoSection.setCenter(
+                    model.get(AssistantCollectUserDataModel.INFO_SECTION_TEXT_CENTER));
             return true;
         } else if (propertyKey == AssistantCollectUserDataModel.PRIVACY_NOTICE_TEXT) {
             view.mTermsSection.setPrivacyNoticeText(
@@ -590,7 +612,9 @@ class AssistantCollectUserDataBinder
                     0, view.mSectionToSectionPadding, view.mSectionToSectionPadding);
         }
         view.mTermsSection.setPaddings(view.mSectionToSectionPadding, 0);
-        view.mTermsAsCheckboxSection.setPaddings(view.mSectionToSectionPadding, 0);
+        // Do not set padding to the view.mTermsAsCheckboxSection, it already has "padding" from
+        // its checkbox (that coincidentally matches the padding of mSectionToSectionPadding).
+        view.mInfoSection.setPaddings(view.mSectionToSectionPadding, 0);
 
         // Hide dividers for currently invisible sections and after the expanded section, if any.
         boolean prevSectionIsExpandedOrInvisible = false;
@@ -633,6 +657,7 @@ class AssistantCollectUserDataBinder
             return true;
         }
 
+        Profile profile = Profile.fromWebContents(webContents);
         if (shouldShowContactDetails(model)) {
             ContactEditor contactEditor =
                     new ContactEditor(model.get(AssistantCollectUserDataModel.REQUEST_NAME),
@@ -640,17 +665,17 @@ class AssistantCollectUserDataBinder
                             model.get(AssistantCollectUserDataModel.REQUEST_EMAIL),
                             !webContents.isIncognito());
             contactEditor.setEditorDialog(new EditorDialog(view.mActivity,
-                    /*deleteRunnable =*/null));
+                    /*deleteRunnable =*/null, profile));
             view.mContactDetailsSection.setEditor(contactEditor);
         }
 
         AddressEditor addressEditor = new AddressEditor(AddressEditor.Purpose.PAYMENT_REQUEST,
                 /* saveToDisk= */ !webContents.isIncognito());
         addressEditor.setEditorDialog(new EditorDialog(view.mActivity,
-                /*deleteRunnable =*/null));
+                /*deleteRunnable =*/null, profile));
 
         CardEditor cardEditor = new CardEditor(webContents, addressEditor,
-                /* includeOrgLabel= */ false, /* observerForTest= */ null);
+                /* includeOrgLabel= */ false);
         List<String> supportedCardNetworks =
                 model.get(AssistantCollectUserDataModel.SUPPORTED_BASIC_CARD_NETWORKS);
         if (supportedCardNetworks != null) {
@@ -659,7 +684,7 @@ class AssistantCollectUserDataBinder
         }
 
         EditorDialog cardEditorDialog = new EditorDialog(view.mActivity,
-                /*deleteRunnable =*/null);
+                /*deleteRunnable =*/null, profile);
         if (ChromeVersionInfo.isBetaBuild() || ChromeVersionInfo.isStableBuild()) {
             cardEditorDialog.disableScreenshots();
         }

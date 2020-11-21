@@ -2,9 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import {TestBrowserProxy} from 'chrome://test/test_browser_proxy.m.js';
 import {isMac, webUIListenerCallback} from 'chrome://resources/js/cr.m.js';
-import {UpdateStatus} from 'chrome://settings/settings.js';
+import {AboutPageBrowserProxy, UpdateStatus} from 'chrome://settings/settings.js';
+import {TestBrowserProxy} from '../test_browser_proxy.m.js';
 
 /** @implements {AboutPageBrowserProxy} */
 export class TestAboutPageBrowserProxy extends TestBrowserProxy {
@@ -63,6 +63,43 @@ export class TestAboutPageBrowserProxy extends TestBrowserProxy {
   openHelpPage() {
     this.methodCalled('openHelpPage');
   }
+
+  /** @override */
+  launchReleaseNotes() {}
+
+  /** @override */
+  openOsHelpPage() {}
+
+  /** @override */
+  requestUpdate() {}
+
+  /** @override */
+  requestUpdateOverCellular() {}
+
+  /** @override */
+  setChannel() {}
+
+  /** @override */
+  getChannelInfo() {}
+
+  /** @override */
+  canChangeChannel() {}
+
+  /** @override */
+  getVersionInfo() {}
+
+
+  /** @override */
+  getRegulatoryInfo() {}
+
+  /** @override */
+  getEndOfLifeInfo() {}
+
+  /** @override */
+  checkInternetConnection() {}
+
+  /** @override */
+  refreshTPMFirmwareUpdateStatus() {}
 }
 
 if (isMac) {
@@ -71,4 +108,3 @@ if (isMac) {
     this.methodCalled('promoteUpdater');
   };
 }
-

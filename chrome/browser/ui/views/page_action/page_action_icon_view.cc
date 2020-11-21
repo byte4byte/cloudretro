@@ -39,7 +39,7 @@ gfx::Insets PageActionIconView::Delegate::GetPageActionIconInsets(
   return GetLayoutInsets(LOCATION_BAR_ICON_INTERIOR_PADDING);
 }
 
-bool PageActionIconView::Delegate::IsLocationBarUserInputInProgress() const {
+bool PageActionIconView::Delegate::ShouldHidePageActionIcons() const {
   return false;
 }
 
@@ -61,7 +61,7 @@ PageActionIconView::PageActionIconView(
       command_id_(command_id) {
   DCHECK(delegate_);
 
-  image()->EnableCanvasFlippingForRTLUI(true);
+  image()->SetFlipCanvasOnPaintForRTLUI(true);
   SetInkDropMode(InkDropMode::ON);
   SetFocusBehavior(FocusBehavior::ACCESSIBLE_ONLY);
   // Only shows bubble after mouse is released.
@@ -152,7 +152,7 @@ bool PageActionIconView::IsTriggerableEvent(const ui::Event& event) {
     // IconLabelBubbleView allows any mouse click to be triggerable event so
     // need to manually check here.
     return IconLabelBubbleView::IsTriggerableEvent(event) &&
-           ((triggerable_event_flags() & event.flags()) != 0);
+           ((GetTriggerableEventFlags() & event.flags()) != 0);
   }
 
   return IconLabelBubbleView::IsTriggerableEvent(event);
@@ -200,7 +200,8 @@ void PageActionIconView::SetActive(bool active) {
 void PageActionIconView::Update() {
   // Currently no page action icon should be visible during user input.
   // A future subclass may need a hook here if that changes.
-  if (delegate_->IsLocationBarUserInputInProgress()) {
+  if (delegate_->ShouldHidePageActionIcons()) {
+    ResetSlideAnimation(/*show_label=*/false);
     SetVisible(false);
   } else {
     UpdateImpl();
@@ -217,7 +218,7 @@ void PageActionIconView::UpdateIconImage() {
   const gfx::ImageSkia image = gfx::CreateVectorIconWithBadge(
       GetVectorIcon(), icon_size, icon_color, GetVectorIconBadge());
   if (!image.isNull())
-    SetImage(image);
+    SetImageModel(ui::ImageModel::FromImageSkia(image));
 }
 
 void PageActionIconView::InstallLoadingIndicator() {

@@ -7,6 +7,7 @@
 #include "chrome/test/payments/payment_request_platform_browsertest_base.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -14,8 +15,7 @@ namespace payments {
 
 class IframeCspTest : public PaymentRequestPlatformBrowserTestBase {
  public:
-  IframeCspTest() : app_server_(net::EmbeddedTestServer::TYPE_HTTPS) {}
-
+  IframeCspTest() = default;
   ~IframeCspTest() override = default;
 
   void SetUpOnMainThread() override {
@@ -25,15 +25,10 @@ class IframeCspTest : public PaymentRequestPlatformBrowserTestBase {
     app_server_.ServeFilesFromSourceDirectory(
         "components/test/data/payments/kylepay.com");
     ASSERT_TRUE(app_server_.Start());
-
-    // Set up test manifest downloader that knows how to fake origin.
-    const std::string method_name = "kylepay.com";
-    SetDownloaderAndIgnorePortInOriginComparisonForTesting(
-        {{method_name, &app_server_}});
   }
 
- private:
-  net::EmbeddedTestServer app_server_;
+ protected:
+  net::EmbeddedTestServer app_server_{net::EmbeddedTestServer::TYPE_HTTPS};
 };
 
 IN_PROC_BROWSER_TEST_F(IframeCspTest, Show) {
@@ -54,6 +49,11 @@ IN_PROC_BROWSER_TEST_F(IframeCspTest, Show) {
       GetActiveWebContents(),
       base::BindRepeating(&content::FrameHasSourceUrl, iframe_url));
   EXPECT_EQ(iframe_url, iframe->GetLastCommittedURL());
+
+  // Set up test manifest downloader that knows how to fake origin.
+  const std::string method_name = "kylepay.com";
+  SetDownloaderAndIgnorePortInOriginComparisonForTestingInFrame(
+      {{method_name, &app_server_}}, iframe);
 
   EXPECT_EQ(true, content::EvalJs(iframe, "checkCanMakePayment()"));
   EXPECT_TRUE(console_observer.messages().empty());

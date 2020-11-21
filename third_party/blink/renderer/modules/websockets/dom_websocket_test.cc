@@ -7,7 +7,6 @@
 #include <memory>
 #include <string>
 
-#include "base/test/scoped_feature_list.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/common/features.h"
@@ -15,9 +14,9 @@
 #include "third_party/blink/public/mojom/security_context/insecure_request_policy.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_testing.h"
-#include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/execution_context/security_context.h"
 #include "third_party/blink/renderer/core/fileapi/blob.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/testing/dummy_page_holder.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_typed_array.h"
 #include "third_party/blink/renderer/modules/websockets/mock_websocket_channel.h"
@@ -66,7 +65,7 @@ class DOMWebSocketWithMockChannel final : public DOMWebSocket {
     return channel_.Get();
   }
 
-  void Trace(Visitor* visitor) override {
+  void Trace(Visitor* visitor) const override {
     visitor->Trace(channel_);
     DOMWebSocket::Trace(visitor);
   }
@@ -147,19 +146,6 @@ TEST(DOMWebSocketTest, connectToURLHavingFragmentIdentifier) {
   EXPECT_EQ(DOMWebSocket::kClosed, websocket_scope.Socket().readyState());
 }
 
-TEST(DOMWebSocketTest, invalidPort) {
-  V8TestingScope scope;
-  DOMWebSocketTestScope websocket_scope(scope.GetExecutionContext());
-  websocket_scope.Socket().Connect("ws://example.com:7", Vector<String>(),
-                                   scope.GetExceptionState());
-
-  EXPECT_TRUE(scope.GetExceptionState().HadException());
-  EXPECT_EQ(DOMExceptionCode::kSecurityError,
-            scope.GetExceptionState().CodeAs<DOMExceptionCode>());
-  EXPECT_EQ("The port 7 is not allowed.", scope.GetExceptionState().Message());
-  EXPECT_EQ(DOMWebSocket::kClosed, websocket_scope.Socket().readyState());
-}
-
 // FIXME: Add a test for Content Security Policy.
 
 TEST(DOMWebSocketTest, invalidSubprotocols) {
@@ -190,7 +176,7 @@ TEST(DOMWebSocketTest, insecureRequestsUpgrade) {
         .WillOnce(Return(true));
   }
 
-  scope.GetDocument().GetSecurityContext().SetInsecureRequestPolicy(
+  scope.GetWindow().GetSecurityContext().SetInsecureRequestPolicy(
       mojom::blink::InsecureRequestPolicy::kUpgradeInsecureRequests);
   websocket_scope.Socket().Connect("ws://example.com/endpoint",
                                    Vector<String>(), scope.GetExceptionState());
@@ -210,7 +196,7 @@ TEST(DOMWebSocketTest, insecureRequestsUpgradePotentiallyTrustworthy) {
         .WillOnce(Return(true));
   }
 
-  scope.GetDocument().GetSecurityContext().SetInsecureRequestPolicy(
+  scope.GetWindow().GetSecurityContext().SetInsecureRequestPolicy(
       mojom::blink::InsecureRequestPolicy::kUpgradeInsecureRequests);
   websocket_scope.Socket().Connect("ws://127.0.0.1/endpoint", Vector<String>(),
                                    scope.GetExceptionState());
@@ -230,7 +216,7 @@ TEST(DOMWebSocketTest, insecureRequestsDoNotUpgrade) {
         .WillOnce(Return(true));
   }
 
-  scope.GetDocument().GetSecurityContext().SetInsecureRequestPolicy(
+  scope.GetWindow().GetSecurityContext().SetInsecureRequestPolicy(
       mojom::blink::InsecureRequestPolicy::kLeaveInsecureRequestsAlone);
   websocket_scope.Socket().Connect("ws://example.com/endpoint",
                                    Vector<String>(), scope.GetExceptionState());

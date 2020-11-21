@@ -9,18 +9,18 @@
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/extensions/extension_action_test_util.h"
 #include "chrome/browser/extensions/load_error_reporter.h"
-#include "chrome/browser/media/router/media_router_factory.h"
-#include "chrome/browser/media/router/test/mock_media_router.h"
+#include "chrome/browser/media/router/chrome_media_router_factory.h"
 #include "chrome/browser/signin/identity_test_environment_profile_adaptor.h"
 #include "chrome/browser/ui/media_router/media_router_ui_service.h"
 #include "chrome/browser/ui/media_router/media_router_ui_service_factory.h"
 #include "chrome/browser/ui/toolbar/media_router_action_controller.h"
 #include "chrome/browser/ui/toolbar/media_router_contextual_menu.h"
 #include "chrome/browser/ui/toolbar/mock_media_router_action_controller.h"
-#include "chrome/common/pref_names.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
+#include "components/media_router/browser/test/mock_media_router.h"
+#include "components/media_router/common/pref_names.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -73,7 +73,7 @@ class MediaRouterContextualMenuUnitTest : public BrowserWithTestWindowTest {
     MediaRouterActionController::SetAlwaysShowActionPref(profile(), true);
 
     media_router::MediaRouterUIServiceFactory::GetInstance()->SetTestingFactory(
-        profile()->GetOffTheRecordProfile(),
+        profile()->GetPrimaryOTRProfile(),
         base::BindRepeating(&BuildUIService));
   }
 
@@ -86,7 +86,7 @@ class MediaRouterContextualMenuUnitTest : public BrowserWithTestWindowTest {
 
   TestingProfile::TestingFactories GetTestingFactories() override {
     TestingProfile::TestingFactories factories = {
-        {media_router::MediaRouterFactory::GetInstance(),
+        {media_router::ChromeMediaRouterFactory::GetInstance(),
          base::BindRepeating(&media_router::MockMediaRouter::Create)},
         {media_router::MediaRouterUIServiceFactory::GetInstance(),
          base::BindRepeating(&BuildUIService)}};
@@ -127,7 +127,7 @@ TEST_F(MediaRouterContextualMenuUnitTest, Basic) {
   int expected_number_items = 9;
 
   MediaRouterContextualMenu menu(browser(), kShownByUser, &observer_);
-  ui::SimpleMenuModel* model = menu.menu_model();
+  std::unique_ptr<ui::SimpleMenuModel> model = menu.CreateMenuModel();
   // Verify the number of menu items, including separators.
   EXPECT_EQ(model->GetItemCount(), expected_number_items);
 
@@ -157,17 +157,17 @@ TEST_F(MediaRouterContextualMenuUnitTest, Basic) {
 // incognito.
 TEST_F(MediaRouterContextualMenuUnitTest, EnableAndDisableReportIssue) {
   MediaRouterContextualMenu menu(browser(), kShownByPolicy, &observer_);
-  EXPECT_NE(-1, menu.menu_model()->GetIndexOfCommandId(
+  EXPECT_NE(-1, menu.CreateMenuModel()->GetIndexOfCommandId(
                     IDC_MEDIA_ROUTER_REPORT_ISSUE));
 
   std::unique_ptr<BrowserWindow> window(CreateBrowserWindow());
   std::unique_ptr<Browser> incognito_browser(
-      CreateBrowser(profile()->GetOffTheRecordProfile(), Browser::TYPE_NORMAL,
+      CreateBrowser(profile()->GetPrimaryOTRProfile(), Browser::TYPE_NORMAL,
                     false, window.get()));
 
   MediaRouterContextualMenu incognito_menu(incognito_browser.get(),
                                            kShownByPolicy, &observer_);
-  EXPECT_EQ(-1, incognito_menu.menu_model()->GetIndexOfCommandId(
+  EXPECT_EQ(-1, incognito_menu.CreateMenuModel()->GetIndexOfCommandId(
                     IDC_MEDIA_ROUTER_REPORT_ISSUE));
 }
 
@@ -187,7 +187,7 @@ TEST_F(MediaRouterContextualMenuUnitTest, ToggleCloudServicesItem) {
   // Set this preference so that the cloud services can be enabled without
   // showing the opt-in dialog.
   browser()->profile()->GetPrefs()->SetBoolean(
-      prefs::kMediaRouterCloudServicesPrefSet, true);
+      media_router::prefs::kMediaRouterCloudServicesPrefSet, true);
 
   // By default, the command is not checked.
   EXPECT_FALSE(menu.IsCommandIdChecked(
@@ -206,18 +206,19 @@ TEST_F(MediaRouterContextualMenuUnitTest, ToggleMediaRemotingItem) {
   MediaRouterContextualMenu menu(browser(), kShownByPolicy, &observer_);
 
   PrefService* pref_service = browser()->profile()->GetPrefs();
-  pref_service->SetBoolean(prefs::kMediaRouterMediaRemotingEnabled, false);
+  pref_service->SetBoolean(
+      media_router::prefs::kMediaRouterMediaRemotingEnabled, false);
   EXPECT_FALSE(menu.IsCommandIdChecked(IDC_MEDIA_ROUTER_TOGGLE_MEDIA_REMOTING));
 
   menu.ExecuteCommand(IDC_MEDIA_ROUTER_TOGGLE_MEDIA_REMOTING, 0);
   EXPECT_TRUE(menu.IsCommandIdChecked(IDC_MEDIA_ROUTER_TOGGLE_MEDIA_REMOTING));
-  EXPECT_TRUE(
-      pref_service->GetBoolean(prefs::kMediaRouterMediaRemotingEnabled));
+  EXPECT_TRUE(pref_service->GetBoolean(
+      media_router::prefs::kMediaRouterMediaRemotingEnabled));
 
   menu.ExecuteCommand(IDC_MEDIA_ROUTER_TOGGLE_MEDIA_REMOTING, 0);
   EXPECT_FALSE(menu.IsCommandIdChecked(IDC_MEDIA_ROUTER_TOGGLE_MEDIA_REMOTING));
-  EXPECT_FALSE(
-      pref_service->GetBoolean(prefs::kMediaRouterMediaRemotingEnabled));
+  EXPECT_FALSE(pref_service->GetBoolean(
+      media_router::prefs::kMediaRouterMediaRemotingEnabled));
 }
 
 TEST_F(MediaRouterContextualMenuUnitTest, ToggleAlwaysShowIconItem) {
@@ -249,7 +250,7 @@ TEST_F(MediaRouterContextualMenuUnitTest, ActionShownByPolicy) {
   EXPECT_FALSE(menu.IsCommandIdEnabled(IDC_MEDIA_ROUTER_SHOWN_BY_POLICY));
 
   // The checkbox item "Always show icon" should not be shown.
-  EXPECT_FALSE(HasCommandId(menu.menu_model(),
+  EXPECT_FALSE(HasCommandId(menu.CreateMenuModel().get(),
                             IDC_MEDIA_ROUTER_ALWAYS_SHOW_TOOLBAR_ACTION));
 }
 
@@ -257,9 +258,10 @@ TEST_F(MediaRouterContextualMenuUnitTest, NotifyActionController) {
   EXPECT_CALL(observer_, OnContextMenuShown());
   auto menu = std::make_unique<MediaRouterContextualMenu>(
       browser(), kShownByUser, &observer_);
-  menu->OnMenuWillShow(menu->menu_model());
+  std::unique_ptr<ui::SimpleMenuModel> model = menu->CreateMenuModel();
+  menu->OnMenuWillShow(model.get());
 
   EXPECT_CALL(observer_, OnContextMenuHidden());
-  menu->MenuClosed(menu->menu_model());
+  menu->MenuClosed(model.get());
   menu.reset();
 }

@@ -14,6 +14,7 @@
 #include "ash/shell_observer.h"
 #include "base/callback.h"
 #include "base/macros.h"
+#include "base/timer/timer.h"
 #include "ui/aura/window_observer.h"
 #include "ui/display/display_observer.h"
 #include "ui/events/event_handler.h"
@@ -86,9 +87,9 @@ class ASH_EXPORT ScreenshotController : public ui::EventHandler,
 
   class ScopedCursorSetter;
   class ScreenshotLayer;
+  class MovableScreenshotLayer;
 
   // Starts, ends, cancels, or updates the region selection.
-  void MaybeStart(const ui::LocatedEvent& event);
   void CompleteWindowScreenshot();
   void CompletePartialScreenshot();
   void Update(const ui::LocatedEvent& event);
@@ -112,6 +113,12 @@ class ASH_EXPORT ScreenshotController : public ui::EventHandler,
   // aura::WindowObserver:
   void OnWindowDestroying(aura::Window* window) override;
 
+  // Records the number of screenshots taken.
+  void RecordNumberOfScreenshotsTakenInLastDay();
+  void RecordNumberOfScreenshotsTakenInLastWeek();
+
+  gfx::Point GetStartPositionForTest() const;
+
   Mode mode_;
 
   // If true, then only pointer events will be used when selecting the
@@ -121,7 +128,6 @@ class ASH_EXPORT ScreenshotController : public ui::EventHandler,
   base::OnceClosure on_screenshot_session_done_;
 
   // The data to build the screenshot region.
-  gfx::Point start_position_;
   aura::Window* root_window_;
 
   // Currently selected window in WINDOW mode.
@@ -138,6 +144,16 @@ class ASH_EXPORT ScreenshotController : public ui::EventHandler,
 
   // TODO(jamescook): Replace with a mojo-compatible interface.
   std::unique_ptr<ScreenshotDelegate> screenshot_delegate_;
+
+  // Timers used to schedule recording of the number of screenshots taken.
+  base::RepeatingTimer num_screenshots_taken_in_last_day_scheduler_;
+  base::RepeatingTimer num_screenshots_taken_in_last_week_scheduler_;
+
+  // Counters used to track the number of screenshots taken.
+  int num_screenshots_taken_in_last_day_ = 0;
+  int num_screenshots_taken_in_last_week_ = 0;
+
+  base::WeakPtrFactory<ScreenshotController> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(ScreenshotController);
 };

@@ -112,11 +112,11 @@ class EasyUnlockServiceRegularTest : public testing::Test {
   void SetUp() override {
     PowerManagerClient::InitializeFake();
 
+    // Note: this is necessary because objects owned by EasyUnlockService
+    // depend on the BluetoothAdapter -- fetching the real one causes tests
+    // to fail.
     mock_adapter_ = new testing::NiceMock<MockBluetoothAdapter>();
     device::BluetoothAdapterFactory::SetAdapterForTesting(mock_adapter_);
-    EXPECT_CALL(*mock_adapter_, IsPresent())
-        .WillRepeatedly(testing::Invoke(
-            this, &EasyUnlockServiceRegularTest::is_bluetooth_adapter_present));
 
     TestingBrowserProcess::GetGlobal()->SetLocalState(&local_pref_service_);
     RegisterLocalState(local_pref_service_.registry());
@@ -161,7 +161,7 @@ class EasyUnlockServiceRegularTest : public testing::Test {
     TestingBrowserProcess::GetGlobal()->SetLocalState(nullptr);
   }
 
-  // Most tests will want to pass |should_initialize_all_dependencies| == true,
+  // Most tests will want to pass `should_initialize_all_dependencies` == true,
   // but may pass false if they wish to tweak the dependencies' state themselves
   // before initializing the service.
   void InitializeService(bool should_initialize_all_dependencies) {
@@ -206,14 +206,6 @@ class EasyUnlockServiceRegularTest : public testing::Test {
   void SetEasyUnlockAllowedPolicy(bool allowed) {
     profile_->GetTestingPrefService()->SetManagedPref(
         prefs::kEasyUnlockAllowed, std::make_unique<base::Value>(allowed));
-  }
-
-  void set_is_bluetooth_adapter_present(bool is_present) {
-    is_bluetooth_adapter_present_ = is_present;
-  }
-
-  bool is_bluetooth_adapter_present() const {
-    return is_bluetooth_adapter_present_;
   }
 
   void SetScreenLockState(bool is_locked) {
@@ -261,7 +253,6 @@ class EasyUnlockServiceRegularTest : public testing::Test {
 
   std::string profile_gaia_id_;
 
-  bool is_bluetooth_adapter_present_ = true;
   scoped_refptr<testing::NiceMock<MockBluetoothAdapter>> mock_adapter_;
 
   testing::StrictMock<MockEasyUnlockNotificationController>*
@@ -282,13 +273,6 @@ class EasyUnlockServiceRegularTest : public testing::Test {
   DISALLOW_COPY_AND_ASSIGN(EasyUnlockServiceRegularTest);
 };
 
-TEST_F(EasyUnlockServiceRegularTest, NoBluetoothNoService) {
-  InitializeService(true /* should_initialize_all_dependencies */);
-
-  set_is_bluetooth_adapter_present(false);
-  EXPECT_FALSE(easy_unlock_service_regular_->IsAllowed());
-}
-
 TEST_F(EasyUnlockServiceRegularTest, NotAllowedWhenProhibited) {
   InitializeService(true /* should_initialize_all_dependencies */);
   fake_multidevice_setup_client_->SetFeatureState(
@@ -303,7 +287,7 @@ TEST_F(EasyUnlockServiceRegularTest, NotAllowedForEphemeralAccounts) {
 
   // Only MockUserManager allows for stubbing
   // IsCurrentUserNonCryptohomeDataEphemeral() to return false so we use one
-  // here in place of |fake_chrome_user_manager_|. Injecting it into a local
+  // here in place of `fake_chrome_user_manager_`. Injecting it into a local
   // ScopedUserManager sets it up as the global UserManager instance.
   auto mock_user_manager =
       std::make_unique<testing::NiceMock<MockUserManager>>();

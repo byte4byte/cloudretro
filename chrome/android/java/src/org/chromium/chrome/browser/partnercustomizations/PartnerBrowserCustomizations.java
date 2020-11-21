@@ -21,9 +21,8 @@ import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.task.AsyncTask;
 import org.chromium.base.task.PostTask;
 import org.chromium.chrome.browser.AppHooks;
-import org.chromium.chrome.browser.ChromeVersionInfo;
 import org.chromium.chrome.browser.flags.ChromeSwitches;
-import org.chromium.chrome.browser.ntp.NewTabPage;
+import org.chromium.chrome.browser.version.ChromeVersionInfo;
 import org.chromium.components.embedder_support.util.UrlConstants;
 import org.chromium.components.embedder_support.util.UrlUtilities;
 import org.chromium.content_public.browser.UiThreadTaskTraits;
@@ -287,12 +286,11 @@ public class PartnerBrowserCustomizations {
     @VisibleForTesting
     void initializeAsync(final Context context, long timeoutMs) {
         mIsInitialized = false;
-        Provider provider = AppHooks.get().getCustomizationProvider();
         // Setup an initializing async task.
         final AsyncTask<Void> initializeAsyncTask = new AsyncTask<Void>() {
             private boolean mHomepageUriChanged;
 
-            private void refreshHomepage() {
+            private void refreshHomepage(Provider provider) {
                 try {
                     String homepage = provider.getHomepage();
                     if (!isValidHomepage(homepage)) {
@@ -307,7 +305,7 @@ public class PartnerBrowserCustomizations {
                 }
             }
 
-            private void refreshIncognitoModeDisabled() {
+            private void refreshIncognitoModeDisabled(Provider provider) {
                 try {
                     mIncognitoModeDisabled = provider.isIncognitoModeDisabled();
                 } catch (Exception e) {
@@ -315,7 +313,7 @@ public class PartnerBrowserCustomizations {
                 }
             }
 
-            private void refreshBookmarksEditingDisabled() {
+            private void refreshBookmarksEditingDisabled(Provider provider) {
                 try {
                     mBookmarksEditingDisabled = provider.isBookmarksEditingDisabled();
                 } catch (Exception e) {
@@ -335,20 +333,17 @@ public class PartnerBrowserCustomizations {
                         return null;
                     }
 
-                    if (isCancelled()) {
-                        return null;
-                    }
-                    refreshIncognitoModeDisabled();
+                    if (isCancelled()) return null;
+                    Provider provider = AppHooks.get().getCustomizationProvider();
 
-                    if (isCancelled()) {
-                        return null;
-                    }
-                    refreshBookmarksEditingDisabled();
+                    if (isCancelled()) return null;
+                    refreshIncognitoModeDisabled(provider);
 
-                    if (isCancelled()) {
-                        return null;
-                    }
-                    refreshHomepage();
+                    if (isCancelled()) return null;
+                    refreshBookmarksEditingDisabled(provider);
+
+                    if (isCancelled()) return null;
+                    refreshHomepage(provider);
                 } catch (Exception e) {
                     Log.w(TAG, "Fetching partner customizations failed", e);
                 }
@@ -444,7 +439,7 @@ public class PartnerBrowserCustomizations {
         if (url == null) {
             return false;
         }
-        if (!UrlUtilities.isHttpOrHttps(url) && !NewTabPage.isNTPUrl(url)) {
+        if (!UrlUtilities.isHttpOrHttps(url) && !UrlUtilities.isNTPUrl(url)) {
             Log.w(TAG,
                     "Partner homepage must be HTTP(S) or NewTabPage. "
                             + "Got invalid URL \"%s\"",

@@ -2,8 +2,20 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// clang-format off
+// #import {ContentMetadataProvider} from './content_metadata_provider.m.js';
+// #import {ExternalMetadataProvider} from './external_metadata_provider.m.js';
+// #import {FileSystemMetadataProvider} from './file_system_metadata_provider.m.js';
+// #import {MetadataItem} from './metadata_item.m.js';
+// #import {MetadataProvider} from './metadata_provider.m.js';
+// #import {MetadataRequest} from './metadata_request.m.js';
+// #import * as wrappedVolumeManagerCommon from '../../../../base/js/volume_manager_types.m.js'; const {VolumeManagerCommon} = wrappedVolumeManagerCommon;
+// #import {VolumeManager} from '../../../../externs/volume_manager.m.js';
+// #import {assert} from 'chrome://resources/js/assert.m.js';
+// clang-format on
+
 /** @final */
-class MultiMetadataProvider extends MetadataProvider {
+/* #export */ class MultiMetadataProvider extends MetadataProvider {
   /**
    * @param {!FileSystemMetadataProvider} fileSystemMetadataProvider
    * @param {!ExternalMetadataProvider} externalMetadataProvider
@@ -99,10 +111,13 @@ class MultiMetadataProvider extends MetadataProvider {
           volumeInfo &&
           volumeInfo.volumeType ===
               VolumeManagerCommon.VolumeType.DOCUMENTS_PROVIDER) {
-        // We need to discard content requests when using a documents provider
-        // since the content sniffing code can't resolve the file path in the
-        // MediaGallery API. See crbug.com/942417
-        addRequests(fileSystemRequests, fileSystemPropertyNames);
+        // When using a documents provider, we need to discard:
+        // - contentRequests: since the content sniffing code
+        //   can't resolve the file path in the MediaGallery API. See
+        //   crbug.com/942417
+        // - fileSystemRequests: because it does not correctly handle unknown
+        //   file size, which DocumentsProvider files may report (all filesystem
+        //   request fields are retrieved using external requests instead).
         addRequests(
             externalRequests,
             MultiMetadataProvider.DOCUMENTS_PROVIDER_EXTERNAL_PROPERTY_NAMES);
@@ -190,4 +205,6 @@ MultiMetadataProvider.DOCUMENTS_PROVIDER_EXTERNAL_PROPERTY_NAMES = [
   'canDelete',
   'canRename',
   'canAddChildren',
+  'modificationTime',
+  'size',
 ];

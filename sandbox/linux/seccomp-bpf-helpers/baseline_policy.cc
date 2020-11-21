@@ -11,8 +11,8 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include "base/check_op.h"
 #include "base/clang_profiling_buildflags.h"
-#include "base/logging.h"
 #include "build/build_config.h"
 #include "sandbox/linux/bpf_dsl/bpf_dsl.h"
 #include "sandbox/linux/seccomp-bpf-helpers/sigsys_handlers.h"
@@ -145,6 +145,15 @@ ResultExpr EvaluateSyscallImpl(int fs_denied_errno,
 #if defined(OS_ANDROID)
   // Needed for thread creation.
   if (sysno == __NR_sigaltstack)
+    return Allow();
+#endif
+
+#if defined(__NR_rseq) && !defined(OS_ANDROID)
+  // See https://crbug.com/1104160. Rseq can only be disabled right before an
+  // execve, because glibc registers it with the kernel and so far it's unclear
+  // whether shared libraries (which, during initialization, may observe that
+  // rseq is already registered) should have to deal with deregistration.
+  if (sysno == __NR_rseq)
     return Allow();
 #endif
 

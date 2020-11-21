@@ -13,6 +13,7 @@ Polymer({
   behaviors: [
     CrPolicyNetworkBehaviorMojo,
     I18nBehavior,
+    cr.ui.FocusRowBehavior,
   ],
 
   properties: {
@@ -45,7 +46,6 @@ Polymer({
     tabindex: {
       type: Number,
       value: -1,
-      reflectToAttribute: true,
     },
 
     /**
@@ -53,11 +53,10 @@ Polymer({
      * added as an attribute on this top-level network-list-item, and can
      * be used by any sub-element which applies it.
      */
-    ariaLabel: {
+    rowLabel: {
       type: String,
       notify: true,
-      reflectToAttribute: true,
-      computed: 'getAriaLabel_(item, networkState)',
+      computed: 'getRowLabel_(item, networkState, providerName_)',
     },
 
     buttonLabel: {
@@ -96,6 +95,24 @@ Polymer({
      * @private {!OncMojo.DeviceStateProperties|undefined} deviceState
      */
     deviceState: Object,
+
+    /**
+     * Cellular/Tether network provider name
+     * @private {string}
+     */
+    providerName_: {
+      type: String,
+      value: '',
+    },
+  },
+
+  /** @private {?chromeos.networkConfig.mojom.CrosNetworkConfigRemote} */
+  networkConfig_: null,
+
+  /** @override */
+  created() {
+    this.networkConfig_ = network_config.MojoInterfaceProviderImpl.getInstance()
+                              .getMojoServiceRemote();
   },
 
   /** @override */
@@ -113,9 +130,39 @@ Polymer({
     if (this.item && !this.item.hasOwnProperty('customItemName')) {
       this.networkState =
           /** @type {!OncMojo.NetworkStateProperties} */ (this.item);
+      this.setProviderName_();
     } else if (this.networkState) {
       this.networkState = undefined;
     }
+  },
+
+  /** @private */
+  setProviderName_() {
+    const mojom = chromeos.networkConfig.mojom;
+
+    if (this.networkState.type !== mojom.NetworkType.kTether &&
+        this.networkState.type !== mojom.NetworkType.kCellular) {
+      return;
+    }
+
+    this.networkConfig_.getManagedProperties(this.networkState.guid)
+        .then(response => {
+          if (!response || !response.result) {
+            return;
+          }
+          const managedProperty = response.result;
+
+          if (managedProperty.type === mojom.NetworkType.kTether &&
+              managedProperty.typeProperties.tether) {
+            this.providerName_ = managedProperty.typeProperties.tether.carrier;
+          }
+
+          if (managedProperty.type === mojom.NetworkType.kCellular &&
+              managedProperty.typeProperties.cellular.homeProvider) {
+            this.providerName_ =
+                managedProperty.typeProperties.cellular.homeProvider.name;
+          }
+        });
   },
 
   /** @private */
@@ -162,22 +209,51 @@ Polymer({
    * @return {string}
    * @private
    */
-  getAriaLabel_() {
+  getRowLabel_() {
+    if (!this.item) {
+      return '';
+    }
+
     const NetworkType = chromeos.networkConfig.mojom.NetworkType;
     const OncSource = chromeos.networkConfig.mojom.OncSource;
     const SecurityType = chromeos.networkConfig.mojom.SecurityType;
     const status = this.getNetworkStateText_();
     const isManaged = this.item.source === OncSource.kDevicePolicy ||
         this.item.source === OncSource.kUserPolicy;
-    const index = this.parentElement.items.indexOf(this.item) + 1;
-    const total = this.parentElement.items.length;
+
+    // TODO(jonmann): Reaching into the parent element breaks encapsulation so
+    // refactor this logic into the parent (NetworkList) and pass into
+    // NetworkListItem as a property.
+    let index;
+    let total;
+    if (this.parentElement.items) {
+      index = this.parentElement.items.indexOf(this.item) + 1;
+      total = this.parentElement.items.length;
+    } else {
+      // This should only happen in tests; see TODO above.
+      index = 0;
+      total = 1;
+    }
+
     switch (this.item.type) {
       case NetworkType.kCellular:
         if (isManaged) {
           if (status) {
+            if (this.providerName_) {
+              return this.i18n(
+                  'networkListItemLabelCellularManagedWithConnectionStatusAndProviderName',
+                  index, total, this.getItemName_(), this.providerName_, status,
+                  this.item.typeState.cellular.signalStrength);
+            }
             return this.i18n(
                 'networkListItemLabelCellularManagedWithConnectionStatus',
                 index, total, this.getItemName_(), status,
+                this.item.typeState.cellular.signalStrength);
+          }
+          if (this.providerName_) {
+            return this.i18n(
+                'networkListItemLabelCellularManagedWithProviderName', index,
+                total, this.getItemName_(), this.providerName_,
                 this.item.typeState.cellular.signalStrength);
           }
           return this.i18n(
@@ -185,9 +261,22 @@ Polymer({
               this.getItemName_(), this.item.typeState.cellular.signalStrength);
         }
         if (status) {
+          if (this.providerName_) {
+            return this.i18n(
+                'networkListItemLabelCellularWithConnectionStatusAndProviderName',
+                index, total, this.getItemName_(), this.providerName_, status,
+                this.item.typeState.cellular.signalStrength);
+          }
           return this.i18n(
               'networkListItemLabelCellularWithConnectionStatus', index, total,
               this.getItemName_(), status,
+              this.item.typeState.cellular.signalStrength);
+        }
+
+        if (this.providerName_) {
+          return this.i18n(
+              'networkListItemLabelCellularWithProviderName', index, total,
+              this.getItemName_(), this.providerName_,
               this.item.typeState.cellular.signalStrength);
         }
         return this.i18n(
@@ -214,9 +303,23 @@ Polymer({
       case NetworkType.kTether:
         // Tether networks will never be controlled by policy (only disabled).
         if (status) {
+          if (this.providerName_) {
+            return this.i18n(
+                'networkListItemLabelTetherWithConnectionStatusAndProviderName',
+                index, total, this.getItemName_(), this.providerName_, status,
+                this.item.typeState.tether.signalStrength,
+                this.item.typeState.tether.batteryPercentage);
+          }
           return this.i18n(
               'networkListItemLabelTetherWithConnectionStatus', index, total,
               this.getItemName_(), status,
+              this.item.typeState.tether.signalStrength,
+              this.item.typeState.tether.batteryPercentage);
+        }
+        if (this.providerName_) {
+          return this.i18n(
+              'networkListItemLabelTetherWithProviderName', index, total,
+              this.getItemName_(), this.providerName_,
               this.item.typeState.tether.signalStrength,
               this.item.typeState.tether.batteryPercentage);
         }
@@ -300,6 +403,22 @@ Polymer({
   },
 
   /**
+   * @return {string}
+   * @private
+   */
+  getProviderName_() {
+    return this.providerName_ ? this.providerName_ : '';
+  },
+
+  /**
+   * @return {boolean}
+   * @private
+   */
+  isProviderNameVisible_() {
+    return !!this.providerName_;
+  },
+
+  /**
    * @param {!OncMojo.NetworkStateProperties|undefined} networkState
    * @param {boolean} showButtons
    * @return {boolean}
@@ -331,21 +450,33 @@ Polymer({
    * @private
    */
   onKeydown_(event) {
-    // The only key event handled by this element is pressing Enter when the
-    // subpage arrow is focused.
-    if (event.key !== 'Enter' ||
-        !this.isSubpageButtonVisible_(this.networkState, this.showButtons) ||
-        this.$$('#subpage-button') !== this.shadowRoot.activeElement) {
+    if (event.key !== 'Enter' && event.key !== ' ') {
       return;
     }
 
-    this.fireShowDetails_(event);
+    this.onSelected_(event);
 
     // The default event for pressing Enter on a focused button is to simulate a
     // click on the button. Prevent this action, since it would navigate a
     // second time to the details page and cause an unnecessary entry to be
     // added to the back stack. See https://crbug.com/736963.
     event.preventDefault();
+  },
+
+  /**
+   * @param {!Event} event
+   * @private
+   */
+  onSelected_(event) {
+    if (this.isSubpageButtonVisible_(this.networkState, this.showButtons) &&
+        this.$$('#subpage-button') === this.shadowRoot.activeElement) {
+      this.fireShowDetails_(event);
+    } else if (this.item.hasOwnProperty('customItemName')) {
+      this.fire('custom-item-selected', this.item);
+    } else {
+      this.fire('selected', this.item);
+      this.focusRequested_ = true;
+    }
   },
 
   /**
@@ -382,5 +513,18 @@ Polymer({
     return this.networkState.type === mojom.NetworkType.kCellular &&
         this.networkState.typeState.cellular.activationState !==
         mojom.ActivationStateType.kActivated;
+  },
+
+  /**
+   * When the row is focused, this enables aria-live in "polite" mode to notify
+   * a11y users when details about the network change or when the list gets
+   * re-ordered because of changing signal strengths.
+   * @param {boolean} isFocused
+   * @return {string}
+   * @private
+   */
+  getLiveStatus_(isFocused) {
+    // isFocused is supplied by FocusRowBehavior.
+    return this.isFocused ? 'polite' : 'off';
   },
 });

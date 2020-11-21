@@ -18,6 +18,7 @@
 #import "ios/chrome/browser/ui/util/layout_guide_names.h"
 #import "ios/chrome/browser/ui/util/named_guide.h"
 #import "ios/chrome/browser/web/sad_tab_tab_helper.h"
+#import "ios/chrome/browser/web/web_navigation_browser_agent.h"
 #import "ios/chrome/common/ui/util/constraints_ui_util.h"
 #import "ios/web/public/web_state.h"
 
@@ -37,11 +38,11 @@
     return;
 
   if (self.repeatedFailure) {
-    UMA_HISTOGRAM_ENUMERATION(ui_metrics::kSadTabReloadHistogramKey,
+    UMA_HISTOGRAM_ENUMERATION(ui_metrics::kSadTabFeedbackHistogramKey,
                               ui_metrics::SadTabEvent::DISPLAYED,
                               ui_metrics::SadTabEvent::MAX_SAD_TAB_EVENT);
   } else {
-    UMA_HISTOGRAM_ENUMERATION(ui_metrics::kSadTabFeedbackHistogramKey,
+    UMA_HISTOGRAM_ENUMERATION(ui_metrics::kSadTabReloadHistogramKey,
                               ui_metrics::SadTabEvent::DISPLAYED,
                               ui_metrics::SadTabEvent::MAX_SAD_TAB_EVENT);
   }
@@ -91,7 +92,8 @@
   // TODO(crbug.com/1045047): Use HandlerForProtocol after commands protocol
   // clean up.
   [static_cast<id<ApplicationCommands>>(self.browser->GetCommandDispatcher())
-      showReportAnIssueFromViewController:self.baseViewController];
+      showReportAnIssueFromViewController:self.baseViewController
+                                   sender:UserFeedbackSender::SadTab];
 }
 
 - (void)sadTabViewController:(SadTabViewController*)sadTabViewController
@@ -104,10 +106,7 @@
 }
 
 - (void)sadTabViewControllerReload:(SadTabViewController*)sadTabViewController {
-  // TODO(crbug.com/1045047): Use HandlerForProtocol after commands protocol
-  // clean up.
-  [static_cast<id<BrowserCommands>>(self.browser->GetCommandDispatcher())
-      reload];
+  WebNavigationBrowserAgent::FromBrowser(self.browser)->Reload();
 }
 
 #pragma mark - SadTabTabHelperDelegate

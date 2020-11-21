@@ -12,6 +12,10 @@ import sys
 import tempfile
 import shlex
 
+if sys.version_info.major < 3:
+  basestring_compat = basestring
+else:
+  basestring_compat = str
 
 # Xcode substitutes variables like ${PRODUCT_NAME} or $(PRODUCT_NAME) when
 # compiling Info.plist. It also supports supports modifiers like :identifier
@@ -80,23 +84,27 @@ def Interpolate(value, substitutions):
     substitution.
   """
   if isinstance(value, dict):
-      return {k: Interpolate(v, substitutions) for k, v in value.iteritems()}
+    return {k: Interpolate(v, substitutions) for k, v in value.items()}
   if isinstance(value, list):
     return [Interpolate(v, substitutions) for v in value]
-  if isinstance(value, str):
+  if isinstance(value, basestring_compat):
     return InterpolateString(value, substitutions)
   return value
 
 
 def LoadPList(path):
   """Loads Plist at |path| and returns it as a dictionary."""
-  fd, name = tempfile.mkstemp()
-  try:
-    subprocess.check_call(['plutil', '-convert', 'xml1', '-o', name, path])
-    with os.fdopen(fd, 'r') as f:
-      return plistlib.readPlist(f)
-  finally:
-    os.unlink(name)
+  if sys.version_info.major == 2:
+    fd, name = tempfile.mkstemp()
+    try:
+      subprocess.check_call(['plutil', '-convert', 'xml1', '-o', name, path])
+      with os.fdopen(fd, 'rb') as f:
+        return plistlib.readPlist(f)
+    finally:
+      os.unlink(name)
+  else:
+    with open(path, 'rb') as f:
+      return plistlib.load(f)
 
 
 def SavePList(path, format, data):
@@ -109,8 +117,11 @@ def SavePList(path, format, data):
     # it does exist.
     if os.path.exists(path):
       os.unlink(path)
-    with os.fdopen(fd, 'w') as f:
-      plistlib.writePlist(data, f)
+    with os.fdopen(fd, 'wb') as f:
+      if sys.version_info.major == 2:
+        plistlib.writePlist(data, f)
+      else:
+        plistlib.dump(data, f)
     subprocess.check_call(['plutil', '-convert', format, '-o', path, name])
   finally:
     os.unlink(name)
@@ -134,7 +145,7 @@ def MergePList(plist1, plist2):
     are concatenated.
   """
   result = plist1.copy()
-  for key, value in plist2.iteritems():
+  for key, value in plist2.items():
     if isinstance(value, dict):
       old_value = result.get(key)
       if isinstance(old_value, dict):
@@ -170,6 +181,10 @@ class MergeAction(Action):
         '-f', '--format', required=True, choices=('xml1', 'binary1', 'json'),
         help='format of the plist file to generate')
     parser.add_argument(
+        '-x',
+        '--xcode-version',
+        help='version of Xcode, ignored (can be used to force rebuild)')
+    parser.add_argument(
           'path', nargs="+",
           help='path to plist files to merge')
 
@@ -201,6 +216,10 @@ class SubstituteAction(Action):
     parser.add_argument(
         '-f', '--format', required=True, choices=('xml1', 'binary1', 'json'),
         help='format of the plist file to generate')
+    parser.add_argument(
+        '-x',
+        '--xcode-version',
+        help='version of Xcode, ignored (can be used to force rebuild)')
 
   @staticmethod
   def _Execute(args):

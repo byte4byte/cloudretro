@@ -4,31 +4,20 @@
 
 #include "content/common/frame_replication_state.h"
 
-#include "services/network/public/mojom/web_sandbox_flags.mojom-shared.h"
-#include "third_party/blink/public/mojom/security_context/insecure_request_policy.mojom.h"
-#include "third_party/blink/public/web/web_tree_scope_type.h"
-
 namespace content {
 
-FrameReplicationState::FrameReplicationState()
-    : active_sandbox_flags(network::mojom::WebSandboxFlags::kNone),
-      scope(blink::WebTreeScopeType::kDocument),
-      insecure_request_policy(
-          blink::mojom::InsecureRequestPolicy::kLeaveInsecureRequestsAlone),
-      has_potentially_trustworthy_unique_origin(false),
-      has_received_user_gesture(false),
-      has_received_user_gesture_before_nav(false) {}
+FrameReplicationState::FrameReplicationState() = default;
 
 FrameReplicationState::FrameReplicationState(
-    blink::WebTreeScopeType scope,
+    blink::mojom::TreeScopeType scope,
     const std::string& name,
     const std::string& unique_name,
     blink::mojom::InsecureRequestPolicy insecure_request_policy,
     const std::vector<uint32_t>& insecure_navigations_set,
     bool has_potentially_trustworthy_unique_origin,
-    bool has_received_user_gesture,
+    bool has_active_user_gesture,
     bool has_received_user_gesture_before_nav,
-    blink::FrameOwnerElementType owner_type)
+    blink::mojom::FrameOwnerElementType owner_type)
     : name(name),
       unique_name(unique_name),
       active_sandbox_flags(network::mojom::WebSandboxFlags::kNone),
@@ -37,15 +26,16 @@ FrameReplicationState::FrameReplicationState(
       insecure_navigations_set(insecure_navigations_set),
       has_potentially_trustworthy_unique_origin(
           has_potentially_trustworthy_unique_origin),
-      has_received_user_gesture(has_received_user_gesture),
+      has_active_user_gesture(has_active_user_gesture),
       has_received_user_gesture_before_nav(
           has_received_user_gesture_before_nav),
       frame_owner_element_type(owner_type) {}
 
+FrameReplicationState::~FrameReplicationState() = default;
+
 FrameReplicationState::FrameReplicationState(
     const FrameReplicationState& other) = default;
-
-FrameReplicationState::~FrameReplicationState() {
-}
+FrameReplicationState& FrameReplicationState::operator=(
+    const FrameReplicationState& other) = default;
 
 }  // namespace content

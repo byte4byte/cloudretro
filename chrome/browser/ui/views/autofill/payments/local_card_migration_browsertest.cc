@@ -68,6 +68,7 @@
 #include "components/sync/test/fake_server/fake_server.h"
 #include "components/sync/test/fake_server/fake_server_network_resources.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/mock_navigation_handle.h"
 #include "content/public/test/test_navigation_observer.h"
@@ -292,7 +293,8 @@ class LocalCardMigrationBrowserTest
   }
 
   CreditCard SaveLocalCard(std::string card_number,
-                           bool set_as_expired_card = false) {
+                           bool set_as_expired_card = false,
+                           bool set_nickname = false) {
     CreditCard local_card;
     test::SetCreditCardInfo(&local_card, "John Smith", card_number.c_str(),
                             "12",
@@ -301,7 +303,10 @@ class LocalCardMigrationBrowserTest
                             "1");
     local_card.set_guid("00000000-0000-0000-0000-" + card_number.substr(0, 12));
     local_card.set_record_type(CreditCard::LOCAL_CARD);
-    AddTestCreditCard(browser(), local_card);
+    if (set_nickname)
+      local_card.SetNickname(base::ASCIIToUTF16("card nickname"));
+
+    AddTestCreditCard(browser()->profile(), local_card);
     return local_card;
   }
 
@@ -313,7 +318,7 @@ class LocalCardMigrationBrowserTest
                          card_number.substr(0, 12));
     server_card.set_record_type(CreditCard::FULL_SERVER_CARD);
     server_card.set_server_id("full_id_" + card_number);
-    AddTestServerCreditCard(browser(), server_card);
+    AddTestServerCreditCard(browser()->profile(), server_card);
     return server_card;
   }
 
@@ -384,7 +389,7 @@ class LocalCardMigrationBrowserTest
 
   void ClickOnDialogViewAndWait(
       views::View* view,
-      views::DialogDelegateView* local_card_migration_view) {
+      views::BubbleDialogDelegateView* local_card_migration_view) {
     CHECK(local_card_migration_view);
     views::test::WidgetDestroyedWaiter destroyed_waiter(
         local_card_migration_view->GetWidget());
@@ -401,7 +406,7 @@ class LocalCardMigrationBrowserTest
 
   views::View* FindViewInDialogById(
       DialogViewId view_id,
-      views::DialogDelegateView* local_card_migration_view) {
+      views::BubbleDialogDelegateView* local_card_migration_view) {
     CHECK(local_card_migration_view);
 
     views::View* specified_view =
@@ -416,19 +421,20 @@ class LocalCardMigrationBrowserTest
     return specified_view;
   }
 
-  void ClickOnOkButton(views::DialogDelegateView* local_card_migration_view) {
+  void ClickOnOkButton(
+      views::BubbleDialogDelegateView* local_card_migration_view) {
     views::View* ok_button = local_card_migration_view->GetOkButton();
 
     ClickOnDialogViewAndWait(ok_button, local_card_migration_view);
   }
 
   void ClickOnCancelButton(
-      views::DialogDelegateView* local_card_migration_view) {
+      views::BubbleDialogDelegateView* local_card_migration_view) {
     views::View* cancel_button = local_card_migration_view->GetCancelButton();
     ClickOnDialogViewAndWait(cancel_button, local_card_migration_view);
   }
 
-  views::DialogDelegateView* GetLocalCardMigrationOfferBubbleViews() {
+  LocalCardMigrationBubbleViews* GetLocalCardMigrationOfferBubbleViews() {
     LocalCardMigrationBubbleControllerImpl*
         local_card_migration_bubble_controller_impl =
             LocalCardMigrationBubbleControllerImpl::FromWebContents(
@@ -440,7 +446,7 @@ class LocalCardMigrationBrowserTest
             ->local_card_migration_bubble_view());
   }
 
-  views::DialogDelegateView* GetLocalCardMigrationMainDialogView() {
+  views::BubbleDialogDelegateView* GetLocalCardMigrationMainDialogView() {
     LocalCardMigrationDialogControllerImpl*
         local_card_migration_dialog_controller_impl =
             LocalCardMigrationDialogControllerImpl::FromWebContents(
@@ -499,7 +505,9 @@ class LocalCardMigrationBrowserTest
     return &test_url_loader_factory_;
   }
 
-  void WaitForCardDeletion() { WaitForPersonalDataChange(browser()); }
+  void WaitForCardDeletion() {
+    WaitForPersonalDataChange(browser()->profile());
+  }
 
   void WaitForAnimationToComplete() {
     if (base::FeatureList::IsEnabled(
@@ -788,11 +796,11 @@ IN_PROC_BROWSER_TEST_F(LocalCardMigrationBrowserTest,
   ASSERT_EQ(2u, card_list_view->children().size());
   // Cards will be added to database in a reversed order.
   EXPECT_EQ(static_cast<MigratableCardView*>(card_list_view->children()[0])
-                ->GetNetworkAndLastFourDigits(),
-            second_card.NetworkAndLastFourDigits());
+                ->GetCardIdentifierString(),
+            second_card.CardIdentifierStringForAutofillDisplay());
   EXPECT_EQ(static_cast<MigratableCardView*>(card_list_view->children()[1])
-                ->GetNetworkAndLastFourDigits(),
-            first_card.NetworkAndLastFourDigits());
+                ->GetCardIdentifierString(),
+            first_card.CardIdentifierStringForAutofillDisplay());
 }
 
 // Ensures that rejecting the main migration dialog closes the dialog.
@@ -1005,7 +1013,7 @@ IN_PROC_BROWSER_TEST_F(LocalCardMigrationBrowserTestForStatusChip,
 }
 
 // TODO(crbug.com/999510): Crashes flakily on Linux.
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
 #define MAYBE_ClickingOmniboxIconReshowsBubble \
   DISABLED_ClickingOmniboxIconReshowsBubble
 #else
@@ -1042,7 +1050,7 @@ IN_PROC_BROWSER_TEST_F(LocalCardMigrationBrowserTestForStatusChip,
           Bucket(AutofillMetrics::LOCAL_CARD_MIGRATION_BUBBLE_SHOWN, 1)));
 }
 
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
 // TODO(crbug.com/823543): Widget activation doesn't work on Mac.
 #define MAYBE_ActivateFirstInactiveBubbleForAccessibility \
   DISABLED_ActivateFirstInactiveBubbleForAccessibility
@@ -1148,8 +1156,110 @@ IN_PROC_BROWSER_TEST_F(LocalCardMigrationBrowserTestForStatusChip,
 
 #endif  // !defined(OS_CHROMEOS)
 
+class LocalCardMigrationBrowserTestForFixedLogging
+    : public LocalCardMigrationBrowserTest {
+ protected:
+  LocalCardMigrationBrowserTestForFixedLogging() {
+    scoped_feature_list_.InitAndEnableFeature(
+        features::kAutofillEnableFixedPaymentsBubbleLogging);
+  }
+
+  ~LocalCardMigrationBrowserTestForFixedLogging() override = default;
+
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
+};
+
+IN_PROC_BROWSER_TEST_F(LocalCardMigrationBrowserTestForFixedLogging,
+                       ClosedReason_BubbleAccepted) {
+  base::HistogramTester histogram_tester;
+
+  SaveLocalCard(kFirstCardNumber);
+  SaveLocalCard(kSecondCardNumber);
+  UseCardAndWaitForMigrationOffer(kFirstCardNumber);
+  ClickOnOkButton(GetLocalCardMigrationOfferBubbleViews());
+
+  histogram_tester.ExpectUniqueSample(
+      "Autofill.LocalCardMigrationBubbleResult.FirstShow",
+      AutofillMetrics::LOCAL_CARD_MIGRATION_BUBBLE_ACCEPTED, 1);
+}
+
+IN_PROC_BROWSER_TEST_F(LocalCardMigrationBrowserTestForFixedLogging,
+                       ClosedReason_BubbleClosed) {
+  base::HistogramTester histogram_tester;
+
+  SaveLocalCard(kFirstCardNumber);
+  SaveLocalCard(kSecondCardNumber);
+  UseCardAndWaitForMigrationOffer(kFirstCardNumber);
+  ClickOnDialogViewAndWait(GetCloseButton(),
+                           GetLocalCardMigrationOfferBubbleViews());
+
+  histogram_tester.ExpectUniqueSample(
+      "Autofill.LocalCardMigrationBubbleResult.FirstShow",
+      AutofillMetrics::LOCAL_CARD_MIGRATION_BUBBLE_CLOSED, 1);
+}
+
+IN_PROC_BROWSER_TEST_F(LocalCardMigrationBrowserTestForFixedLogging,
+                       ClosedReason_BubbleNotInteracted) {
+  base::HistogramTester histogram_tester;
+
+  SaveLocalCard(kFirstCardNumber);
+  SaveLocalCard(kSecondCardNumber);
+  UseCardAndWaitForMigrationOffer(kFirstCardNumber);
+  views::test::WidgetDestroyedWaiter destroyed_waiter(
+      GetLocalCardMigrationOfferBubbleViews()->GetWidget());
+  browser()->tab_strip_model()->CloseAllTabs();
+  destroyed_waiter.Wait();
+
+  histogram_tester.ExpectUniqueSample(
+      "Autofill.LocalCardMigrationBubbleResult.FirstShow",
+      AutofillMetrics::LOCAL_CARD_MIGRATION_BUBBLE_NOT_INTERACTED, 1);
+}
+
+IN_PROC_BROWSER_TEST_F(LocalCardMigrationBrowserTestForFixedLogging,
+                       ClosedReason_BubbleLostFocus) {
+  base::HistogramTester histogram_tester;
+
+  SaveLocalCard(kFirstCardNumber);
+  SaveLocalCard(kSecondCardNumber);
+  UseCardAndWaitForMigrationOffer(kFirstCardNumber);
+  views::test::WidgetDestroyedWaiter destroyed_waiter(
+      GetLocalCardMigrationOfferBubbleViews()->GetWidget());
+  GetLocalCardMigrationOfferBubbleViews()->GetWidget()->CloseWithReason(
+      views::Widget::ClosedReason::kLostFocus);
+  destroyed_waiter.Wait();
+
+  histogram_tester.ExpectUniqueSample(
+      "Autofill.LocalCardMigrationBubbleResult.FirstShow",
+      AutofillMetrics::LOCAL_CARD_MIGRATION_BUBBLE_LOST_FOCUS, 1);
+}
+
+// Tests to ensure the card nickname is shown correctly in the local card
+// migration dialog.
+IN_PROC_BROWSER_TEST_F(LocalCardMigrationBrowserTest, CardIdentifierString) {
+  base::HistogramTester histogram_tester;
+
+  CreditCard first_card = SaveLocalCard(
+      kFirstCardNumber, /*set_as_expired_card=*/false, /*set_nickname=*/true);
+  CreditCard second_card = SaveLocalCard(
+      kSecondCardNumber, /*set_as_expired_card=*/false, /*set_nickname=*/false);
+  UseCardAndWaitForMigrationOffer(kFirstCardNumber);
+  // Click the [Continue] button.
+  ClickOnOkButton(GetLocalCardMigrationOfferBubbleViews());
+
+  views::View* card_list_view = GetCardListView();
+  EXPECT_TRUE(card_list_view->GetVisible());
+  ASSERT_EQ(2u, card_list_view->children().size());
+  // Cards will be added to database in a reversed order.
+  EXPECT_EQ(static_cast<MigratableCardView*>(card_list_view->children()[0])
+                ->GetCardIdentifierString(),
+            second_card.NetworkAndLastFourDigits());
+  EXPECT_EQ(static_cast<MigratableCardView*>(card_list_view->children()[1])
+                ->GetCardIdentifierString(),
+            first_card.NicknameAndLastFourDigitsForTesting());
+}
+
 // TODO(crbug.com/897998):
-// - Update test set-up and add navigation tests.
 // - Add more tests for feedback dialog.
 
 }  // namespace autofill

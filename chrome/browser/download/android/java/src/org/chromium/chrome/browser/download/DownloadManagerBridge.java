@@ -10,10 +10,10 @@ import android.content.SharedPreferences;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Build.VERSION;
+import android.os.Build.VERSION_CODES;
 import android.os.Environment;
 import android.text.TextUtils;
-
-import androidx.core.app.NotificationManagerCompat;
 
 import org.chromium.base.Callback;
 import org.chromium.base.ContentUriUtils;
@@ -26,10 +26,9 @@ import org.chromium.base.annotations.NativeMethods;
 import org.chromium.base.task.AsyncTask;
 import org.chromium.base.task.PostTask;
 import org.chromium.base.task.TaskTraits;
+import org.chromium.components.browser_ui.util.DownloadUtils;
 
 import java.io.File;
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
 import java.util.concurrent.RejectedExecutionException;
 
 /**
@@ -94,38 +93,12 @@ public class DownloadManagerBridge {
             String filePath, long fileSizeBytes, String originalUrl, String referer,
             String downloadGuid) {
         assert !ThreadUtils.runningOnUiThread();
-        DownloadManager manager =
-                (DownloadManager) getContext().getSystemService(Context.DOWNLOAD_SERVICE);
-        NotificationManagerCompat notificationManager =
-                NotificationManagerCompat.from(getContext());
-        boolean useSystemNotification = !notificationManager.areNotificationsEnabled();
+        assert VERSION.SDK_INT < VERSION_CODES.Q : "Deprecated in Q, may cause crash.";
         long downloadId = getDownloadIdForDownloadGuid(downloadGuid);
         if (downloadId != DownloadConstants.INVALID_DOWNLOAD_ID) return downloadId;
 
-        if (Build.VERSION.SDK_INT > Build.VERSION_CODES.M) {
-            Class<?> c = manager.getClass();
-            try {
-                Class[] args = {String.class, String.class, boolean.class, String.class,
-                        String.class, long.class, boolean.class, Uri.class, Uri.class};
-                Method method = c.getMethod("addCompletedDownload", args);
-                // OriginalUri has to be null or non-empty http(s) scheme.
-                Uri originalUri = UriUtils.parseOriginalUrl(originalUrl);
-                Uri refererUri = TextUtils.isEmpty(referer) ? null : Uri.parse(referer);
-                downloadId = (Long) method.invoke(manager, fileName, description, true, mimeType,
-                        filePath, fileSizeBytes, useSystemNotification, originalUri, refererUri);
-            } catch (SecurityException e) {
-                Log.e(TAG, "Cannot access the needed method.");
-            } catch (NoSuchMethodException e) {
-                Log.e(TAG, "Cannot find the needed method.");
-            } catch (InvocationTargetException e) {
-                Log.e(TAG, "Error calling the needed method.");
-            } catch (IllegalAccessException e) {
-                Log.e(TAG, "Error accessing the needed method.");
-            }
-        } else {
-            downloadId = manager.addCompletedDownload(fileName, description, true, mimeType,
-                    filePath, fileSizeBytes, useSystemNotification);
-        }
+        downloadId = DownloadUtils.addCompletedDownload(
+                fileName, description, mimeType, filePath, fileSizeBytes, originalUrl, referer);
         addDownloadIdMapping(downloadId, downloadGuid);
         return downloadId;
     }
@@ -298,10 +271,13 @@ public class DownloadManagerBridge {
         AsyncTask<Long> task = new AsyncTask<Long>() {
             @Override
             protected Long doInBackground() {
-                long downloadId = ContentUriUtils.isContentUri(filePath)
-                        ? DownloadConstants.INVALID_DOWNLOAD_ID
-                        : addCompletedDownload(fileName, description, mimeType, filePath,
-                                fileSizeBytes, originalUrl, referrer, downloadGuid);
+                long downloadId = DownloadConstants.INVALID_DOWNLOAD_ID;
+                // On Android Q-, add the completed download to Android download manager.
+                if (!ContentUriUtils.isContentUri(filePath)
+                        && Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+                    downloadId = addCompletedDownload(fileName, description, mimeType, filePath,
+                            fileSizeBytes, originalUrl, referrer, downloadGuid);
+                }
                 return downloadId;
             }
 

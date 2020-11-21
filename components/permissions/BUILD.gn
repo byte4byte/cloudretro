@@ -2,15 +2,26 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+source_set("permissions_common") {
+  sources = [ "permission_request_enums.h" ]
+}
+
 source_set("permissions") {
   sources = [
     "chooser_context_base.cc",
     "chooser_context_base.h",
+    "contexts/font_access_permission_context.cc",
+    "contexts/font_access_permission_context.h",
     "contexts/geolocation_permission_context.cc",
     "contexts/geolocation_permission_context.h",
+    "contexts/webxr_permission_context.cc",
+    "contexts/webxr_permission_context.h",
     "features.cc",
     "features.h",
+    "notification_permission_ui_selector.cc",
     "notification_permission_ui_selector.h",
+    "permission_auditing_database.cc",
+    "permission_auditing_database.h",
     "permission_context_base.cc",
     "permission_context_base.h",
     "permission_decision_auto_blocker.cc",
@@ -30,6 +41,8 @@ source_set("permissions") {
     "permission_result.h",
     "permission_uma_util.cc",
     "permission_uma_util.h",
+    "permission_usage_session.cc",
+    "permission_usage_session.h",
     "permission_util.cc",
     "permission_util.h",
     "permissions_client.cc",
@@ -43,9 +56,11 @@ source_set("permissions") {
   ]
   deps = [
     "//base",
+    "//components/autofill_assistant/browser/public:public",
     "//components/content_settings/browser",
     "//components/content_settings/core/browser",
     "//components/keyed_service/content",
+    "//components/permissions/prediction_service",
     "//components/strings:components_strings_grit",
     "//components/ukm/content",
     "//components/url_formatter",
@@ -53,6 +68,9 @@ source_set("permissions") {
     "//components/vector_icons",
     "//content/public/browser",
     "//services/metrics/public/cpp:ukm_builders",
+    "//sql",
+    "//third_party/blink/public/common",
+    "//third_party/sqlite",
     "//ui/base",
     "//url",
   ]
@@ -79,6 +97,7 @@ source_set("permissions") {
   } else {
     sources += [ "permission_prompt_impl.cc" ]
   }
+  public_deps = [ ":permissions_common" ]
 }
 
 source_set("test_support") {
@@ -100,6 +119,7 @@ source_set("test_support") {
   deps = [
     ":permissions",
     "//base",
+    "//components/content_settings/core/browser",
     "//components/sync_preferences:test_support",
     "//components/ukm/content",
     "//components/vector_icons",
@@ -119,6 +139,7 @@ source_set("unit_tests") {
   sources = [
     "chooser_context_base_unittest.cc",
     "contexts/geolocation_permission_context_unittest.cc",
+    "permission_auditing_database_unittest.cc",
     "permission_context_base_unittest.cc",
     "permission_decision_auto_blocker_unittest.cc",
     "permission_manager_unittest.cc",
@@ -131,6 +152,7 @@ source_set("unit_tests") {
     "//base",
     "//base/test:test_support",
     "//components/content_settings/browser",
+    "//components/content_settings/browser:test_support",
     "//components/content_settings/core/browser",
     "//components/keyed_service/content",
     "//components/prefs:test_support",
@@ -138,7 +160,11 @@ source_set("unit_tests") {
     "//components/ukm/content",
     "//components/variations",
     "//content/test:test_support",
+    "//sql",
+    "//sql:test_support",
     "//testing/gtest",
+    "//third_party/sqlite",
+    "//url",
   ]
   if (is_android) {
     deps += [

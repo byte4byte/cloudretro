@@ -5,8 +5,8 @@
 #include "base/test/test_message_loop.h"
 
 #include "base/compiler_specific.h"
-#include "base/logging.h"
 #include "base/message_loop/message_pump_type.h"
+#include "base/notreached.h"
 #include "base/run_loop.h"
 #include "base/test/task_environment.h"
 #include "build/build_config.h"
@@ -27,7 +27,7 @@ test::SingleThreadTaskEnvironment::MainThreadType GetMainThreadType(
     case MessagePumpType::CUSTOM:
 #if defined(OS_ANDROID)
     case MessagePumpType::JAVA:
-#elif defined(OS_MACOSX)
+#elif defined(OS_APPLE)
     case MessagePumpType::NS_RUNLOOP:
 #elif defined(OS_WIN)
     case MessagePumpType::UI_WITH_WM_QUIT_SUPPORT:

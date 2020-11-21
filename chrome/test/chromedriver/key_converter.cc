@@ -23,10 +23,10 @@ struct ModifierMaskAndKeyCode {
 };
 
 const ModifierMaskAndKeyCode kModifiers[] = {
-  { kShiftKeyModifierMask, ui::VKEY_SHIFT },
-  { kControlKeyModifierMask, ui::VKEY_CONTROL },
-  { kAltKeyModifierMask, ui::VKEY_MENU }
-};
+    {kShiftKeyModifierMask, ui::VKEY_SHIFT},
+    {kControlKeyModifierMask, ui::VKEY_CONTROL},
+    {kAltKeyModifierMask, ui::VKEY_MENU},
+    {kMetaKeyModifierMask, ui::VKEY_COMMAND}};
 
 // Ordered list of all the key codes corresponding to special WebDriver keys.
 // These keys are "special" in the sense that their code points are defined by
@@ -451,8 +451,8 @@ int GetKeyLocation(uint32_t code_point) {
 Status ConvertKeysToKeyEvents(const base::string16& client_keys,
                               bool release_modifiers,
                               int* modifiers,
-                              std::list<KeyEvent>* client_key_events) {
-  std::list<KeyEvent> key_events;
+                              std::vector<KeyEvent>* client_key_events) {
+  std::vector<KeyEvent> key_events;
 
   base::string16 keys = client_keys;
   // Add an implicit NULL character to the end of the input to depress all
@@ -579,8 +579,9 @@ Status ConvertKeysToKeyEvents(const base::string16& client_keys,
     }
 
     // Create the key events.
-    bool necessary_modifiers[3];
-    for (int i = 0; i < 3; ++i) {
+    int number_modifiers = base::size(kModifiers);
+    bool necessary_modifiers[number_modifiers];
+    for (int i = 0; i < number_modifiers; ++i) {
       necessary_modifiers[i] =
           all_modifiers & kModifiers[i].mask &&
           !(sticky_modifiers & kModifiers[i].mask);
@@ -617,7 +618,7 @@ Status ConvertKeysToKeyEvents(const base::string16& client_keys,
 Status ConvertKeyActionToKeyEvent(const base::DictionaryValue* action_object,
                                   base::DictionaryValue* input_state,
                                   bool is_key_down,
-                                  std::list<KeyEvent>* key_events) {
+                                  std::vector<KeyEvent>* key_events) {
   std::string raw_key;
   if (!action_object->GetString("value", &raw_key))
     return Status(kUnknownError, "missing 'value'");

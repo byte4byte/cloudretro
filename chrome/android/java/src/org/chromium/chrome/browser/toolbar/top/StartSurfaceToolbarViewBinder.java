@@ -5,8 +5,8 @@
 package org.chromium.chrome.browser.toolbar.top;
 
 import static org.chromium.chrome.browser.toolbar.top.StartSurfaceToolbarProperties.ACCESSIBILITY_ENABLED;
-import static org.chromium.chrome.browser.toolbar.top.StartSurfaceToolbarProperties.APP_MENU_BUTTON_HELPER;
 import static org.chromium.chrome.browser.toolbar.top.StartSurfaceToolbarProperties.BUTTONS_CLICKABLE;
+import static org.chromium.chrome.browser.toolbar.top.StartSurfaceToolbarProperties.IDENTITY_DISC_AT_START;
 import static org.chromium.chrome.browser.toolbar.top.StartSurfaceToolbarProperties.IDENTITY_DISC_CLICK_HANDLER;
 import static org.chromium.chrome.browser.toolbar.top.StartSurfaceToolbarProperties.IDENTITY_DISC_DESCRIPTION;
 import static org.chromium.chrome.browser.toolbar.top.StartSurfaceToolbarProperties.IDENTITY_DISC_IMAGE;
@@ -18,9 +18,11 @@ import static org.chromium.chrome.browser.toolbar.top.StartSurfaceToolbarPropert
 import static org.chromium.chrome.browser.toolbar.top.StartSurfaceToolbarProperties.IS_VISIBLE;
 import static org.chromium.chrome.browser.toolbar.top.StartSurfaceToolbarProperties.LOGO_IS_VISIBLE;
 import static org.chromium.chrome.browser.toolbar.top.StartSurfaceToolbarProperties.MENU_IS_VISIBLE;
-import static org.chromium.chrome.browser.toolbar.top.StartSurfaceToolbarProperties.NEW_TAB_BUTTON_AT_LEFT;
+import static org.chromium.chrome.browser.toolbar.top.StartSurfaceToolbarProperties.NEW_TAB_BUTTON_AT_START;
+import static org.chromium.chrome.browser.toolbar.top.StartSurfaceToolbarProperties.NEW_TAB_BUTTON_HIGHLIGHT;
 import static org.chromium.chrome.browser.toolbar.top.StartSurfaceToolbarProperties.NEW_TAB_BUTTON_IS_VISIBLE;
 import static org.chromium.chrome.browser.toolbar.top.StartSurfaceToolbarProperties.NEW_TAB_CLICK_HANDLER;
+import static org.chromium.chrome.browser.toolbar.top.StartSurfaceToolbarProperties.TRANSLATION_Y;
 
 import org.chromium.ui.modelutil.PropertyKey;
 import org.chromium.ui.modelutil.PropertyModel;
@@ -31,12 +33,12 @@ class StartSurfaceToolbarViewBinder {
             PropertyModel model, StartSurfaceToolbarView view, PropertyKey propertyKey) {
         if (propertyKey == ACCESSIBILITY_ENABLED) {
             view.onAccessibilityStatusChanged(model.get(ACCESSIBILITY_ENABLED));
-        } else if (propertyKey == APP_MENU_BUTTON_HELPER) {
-            view.setAppMenuButtonHelper(model.get(APP_MENU_BUTTON_HELPER));
         } else if (propertyKey == BUTTONS_CLICKABLE) {
             view.setButtonClickableState(model.get(BUTTONS_CLICKABLE));
         } else if (propertyKey == INCOGNITO_SWITCHER_VISIBLE) {
-            view.setIncognitoSwitcherVisibility(model.get(INCOGNITO_SWITCHER_VISIBLE));
+            view.setIncognitoSwitcherVisibility((Boolean) model.get(INCOGNITO_SWITCHER_VISIBLE));
+        } else if (propertyKey == IDENTITY_DISC_AT_START) {
+            view.setIdentityDiscAtStart(model.get(IDENTITY_DISC_AT_START));
         } else if (propertyKey == IDENTITY_DISC_CLICK_HANDLER) {
             view.setIdentityDiscClickHandler(model.get(IDENTITY_DISC_CLICK_HANDLER));
         } else if (propertyKey == IDENTITY_DISC_DESCRIPTION) {
@@ -59,10 +61,14 @@ class StartSurfaceToolbarViewBinder {
             view.setMenuButtonVisibility(model.get(MENU_IS_VISIBLE));
         } else if (propertyKey == NEW_TAB_CLICK_HANDLER) {
             view.setOnNewTabClickHandler(model.get(NEW_TAB_CLICK_HANDLER));
-        } else if (propertyKey == NEW_TAB_BUTTON_AT_LEFT) {
-            view.setNewTabButtonAtLeft(model.get(NEW_TAB_BUTTON_AT_LEFT));
+        } else if (propertyKey == NEW_TAB_BUTTON_AT_START) {
+            view.setNewTabButtonAtStart(model.get(NEW_TAB_BUTTON_AT_START));
+        } else if (propertyKey == NEW_TAB_BUTTON_HIGHLIGHT) {
+            view.setNewTabButtonHighlight(model.get(NEW_TAB_BUTTON_HIGHLIGHT));
         } else if (propertyKey == NEW_TAB_BUTTON_IS_VISIBLE) {
             view.setNewTabButtonVisibility(model.get(NEW_TAB_BUTTON_IS_VISIBLE));
+        } else if (propertyKey == TRANSLATION_Y) {
+            view.setTranslationY(model.get(TRANSLATION_Y));
         }
     }
 }

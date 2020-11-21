@@ -21,6 +21,7 @@
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/shell/browser/shell.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
@@ -113,7 +114,7 @@ class DomDistillerJsTest : public content::ContentBrowserTest {
 // https://crbug.com/845180
 // Then disabled more generally on Android: https://crbug.com/979685
 #if defined(MEMORY_SANITIZER) || defined(OS_WIN) || defined(OS_ANDROID) || \
-    (defined(OS_LINUX) &&                                                  \
+    ((defined(OS_LINUX) || defined(OS_CHROMEOS)) &&                        \
      (BUILDFLAG(CFI_CAST_CHECK) || BUILDFLAG(CFI_ICALL_CHECK) ||           \
       BUILDFLAG(CFI_ENFORCEMENT_DIAGNOSTIC) ||                             \
       BUILDFLAG(CFI_ENFORCEMENT_TRAP)))

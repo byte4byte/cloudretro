@@ -4,7 +4,7 @@
 
 package org.chromium.chrome.browser.webapps;
 
-import static org.chromium.webapk.lib.common.WebApkConstants.WEBAPK_PACKAGE_PREFIX;
+import static org.chromium.components.webapk.lib.common.WebApkConstants.WEBAPK_PACKAGE_PREFIX;
 
 import android.graphics.Bitmap;
 import android.os.Handler;
@@ -17,13 +17,15 @@ import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.NativeMethods;
-import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.ShortcutHelper;
+import org.chromium.chrome.browser.app.ChromeActivity;
+import org.chromium.chrome.browser.browserservices.BrowserServicesIntentDataProvider;
 import org.chromium.chrome.browser.dependency_injection.ActivityScope;
 import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.lifecycle.ActivityLifecycleDispatcher;
 import org.chromium.chrome.browser.lifecycle.Destroyable;
 import org.chromium.chrome.browser.metrics.WebApkUma;
+import org.chromium.chrome.browser.metrics.WebApkUma.UpdateRequestQueued;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.components.background_task_scheduler.BackgroundTaskSchedulerFactory;
 import org.chromium.components.background_task_scheduler.TaskIds;
@@ -80,9 +82,10 @@ public class WebApkUpdateManager implements WebApkUpdateDataFetcher.Observer, De
      * Checks whether the WebAPK's Web Manifest has changed. Requests an updated WebAPK if the Web
      * Manifest has changed. Skips the check if the check was done recently.
      */
-    public void updateIfNeeded(WebappDataStorage storage, WebappInfo info) {
+    public void updateIfNeeded(
+            WebappDataStorage storage, BrowserServicesIntentDataProvider intentDataProvider) {
         mStorage = storage;
-        mInfo = info;
+        mInfo = WebappInfo.create(intentDataProvider);
 
         Tab tab = mActivity.getActivityTab();
 
@@ -112,8 +115,10 @@ public class WebApkUpdateManager implements WebApkUpdateDataFetcher.Observer, De
     }
 
     @Override
-    public void onGotManifestData(
-            WebappInfo fetchedInfo, String primaryIconUrl, String splashIconUrl) {
+    public void onGotManifestData(BrowserServicesIntentDataProvider fetchedIntentDataProvider,
+            String primaryIconUrl, String splashIconUrl) {
+        WebappInfo fetchedInfo = WebappInfo.create(fetchedIntentDataProvider);
+
         mStorage.updateTimeOfLastCheckForUpdatedWebManifest();
         if (mUpdateFailureHandler != null) {
             mUpdateFailureHandler.removeCallbacksAndMessages(null);
@@ -193,27 +198,26 @@ public class WebApkUpdateManager implements WebApkUpdateDataFetcher.Observer, De
 
     /** Schedules update for when WebAPK is not running. */
     private void scheduleUpdate() {
-        WebApkUma.recordUpdateRequestQueued(1);
+        WebApkUma.recordUpdateRequestQueued(UpdateRequestQueued.TWICE);
         TaskInfo updateTask;
         if (mStorage.shouldForceUpdate()) {
             // Start an update task ASAP for forced updates.
-            updateTask = TaskInfo.createOneOffTask(TaskIds.WEBAPK_UPDATE_JOB_ID,
-                                         WebApkUpdateTask.class, 0 /* windowEndTimeMs */)
-                                 .setUpdateCurrent(true)
-                                 .setIsPersisted(true)
-                                 .build();
+            updateTask =
+                    TaskInfo.createOneOffTask(TaskIds.WEBAPK_UPDATE_JOB_ID, 0 /* windowEndTimeMs */)
+                            .setUpdateCurrent(true)
+                            .setIsPersisted(true)
+                            .build();
             mStorage.setUpdateScheduled(true);
             mStorage.setShouldForceUpdate(false);
         } else {
             // The task deadline should be before {@link WebappDataStorage#RETRY_UPDATE_DURATION}
-            updateTask =
-                    TaskInfo.createOneOffTask(TaskIds.WEBAPK_UPDATE_JOB_ID, WebApkUpdateTask.class,
-                                    DateUtils.HOUR_IN_MILLIS, DateUtils.HOUR_IN_MILLIS * 23)
-                            .setRequiredNetworkType(TaskInfo.NetworkType.UNMETERED)
-                            .setUpdateCurrent(true)
-                            .setIsPersisted(true)
-                            .setRequiresCharging(true)
-                            .build();
+            updateTask = TaskInfo.createOneOffTask(TaskIds.WEBAPK_UPDATE_JOB_ID,
+                                         DateUtils.HOUR_IN_MILLIS, DateUtils.HOUR_IN_MILLIS * 23)
+                                 .setRequiredNetworkType(TaskInfo.NetworkType.UNMETERED)
+                                 .setUpdateCurrent(true)
+                                 .setIsPersisted(true)
+                                 .setRequiresCharging(true)
+                                 .build();
         }
 
         BackgroundTaskSchedulerFactory.getScheduler().schedule(
@@ -376,7 +380,7 @@ public class WebApkUpdateManager implements WebApkUpdateDataFetcher.Observer, De
             return WebApkUpdateReason.ORIENTATION_DIFFERS;
         } else if (oldInfo.displayMode() != fetchedInfo.displayMode()) {
             return WebApkUpdateReason.DISPLAY_MODE_DIFFERS;
-        } else if (!oldInfo.shareTarget().equals(fetchedInfo.shareTarget())) {
+        } else if (!WebApkShareTarget.equals(oldInfo.shareTarget(), fetchedInfo.shareTarget())) {
             return WebApkUpdateReason.WEB_SHARE_TARGET_DIFFERS;
         } else if (oldInfo.isIconAdaptive() != fetchedInfo.isIconAdaptive()
                 && (!fetchedInfo.isIconAdaptive()
@@ -421,19 +425,36 @@ public class WebApkUpdateManager implements WebApkUpdateDataFetcher.Observer, De
         for (int j = 0; j < info.shortcutItems().size(); j++) {
             WebApkExtras.ShortcutItem shortcut = info.shortcutItems().get(j);
             shortcuts[j] = new String[] {shortcut.name, shortcut.shortName, shortcut.launchUrl,
-                    shortcut.iconUrl, shortcut.iconHash};
+                    shortcut.iconUrl, shortcut.iconHash, shortcut.icon.encoded()};
+        }
+
+        String shareTargetAction = "";
+        String shareTargetParamTitle = "";
+        String shareTargetParamText = "";
+        boolean shareTargetIsMethodPost = false;
+        boolean shareTargetIsEncTypeMultipart = false;
+        String[] shareTargetParamFileNames = new String[0];
+        String[][] shareTargetParamAccepts = new String[0][];
+        WebApkShareTarget shareTarget = info.shareTarget();
+        if (shareTarget != null) {
+            shareTargetAction = shareTarget.getAction();
+            shareTargetParamTitle = shareTarget.getParamTitle();
+            shareTargetParamText = shareTarget.getParamText();
+            shareTargetIsMethodPost = shareTarget.isShareMethodPost();
+            shareTargetIsEncTypeMultipart = shareTarget.isShareEncTypeMultipart();
+            shareTargetParamFileNames = shareTarget.getFileNames();
+            shareTargetParamAccepts = shareTarget.getFileAccepts();
         }
 
         WebApkUpdateManagerJni.get().storeWebApkUpdateRequestToFile(updateRequestPath,
                 info.manifestStartUrl(), info.scopeUrl(), info.name(), info.shortName(),
                 primaryIconUrl, info.icon().bitmap(), info.isIconAdaptive(), splashIconUrl,
                 info.splashIcon().bitmap(), iconUrls, iconHashes, info.displayMode(),
-                info.orientation(), info.toolbarColor(), info.backgroundColor(),
-                info.shareTarget().getAction(), info.shareTarget().getParamTitle(),
-                info.shareTarget().getParamText(), info.shareTarget().isShareMethodPost(),
-                info.shareTarget().isShareEncTypeMultipart(), info.shareTarget().getFileNames(),
-                info.shareTarget().getFileAccepts(), shortcuts, info.manifestUrl(),
-                info.webApkPackageName(), versionCode, isManifestStale, updateReason, callback);
+                info.orientation(), info.toolbarColor(), info.backgroundColor(), shareTargetAction,
+                shareTargetParamTitle, shareTargetParamText, shareTargetIsMethodPost,
+                shareTargetIsEncTypeMultipart, shareTargetParamFileNames, shareTargetParamAccepts,
+                shortcuts, info.manifestUrl(), info.webApkPackageName(), versionCode,
+                isManifestStale, updateReason, callback);
     }
 
     @NativeMethods

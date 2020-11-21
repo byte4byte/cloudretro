@@ -27,12 +27,6 @@ class CONTENT_EXPORT RenderWidgetHostLatencyTracker {
   explicit RenderWidgetHostLatencyTracker(RenderWidgetHostDelegate* delegate);
   virtual ~RenderWidgetHostLatencyTracker();
 
-  void ComputeInputLatencyHistograms(
-      blink::WebInputEvent::Type type,
-      const ui::LatencyInfo& latency,
-      blink::mojom::InputEventResultState ack_result,
-      base::TimeTicks ack_timestamp);
-
   // Populates the LatencyInfo with relevant entries for latency tracking.
   // Called when an event is received by the RenderWidgetHost, prior to
   // that event being forwarded to the renderer (via the InputRouter).
@@ -53,6 +47,8 @@ class CONTENT_EXPORT RenderWidgetHostLatencyTracker {
   void OnEventStart(ui::LatencyInfo* latency);
 
   bool has_seen_first_gesture_scroll_update_;
+  int64_t gesture_scroll_id_;
+
   // Whether the current stream of touch events includes more than one active
   // touch point. This is set in OnInputEvent, and cleared in OnInputEventAck.
   bool active_multi_finger_gesture_;

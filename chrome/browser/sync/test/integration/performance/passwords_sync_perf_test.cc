@@ -11,6 +11,7 @@
 #include "chrome/browser/sync/test/integration/profile_sync_service_harness.h"
 #include "chrome/browser/sync/test/integration/sync_test.h"
 #include "components/password_manager/core/browser/password_store.h"
+#include "content/public/test/browser_test.h"
 #include "testing/perf/perf_result_reporter.h"
 
 using passwords_helper::AddLogin;
@@ -54,7 +55,7 @@ class PasswordsSyncPerfTest : public SyncTest {
 
  private:
   // Returns a new unique login.
-  autofill::PasswordForm NextLogin();
+  password_manager::PasswordForm NextLogin();
 
   // Returns a new unique password value.
   std::string NextPassword();
@@ -70,7 +71,7 @@ void PasswordsSyncPerfTest::AddLogins(int profile, int num_logins) {
 }
 
 void PasswordsSyncPerfTest::UpdateLogins(int profile) {
-  std::vector<std::unique_ptr<autofill::PasswordForm>> logins =
+  std::vector<std::unique_ptr<password_manager::PasswordForm>> logins =
       passwords_helper::GetLogins(GetPasswordStore(profile));
   for (auto& login : logins) {
     login->password_value = base::ASCIIToUTF16(NextPassword());
@@ -82,7 +83,7 @@ void PasswordsSyncPerfTest::RemoveLogins(int profile) {
   passwords_helper::RemoveLogins(GetPasswordStore(profile));
 }
 
-autofill::PasswordForm PasswordsSyncPerfTest::NextLogin() {
+password_manager::PasswordForm PasswordsSyncPerfTest::NextLogin() {
   return CreateTestPasswordForm(password_number_++);
 }
 

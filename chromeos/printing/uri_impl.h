@@ -5,7 +5,6 @@
 #ifndef CHROMEOS_PRINTING_URI_IMPL_H_
 #define CHROMEOS_PRINTING_URI_IMPL_H_
 
-#include <map>
 #include <string>
 #include <utility>
 #include <vector>
@@ -22,19 +21,9 @@ using Iter = std::string::const_iterator;
 
 class Uri::Pim {
  public:
-  // The map with pairs scheme -> default_port.
-  static const std::map<std::string, int> kDefaultPorts;
-
   Pim();
   Pim(const Pim&);
   ~Pim();
-
-  // Resets the internal field |parser_error|.
-  void ResetParserError() {
-    parser_error_.parsed_chars = 0;
-    parser_error_.parsed_strings = 0;
-    parser_error_.status = ParserStatus::kNoErrors;
-  }
 
   // These methods parse and normalize the corresponding component(s) from the
   // input string |begin|-|end|. Each component is saved only if successfully
@@ -45,9 +34,11 @@ class Uri::Pim {
   //    default port number, the Port is set to this default value
   //  * Authority: this is Userinfo + Host + Port, see description in uri.h for
   //    the grammar
+  //  * Port: an empty string means -1, see the method SavePort(int) below
   //  * Path: the input string must be empty or starts from '/'
   bool ParseScheme(const Iter& begin, const Iter& end);
   bool ParseAuthority(const Iter& begin, const Iter& end);
+  bool ParsePort(const Iter& begin, const Iter& end);
   bool ParsePath(const Iter& begin, const Iter& end);
   bool ParseQuery(const Iter& begin, const Iter& end);
   bool ParseFragment(const Iter& begin, const Iter& end);
@@ -60,7 +51,8 @@ class Uri::Pim {
 
   // This method fails (and return false) <=> |port| is smaller than -1 or
   // larger than 65535. If |port| == -1 and the current Scheme has a default
-  // port, the default port is set as a new Port number.
+  // port, the default port is set as a new Port number. The field
+  // |parser_error| is set accordingly.
   bool SavePort(int port);
 
   // These methods save values of corresponding components. The template

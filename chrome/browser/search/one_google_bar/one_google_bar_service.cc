@@ -14,7 +14,7 @@
 class OneGoogleBarService::SigninObserver
     : public signin::IdentityManager::Observer {
  public:
-  using SigninStatusChangedCallback = base::Closure;
+  using SigninStatusChangedCallback = base::RepeatingClosure;
 
   SigninObserver(signin::IdentityManager* identity_manager,
                  const SigninStatusChangedCallback& callback)
@@ -42,8 +42,8 @@ OneGoogleBarService::OneGoogleBarService(
     : loader_(std::move(loader)),
       signin_observer_(std::make_unique<SigninObserver>(
           identity_manager,
-          base::Bind(&OneGoogleBarService::SigninStatusChanged,
-                     base::Unretained(this)))) {}
+          base::BindRepeating(&OneGoogleBarService::SigninStatusChanged,
+                              base::Unretained(this)))) {}
 
 OneGoogleBarService::~OneGoogleBarService() = default;
 
@@ -73,6 +73,10 @@ void OneGoogleBarService::RemoveObserver(
 void OneGoogleBarService::SetLanguageCodeForTesting(
     const std::string& language_code) {
   language_code_ = language_code;
+}
+
+bool OneGoogleBarService::SetAdditionalQueryParams(const std::string& value) {
+  return loader_->SetAdditionalQueryParams(value);
 }
 
 void OneGoogleBarService::SigninStatusChanged() {

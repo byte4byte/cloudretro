@@ -12,12 +12,13 @@ import android.net.http.SslError;
 import android.os.Build;
 import android.os.SystemClock;
 import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.LargeTest;
-import android.support.test.filters.MediumTest;
-import android.support.test.filters.SmallTest;
 import android.view.WindowManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebSettings;
+
+import androidx.test.filters.LargeTest;
+import androidx.test.filters.MediumTest;
+import androidx.test.filters.SmallTest;
 
 import org.junit.After;
 import org.junit.Assert;
@@ -26,9 +27,10 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.android_webview.AwContents;
+import org.chromium.android_webview.AwFeatureList;
 import org.chromium.android_webview.AwSettings;
 import org.chromium.android_webview.AwSettings.LayoutAlgorithm;
-import org.chromium.android_webview.AwWebResourceResponse;
+import org.chromium.android_webview.common.AwFeatures;
 import org.chromium.android_webview.test.AwActivityTestRule.TestDependencyFactory;
 import org.chromium.android_webview.test.TestAwContentsClient.DoUpdateVisitedHistoryHelper;
 import org.chromium.android_webview.test.util.CommonResources;
@@ -37,13 +39,15 @@ import org.chromium.android_webview.test.util.JSUtils;
 import org.chromium.android_webview.test.util.VideoTestUtil;
 import org.chromium.android_webview.test.util.VideoTestWebServer;
 import org.chromium.base.Callback;
+import org.chromium.base.FileUtils;
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
-import org.chromium.base.test.util.RetryOnFailure;
+import org.chromium.base.test.util.RequiresRestart;
 import org.chromium.base.test.util.TestFileUtil;
 import org.chromium.base.test.util.UrlUtils;
+import org.chromium.components.embedder_support.util.WebResourceResponseInfo;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.browser.WebContentsObserver;
 import org.chromium.content_public.browser.test.util.DOMUtils;
@@ -57,6 +61,8 @@ import org.chromium.ui.display.DisplayAndroid;
 import org.chromium.ui.display.DisplayUtil;
 
 import java.io.File;
+import java.io.FileInputStream;
+import java.net.URLEncoder;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -1555,6 +1561,74 @@ public class AwSettingsTest {
         });
     }
 
+    class AwSettingsCorsTestHelper {
+        public static final String ASSET_MAIN_URL = "file:///android_asset/cors.html";
+        public static final String RESOURCE_IMAGE_URL = "file:///android_res/raw/resource_icon.png";
+
+        private static final String TEST_HTML_FILE_PATH = "android_webview/test/data/cors.html";
+        private static final String TEST_IMAGE_FILE_PATH = "android_webview/test/data/chrome.png";
+        private static final String TEST_HTML_CONTENT_PATH = "cors.html";
+
+        private final TestAwContentsClient mContentClient;
+        private final AwTestContainerView mTestContainerView;
+        private final AwContents mAwContents;
+        private final AwSettings mAwSettings;
+
+        public final String mContentMainUrl;
+        public final String mFileMainUrl;
+        public final String mContentImageUrl;
+        public final String mFileImageUrl;
+
+        AwSettingsCorsTestHelper() throws Throwable {
+            mContentClient = new TestAwContentsClient();
+            mTestContainerView =
+                    mActivityTestRule.createAwTestContainerViewOnMainSync(mContentClient);
+            mAwContents = mTestContainerView.getAwContents();
+            mAwSettings = mActivityTestRule.getAwSettingsOnUiThread(mAwContents);
+
+            TestContentProvider.register(TEST_HTML_CONTENT_PATH, "text/html",
+                    FileUtils.readStream(new FileInputStream(
+                            UrlUtils.getIsolatedTestFilePath(TEST_HTML_FILE_PATH))));
+            AwActivityTestRule.enableJavaScriptOnUiThread(mAwContents);
+            mAwSettings.setAllowFileAccess(true);
+            mAwSettings.setAllowContentAccess(true);
+            mAwSettings.setAllowFileAccessFromFileURLs(false);
+            mAwSettings.setAllowUniversalAccessFromFileURLs(false);
+
+            mContentMainUrl = TestContentProvider.createContentUrl(TEST_HTML_CONTENT_PATH);
+            mFileMainUrl = UrlUtils.getIsolatedTestFileUrl(TEST_HTML_FILE_PATH);
+            mContentImageUrl = TestContentProvider.createContentUrl("image");
+            mFileImageUrl = UrlUtils.getIsolatedTestFileUrl(TEST_IMAGE_FILE_PATH);
+        }
+
+        public String getTestResult(String api, String mainUrl, String resourceUrl)
+                throws Throwable {
+            final String targetUrl =
+                    mainUrl + "?api=" + api + "&url=" + URLEncoder.encode(resourceUrl);
+            mActivityTestRule.loadUrlSync(
+                    mAwContents, mContentClient.getOnPageFinishedHelper(), targetUrl);
+            AwActivityTestRule.pollInstrumentationThread(
+                    () -> !"running".equals(mActivityTestRule.getTitleOnUiThread(mAwContents)));
+            return mActivityTestRule.getTitleOnUiThread(mAwContents);
+        }
+
+        public void allowFileAccessFromFileURLs() {
+            mAwSettings.setAllowFileAccessFromFileURLs(true);
+        }
+
+        public void allowUniversalAccessFromFileURLs() {
+            mAwSettings.setAllowUniversalAccessFromFileURLs(true);
+        }
+
+        public void disallowFileAccess() {
+            mAwSettings.setAllowFileAccess(false);
+        }
+
+        public void disallowContentAccess() {
+            mAwSettings.setAllowContentAccess(false);
+        }
+    }
+
     // The test verifies that JavaScript is disabled upon WebView
     // creation without accessing AwSettings. If the test passes,
     // it means that WebView-specific web preferences configuration
@@ -1962,7 +2036,6 @@ public class AwSettingsTest {
     @Test
     @SmallTest
     @Feature({"AndroidWebView", "Preferences"})
-    @RetryOnFailure
     public void testFileUrlAccessWithTwoViews() throws Throwable {
         ViewPair views = createViews();
         runPerViewSettingsTest(
@@ -2013,6 +2086,275 @@ public class AwSettingsTest {
                         views.getContainer0(), views.getClient0(), 0),
                 new AwSettingsContentUrlAccessFromFileTestHelper(
                         views.getContainer1(), views.getClient1(), 1));
+    }
+
+    // Resources under content:// and file:// should not be accessed via XHR
+    // from content:// and file://.
+    @Test
+    @SmallTest
+    @Feature({"AndroidWebView", "Preferences", "CORS"})
+    public void testContentUrlMakesXhrRequests() throws Throwable {
+        final AwSettingsCorsTestHelper corsTestHelper = new AwSettingsCorsTestHelper();
+
+        // Case a) content:// to content:// should fail.
+        Assert.assertEquals("error",
+                corsTestHelper.getTestResult(
+                        "xhr", corsTestHelper.mContentMainUrl, corsTestHelper.mContentImageUrl));
+
+        // Case b) content:// to file:// should fail.
+        Assert.assertEquals("error",
+                corsTestHelper.getTestResult(
+                        "xhr", corsTestHelper.mContentMainUrl, corsTestHelper.mFileImageUrl));
+
+        // Case b') content:// to file:///android_res/ should also fail.
+        Assert.assertEquals("error",
+                corsTestHelper.getTestResult("xhr", corsTestHelper.mContentMainUrl,
+                        AwSettingsCorsTestHelper.RESOURCE_IMAGE_URL));
+
+        // Case c) file:// to content:// should fail.
+        Assert.assertEquals("error",
+                corsTestHelper.getTestResult(
+                        "xhr", corsTestHelper.mFileMainUrl, corsTestHelper.mContentImageUrl));
+
+        // Case c') file:///android_asset/ to content:// should also fail.
+        Assert.assertEquals("error",
+                corsTestHelper.getTestResult("xhr", AwSettingsCorsTestHelper.ASSET_MAIN_URL,
+                        corsTestHelper.mContentImageUrl));
+
+        // Case d) file:// to file:// should fail.
+        Assert.assertEquals("error",
+                corsTestHelper.getTestResult(
+                        "xhr", corsTestHelper.mFileMainUrl, corsTestHelper.mFileImageUrl));
+
+        // Case d') file:///android_asset/ to file:// should also fail.
+        Assert.assertEquals("error",
+                corsTestHelper.getTestResult("xhr", AwSettingsCorsTestHelper.ASSET_MAIN_URL,
+                        corsTestHelper.mFileImageUrl));
+
+        // Case d'') file:///android_asset/ to file:///android_res/ should also fail.
+        Assert.assertEquals("error",
+                corsTestHelper.getTestResult("xhr", AwSettingsCorsTestHelper.ASSET_MAIN_URL,
+                        AwSettingsCorsTestHelper.RESOURCE_IMAGE_URL));
+    }
+
+    // Check if setAllowFileAccessFromFileURLs(true) allows same-scheme CORS accesses.
+    @Test
+    @SmallTest
+    @Feature({"AndroidWebView", "Preferences", "CORS"})
+    public void testContentUrlMakesXhrRequestsWithAllowFileAccess() throws Throwable {
+        final AwSettingsCorsTestHelper corsTestHelper = new AwSettingsCorsTestHelper();
+        corsTestHelper.allowFileAccessFromFileURLs();
+
+        // Case a) content:// to content:// should pass.
+        Assert.assertEquals("load",
+                corsTestHelper.getTestResult(
+                        "xhr", corsTestHelper.mContentMainUrl, corsTestHelper.mContentImageUrl));
+
+        // Case b) content:// to file:// should fail.
+        Assert.assertEquals("error",
+                corsTestHelper.getTestResult(
+                        "xhr", corsTestHelper.mContentMainUrl, corsTestHelper.mFileImageUrl));
+
+        // Case b') content:// to file:///android_res/ should also fail.
+        Assert.assertEquals("error",
+                corsTestHelper.getTestResult("xhr", corsTestHelper.mContentMainUrl,
+                        AwSettingsCorsTestHelper.RESOURCE_IMAGE_URL));
+
+        // Case c) file:// to content:// should fail.
+        Assert.assertEquals("error",
+                corsTestHelper.getTestResult(
+                        "xhr", corsTestHelper.mFileMainUrl, corsTestHelper.mContentImageUrl));
+
+        // Case c') file:///android_asset/ to content:// should also fail.
+        Assert.assertEquals("error",
+                corsTestHelper.getTestResult("xhr", AwSettingsCorsTestHelper.ASSET_MAIN_URL,
+                        corsTestHelper.mContentImageUrl));
+
+        // Case d) file:// to file:// should pass.
+        Assert.assertEquals("load",
+                corsTestHelper.getTestResult(
+                        "xhr", corsTestHelper.mFileMainUrl, corsTestHelper.mFileImageUrl));
+
+        // Case d') file:///android_asset/ to file:// should also pass.
+        Assert.assertEquals("load",
+                corsTestHelper.getTestResult("xhr", AwSettingsCorsTestHelper.ASSET_MAIN_URL,
+                        corsTestHelper.mFileImageUrl));
+
+        // Case d'') file:///android_asset/ to file:///android_res/ should also pass.
+        Assert.assertEquals("load",
+                corsTestHelper.getTestResult("xhr", AwSettingsCorsTestHelper.ASSET_MAIN_URL,
+                        AwSettingsCorsTestHelper.RESOURCE_IMAGE_URL));
+    }
+
+    // Check if setAllowUniversalAccessFromFileURLs(true) allows any CORS access from file://.
+    @Test
+    @SmallTest
+    @Feature({"AndroidWebView", "Preferences", "CORS"})
+    public void testContentUrlMakesXhrRequestsWithAllowUniversalAccess() throws Throwable {
+        final AwSettingsCorsTestHelper corsTestHelper = new AwSettingsCorsTestHelper();
+        corsTestHelper.allowUniversalAccessFromFileURLs();
+
+        // Case a) content:// to content:// should pass.
+        Assert.assertEquals("load",
+                corsTestHelper.getTestResult(
+                        "xhr", corsTestHelper.mContentMainUrl, corsTestHelper.mContentImageUrl));
+
+        // Case b) content:// to file:// should fail.
+        Assert.assertEquals("error",
+                corsTestHelper.getTestResult(
+                        "xhr", corsTestHelper.mContentMainUrl, corsTestHelper.mFileImageUrl));
+
+        // Case b') content:// to file:///android_res/ should also fail.
+        Assert.assertEquals("error",
+                corsTestHelper.getTestResult("xhr", corsTestHelper.mContentMainUrl,
+                        AwSettingsCorsTestHelper.RESOURCE_IMAGE_URL));
+
+        // Case c) file:// to content:// should pass.
+        Assert.assertEquals("load",
+                corsTestHelper.getTestResult(
+                        "xhr", corsTestHelper.mFileMainUrl, corsTestHelper.mContentImageUrl));
+
+        // Case c') file:///android_asset/ to content:// should also pass.
+        Assert.assertEquals("load",
+                corsTestHelper.getTestResult("xhr", AwSettingsCorsTestHelper.ASSET_MAIN_URL,
+                        corsTestHelper.mContentImageUrl));
+
+        // Case d) file:// to file:// should pass.
+        Assert.assertEquals("load",
+                corsTestHelper.getTestResult(
+                        "xhr", corsTestHelper.mFileMainUrl, corsTestHelper.mFileImageUrl));
+
+        // Case d') file:///android_asset/ to file:// should also pass.
+        Assert.assertEquals("load",
+                corsTestHelper.getTestResult("xhr", AwSettingsCorsTestHelper.ASSET_MAIN_URL,
+                        corsTestHelper.mFileImageUrl));
+
+        // Case d'') file:///android_asset/ to file:///android_res/ should also pass.
+        Assert.assertEquals("load",
+                corsTestHelper.getTestResult("xhr", AwSettingsCorsTestHelper.ASSET_MAIN_URL,
+                        AwSettingsCorsTestHelper.RESOURCE_IMAGE_URL));
+    }
+
+    // Check if the Fetch API always fails on file:// and content://.
+    @Test
+    @SmallTest
+    @Feature({"AndroidWebView", "Preferences", "CORS"})
+    public void testContentUrlMakesFetchRequestsWithoutFileAccess() throws Throwable {
+        final AwSettingsCorsTestHelper corsTestHelper = new AwSettingsCorsTestHelper();
+        // Run tests with the most relaxed settings.
+        corsTestHelper.allowFileAccessFromFileURLs();
+        corsTestHelper.allowUniversalAccessFromFileURLs();
+
+        // Case a) content:// to content:// should fail.
+        Assert.assertEquals("error",
+                corsTestHelper.getTestResult(
+                        "fetch", corsTestHelper.mContentMainUrl, corsTestHelper.mContentImageUrl));
+
+        // Case b) content:// to file:// should fail.
+        Assert.assertEquals("error",
+                corsTestHelper.getTestResult(
+                        "fetch", corsTestHelper.mContentMainUrl, corsTestHelper.mFileImageUrl));
+
+        // Case c) file:// to content:// should fail.
+        Assert.assertEquals("error",
+                corsTestHelper.getTestResult(
+                        "fetch", corsTestHelper.mFileMainUrl, corsTestHelper.mContentImageUrl));
+
+        // Case d) file:// to file:// should fail.
+        Assert.assertEquals("error",
+                corsTestHelper.getTestResult(
+                        "fetch", corsTestHelper.mFileMainUrl, corsTestHelper.mFileImageUrl));
+    }
+
+    // Check if file:// and content:// can be accessible from
+    // file:///android_asset/ when the file and content access is disallowed.
+    @Test
+    @SmallTest
+    @Feature({"AndroidWebView", "Preferences", "CORS"})
+    public void testAndroidUrlMakesXhrRequestsWithoutFileAndContentAccesses() throws Throwable {
+        final AwSettingsCorsTestHelper corsTestHelper = new AwSettingsCorsTestHelper();
+        // file:///android_asset/ and file:///android_res can be accessible even
+        // if AllowFileAccess and AllowContentAccess are set to false.
+        corsTestHelper.disallowFileAccess();
+        corsTestHelper.disallowContentAccess();
+        corsTestHelper.allowFileAccessFromFileURLs();
+
+        // Case c') file:///android_asset/ to content:// should fail as
+        // content:// is still disallowed by AllowContentAccess.
+        Assert.assertEquals("error",
+                corsTestHelper.getTestResult("xhr", AwSettingsCorsTestHelper.ASSET_MAIN_URL,
+                        corsTestHelper.mContentImageUrl));
+
+        // Case d') file:///android_asset/ to file:// should fail as file://
+        // is still disallowed by AllowFileAccess.
+        Assert.assertEquals("error",
+                corsTestHelper.getTestResult("xhr", AwSettingsCorsTestHelper.ASSET_MAIN_URL,
+                        corsTestHelper.mFileImageUrl));
+
+        // Case d'') file:///android_asset/ to file:///android_res/ should pass.
+        Assert.assertEquals("load",
+                corsTestHelper.getTestResult("xhr", AwSettingsCorsTestHelper.ASSET_MAIN_URL,
+                        AwSettingsCorsTestHelper.RESOURCE_IMAGE_URL));
+
+        // AllowUniversalAccessFromFileURLs should not help.
+        corsTestHelper.allowUniversalAccessFromFileURLs();
+
+        // Case c') file:///android_asset/ to content:// should fail as
+        // content:// is still disallowed by AllowContentAccess.
+        Assert.assertEquals("error",
+                corsTestHelper.getTestResult("xhr", AwSettingsCorsTestHelper.ASSET_MAIN_URL,
+                        corsTestHelper.mContentImageUrl));
+
+        // Case d') file:///android_asset/ to file:// should fail as file://
+        // is still disallowed by AllowFileAccess.
+        Assert.assertEquals("error",
+                corsTestHelper.getTestResult("xhr", AwSettingsCorsTestHelper.ASSET_MAIN_URL,
+                        corsTestHelper.mFileImageUrl));
+    }
+
+    // Check if file:// and content:// can be accessible from
+    // file:///android_asset/ when the file access is disallowed.
+    @Test
+    @SmallTest
+    @Feature({"AndroidWebView", "Preferences", "CORS"})
+    public void testAndroidUrlMakesXhrRequests() throws Throwable {
+        final AwSettingsCorsTestHelper corsTestHelper = new AwSettingsCorsTestHelper();
+        // file:///android_asset/ and file:///android_res can be accessible even
+        // if AllowFileAccess is set to false.
+        corsTestHelper.disallowFileAccess();
+        corsTestHelper.allowFileAccessFromFileURLs();
+
+        // Case c') file:///android_asset/ to content:// should fail as
+        // content:// is still accessible but CORS is not permitted.
+        Assert.assertEquals("error",
+                corsTestHelper.getTestResult("xhr", AwSettingsCorsTestHelper.ASSET_MAIN_URL,
+                        corsTestHelper.mContentImageUrl));
+
+        // Case d') file:///android_asset/ to file:// should fail as file://
+        // is still disallowed by AllowFileAccess.
+        Assert.assertEquals("error",
+                corsTestHelper.getTestResult("xhr", AwSettingsCorsTestHelper.ASSET_MAIN_URL,
+                        corsTestHelper.mFileImageUrl));
+
+        // Case d'') file:///android_asset/ to file:///android_res/ should pass.
+        Assert.assertEquals("load",
+                corsTestHelper.getTestResult("xhr", AwSettingsCorsTestHelper.ASSET_MAIN_URL,
+                        AwSettingsCorsTestHelper.RESOURCE_IMAGE_URL));
+
+        // AllowUniversalAccessFromFileURLs should not help.
+        corsTestHelper.allowUniversalAccessFromFileURLs();
+
+        // Case c') file:///android_asset/ to content:// pass as CORS accesses
+        // are permitted now.
+        Assert.assertEquals("load",
+                corsTestHelper.getTestResult("xhr", AwSettingsCorsTestHelper.ASSET_MAIN_URL,
+                        corsTestHelper.mContentImageUrl));
+
+        // Case d') file:///android_asset/ to file:// should fail as file://
+        // is still disallowed by AllowFileAccess.
+        Assert.assertEquals("error",
+                corsTestHelper.getTestResult("xhr", AwSettingsCorsTestHelper.ASSET_MAIN_URL,
+                        corsTestHelper.mFileImageUrl));
     }
 
     @Test
@@ -2212,6 +2554,7 @@ public class AwSettingsTest {
     @Test
     @SmallTest
     @Feature({"AndroidWebView", "Navigation"})
+    @DisabledTest(message = "https://crbug.com/1144938")
     public void testAssetUrl() throws Throwable {
         // Note: this text needs to be kept in sync with the contents of the html file referenced
         // below.
@@ -2511,6 +2854,7 @@ public class AwSettingsTest {
         }
     }
 
+    @RequiresRestart("Enabling appcache is global and cannot be reversed.")
     @Test
     @SmallTest
     @Feature({"AndroidWebView", "Preferences", "AppCache"})
@@ -2544,10 +2888,10 @@ public class AwSettingsTest {
         }
     }
 
+    @RequiresRestart("Enabling appcache is global and cannot be reversed.")
     @Test
     @SmallTest
     @Feature({"AndroidWebView", "Preferences", "AppCache"})
-    @RetryOnFailure
     public void testAppCacheWithTwoViews() throws Throwable {
         // We don't use the test helper here, because making sure that AppCache
         // is disabled takes a lot of time, so running through the usual drill
@@ -2598,6 +2942,7 @@ public class AwSettingsTest {
     @Test
     @SmallTest
     @Feature({"AndroidWebView", "Preferences"})
+    @DisabledTest(message = "https://crbug.com/1133535")
     public void testUseWideViewportWithTwoViews() throws Throwable {
         ViewPair views = createViews(true);
         runPerViewSettingsTest(
@@ -2608,6 +2953,7 @@ public class AwSettingsTest {
     @Test
     @SmallTest
     @Feature({"AndroidWebView", "Preferences"})
+    @DisabledTest(message = "https://crbug.com/1133535")
     public void testUseWideViewportWithTwoViewsNoQuirks() throws Throwable {
         ViewPair views = createViews();
         runPerViewSettingsTest(
@@ -2678,6 +3024,7 @@ public class AwSettingsTest {
     @Test
     @SmallTest
     @Feature({"AndroidWebView", "Preferences"})
+    @DisabledTest(message = "https://crbug.com/1133535")
     public void testUseWideViewportLayoutWidth() throws Throwable {
         TestAwContentsClient contentClient = new TestAwContentsClient();
         AwTestContainerView testContainerView =
@@ -2688,6 +3035,7 @@ public class AwSettingsTest {
     @Test
     @SmallTest
     @Feature({"AndroidWebView", "Preferences"})
+    @DisabledTest(message = "https://crbug.com/1133535")
     public void testUseWideViewportLayoutWidthNoQuirks() throws Throwable {
         TestAwContentsClient contentClient = new TestAwContentsClient();
         AwTestContainerView testContainerView =
@@ -2748,7 +3096,6 @@ public class AwSettingsTest {
     @Test
     @SmallTest
     @Feature({"AndroidWebView", "Preferences"})
-    @RetryOnFailure
     public void testForceZeroLayoutHeightViewportTagWithTwoViews() throws Throwable {
         ViewPair views = createViews();
         runPerViewSettingsTest(
@@ -2856,6 +3203,7 @@ public class AwSettingsTest {
     @DisableHardwareAccelerationForTest
     @LargeTest
     @Feature({"AndroidWebView", "Preferences"})
+    @DisabledTest(message = "https://crbug.com/1144945")
     public void testMediaPlaybackWithoutUserGesture() throws Throwable {
         Assert.assertTrue(VideoTestUtil.runVideoTest(InstrumentationRegistry.getInstrumentation(),
                 mActivityTestRule, false, WAIT_TIMEOUT_MS));
@@ -2865,6 +3213,7 @@ public class AwSettingsTest {
     @DisableHardwareAccelerationForTest
     @SmallTest
     @Feature({"AndroidWebView", "Preferences"})
+    @DisabledTest(message = "https://crbug.com/1144945")
     public void testMediaPlaybackWithUserGesture() throws Throwable {
         // Wait for 5 second to see if video played.
         Assert.assertFalse(VideoTestUtil.runVideoTest(
@@ -2879,7 +3228,7 @@ public class AwSettingsTest {
         final String defaultVideoPosterUrl = "http://default_video_poster/";
         TestAwContentsClient client = new TestAwContentsClient() {
             @Override
-            public AwWebResourceResponse shouldInterceptRequest(AwWebResourceRequest request) {
+            public WebResourceResponseInfo shouldInterceptRequest(AwWebResourceRequest request) {
                 if (request.url.equals(defaultVideoPosterUrl)) {
                     videoPosterAccessedCallbackHelper.notifyCalled();
                 }
@@ -2943,6 +3292,7 @@ public class AwSettingsTest {
     @Test
     @SmallTest
     @Feature({"AndroidWebView", "Preferences"})
+    @DisabledTest(message = "https://crbug.com/1144935")
     public void testAllowMixedMode() throws Throwable {
         final TestAwContentsClient contentClient = new TestAwContentsClient() {
             @Override
@@ -2963,6 +3313,7 @@ public class AwSettingsTest {
             httpsServer = TestWebServer.startSsl();
             httpServer = TestWebServer.start();
             httpServer.setServerHost("example.com");
+            httpsServer.setServerHost("secure.com");
 
             final String jsUrl = "/insecure.js";
             final String imageUrl = "/insecure.png";
@@ -2992,11 +3343,29 @@ public class AwSettingsTest {
             Assert.assertEquals(1, httpServer.getRequestCount(imageUrl));
 
             awSettings.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
-            mActivityTestRule.loadUrlSync(
-                    awContents, contentClient.getOnPageFinishedHelper(), fullSecureUrl);
-            Assert.assertEquals(3, httpsServer.getRequestCount(secureUrl));
-            Assert.assertEquals(1, httpServer.getRequestCount(jsUrl));
-            Assert.assertEquals(2, httpServer.getRequestCount(imageUrl));
+            if (AwFeatureList.isEnabled(AwFeatures.WEBVIEW_MIXED_CONTENT_AUTOUPGRADES)) {
+                // COMPATIBILITY_MODE enables autoupgrades for passive mixed content (including
+                // images), so we set the image url to the HTTP version of the HTTPS server, and
+                // check it was autoupgraded by expecting the HTTPS server to be hit.
+                String httpImageUrl = httpsServer.setResponseBase64(
+                        imageUrl, CommonResources.FAVICON_DATA_BASE64, null);
+                httpImageUrl = httpImageUrl.replaceFirst("https", "http");
+                final String autoupgradedImageHtml = "<img src=\"" + httpImageUrl + "\" />";
+                final String htmlForAutoupgrade =
+                        "<body>" + autoupgradedImageHtml + " " + jsHtml + "</body>";
+                fullSecureUrl = httpsServer.setResponse(secureUrl, htmlForAutoupgrade, null);
+                mActivityTestRule.loadUrlSync(
+                        awContents, contentClient.getOnPageFinishedHelper(), fullSecureUrl);
+                Assert.assertEquals(1, httpsServer.getRequestCount(secureUrl));
+                Assert.assertEquals(1, httpsServer.getRequestCount(imageUrl));
+                Assert.assertEquals(1, httpServer.getRequestCount(jsUrl));
+            } else {
+                mActivityTestRule.loadUrlSync(
+                        awContents, contentClient.getOnPageFinishedHelper(), fullSecureUrl);
+                Assert.assertEquals(3, httpsServer.getRequestCount(secureUrl));
+                Assert.assertEquals(1, httpServer.getRequestCount(jsUrl));
+                Assert.assertEquals(2, httpServer.getRequestCount(imageUrl));
+            }
         } finally {
             if (httpServer != null) {
                 httpServer.shutdown();
@@ -3119,35 +3488,6 @@ public class AwSettingsTest {
         // Loading the html via a data URI requires us to encode '#' symbols as '%23'.
         mActivityTestRule.loadDataSync(
                 awContents, onPageFinishedHelper, page.replace("#", "%23"), "text/html", false);
-        String actualTitle = mActivityTestRule.getTitleOnUiThread(awContents);
-        Assert.assertEquals(expectedTitle, actualTitle);
-    }
-
-    @Test
-    @SmallTest
-    @Feature({"AndroidWebView", "Preferences"})
-    public void testWebComponentsV0Reenabled() throws Throwable {
-        // TODO(1021631): This test should be removed once Android Webview
-        // disables Web Components v0 by default.
-        final TestAwContentsClient client = new TestAwContentsClient();
-        final AwTestContainerView view =
-                mActivityTestRule.createAwTestContainerViewOnMainSync(client);
-        final AwContents awContents = view.getAwContents();
-        CallbackHelper onPageFinishedHelper = client.getOnPageFinishedHelper();
-        AwActivityTestRule.enableJavaScriptOnUiThread(awContents);
-        final String expectedTitle = "enabled"; // https://crbug.com/1021631
-        final String page = "<!doctype html>"
-                + "<script>"
-                + "const htmlImportsEnabled = 'import' in document.createElement('link');"
-                + "const customElementsV0Enabled = 'registerElement' in document;"
-                + "const shadowDomV0Enabled = 'createShadowRoot' in document.createElement('div');"
-                + "if (htmlImportsEnabled && customElementsV0Enabled && shadowDomV0Enabled) {"
-                + "  document.title = 'enabled';"
-                + "} else {"
-                + "  document.title = 'disabled';"
-                + "}"
-                + "</script>";
-        mActivityTestRule.loadDataSync(awContents, onPageFinishedHelper, page, "text/html", false);
         String actualTitle = mActivityTestRule.getTitleOnUiThread(awContents);
         Assert.assertEquals(expectedTitle, actualTitle);
     }

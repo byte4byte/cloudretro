@@ -8,6 +8,7 @@
 #import "ios/chrome/test/earl_grey/chrome_test_case.h"
 #import "ios/testing/earl_grey/earl_grey_test.h"
 #include "ios/testing/embedded_test_server_handlers.h"
+#include "ios/web/common/features.h"
 #include "net/test/embedded_test_server/default_handlers.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
@@ -26,6 +27,12 @@
 
 @implementation SSLTestCase
 
+- (AppLaunchConfiguration)appConfigurationForTestCase {
+  AppLaunchConfiguration config;
+  config.relaunch_policy = NoForceRelaunchAndResetState;
+  return config;
+}
+
 - (void)setUp {
   [super setUp];
   _HTTPSServer = std::make_unique<net::test_server::EmbeddedTestServer>(
@@ -41,6 +48,22 @@
   const GURL pageURL = _HTTPSServer->GetURL("/echo");
   [ChromeEarlGrey loadURL:pageURL];
 
+  [ChromeEarlGrey waitForWebStateContainingText:l10n_util::GetStringUTF8(
+                                                    IDS_SSL_V2_HEADING)];
+}
+
+// Test loading a page with a bad SSL certificate during session restore, to
+// avoid regressing https://crbug.com/1050808.
+- (void)testBadSSLInSessionRestore {
+  GREYAssertTrue(_HTTPSServer->Start(), @"Test server failed to start.");
+
+  GURL pageURL = _HTTPSServer->GetURL("/echo");
+  [ChromeEarlGrey loadURL:pageURL];
+
+  [ChromeEarlGrey waitForWebStateContainingText:l10n_util::GetStringUTF8(
+                                                    IDS_SSL_V2_HEADING)];
+
+  [ChromeEarlGrey triggerRestoreViaTabGridRemoveAllUndo];
   [ChromeEarlGrey waitForWebStateContainingText:l10n_util::GetStringUTF8(
                                                     IDS_SSL_V2_HEADING)];
 }

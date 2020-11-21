@@ -41,15 +41,14 @@ constexpr base::TimeDelta kIdleSpellcheckTestTimeout =
 
 }  // namespace
 
-class IdleSpellCheckController::IdleCallback final
-    : public ScriptedIdleTaskController::IdleTask {
+class IdleSpellCheckController::IdleCallback final : public IdleTask {
  public:
   explicit IdleCallback(IdleSpellCheckController* controller)
       : controller_(controller) {}
 
-  void Trace(Visitor* visitor) final {
+  void Trace(Visitor* visitor) const final {
     visitor->Trace(controller_);
-    ScriptedIdleTaskController::IdleTask::Trace(visitor);
+    IdleTask::Trace(visitor);
   }
 
  private:
@@ -62,39 +61,41 @@ class IdleSpellCheckController::IdleCallback final
 
 IdleSpellCheckController::~IdleSpellCheckController() = default;
 
-void IdleSpellCheckController::Trace(Visitor* visitor) {
+void IdleSpellCheckController::Trace(Visitor* visitor) const {
   visitor->Trace(cold_mode_requester_);
+  visitor->Trace(spell_check_requeseter_);
   ExecutionContextLifecycleObserver::Trace(visitor);
 }
 
-IdleSpellCheckController::IdleSpellCheckController(LocalDOMWindow& window)
+IdleSpellCheckController::IdleSpellCheckController(
+    LocalDOMWindow& window,
+    SpellCheckRequester& requester)
     : ExecutionContextLifecycleObserver(&window),
       state_(State::kInactive),
       idle_callback_handle_(kInvalidHandle),
       last_processed_undo_step_sequence_(0),
       cold_mode_requester_(
-          MakeGarbageCollected<ColdModeSpellCheckRequester>(window)) {}
-
-SpellCheckRequester& IdleSpellCheckController::GetSpellCheckRequester() const {
-  return GetWindow().GetSpellChecker().GetSpellCheckRequester();
-}
+          MakeGarbageCollected<ColdModeSpellCheckRequester>(window)),
+      spell_check_requeseter_(requester) {}
 
 LocalDOMWindow& IdleSpellCheckController::GetWindow() const {
-  DCHECK(IsAvailable());
+  DCHECK(GetExecutionContext());
   return *To<LocalDOMWindow>(GetExecutionContext());
 }
 
 Document& IdleSpellCheckController::GetDocument() const {
-  DCHECK(IsAvailable());
+  DCHECK(GetExecutionContext());
   return *GetWindow().document();
 }
 
 bool IdleSpellCheckController::IsSpellCheckingEnabled() const {
+  if (!GetExecutionContext())
+    return false;
   return GetWindow().GetSpellChecker().IsSpellCheckingEnabled();
 }
 
 void IdleSpellCheckController::DisposeIdleCallback() {
-  if (idle_callback_handle_ != kInvalidHandle && IsAvailable())
+  if (idle_callback_handle_ != kInvalidHandle && GetExecutionContext())
     GetDocument().CancelIdleCallback(idle_callback_handle_);
   idle_callback_handle_ = kInvalidHandle;
 }
@@ -105,11 +106,11 @@ void IdleSpellCheckController::Deactivate() {
     cold_mode_timer_.Cancel();
   cold_mode_requester_->ClearProgress();
   DisposeIdleCallback();
-  GetSpellCheckRequester().Deactivate();
+  spell_check_requeseter_->Deactivate();
 }
 
 void IdleSpellCheckController::SetNeedsInvocation() {
-  if (!IsSpellCheckingEnabled() || !IsAvailable()) {
+  if (!IsSpellCheckingEnabled()) {
     Deactivate();
     return;
   }
@@ -135,11 +136,7 @@ void IdleSpellCheckController::SetNeedsInvocation() {
 }
 
 void IdleSpellCheckController::SetNeedsColdModeInvocation() {
-  if (!IsSpellCheckingEnabled()) {
-    Deactivate();
-    return;
-  }
-
+  DCHECK(IsSpellCheckingEnabled());
   if (state_ != State::kInactive && state_ != State::kInHotModeInvocation &&
       state_ != State::kInColdModeInvocation)
     return;
@@ -159,7 +156,7 @@ void IdleSpellCheckController::SetNeedsColdModeInvocation() {
 void IdleSpellCheckController::ColdModeTimerFired() {
   DCHECK_EQ(State::kColdModeTimerStarted, state_);
 
-  if (!IsSpellCheckingEnabled() || !IsAvailable()) {
+  if (!IsSpellCheckingEnabled()) {
     Deactivate();
     return;
   }
@@ -175,7 +172,7 @@ void IdleSpellCheckController::HotModeInvocation(IdleDeadline* deadline) {
   // TODO(xiaochengh): Figure out if this has any performance impact.
   GetDocument().UpdateStyleAndLayout(DocumentUpdateReason::kEditing);
 
-  HotModeSpellCheckRequester requester(GetSpellCheckRequester());
+  HotModeSpellCheckRequester requester(*spell_check_requeseter_);
 
   requester.CheckSpellingAt(
       GetWindow().GetFrame()->Selection().GetSelectionInDOMTree().Extent());
@@ -202,7 +199,7 @@ void IdleSpellCheckController::Invoke(IdleDeadline* deadline) {
   DCHECK_NE(idle_callback_handle_, kInvalidHandle);
   idle_callback_handle_ = kInvalidHandle;
 
-  if (!IsSpellCheckingEnabled() || !IsAvailable()) {
+  if (!IsSpellCheckingEnabled()) {
     Deactivate();
     return;
   }

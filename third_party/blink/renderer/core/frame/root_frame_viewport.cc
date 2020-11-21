@@ -107,18 +107,18 @@ void RootFrameViewport::RestoreToAnchor(const ScrollOffset& target_offset) {
 
   delta = target_offset - GetScrollOffset();
 
-  // Since the main thread LocalFrameView has integer scroll offsets, scroll it
-  // to the next pixel and then we'll scroll the visual viewport again to
-  // compensate for the sub-pixel offset. We need this "overscroll" to ensure
-  // the pixel of which we want to be partially in appears fully inside the
-  // LocalFrameView since the VisualViewport is bounded by the LocalFrameView.
-  IntSize layout_delta = IntSize(
-      delta.Width() < 0 ? floor(delta.Width()) : ceil(delta.Width()),
-      delta.Height() < 0 ? floor(delta.Height()) : ceil(delta.Height()));
+  if (RuntimeEnabledFeatures::FractionalScrollOffsetsEnabled()) {
+    LayoutViewport().SetScrollOffset(LayoutViewport().GetScrollOffset() + delta,
+                                     mojom::blink::ScrollType::kProgrammatic);
+  } else {
+    IntSize layout_delta = IntSize(
+        delta.Width() < 0 ? floor(delta.Width()) : ceil(delta.Width()),
+        delta.Height() < 0 ? floor(delta.Height()) : ceil(delta.Height()));
 
-  LayoutViewport().SetScrollOffset(
-      ScrollOffset(LayoutViewport().ScrollOffsetInt() + layout_delta),
-      mojom::blink::ScrollType::kProgrammatic);
+    LayoutViewport().SetScrollOffset(
+        ScrollOffset(LayoutViewport().ScrollOffsetInt() + layout_delta),
+        mojom::blink::ScrollType::kProgrammatic);
+  }
 
   delta = target_offset - GetScrollOffset();
   GetVisualViewport().SetScrollOffset(
@@ -310,7 +310,7 @@ mojom::blink::ScrollBehavior RootFrameViewport::ScrollBehaviorStyle() const {
   return LayoutViewport().ScrollBehaviorStyle();
 }
 
-WebColorScheme RootFrameViewport::UsedColorScheme() const {
+mojom::blink::ColorScheme RootFrameViewport::UsedColorScheme() const {
   return LayoutViewport().UsedColorScheme();
 }
 
@@ -514,6 +514,7 @@ cc::Layer* RootFrameViewport::LayerForScrollCorner() const {
   return LayoutViewport().LayerForScrollCorner();
 }
 
+// This method distributes the scroll between the visual and layout viewport.
 ScrollResult RootFrameViewport::UserScroll(
     ScrollGranularity granularity,
     const FloatSize& delta,
@@ -526,13 +527,7 @@ ScrollResult RootFrameViewport::UserScroll(
 
   UpdateScrollAnimator();
 
-  // Distribute the scroll between the visual and layout viewport.
-
-  float step_x = ScrollStep(granularity, kHorizontalScrollbar);
-  float step_y = ScrollStep(granularity, kVerticalScrollbar);
-
-  FloatSize pixel_delta(delta);
-  pixel_delta.Scale(step_x, step_y);
+  FloatSize pixel_delta = ResolveScrollDelta(granularity, delta);
 
   // Precompute the amount of possible scrolling since, when animated,
   // ScrollAnimator::userScroll will report having consumed the total given
@@ -682,7 +677,7 @@ base::Optional<FloatPoint> RootFrameViewport::GetSnapPositionAndSetTarget(
   return LayoutViewport().GetSnapPositionAndSetTarget(strategy);
 }
 
-void RootFrameViewport::Trace(Visitor* visitor) {
+void RootFrameViewport::Trace(Visitor* visitor) const {
   visitor->Trace(visual_viewport_);
   visitor->Trace(layout_viewport_);
   ScrollableArea::Trace(visitor);

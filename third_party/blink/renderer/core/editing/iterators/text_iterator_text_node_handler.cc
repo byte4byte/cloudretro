@@ -38,7 +38,7 @@ bool ShouldSkipInvisibleTextAt(const Text& text,
 }
 
 EVisibility FirstLetterVisibilityOf(const LayoutObject* layout_object) {
-  const LayoutTextFragment* text_fragment = ToLayoutTextFragment(layout_object);
+  const auto* text_fragment = To<LayoutTextFragment>(layout_object);
   DCHECK(text_fragment->IsRemainingTextLayoutObject());
   return text_fragment->GetFirstLetterPseudoElement()
       ->ComputedStyleRef()
@@ -146,7 +146,7 @@ bool TextIteratorTextNodeHandler::ShouldHandleFirstLetter(
     return false;
   if (!layout_text.IsTextFragment())
     return false;
-  const LayoutTextFragment& text_fragment = ToLayoutTextFragment(layout_text);
+  const auto& text_fragment = To<LayoutTextFragment>(layout_text);
   return offset_ < text_fragment.TextStartOffset();
 }
 
@@ -157,7 +157,7 @@ static bool HasVisibleTextNode(const LayoutText* layout_object) {
   if (!layout_object->IsTextFragment())
     return false;
 
-  const LayoutTextFragment* fragment = ToLayoutTextFragment(layout_object);
+  const auto* fragment = To<LayoutTextFragment>(layout_object);
   if (!fragment->IsRemainingTextLayoutObject())
     return false;
 
@@ -178,15 +178,12 @@ void TextIteratorTextNodeHandler::HandlePreFormattedTextNode() {
 
   if (last_text_node_ended_with_collapsed_space_ &&
       HasVisibleTextNode(layout_object)) {
-    if (!behavior_.CollapseTrailingSpace() ||
-        (offset_ > 0 && str[offset_ - 1] == ' ')) {
-      EmitChar16Before(kSpaceCharacter, offset_);
-      needs_handle_pre_formatted_text_node_ = true;
-      return;
-    }
+    EmitChar16Before(kSpaceCharacter, offset_);
+    needs_handle_pre_formatted_text_node_ = true;
+    return;
   }
   if (ShouldHandleFirstLetter(*layout_object)) {
-    LayoutTextFragment* remaining_text = ToLayoutTextFragment(layout_object);
+    auto* remaining_text = To<LayoutTextFragment>(layout_object);
     const bool stops_in_first_letter =
         end_offset_ <= remaining_text->TextStartOffset();
 
@@ -270,7 +267,7 @@ void TextIteratorTextNodeHandler::HandleTextNodeInRange(const Text* node,
   const bool should_handle_first_letter =
       ShouldHandleFirstLetter(*layout_object);
   if (should_handle_first_letter)
-    HandleTextNodeFirstLetter(ToLayoutTextFragment(layout_object));
+    HandleTextNodeFirstLetter(To<LayoutTextFragment>(layout_object));
 
   if (!layout_object->FirstTextBox() && str.length() > 0 &&
       !should_handle_first_letter) {
@@ -533,7 +530,7 @@ void TextIteratorTextNodeHandler::HandleTextNodeFirstLetter(
   sorted_text_boxes_.clear();
   remaining_text_box_ = text_box_;
   CHECK(first_letter && first_letter->IsText());
-  first_letter_text_ = ToLayoutText(first_letter);
+  first_letter_text_ = To<LayoutText>(first_letter);
   text_box_ = first_letter_text_->FirstTextBox();
 }
 
@@ -545,12 +542,7 @@ bool TextIteratorTextNodeHandler::ShouldFixLeadingWhiteSpaceForReplacedElement()
     return false;
   if (!last_text_node_ended_with_collapsed_space_)
     return false;
-  if (!behavior_.CollapseTrailingSpace())
-    return true;
-  if (!text_node_)
-    return false;
-  const String str = text_node_->GetLayoutObject()->GetText();
-  return offset_ > 0 && str[offset_ - 1] == ' ';
+  return true;
 }
 
 bool TextIteratorTextNodeHandler::FixLeadingWhiteSpaceForReplacedElement() {

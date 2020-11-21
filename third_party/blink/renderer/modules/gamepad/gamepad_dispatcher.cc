@@ -40,22 +40,24 @@ void GamepadDispatcher::ResetVibrationActuator(
                                                           std::move(callback));
 }
 
-GamepadDispatcher::GamepadDispatcher(
-    scoped_refptr<base::SingleThreadTaskRunner> task_runner)
-    : task_runner_(std::move(task_runner)) {}
+GamepadDispatcher::GamepadDispatcher(ExecutionContext& context)
+    :  // See https://bit.ly/2S0zRAS for task types.
+      task_runner_(context.GetTaskRunner(TaskType::kMiscPlatformAPI)),
+      gamepad_haptics_manager_remote_(&context) {}
 
 GamepadDispatcher::~GamepadDispatcher() = default;
 
 void GamepadDispatcher::InitializeHaptics() {
-  if (!gamepad_haptics_manager_remote_) {
+  if (!gamepad_haptics_manager_remote_.is_bound()) {
     Platform::Current()->GetBrowserInterfaceBroker()->GetInterface(
         gamepad_haptics_manager_remote_.BindNewPipeAndPassReceiver(
             task_runner_));
   }
 }
 
-void GamepadDispatcher::Trace(Visitor* visitor) {
+void GamepadDispatcher::Trace(Visitor* visitor) const {
   visitor->Trace(reader_);
+  visitor->Trace(gamepad_haptics_manager_remote_);
   PlatformEventDispatcher::Trace(visitor);
 }
 
@@ -85,10 +87,10 @@ void GamepadDispatcher::DispatchDidConnectOrDisconnectGamepad(
   NotifyControllers();
 }
 
-void GamepadDispatcher::StartListening(LocalFrame* frame) {
+void GamepadDispatcher::StartListening(LocalDOMWindow* window) {
   if (!reader_) {
-    DCHECK(frame);
-    reader_ = MakeGarbageCollected<GamepadSharedMemoryReader>(*frame);
+    DCHECK(window);
+    reader_ = MakeGarbageCollected<GamepadSharedMemoryReader>(*window);
   }
   reader_->Start(this);
 }

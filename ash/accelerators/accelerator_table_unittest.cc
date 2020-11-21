@@ -17,10 +17,10 @@ namespace ash {
 namespace {
 
 // The number of non-Search-based accelerators.
-constexpr int kNonSearchAcceleratorsNum = 100;
+constexpr int kNonSearchAcceleratorsNum = 102;
 // The hash of non-Search-based accelerators. See HashAcceleratorData().
 constexpr char kNonSearchAcceleratorsHash[] =
-    "a6a7d3d86ae5f8d03019b0cbcf77d46b";
+    "3854f7bea40ae9c966710db8264744f5";
 
 struct Cmp {
   bool operator()(const AcceleratorData& lhs,
@@ -33,14 +33,12 @@ struct Cmp {
 
 std::string AcceleratorDataToString(const AcceleratorData& accelerator) {
   return base::StringPrintf(
-      "trigger_on_press=%s keycode=%d shift=%s control=%s alt=%s search=%s "
-      "action=%d",
+      "trigger_on_press=%s keycode=%d shift=%s control=%s alt=%s search=%s",
       accelerator.trigger_on_press ? "true" : "false", accelerator.keycode,
       (accelerator.modifiers & ui::EF_SHIFT_DOWN) ? "true" : "false",
       (accelerator.modifiers & ui::EF_CONTROL_DOWN) ? "true" : "false",
       (accelerator.modifiers & ui::EF_ALT_DOWN) ? "true" : "false",
-      (accelerator.modifiers & ui::EF_COMMAND_DOWN) ? "true" : "false",
-      accelerator.action);
+      (accelerator.modifiers & ui::EF_COMMAND_DOWN) ? "true" : "false");
 }
 
 std::string HashAcceleratorData(
@@ -61,6 +59,11 @@ TEST(AcceleratorTableTest, CheckDuplicatedAccelerators) {
   std::set<AcceleratorData, Cmp> accelerators;
   for (size_t i = 0; i < kAcceleratorDataLength; ++i) {
     const AcceleratorData& entry = kAcceleratorData[i];
+    EXPECT_TRUE(accelerators.insert(entry).second)
+        << "Duplicated accelerator: " << AcceleratorDataToString(entry);
+  }
+  for (size_t i = 0; i < kDisableWithNewMappingAcceleratorDataLength; ++i) {
+    const AcceleratorData& entry = kDisableWithNewMappingAcceleratorData[i];
     EXPECT_TRUE(accelerators.insert(entry).second)
         << "Duplicated accelerator: " << AcceleratorDataToString(entry);
   }
@@ -140,6 +143,12 @@ TEST(AcceleratorTableTest, CheckSearchBasedAccelerators) {
   std::vector<AcceleratorData> non_search_accelerators;
   for (size_t i = 0; i < kAcceleratorDataLength; ++i) {
     const AcceleratorData& entry = kAcceleratorData[i];
+    if (entry.modifiers & ui::EF_COMMAND_DOWN)
+      continue;
+    non_search_accelerators.emplace_back(entry);
+  }
+  for (size_t i = 0; i < kDisableWithNewMappingAcceleratorDataLength; ++i) {
+    const AcceleratorData& entry = kDisableWithNewMappingAcceleratorData[i];
     if (entry.modifiers & ui::EF_COMMAND_DOWN)
       continue;
     non_search_accelerators.emplace_back(entry);

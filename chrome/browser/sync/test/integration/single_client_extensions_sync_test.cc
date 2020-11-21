@@ -10,6 +10,7 @@
 #include "chrome/browser/sync/test/integration/updated_progress_marker_checker.h"
 #include "components/sync/driver/profile_sync_service.h"
 #include "components/sync/test/fake_server/fake_server.h"
+#include "content/public/test/browser_test.h"
 
 namespace {
 
@@ -22,11 +23,12 @@ using extensions_helper::InstallExtensionForAllProfiles;
 class SingleClientExtensionsSyncTest : public SyncTest {
  public:
   SingleClientExtensionsSyncTest() : SyncTest(SINGLE_CLIENT) {}
+  ~SingleClientExtensionsSyncTest() override = default;
 
-  ~SingleClientExtensionsSyncTest() override {}
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(SingleClientExtensionsSyncTest);
+  bool UseVerifier() override {
+    // TODO(crbug.com/1137717): rewrite tests to not use verifier profile.
+    return true;
+  }
 };
 
 IN_PROC_BROWSER_TEST_F(SingleClientExtensionsSyncTest, StartWithNoExtensions) {
@@ -34,9 +36,8 @@ IN_PROC_BROWSER_TEST_F(SingleClientExtensionsSyncTest, StartWithNoExtensions) {
   ASSERT_TRUE(AllProfilesHaveSameExtensionsAsVerifier());
 }
 
-// Flaky: https://crbug.com/1030556
 IN_PROC_BROWSER_TEST_F(SingleClientExtensionsSyncTest,
-                       DISABLED_StartWithSomeExtensions) {
+                       StartWithSomeExtensions) {
   ASSERT_TRUE(SetupClients());
 
   const int kNumExtensions = 5;
@@ -94,7 +95,7 @@ IN_PROC_BROWSER_TEST_F(SingleClientExtensionsSyncTest, UninstallWinsConflicts) {
 
   // Expect the extension to get uninstalled locally.
   AwaitMatchStatusChangeChecker checker(
-      base::Bind(&ExtensionCountCheck, GetProfile(0), 0u),
+      base::BindRepeating(&ExtensionCountCheck, GetProfile(0), 0u),
       "Waiting for profile to have no extensions");
   EXPECT_TRUE(checker.Wait());
   EXPECT_TRUE(GetInstalledExtensions(GetProfile(0)).empty());

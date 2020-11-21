@@ -6,6 +6,7 @@
 #define COMPONENTS_EXO_WM_HELPER_H_
 
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "base/macros.h"
@@ -35,6 +36,7 @@ class ManagedDisplayMode;
 namespace ui {
 class EventHandler;
 class DropTargetEvent;
+class PropertyHandler;
 }  // namespace ui
 
 namespace wm {
@@ -82,10 +84,21 @@ class WMHelper : public aura::client::DragDropDelegate {
     DISALLOW_COPY_AND_ASSIGN(LifetimeManager);
   };
 
+  // Used to resolve the properties to be set to the window
+  // based on the |app_id| and |startup_id|.
+  class AppPropertyResolver {
+   public:
+    virtual ~AppPropertyResolver() = default;
+    virtual void PopulateProperties(
+        const std::string& app_id,
+        const std::string& startup_id,
+        bool for_creation,
+        ui::PropertyHandler& out_properties_container) = 0;
+  };
+
   WMHelper();
   ~WMHelper() override;
 
-  static void SetInstance(WMHelper* helper);
   static WMHelper* GetInstance();
   static bool HasInstance();
 
@@ -124,6 +137,8 @@ class WMHelper : public aura::client::DragDropDelegate {
   virtual void RemovePostTargetHandler(ui::EventHandler* handler) = 0;
   virtual bool InTabletMode() const = 0;
   virtual double GetDefaultDeviceScaleFactor() const = 0;
+  virtual double GetDeviceScaleFactorForWindow(aura::Window* window) const = 0;
+  virtual void SetDefaultScaleCancellation(bool default_scale_cancellation) = 0;
   virtual void SetImeBlocked(aura::Window* window, bool ime_blocked) = 0;
   virtual bool IsImeBlocked(aura::Window* window) const = 0;
 
@@ -137,7 +152,23 @@ class WMHelper : public aura::client::DragDropDelegate {
   int OnPerformDrop(const ui::DropTargetEvent& event,
                     std::unique_ptr<ui::OSExchangeData> data) override = 0;
 
+  // Registers an AppPropertyResolver. Multiple resolver can be registered and
+  // all resolvers are called in the registration order by the method below.
+  void RegisterAppPropertyResolver(
+      std::unique_ptr<AppPropertyResolver> resolver);
+
+  // Populates window properties for given |app_id| and |startup_id|.
+  // |for_creation| == true means this is called before a widget gets
+  // created, and false means this is called when the application id is set
+  // after the widget is created.
+  void PopulateAppProperties(const std::string& app_id,
+                             const std::string& startup_id,
+                             bool for_creation,
+                             ui::PropertyHandler& out_properties_container);
+
  protected:
+  std::vector<std::unique_ptr<AppPropertyResolver>> resolver_list_;
+
   DISALLOW_COPY_AND_ASSIGN(WMHelper);
 };
 

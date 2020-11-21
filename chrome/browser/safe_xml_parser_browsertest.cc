@@ -11,6 +11,7 @@
 #include "base/token.h"
 #include "base/values.h"
 #include "chrome/test/base/in_process_browser_test.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/test_utils.h"
 #include "services/data_decoder/public/cpp/data_decoder.h"
 #include "services/data_decoder/public/cpp/safe_xml_parser.h"
@@ -52,7 +53,7 @@ class SafeXmlParserTest : public InProcessBrowserTest {
   }
 
  private:
-  void XmlParsingDone(base::Closure quit_loop_closure,
+  void XmlParsingDone(base::OnceClosure quit_loop_closure,
                       std::unique_ptr<base::Value> expected_value,
                       data_decoder::DataDecoder::ValueOrError result) {
     base::ScopedClosureRunner runner(std::move(quit_loop_closure));
@@ -77,4 +78,3 @@ IN_PROC_BROWSER_TEST_F(SafeXmlParserTest, Parse) {
   TestParse("[\"this is JSON not XML\"]", "");
   TestParse(kTestXml, kTestJson);
 }
-

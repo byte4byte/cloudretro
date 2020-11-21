@@ -5,29 +5,33 @@
 /** @fileoverview Suite of tests for the Settings advanced page. */
 
 // clang-format off
-import {CrSettingsPrefs} from 'chrome://settings/settings.js';
 import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
-import {getPage, getSection} from 'chrome://test/settings/settings_page_test_util.js';
+import {CrSettingsPrefs} from 'chrome://settings/settings.js';
+
+import {assertEquals, assertGT, assertTrue} from '../chai_assert.js';
+
+import {getPage, getSection} from './settings_page_test_util.js';
+
 // clang-format on
 
 suite('AdvancedPage', function() {
+  /** @type {?SettingsBasicPageElement} */
   let basicPage = null;
 
   suiteSetup(function() {
-    PolymerTest.clearBody();
-    const ui = document.createElement('settings-ui');
-    document.body.appendChild(ui);
+    document.body.innerHTML = '';
+    const settingsUi = document.createElement('settings-ui');
+    document.body.appendChild(settingsUi);
     return CrSettingsPrefs.initialized
         .then(() => {
           return getPage('basic');
         })
         .then(page => {
           basicPage = page;
-          const settingsMain =
-              document.querySelector('settings-ui').$$('settings-main');
+          const settingsMain = /** @type {!SettingsMainElement} */ (
+              settingsUi.$$('settings-main'));
           assertTrue(!!settingsMain);
-          settingsMain.advancedToggleExpanded =
-              !settingsMain.advancedToggleExpanded;
+          settingsMain.advancedToggleExpanded = true;
           flush();
         });
   });
@@ -35,7 +39,7 @@ suite('AdvancedPage', function() {
   /**
    * Verifies the section has a visible #main element and that any possible
    * sub-pages are hidden.
-   * @param {!Node} The DOM node for the section.
+   * @param {!Node} section The DOM node for the section.
    */
   function verifySubpagesHidden(section) {
     // Check if there are sub-pages to verify.
@@ -47,12 +51,12 @@ suite('AdvancedPage', function() {
 
     const children = pages.getContentChildren();
     const stampedChildren = children.filter(function(element) {
-      return element.tagName != 'TEMPLATE';
+      return element.tagName !== 'TEMPLATE';
     });
 
     // The section's main child should be stamped and visible.
     const main = stampedChildren.filter(function(element) {
-      return element.getAttribute('route-path') == 'default';
+      return element.getAttribute('route-path') === 'default';
     });
     assertEquals(
         main.length, 1,
@@ -61,7 +65,7 @@ suite('AdvancedPage', function() {
 
     // Any other stamped subpages should not be visible.
     const subpages = stampedChildren.filter(function(element) {
-      return element.getAttribute('route-path') != 'default';
+      return element.getAttribute('route-path') !== 'default';
     });
     for (const subpage of subpages) {
       assertEquals(
@@ -76,15 +80,12 @@ suite('AdvancedPage', function() {
   });
 
   test('advanced pages', function() {
-    const sections = ['a11y', 'languages', 'downloads', 'printing', 'reset'];
-    if (!loadTimeData.getBoolean('privacySettingsRedesignEnabled')) {
-      sections.push('privacy');
-    }
+    const sections = ['a11y', 'languages', 'downloads', 'reset'];
     for (let i = 0; i < sections.length; i++) {
-      const section =
-          getSection(basicPage, sections[i]);
+      const section = getSection(
+          /** @type {!SettingsBasicPageElement} */ (basicPage), sections[i]);
       assertTrue(!!section);
-      verifySubpagesHidden(section);
+      verifySubpagesHidden(/** @type {!Node} */ (section));
     }
   });
 });

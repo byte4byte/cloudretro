@@ -5,7 +5,8 @@
 /** @fileoverview Test suite for the WebUI new tab page page. */
 
 GEN_INCLUDE(['//chrome/test/data/webui/polymer_interactive_ui_test.js']);
-GEN('#include "services/network/public/cpp/features.h"');
+
+GEN('#include "content/public/test/browser_test.h"');
 
 class NewTabPageInteractiveTest extends PolymerInteractiveUITest {
   /** @override */
@@ -19,11 +20,6 @@ class NewTabPageInteractiveTest extends PolymerInteractiveUITest {
       '//third_party/mocha/mocha.js',
       '//chrome/test/data/webui/mocha_adapter.js',
     ];
-  }
-
-  /** @override */
-  get featureList() {
-    return {enabled: ['network::features::kOutOfBlinkCors']};
   }
 }
 
@@ -49,18 +45,6 @@ var NewTabPageCustomizeDialogFocusTest =
 };
 
 TEST_F('NewTabPageCustomizeDialogFocusTest', 'All', function() {
-  mocha.run();
-});
-
-// eslint-disable-next-line no-var
-var NewTabPageGridFocusTest = class extends NewTabPageInteractiveTest {
-  /** @override */
-  get browsePreload() {
-    return 'chrome://new-tab-page/test_loader.html?module=new_tab_page/grid_focus_test.js';
-  }
-};
-
-TEST_F('NewTabPageGridFocusTest', 'All', function() {
   mocha.run();
 });
 

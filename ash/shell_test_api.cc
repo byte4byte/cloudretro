@@ -29,6 +29,7 @@
 #include "ui/compositor/compositor.h"
 #include "ui/compositor/compositor_observer.h"
 #include "ui/compositor/layer_animation_observer.h"
+#include "ui/display/manager/display_manager.h"
 #include "ui/events/devices/device_data_manager_test_api.h"
 #include "ui/events/gesture_detection/gesture_configuration.h"
 
@@ -142,6 +143,10 @@ PowerPrefs* ShellTestApi::power_prefs() {
   return shell_->power_prefs_.get();
 }
 
+display::DisplayManager* ShellTestApi::display_manager() {
+  return shell_->display_manager();
+}
+
 void ShellTestApi::ResetPowerButtonControllerForTest() {
   shell_->backlights_forced_off_setter_->ResetForTest();
   shell_->power_button_controller_ = std::make_unique<PowerButtonController>(
@@ -163,6 +168,7 @@ void ShellTestApi::SetTabletModeEnabledForTest(bool enable,
   // to prevent the callback from evdev thread from overwriting whatever we set
   // here below. See `InputDeviceFactoryEvdevProxy::OnStartupScanComplete()`.
   base::RunLoop().RunUntilIdle();
+  ui::DeviceDataManagerTestApi().OnDeviceListsComplete();
   ui::DeviceDataManagerTestApi().SetMouseDevices({});
 
   TabletMode::Waiter waiter(enable);

@@ -30,12 +30,24 @@ Polymer({
 
     showCrostini: Boolean,
 
+    showStartup: Boolean,
+
     showReset: Boolean,
 
   },
 
   /** @param {!settings.Route} newRoute */
   currentRouteChanged(newRoute) {
+    const urlSearchQuery =
+        settings.Router.getInstance().getQueryParameters().get('search');
+
+    // If the route navigated to by a search result is in the advanced
+    // section, the advanced menu will expand.
+    if (urlSearchQuery && settings.routes.ADVANCED &&
+        settings.routes.ADVANCED.contains(newRoute)) {
+      this.advancedOpened = true;
+    }
+
     // Focus the initially selected path.
     const anchors = this.root.querySelectorAll('a');
     for (let i = 0; i < anchors.length; ++i) {

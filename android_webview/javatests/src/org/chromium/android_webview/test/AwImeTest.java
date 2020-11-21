@@ -6,10 +6,11 @@ package org.chromium.android_webview.test;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.greaterThan;
+import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.notNullValue;
 
 import android.content.Context;
 import android.graphics.Rect;
-import android.support.test.filters.SmallTest;
 import android.view.KeyEvent;
 import android.view.ViewGroup;
 import android.view.inputmethod.InputConnection;
@@ -19,19 +20,20 @@ import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.LinearLayout.LayoutParams;
 
-import org.junit.Assert;
+import androidx.test.filters.SmallTest;
+
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.test.util.CallbackHelper;
+import org.chromium.base.test.util.Criteria;
+import org.chromium.base.test.util.CriteriaHelper;
 import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
 import org.chromium.content_public.browser.ImeAdapter;
 import org.chromium.content_public.browser.WebContents;
-import org.chromium.content_public.browser.test.util.Criteria;
-import org.chromium.content_public.browser.test.util.CriteriaHelper;
 import org.chromium.content_public.browser.test.util.DOMUtils;
 import org.chromium.content_public.browser.test.util.TestInputMethodManagerWrapper;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
@@ -153,7 +155,7 @@ public class AwImeTest {
     }
 
     private void waitForNonNullInputConnection() {
-        CriteriaHelper.pollUiThread(() -> { Assert.assertNotNull(getInputConnection()); });
+        CriteriaHelper.pollUiThread(() -> Criteria.checkThat(getInputConnection(), notNullValue()));
     }
 
     /**
@@ -175,26 +177,28 @@ public class AwImeTest {
      * keydown event.
      */
     // https://crbug.com/787651
-    // Flaky! - https://crbug.com/795423
     @Test
-    // @SmallTest
-    @DisabledTest
+    @SmallTest
+    @DisabledTest(message = "https://crbug.com/795423")
     public void testImeDpadMovesFocusOutOfWebView() throws Throwable {
         loadContentEditableBody();
         focusOnEditTextAndShowKeyboard();
         focusOnWebViewAndEnableEditing();
         waitForNonNullInputConnection();
 
-        CriteriaHelper.pollUiThread(Criteria.equals(
-                mTestContainerView, () -> mActivityTestRule.getActivity().getCurrentFocus()));
+        CriteriaHelper.pollUiThread(() -> {
+            Criteria.checkThat(
+                    mActivityTestRule.getActivity().getCurrentFocus(), is(mTestContainerView));
+        });
 
         TestThreadUtils.runOnUiThreadBlocking((Runnable) () -> {
             getInputConnection().sendKeyEvent(
                     new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_UP));
         });
 
-        CriteriaHelper.pollUiThread(Criteria.equals(
-                mEditText, () -> mActivityTestRule.getActivity().getCurrentFocus()));
+        CriteriaHelper.pollUiThread(() -> {
+            Criteria.checkThat(mActivityTestRule.getActivity().getCurrentFocus(), is(mEditText));
+        });
     }
 
     /**
@@ -203,22 +207,26 @@ public class AwImeTest {
      */
     @Test
     @SmallTest
+    @DisabledTest(message = "https://crbug.com/795423")
     public void testDpadDispatchKeyEventMovesFocusOutOfWebView() throws Throwable {
         loadContentEditableBody();
         focusOnEditTextAndShowKeyboard();
         focusOnWebViewAndEnableEditing();
         waitForNonNullInputConnection();
 
-        CriteriaHelper.pollUiThread(Criteria.equals(
-                mTestContainerView, () -> mActivityTestRule.getActivity().getCurrentFocus()));
+        CriteriaHelper.pollUiThread(() -> {
+            Criteria.checkThat(
+                    mActivityTestRule.getActivity().getCurrentFocus(), is(mTestContainerView));
+        });
 
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             mTestContainerView.dispatchKeyEvent(
                     new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_UP));
         });
 
-        CriteriaHelper.pollUiThread(Criteria.equals(
-                mEditText, () -> mActivityTestRule.getActivity().getCurrentFocus()));
+        CriteriaHelper.pollUiThread(() -> {
+            Criteria.checkThat(mActivityTestRule.getActivity().getCurrentFocus(), is(mEditText));
+        });
     }
 
     private void scrollBottomOfNodeIntoView(String nodeId) throws Exception {
@@ -234,10 +242,9 @@ public class AwImeTest {
     }
 
     // https://crbug.com/920061
-    // Flaky! - https://crbug.com/1061218
     @Test
-    // @SmallTest
-    @DisabledTest
+    @SmallTest
+    @DisabledTest(message = "https://crbug.com/1061218")
     public void testFocusAndViewSizeChangeCausesScroll() throws Throwable {
         loadBottomInputHtml();
         Rect currentRect = new Rect();

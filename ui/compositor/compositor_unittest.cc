@@ -7,11 +7,12 @@
 #include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "base/test/task_environment.h"
 #include "base/test/test_mock_time_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
+#include "cc/metrics/frame_sequence_tracker.h"
 #include "components/viz/common/surfaces/parent_local_surface_id_allocator.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -104,8 +105,8 @@ TEST_F(CompositorTestWithMessageLoop, ShouldUpdateDisplayProperties) {
   root_layer->SetBounds(gfx::Rect(10, 10));
   compositor()->SetRootLayer(root_layer.get());
   compositor()->SetScaleAndSize(1.0f, gfx::Size(10, 10),
-                                allocator.GetCurrentLocalSurfaceIdAllocation());
-  DCHECK(compositor()->IsVisible());
+                                allocator.GetCurrentLocalSurfaceId());
+  ASSERT_TRUE(compositor()->IsVisible());
 
   // Set a non-identity color matrix, color space, sdr white level, vsync
   // timebase and vsync interval, and expect it to be set on the context
@@ -176,7 +177,7 @@ TEST_F(CompositorTestWithMessageLoop, MoveThroughputTracker) {
   {
     auto tracker = compositor()->RequestNewThroughputTracker();
     tracker.Start(base::BindLambdaForTesting(
-        [&](cc::FrameSequenceMetrics::ThroughputData throughput) {
+        [&](const cc::FrameSequenceMetrics::CustomReportData& data) {
           // This should not be called since the tracking is auto canceled.
           ADD_FAILURE();
         }));
@@ -187,7 +188,7 @@ TEST_F(CompositorTestWithMessageLoop, MoveThroughputTracker) {
   {
     auto tracker = compositor()->RequestNewThroughputTracker();
     tracker.Start(base::BindLambdaForTesting(
-        [&](cc::FrameSequenceMetrics::ThroughputData throughput) {
+        [&](const cc::FrameSequenceMetrics::CustomReportData& data) {
           // May be called since Stop() is called.
         }));
     auto moved_tracker = std::move(tracker);
@@ -198,7 +199,7 @@ TEST_F(CompositorTestWithMessageLoop, MoveThroughputTracker) {
   {
     auto tracker = compositor()->RequestNewThroughputTracker();
     tracker.Start(base::BindLambdaForTesting(
-        [&](cc::FrameSequenceMetrics::ThroughputData throughput) {
+        [&](const cc::FrameSequenceMetrics::CustomReportData& data) {
           // This should not be called since Cancel() is called.
           ADD_FAILURE();
         }));
@@ -210,7 +211,7 @@ TEST_F(CompositorTestWithMessageLoop, MoveThroughputTracker) {
   {
     auto tracker = compositor()->RequestNewThroughputTracker();
     tracker.Start(base::BindLambdaForTesting(
-        [&](cc::FrameSequenceMetrics::ThroughputData throughput) {
+        [&](const cc::FrameSequenceMetrics::CustomReportData& data) {
           // May be called since Stop() is called.
         }));
     tracker.Stop();
@@ -221,13 +222,65 @@ TEST_F(CompositorTestWithMessageLoop, MoveThroughputTracker) {
   {
     auto tracker = compositor()->RequestNewThroughputTracker();
     tracker.Start(base::BindLambdaForTesting(
-        [&](cc::FrameSequenceMetrics::ThroughputData throughput) {
+        [&](const cc::FrameSequenceMetrics::CustomReportData& data) {
           // This should not be called since Cancel() is called.
           ADD_FAILURE();
         }));
     tracker.Cancel();
     auto moved_tracker = std::move(tracker);
   }
+}
+
+TEST_F(CompositorTestWithMessageLoop, ThroughputTracker) {
+  auto root_layer = std::make_unique<Layer>(ui::LAYER_SOLID_COLOR);
+  viz::ParentLocalSurfaceIdAllocator allocator;
+  allocator.GenerateId();
+  root_layer->SetBounds(gfx::Rect(10, 10));
+  compositor()->SetRootLayer(root_layer.get());
+  compositor()->SetScaleAndSize(1.0f, gfx::Size(10, 10),
+                                allocator.GetCurrentLocalSurfaceId());
+  ASSERT_TRUE(compositor()->IsVisible());
+
+  ThroughputTracker tracker = compositor()->RequestNewThroughputTracker();
+
+  base::RunLoop run_loop;
+  tracker.Start(base::BindLambdaForTesting(
+      [&](const cc::FrameSequenceMetrics::CustomReportData& data) {
+        EXPECT_GT(data.frames_expected, 0u);
+        EXPECT_GT(data.frames_produced, 0u);
+        run_loop.Quit();
+      }));
+
+  // Generates a few frames after tracker starts to have some data collected.
+  for (int i = 0; i < 5; ++i) {
+    compositor()->ScheduleFullRedraw();
+    DrawWaiterForTest::WaitForCompositingEnded(compositor());
+  }
+
+  tracker.Stop();
+
+  // Generates a few frames after tracker stops. Note the number of frames
+  // must be at least two: one to trigger underlying cc::FrameSequenceTracker to
+  // be scheduled for termination and one to report data.
+  for (int i = 0; i < 5; ++i) {
+    compositor()->ScheduleFullRedraw();
+    DrawWaiterForTest::WaitForCompositingEnded(compositor());
+  }
+
+  run_loop.Run();
+}
+
+TEST_F(CompositorTestWithMessageLoop, ThroughputTrackerOutliveCompositor) {
+  auto tracker = compositor()->RequestNewThroughputTracker();
+  tracker.Start(base::BindLambdaForTesting(
+      [&](const cc::FrameSequenceMetrics::CustomReportData& data) {
+        ADD_FAILURE() << "No report should happen";
+      }));
+
+  DestroyCompositor();
+
+  // No crash, no use-after-free and no report.
+  tracker.Stop();
 }
 
 #if defined(OS_WIN)
@@ -244,8 +297,8 @@ TEST_F(CompositorTestWithMessageLoop, MAYBE_CreateAndReleaseOutputSurface) {
   root_layer->SetBounds(gfx::Rect(10, 10));
   compositor()->SetRootLayer(root_layer.get());
   compositor()->SetScaleAndSize(1.0f, gfx::Size(10, 10),
-                                allocator.GetCurrentLocalSurfaceIdAllocation());
-  DCHECK(compositor()->IsVisible());
+                                allocator.GetCurrentLocalSurfaceId());
+  ASSERT_TRUE(compositor()->IsVisible());
   compositor()->ScheduleDraw();
   DrawWaiterForTest::WaitForCompositingEnded(compositor());
   compositor()->SetVisible(false);

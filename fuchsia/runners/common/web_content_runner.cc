@@ -12,9 +12,9 @@
 #include "base/bind.h"
 #include "base/files/file.h"
 #include "base/files/file_util.h"
-#include "base/fuchsia/default_context.h"
 #include "base/fuchsia/file_utils.h"
 #include "base/fuchsia/fuchsia_logging.h"
+#include "base/fuchsia/process_context.h"
 #include "base/fuchsia/scoped_service_binding.h"
 #include "base/fuchsia/startup_context.h"
 #include "base/logging.h"
@@ -26,7 +26,7 @@ namespace {
 
 fuchsia::web::ContextPtr CreateWebContext(
     fuchsia::web::CreateContextParams context_params) {
-  auto context_provider = base::fuchsia::ComponentContextForCurrentProcess()
+  auto context_provider = base::ComponentContextForProcess()
                               ->svc()
                               ->Connect<fuchsia::web::ContextProvider>();
   fuchsia::web::ContextPtr web_context;
@@ -51,22 +51,18 @@ WebContentRunner::WebContentRunner(
 
 WebContentRunner::~WebContentRunner() = default;
 
-fuchsia::web::FramePtr WebContentRunner::CreateFrame(
-    fuchsia::web::CreateFrameParams params) {
+void WebContentRunner::CreateFrameWithParams(
+    fuchsia::web::CreateFrameParams params,
+    fidl::InterfaceRequest<fuchsia::web::Frame> request) {
   if (!context_) {
     DCHECK(get_context_params_callback_);
     context_ = CreateWebContext(get_context_params_callback_.Run());
-    context_.set_error_handler([this](zx_status_t status) {
+    context_.set_error_handler([](zx_status_t status) {
       ZX_LOG(ERROR, status) << "Connection to Context lost.";
-      if (on_context_lost_callback_) {
-        std::move(on_context_lost_callback_).Run();
-      }
     });
   }
 
-  fuchsia::web::FramePtr frame;
-  context_->CreateFrameWithParams(std::move(params), frame.NewRequest());
-  return frame;
+  context_->CreateFrameWithParams(std::move(params), std::move(request));
 }
 
 void WebContentRunner::StartComponent(
@@ -112,9 +108,4 @@ void WebContentRunner::RegisterComponent(
 
 void WebContentRunner::SetOnEmptyCallback(base::OnceClosure on_empty) {
   on_empty_callback_ = std::move(on_empty);
-}
-
-void WebContentRunner::SetOnContextLostCallbackForTest(
-    base::OnceClosure callback) {
-  on_context_lost_callback_ = std::move(callback);
 }

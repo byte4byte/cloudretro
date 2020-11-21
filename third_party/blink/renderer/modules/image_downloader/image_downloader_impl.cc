@@ -7,7 +7,7 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/logging.h"
+#include "base/check.h"
 #include "skia/ext/image_operations.h"
 #include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
 #include "third_party/blink/public/platform/interface_registry.h"
@@ -147,8 +147,8 @@ void ImageDownloaderImpl::ProvideTo(LocalFrame& frame) {
 
 ImageDownloaderImpl::ImageDownloaderImpl(LocalFrame& frame)
     : Supplement<LocalFrame>(frame),
-      ExecutionContextLifecycleObserver(
-          frame.GetDocument()->GetExecutionContext()) {
+      ExecutionContextLifecycleObserver(frame.DomWindow()),
+      receiver_(this, frame.DomWindow()) {
   frame.GetInterfaceRegistry()->AddInterface(WTF::BindRepeating(
       &ImageDownloaderImpl::CreateMojoService, WrapWeakPersistent(this)));
 }
@@ -157,7 +157,8 @@ ImageDownloaderImpl::~ImageDownloaderImpl() {}
 
 void ImageDownloaderImpl::CreateMojoService(
     mojo::PendingReceiver<mojom::blink::ImageDownloader> receiver) {
-  receiver_.Bind(std::move(receiver));
+  receiver_.Bind(std::move(receiver),
+                 GetSupplementable()->GetTaskRunner(TaskType::kNetworking));
   receiver_.set_disconnect_handler(
       WTF::Bind(&ImageDownloaderImpl::Dispose, WrapWeakPersistent(this)));
 }
@@ -218,8 +219,8 @@ void ImageDownloaderImpl::FetchImage(const KURL& image_url,
   image_fetchers_.push_back(
       std::make_unique<MultiResolutionImageResourceFetcher>(
           image_url, GetSupplementable(),
-          is_favicon ? blink::mojom::RequestContextType::FAVICON
-                     : blink::mojom::RequestContextType::IMAGE,
+          is_favicon ? mojom::blink::RequestContextType::FAVICON
+                     : mojom::blink::RequestContextType::IMAGE,
           bypass_cache ? blink::mojom::FetchCacheMode::kBypassCache
                        : blink::mojom::FetchCacheMode::kDefault,
           WTF::Bind(&ImageDownloaderImpl::DidFetchImage, WrapPersistent(this),
@@ -252,7 +253,8 @@ void ImageDownloaderImpl::DidFetchImage(
   std::move(callback).Run(http_status_code, images);
 }
 
-void ImageDownloaderImpl::Trace(Visitor* visitor) {
+void ImageDownloaderImpl::Trace(Visitor* visitor) const {
+  visitor->Trace(receiver_);
   Supplement<LocalFrame>::Trace(visitor);
   ExecutionContextLifecycleObserver::Trace(visitor);
 }

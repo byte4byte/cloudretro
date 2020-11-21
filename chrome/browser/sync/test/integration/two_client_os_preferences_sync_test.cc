@@ -11,6 +11,7 @@
 #include "chrome/browser/sync/test/integration/profile_sync_service_harness.h"
 #include "chrome/browser/sync/test/integration/sync_integration_test_util.h"
 #include "components/prefs/pref_service.h"
+#include "content/public/test/browser_test.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using preferences_helper::ChangeStringPref;
@@ -31,7 +32,6 @@ class TwoClientOsPreferencesSyncTest : public OsSyncTest {
 
 IN_PROC_BROWSER_TEST_F(TwoClientOsPreferencesSyncTest, E2E_ENABLED(Sanity)) {
   ResetSyncForPrimaryAccount();
-  DisableVerifier();
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
   // Wait until sync settles before we override the prefs below.
   ASSERT_TRUE(AwaitQuiescence());

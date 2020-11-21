@@ -16,7 +16,7 @@
 
 namespace ash {
 
-// Used by HomeLauncherGestureHandler to handle gesture drag events while the
+// Used by ShelfLayoutManager to handle gesture drag events while the
 // handler is in kSwipeHomeToOverview mode. The controller handles swipe gesture
 // from hot seat on the home screen. The gesture, if detected, transitions the
 // home screen to the overview UI.
@@ -63,6 +63,10 @@ class ASH_EXPORT SwipeHomeToOverviewController {
   // Note that the controller might keep getting drag updates as the user keeps
   // moving the pointer - those events will be ignored.
   void FinalizeDragAndShowOverview();
+
+  // Finalizes the drag sequence by staying on the home screen.
+  // |go_back| - if the gesture should invoke home screen back action.
+  void FinalizeDragAndStayOnHomeScreen(bool go_back);
 
   const int64_t display_id_;
 

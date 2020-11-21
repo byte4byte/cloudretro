@@ -61,7 +61,7 @@ class SendTabToSelfUtilTest : public BrowserWithTestWindowTest {
 
   void SetUp() override {
     BrowserWithTestWindowTest::SetUp();
-    incognito_profile_ = profile()->GetOffTheRecordProfile();
+    incognito_profile_ = profile()->GetPrimaryOTRProfile();
     url_ = GURL("https://www.google.com");
     title_ = base::UTF8ToUTF16(base::StringPiece("Google"));
   }
@@ -88,6 +88,11 @@ TEST_F(SendTabToSelfUtilTest, ContentRequirementsMet) {
 
 TEST_F(SendTabToSelfUtilTest, NotHTTPOrHTTPS) {
   url_ = GURL("192.168.0.0");
+  EXPECT_FALSE(AreContentRequirementsMet(url_, profile()));
+}
+
+TEST_F(SendTabToSelfUtilTest, UntrustedPage) {
+  url_ = GURL("chrome-untrusted://url");
   EXPECT_FALSE(AreContentRequirementsMet(url_, profile()));
 }
 

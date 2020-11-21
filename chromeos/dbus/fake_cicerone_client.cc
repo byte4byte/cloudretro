@@ -47,6 +47,12 @@ FakeCiceroneClient::FakeCiceroneClient() {
 
   start_lxd_response_.set_status(
       vm_tools::cicerone::StartLxdResponse::ALREADY_RUNNING);
+
+  add_file_watch_response_.set_status(
+      vm_tools::cicerone::AddFileWatchResponse::SUCCEEDED);
+
+  remove_file_watch_response_.set_status(
+      vm_tools::cicerone::RemoveFileWatchResponse::SUCCEEDED);
 }
 
 FakeCiceroneClient::~FakeCiceroneClient() = default;
@@ -57,6 +63,17 @@ void FakeCiceroneClient::AddObserver(Observer* observer) {
 
 void FakeCiceroneClient::RemoveObserver(Observer* observer) {
   observer_list_.RemoveObserver(observer);
+}
+
+void FakeCiceroneClient::NotifyCiceroneStopped() {
+  for (auto& observer : observer_list_) {
+    observer.CiceroneServiceStopped();
+  }
+}
+void FakeCiceroneClient::NotifyCiceroneStarted() {
+  for (auto& observer : observer_list_) {
+    observer.CiceroneServiceStarted();
+  }
 }
 
 bool FakeCiceroneClient::IsContainerStartedSignalConnected() {
@@ -115,6 +132,10 @@ bool FakeCiceroneClient::IsStartLxdProgressSignalConnected() {
   return is_start_lxd_progress_signal_connected_;
 }
 
+bool FakeCiceroneClient::IsFileWatchTriggeredSignalConnected() {
+  return is_file_watch_triggered_signal_connected_;
+}
+
 // Currently no tests need to change the output of this method. If you want to
 // add one, make it return a variable like the above examples.
 bool FakeCiceroneClient::IsPendingAppListUpdatesSignalConnected() {
@@ -125,9 +146,13 @@ void FakeCiceroneClient::LaunchContainerApplication(
     const vm_tools::cicerone::LaunchContainerApplicationRequest& request,
     DBusMethodCallback<vm_tools::cicerone::LaunchContainerApplicationResponse>
         callback) {
-  base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::BindOnce(std::move(callback),
-                                launch_container_application_response_));
+  if (launch_container_application_callback_) {
+    launch_container_application_callback_.Run(request, std::move(callback));
+  } else {
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::BindOnce(std::move(callback),
+                                  launch_container_application_response_));
+  }
 }
 
 void FakeCiceroneClient::GetContainerAppIcons(
@@ -155,6 +180,11 @@ void FakeCiceroneClient::InstallLinuxPackage(
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
       base::BindOnce(std::move(callback), install_linux_package_response_));
+}
+
+void FakeCiceroneClient::SetOnLaunchContainerApplicationCallback(
+    LaunchContainerApplicationCallback callback) {
+  launch_container_application_callback_ = std::move(callback);
 }
 
 void FakeCiceroneClient::SetOnUninstallPackageOwningFileCallback(
@@ -197,7 +227,7 @@ void FakeCiceroneClient::CreateLxdContainer(
   signal.set_status(lxd_container_created_signal_status_);
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE, base::BindOnce(&FakeCiceroneClient::NotifyLxdContainerCreated,
-                                base::Unretained(this), std::move(signal)));
+                                weak_factory_.GetWeakPtr(), std::move(signal)));
 }
 
 void FakeCiceroneClient::DeleteLxdContainer(
@@ -228,7 +258,7 @@ void FakeCiceroneClient::StartLxdContainer(
   signal.mutable_os_release()->CopyFrom(lxd_container_os_release_);
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE, base::BindOnce(&FakeCiceroneClient::NotifyLxdContainerStarting,
-                                base::Unretained(this), std::move(signal)));
+                                weak_factory_.GetWeakPtr(), std::move(signal)));
 
   if (send_container_started_signal_) {
     // Trigger CiceroneClient::Observer::NotifyContainerStartedSignal.
@@ -238,8 +268,9 @@ void FakeCiceroneClient::StartLxdContainer(
     signal.set_container_name(request.container_name());
     signal.set_container_username(last_container_username_);
     base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, base::BindOnce(&FakeCiceroneClient::NotifyContainerStarted,
-                                  base::Unretained(this), std::move(signal)));
+        FROM_HERE,
+        base::BindOnce(&FakeCiceroneClient::NotifyContainerStarted,
+                       weak_factory_.GetWeakPtr(), std::move(signal)));
   }
 }
 
@@ -342,6 +373,29 @@ void FakeCiceroneClient::StartLxd(
       FROM_HERE, base::BindOnce(std::move(callback), start_lxd_response_));
 }
 
+void FakeCiceroneClient::AddFileWatch(
+    const vm_tools::cicerone::AddFileWatchRequest& request,
+    DBusMethodCallback<vm_tools::cicerone::AddFileWatchResponse> callback) {
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::BindOnce(std::move(callback), add_file_watch_response_));
+}
+
+void FakeCiceroneClient::RemoveFileWatch(
+    const vm_tools::cicerone::RemoveFileWatchRequest& request,
+    DBusMethodCallback<vm_tools::cicerone::RemoveFileWatchResponse> callback) {
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE,
+      base::BindOnce(std::move(callback), remove_file_watch_response_));
+}
+
+void FakeCiceroneClient::GetVshSession(
+    const vm_tools::cicerone::GetVshSessionRequest& request,
+    DBusMethodCallback<vm_tools::cicerone::GetVshSessionResponse> callback) {
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE,
+      base::BindOnce(std::move(callback), get_vsh_session_response_));
+}
+
 void FakeCiceroneClient::NotifyLxdContainerCreated(
     const vm_tools::cicerone::LxdContainerCreatedSignal& proto) {
   for (auto& observer : observer_list_) {
@@ -423,6 +477,13 @@ void FakeCiceroneClient::NotifyStartLxdProgress(
     const vm_tools::cicerone::StartLxdProgressSignal& signal) {
   for (auto& observer : observer_list_) {
     observer.OnStartLxdProgress(signal);
+  }
+}
+
+void FakeCiceroneClient::NotifyFileWatchTriggered(
+    const vm_tools::cicerone::FileWatchTriggeredSignal& signal) {
+  for (auto& observer : observer_list_) {
+    observer.OnFileWatchTriggered(signal);
   }
 }
 

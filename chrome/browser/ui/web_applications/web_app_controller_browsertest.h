@@ -8,8 +8,9 @@
 #include "base/macros.h"
 #include "base/test/scoped_feature_list.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
+#include "chrome/browser/web_applications/components/os_integration_manager.h"
 #include "chrome/browser/web_applications/components/web_app_id.h"
-#include "chrome/common/web_application_info.h"
+#include "chrome/browser/web_applications/components/web_application_info.h"
 #include "content/public/test/content_mock_cert_verifier.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "url/gurl.h"
@@ -24,24 +25,20 @@ class WebContents;
 
 namespace web_app {
 
-enum class ControllerType {
-  kHostedAppController,
-  kUnifiedControllerWithBookmarkApp,
-  kUnifiedControllerWithWebApp,
-};
-
-std::string ControllerTypeParamToString(
-    const ::testing::TestParamInfo<ControllerType>& controller_type);
+class WebAppProviderBase;
 
 // Base class for tests of user interface support for web applications.
-// ControllerType selects between use of WebAppBrowserController and
-// HostedAppBrowserController.
 class WebAppControllerBrowserTestBase
-    : public extensions::ExtensionBrowserTest,
-      public ::testing::WithParamInterface<ControllerType> {
+    : public extensions::ExtensionBrowserTest {
  public:
   WebAppControllerBrowserTestBase();
-  ~WebAppControllerBrowserTestBase() = 0;
+  WebAppControllerBrowserTestBase(const WebAppControllerBrowserTestBase&) =
+      delete;
+  WebAppControllerBrowserTestBase& operator=(
+      const WebAppControllerBrowserTestBase&) = delete;
+  ~WebAppControllerBrowserTestBase() override = 0;
+
+  WebAppProviderBase& provider();
 
   AppId InstallPWA(const GURL& app_url);
 
@@ -53,6 +50,9 @@ class WebAppControllerBrowserTestBase
   // Launches the app, waits for the app url to load.
   Browser* LaunchWebAppBrowserAndWait(const AppId&);
 
+  // Launches the app, waits for it to load and finish the installability check.
+  Browser* LaunchWebAppBrowserAndAwaitInstallabilityCheck(const AppId&);
+
   // Launches the app as a tab and returns the browser.
   Browser* LaunchBrowserForWebAppInTab(const AppId&);
 
@@ -63,17 +63,12 @@ class WebAppControllerBrowserTestBase
   Browser* NavigateInNewWindowAndAwaitInstallabilityCheck(const GURL&);
 
   base::Optional<AppId> FindAppWithUrlInScope(const GURL& url);
-
- private:
-  base::test::ScopedFeatureList scoped_feature_list_;
-
-  DISALLOW_COPY_AND_ASSIGN(WebAppControllerBrowserTestBase);
 };
 
 class WebAppControllerBrowserTest : public WebAppControllerBrowserTestBase {
  public:
   WebAppControllerBrowserTest();
-  ~WebAppControllerBrowserTest() = 0;
+  ~WebAppControllerBrowserTest() override = 0;
 
   // ExtensionBrowserTest:
   void SetUp() override;
@@ -99,6 +94,8 @@ class WebAppControllerBrowserTest : public WebAppControllerBrowserTestBase {
   // Similar to net::MockCertVerifier, but also updates the CertVerifier
   // used by the NetworkService.
   content::ContentMockCertVerifier cert_verifier_;
+
+  ScopedOsHooksSuppress os_hooks_suppress_;
 
   DISALLOW_COPY_AND_ASSIGN(WebAppControllerBrowserTest);
 };

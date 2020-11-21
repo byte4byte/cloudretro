@@ -14,8 +14,7 @@ import androidx.annotation.VisibleForTesting;
 import org.chromium.base.ContextUtils;
 import org.chromium.chrome.browser.search_engines.TemplateUrlServiceFactory;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.tab.TabImpl;
-import org.chromium.chrome.browser.tabmodel.EmptyTabModelObserver;
+import org.chromium.chrome.browser.tab.state.CriticalPersistedTabData;
 import org.chromium.chrome.browser.tabmodel.EmptyTabModelSelectorObserver;
 import org.chromium.chrome.browser.tabmodel.TabModelFilter;
 import org.chromium.chrome.browser.tabmodel.TabModelObserver;
@@ -59,6 +58,8 @@ public class TabAttributeCache {
      * @param tabModelSelector The {@link TabModelSelector} to observe.
      */
     public TabAttributeCache(TabModelSelector tabModelSelector) {
+        // TODO(hanxi): makes TabAttributeCache a singleton. The TabAttributeCache should be
+        //  instantiated and exactly once before it is used.
         mTabModelSelector = tabModelSelector;
         mTabModelSelectorTabObserver = new TabModelSelectorTabObserver(mTabModelSelector) {
             @Override
@@ -78,7 +79,7 @@ public class TabAttributeCache {
             @Override
             public void onRootIdChanged(Tab tab, int newRootId) {
                 if (tab.isIncognito()) return;
-                assert newRootId == ((TabImpl) tab).getRootId();
+                assert newRootId == CriticalPersistedTabData.from(tab).getRootId();
                 cacheRootId(tab.getId(), newRootId);
             }
 
@@ -93,7 +94,7 @@ public class TabAttributeCache {
             }
         };
 
-        mTabModelObserver = new EmptyTabModelObserver() {
+        mTabModelObserver = new TabModelObserver() {
             @Override
             public void tabClosureCommitted(Tab tab) {
                 int id = tab.getId();
@@ -118,7 +119,7 @@ public class TabAttributeCache {
                     Tab tab = filter.getTabAt(i);
                     cacheUrl(tab.getId(), tab.getUrlString());
                     cacheTitle(tab.getId(), tab.getTitle());
-                    cacheRootId(tab.getId(), ((TabImpl) tab).getRootId());
+                    cacheRootId(tab.getId(), CriticalPersistedTabData.from(tab).getRootId());
                 }
                 Tab currentTab = mTabModelSelector.getCurrentTab();
                 if (currentTab != null) cacheLastSearchTerm(currentTab);

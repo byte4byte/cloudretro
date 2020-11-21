@@ -5,16 +5,18 @@
 #include "components/search_engines/template_url.h"
 
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "base/base64.h"
+#include "base/check_op.h"
 #include "base/command_line.h"
 #include "base/format_macros.h"
 #include "base/i18n/case_conversion.h"
 #include "base/i18n/icu_string_conversions.h"
 #include "base/i18n/rtl.h"
-#include "base/logging.h"
 #include "base/metrics/field_trial.h"
+#include "base/notreached.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
@@ -25,9 +27,9 @@
 #include "base/trace_event/memory_usage_estimator.h"
 #include "build/build_config.h"
 #include "components/google/core/common/google_util.h"
+#include "components/search_engines/search_engine_utils.h"
 #include "components/search_engines/search_engines_switches.h"
 #include "components/search_engines/search_terms_data.h"
-#include "components/search_engines/template_url_prepopulate_data.h"
 #include "components/url_formatter/url_formatter.h"
 #include "google_apis/google_api_keys.h"
 #include "net/base/escape.h"
@@ -226,7 +228,9 @@ TemplateURLRef::SearchTermsArgs::ContextualSearchParams::ContextualSearchParams(
     int previous_event_results,
     bool is_exact_search,
     std::string source_lang,
-    std::string target_lang)
+    std::string target_lang,
+    std::string fluent_languages,
+    std::string related_searches_stamp)
     : version(version),
       contextual_cards_version(contextual_cards_version),
       home_country(home_country),
@@ -234,7 +238,9 @@ TemplateURLRef::SearchTermsArgs::ContextualSearchParams::ContextualSearchParams(
       previous_event_results(previous_event_results),
       is_exact_search(is_exact_search),
       source_lang(source_lang),
-      target_lang(target_lang) {}
+      target_lang(target_lang),
+      fluent_languages(fluent_languages),
+      related_searches_stamp(related_searches_stamp) {}
 
 TemplateURLRef::SearchTermsArgs::ContextualSearchParams::ContextualSearchParams(
     const ContextualSearchParams& other) = default;
@@ -546,8 +552,8 @@ bool TemplateURLRef::ExtractSearchTermsFromURL(
     // not a match.
     if (source.size() < (search_term_value_prefix_.size() +
                          search_term_value_suffix_.size()) ||
-        !source.starts_with(search_term_value_prefix_) ||
-        !source.ends_with(search_term_value_suffix_))
+        !base::StartsWith(source, search_term_value_prefix_) ||
+        !base::EndsWith(source, search_term_value_suffix_))
       return false;
     position =
         url::MakeRange(search_term_value_prefix_.size(),
@@ -575,8 +581,8 @@ bool TemplateURLRef::ExtractSearchTermsFromURL(
               base::StringPiece(source).substr(value.begin, value.len);
           if (search_term.size() < (search_term_value_prefix_.size() +
                                     search_term_value_suffix_.size()) ||
-              !search_term.starts_with(search_term_value_prefix_) ||
-              !search_term.ends_with(search_term_value_suffix_))
+              !base::StartsWith(search_term, search_term_value_prefix_) ||
+              !base::EndsWith(search_term, search_term_value_suffix_))
             continue;
 
           key_found = true;
@@ -694,6 +700,8 @@ bool TemplateURLRef::ParseParameter(size_t start,
     // Do nothing, we just want the path wildcard removed from the URL.
   } else if (parameter == "google:prefetchQuery") {
     replacements->push_back(Replacement(GOOGLE_PREFETCH_QUERY, start));
+  } else if (parameter == "google:prefetchSource") {
+    replacements->push_back(Replacement(GOOGLE_PREFETCH_SOURCE, start));
   } else if (parameter == "google:RLZ") {
     replacements->push_back(Replacement(GOOGLE_RLZ, start));
   } else if (parameter == "google:searchClient") {
@@ -860,7 +868,8 @@ bool TemplateURLRef::PathIsEqual(const GURL& url) const {
   if (!path_wildcard_present_)
     return path == path_prefix_;
   return ((path.length() >= path_prefix_.length() + path_suffix_.length()) &&
-          path.starts_with(path_prefix_) && path.ends_with(path_suffix_));
+          base::StartsWith(path, path_prefix_) &&
+          base::EndsWith(path, path_suffix_));
 }
 
 void TemplateURLRef::ParseHostAndSearchTermKey(
@@ -1003,6 +1012,10 @@ std::string TemplateURLRef::HandleReplacements(
           args.push_back("tlitesl=" + params.source_lang);
         if (!params.target_lang.empty())
           args.push_back("tlitetl=" + params.target_lang);
+        if (!params.fluent_languages.empty())
+          args.push_back("ctxs_fls=" + params.fluent_languages);
+        if (!params.related_searches_stamp.empty())
+          args.push_back("ctxsl_rs=" + params.related_searches_stamp);
 
         HandleReplacement(std::string(), base::JoinString(args, "&"), *i, &url);
         break;
@@ -1068,11 +1081,10 @@ std::string TemplateURLRef::HandleReplacements(
 
       case GOOGLE_OMNIBOX_FOCUS_TYPE:
         DCHECK(!i->is_post_param);
-        if (search_terms_args.omnibox_focus_type !=
-            SearchTermsArgs::OmniboxFocusType::DEFAULT) {
+        if (search_terms_args.focus_type != OmniboxFocusType::DEFAULT) {
           HandleReplacement("oft",
-                            base::NumberToString(static_cast<int>(
-                                search_terms_args.omnibox_focus_type)),
+                            base::NumberToString(
+                                static_cast<int>(search_terms_args.focus_type)),
                             *i, &url);
         }
         break;
@@ -1106,6 +1118,19 @@ std::string TemplateURLRef::HandleReplacements(
         break;
       }
 
+      case GOOGLE_PREFETCH_SOURCE: {
+        if (search_terms_args.is_prefetch) {
+          // Currently, Chrome only support "cs" for prefetches, but if new
+          // prefetch sources (outside of suggestions) are added, a new prefetch
+          // source value is needed. These should denote the source of the
+          // prefetch to allow the search server to treat the requests based on
+          // source. "cs" represents Chrome Suggestions as the source. Adding a
+          // new source should be supported by the Search engine.
+          HandleReplacement(std::string(), "pf=cs&", *i, &url);
+        }
+        break;
+      }
+
       case GOOGLE_RLZ: {
         DCHECK(!i->is_post_param);
         // On platforms that don't have RLZ, we still want this branch
@@ -1113,7 +1138,7 @@ std::string TemplateURLRef::HandleReplacements(
         // empty string.  (If we don't handle this case, we hit a
         // NOTREACHED below.)
         base::string16 rlz_string = search_terms_data.GetRlzParameterValue(
-            search_terms_args.from_app_list);
+            search_terms_args.request_source == CROS_APP_LIST);
         if (!rlz_string.empty()) {
           HandleReplacement("rlz", base::UTF16ToUTF8(rlz_string), *i, &url);
         }
@@ -1147,7 +1172,10 @@ std::string TemplateURLRef::HandleReplacements(
 
       case GOOGLE_SUGGEST_CLIENT:
         HandleReplacement(
-            std::string(), search_terms_data.GetSuggestClient(), *i, &url);
+            std::string(),
+            search_terms_data.GetSuggestClient(
+                search_terms_args.request_source == NON_SEARCHBOX_NTP),
+            *i, &url);
         break;
 
       case GOOGLE_SUGGEST_REQUEST_ID:
@@ -1305,6 +1333,37 @@ TemplateURL::TemplateURL(const TemplateURLData& data,
 TemplateURL::~TemplateURL() {
 }
 
+bool TemplateURL::IsBetterThanEngineWithConflictingKeyword(
+    const TemplateURL* other) const {
+  DCHECK(other);
+
+  auto get_sort_key = [](const TemplateURL* engine) {
+    return std::make_tuple(
+        // Policy-created engines always win over non-policy created engines.
+        engine->created_by_policy(),
+        // The integral value of the type enum is used to sort next.
+        // This makes extension-controlled engines win.
+        engine->type(),
+        // For engines with associated extensions; more recently installed
+        // extensions win.
+        engine->extension_info_ ? engine->extension_info_->install_time
+                                : base::Time(),
+        // Prefer engines that CANNOT be auto-replaced.
+        !engine->safe_for_autoreplace(),
+        // More recently modified engines win.
+        engine->last_modified(),
+        // TODO(tommycli): This should be a tie-breaker than provides a total
+        // ordering of all TemplateURLs so that distributed clients resolve
+        // conflicts identically. This sync_guid is not globally unique today,
+        // so we need to fix that before we can resolve conflicts with this.
+        engine->sync_guid());
+  };
+
+  // Although normally sort is done by operator<, in this case, we want the
+  // BETTER engine to be preceding the worse engine.
+  return get_sort_key(this) > get_sort_key(other);
+}
+
 // static
 base::string16 TemplateURL::GenerateKeyword(const GURL& url) {
   DCHECK(url.is_valid());
@@ -1312,13 +1371,9 @@ base::string16 TemplateURL::GenerateKeyword(const GURL& url) {
   // properly.  See http://code.google.com/p/chromium/issues/detail?id=6984 .
   // |url|'s hostname may be IDN-encoded. Before generating |keyword| from it,
   // convert to Unicode, so it won't look like a confusing punycode string.
-  base::string16 keyword = url_formatter::StripWWW(
-      url_formatter::IDNToUnicode(url.host()));
-  // Special case: if the host was exactly "www." (not sure this can happen but
-  // perhaps with some weird intranet and custom DNS server?), ensure we at
-  // least don't return the empty string.
-  return keyword.empty() ? base::ASCIIToUTF16("www")
-                         : base::i18n::ToLower(keyword);
+  base::string16 keyword =
+      url_formatter::IDNToUnicode(url_formatter::StripWWW(url.host()));
+  return base::i18n::ToLower(keyword);
 }
 
 // static
@@ -1409,8 +1464,8 @@ SearchEngineType TemplateURL::GetEngineType(
     const SearchTermsData& search_terms_data) const {
   if (engine_type_ == SEARCH_ENGINE_UNKNOWN) {
     const GURL url = GenerateSearchURL(search_terms_data);
-    engine_type_ = url.is_valid() ?
-        TemplateURLPrepopulateData::GetEngineType(url) : SEARCH_ENGINE_OTHER;
+    engine_type_ = url.is_valid() ? SearchEngineUtils::GetEngineType(url)
+                                  : SEARCH_ENGINE_OTHER;
     DCHECK_NE(SEARCH_ENGINE_UNKNOWN, engine_type_);
   }
   return engine_type_;

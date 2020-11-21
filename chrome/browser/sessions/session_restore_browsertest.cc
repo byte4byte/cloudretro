@@ -15,12 +15,13 @@
 #include "base/macros.h"
 #include "base/process/launch.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/time/time.h"
 #include "base/util/memory_pressure/fake_memory_pressure_monitor.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/first_run/first_run.h"
@@ -72,6 +73,7 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/bindings_policy.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/download_test_observer.h"
 #include "content/public/test/test_navigation_observer.h"
@@ -84,7 +86,7 @@
 #include "ui/base/ui_base_features.h"
 #include "ui/gfx/color_palette.h"
 
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
 #include "base/mac/scoped_nsautorelease_pool.h"
 #endif
 
@@ -231,7 +233,7 @@ class SessionRestoreTest : public InProcessBrowserTest {
       content::WebContents* contents =
           browser->tab_strip_model()->GetWebContentsAt(i);
       contents->GetController().LoadIfNecessary();
-      content::WaitForLoadStop(contents);
+      EXPECT_TRUE(content::WaitForLoadStop(contents));
     }
   }
 
@@ -375,7 +377,13 @@ IN_PROC_BROWSER_TEST_F(SessionRestoreTest, RestoredTabsShouldHaveWindow) {
 
 // Verify that restoring a minimized window does not create a blank window.
 // Regression test for https://crbug.com/1018885.
-IN_PROC_BROWSER_TEST_F(SessionRestoreTest, RestoreMinimizedWindow) {
+// TODO(1080602): Flaky on Windows and Linux.
+#if defined(OS_WIN) || defined(OS_LINUX) || defined(OS_CHROMEOS)
+#define MAYBE_RestoreMinimizedWindow DISABLED_RestoreMinimizedWindow
+#else
+#define MAYBE_RestoreMinimizedWindow RestoreMinimizedWindow
+#endif
+IN_PROC_BROWSER_TEST_F(SessionRestoreTest, MAYBE_RestoreMinimizedWindow) {
   // Minimize the window.
   browser()->window()->Minimize();
 
@@ -383,7 +391,7 @@ IN_PROC_BROWSER_TEST_F(SessionRestoreTest, RestoreMinimizedWindow) {
   Browser* restored = QuitBrowserAndRestore(browser(), 3);
   EXPECT_EQ(1, restored->tab_strip_model()->count());
 
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
   // On macOS, minimized windows are neither active nor shown, to avoid causing
   // space switches during session restore.
   EXPECT_FALSE(restored->window()->IsActive());
@@ -652,7 +660,7 @@ IN_PROC_BROWSER_TEST_F(SessionRestoreTest, RestoreIndividualTabFromWindow) {
 }
 
 // Flaky on Linux. https://crbug.com/537592.
-#if defined (OS_LINUX)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
 #define MAYBE_WindowWithOneTab DISABLED_WindowWithOneTab
 #else
 #define MAYBE_WindowWithOneTab WindowWithOneTab
@@ -989,9 +997,7 @@ std::vector<base::Optional<tab_groups::TabGroupId>> GetTabGroups(
 class SessionRestoreTabGroupsTest : public SessionRestoreTest,
                                     public testing::WithParamInterface<bool> {
  public:
-  SessionRestoreTabGroupsTest() {
-    feature_override_.InitAndEnableFeature(features::kTabGroups);
-  }
+  SessionRestoreTabGroupsTest() = default;
 
  protected:
   void SetUpOnMainThread() override {
@@ -1061,7 +1067,7 @@ IN_PROC_BROWSER_TEST_P(SessionRestoreTabGroupsTest, GroupMetadataRestored) {
   const tab_groups::TabGroupVisualData group1_data =
       *tsm->group_model()->GetTabGroup(group1)->visual_data();
   const tab_groups::TabGroupVisualData group2_data(
-      base::ASCIIToUTF16("Foo"), tab_groups::TabGroupColorId::kBlue);
+      base::ASCIIToUTF16("Foo"), tab_groups::TabGroupColorId::kBlue, true);
   tsm->group_model()->GetTabGroup(group2)->SetVisualData(group2_data);
 
   Browser* const new_browser = QuitBrowserAndRestore(browser(), 5);
@@ -1073,35 +1079,18 @@ IN_PROC_BROWSER_TEST_P(SessionRestoreTabGroupsTest, GroupMetadataRestored) {
       new_tsm->group_model()->GetTabGroup(group1)->visual_data();
   const tab_groups::TabGroupVisualData* const group2_restored_data =
       new_tsm->group_model()->GetTabGroup(group2)->visual_data();
+
   EXPECT_EQ(group1_data.title(), group1_restored_data->title());
   EXPECT_EQ(group1_data.color(), group1_restored_data->color());
+  EXPECT_EQ(group1_data.is_collapsed(), group1_restored_data->is_collapsed());
   EXPECT_EQ(group2_data.title(), group2_restored_data->title());
   EXPECT_EQ(group2_data.color(), group2_restored_data->color());
+  EXPECT_EQ(group2_data.is_collapsed(), group2_restored_data->is_collapsed());
 }
 
 INSTANTIATE_TEST_SUITE_P(WithAndWithoutReset,
                          SessionRestoreTabGroupsTest,
                          testing::Values(false, true));
-
-// Ensure tab groups aren't restored if |features::kTabGroups| is disabled.
-// Regression test for crbug.com/983962.
-//
-// TODO(https://crbug.com/1012605): Find a way to cover this regression without
-// relying on dynamic FeatureList overrides mid-test.
-IN_PROC_BROWSER_TEST_F(SessionRestoreTest,
-                       DISABLED_GroupsNotRestoredWhenFeatureDisabled) {
-  auto feature_override = std::make_unique<base::test::ScopedFeatureList>();
-  feature_override->InitAndEnableFeature(features::kTabGroups);
-
-  ASSERT_EQ(1, browser()->tab_strip_model()->count());
-  browser()->tab_strip_model()->AddToNewGroup({0});
-
-  feature_override = std::make_unique<base::test::ScopedFeatureList>();
-  feature_override->InitAndDisableFeature(features::kTabGroups);
-  Browser* new_browser = QuitBrowserAndRestore(browser(), 1);
-  ASSERT_EQ(base::nullopt,
-            new_browser->tab_strip_model()->GetTabGroupForTab(0));
-}
 
 IN_PROC_BROWSER_TEST_F(SessionRestoreTest, RestoreAfterDelete) {
   ui_test_utils::NavigateToURL(browser(), url1_);
@@ -1132,12 +1121,17 @@ IN_PROC_BROWSER_TEST_F(SessionRestoreTest, RestoreAfterDelete) {
 
 IN_PROC_BROWSER_TEST_F(SessionRestoreTest, StartupPagesWithOnlyNtp) {
   ui_test_utils::NavigateToURL(browser(), GURL(chrome::kChromeUINewTabURL));
+  content::WebContentsDestroyedWatcher original_tab_destroyed_watcher(
+      browser()->tab_strip_model()->GetWebContentsAt(0));
+
   SessionStartupPref pref(SessionStartupPref::URLS);
   pref.urls.push_back(url1_);
   pref.urls.push_back(url2_);
   SessionStartupPref::SetStartupPref(browser()->profile(), pref);
 
   SessionRestore::OpenStartupPagesAfterCrash(browser());
+  // Wait until the original tab finished closing.
+  original_tab_destroyed_watcher.Wait();
 
   ASSERT_EQ(1u, active_browser_list_->size());
   ASSERT_EQ(2, browser()->tab_strip_model()->count());
@@ -1486,10 +1480,11 @@ IN_PROC_BROWSER_TEST_F(SessionRestoreTest, ActiveIndexUpdatedAtInsert) {
   ASSERT_EQ(new_browser->tab_strip_model()->active_index(), 1);
 }
 
-#if !defined(OS_CHROMEOS) && !defined(OS_MACOSX)
-// This test doesn't apply to the Mac version; see GetCommandLineForRelaunch
+#if !defined(OS_MAC) && !BUILDFLAG(IS_CHROMEOS_LACROS) && \
+    !BUILDFLAG(IS_CHROMEOS_ASH)
+// This test doesn't apply to Mac or Lacros; see GetCommandLineForRelaunch
 // for details. It was disabled for a long time so might never have worked on
-// ChromeOS.
+// Chrome OS Ash.
 
 // Launches an app window, closes tabbed browser, launches and makes sure
 // we restore the tabbed browser url.
@@ -1518,7 +1513,8 @@ IN_PROC_BROWSER_TEST_F(SessionRestoreTest,
             new_browser->tab_strip_model()->GetActiveWebContents()->GetURL());
 }
 
-#endif  // !defined(OS_CHROMEOS) && !defined(OS_MACOSX)
+#endif  // !!defined(OS_MAC) && !BUILDFLAG(IS_CHROMEOS_LACROS) &&
+        // !BUILDFLAG(IS_CHROMEOS_ASH)
 
 // Creates two windows, closes one, restores, make sure only one window open.
 IN_PROC_BROWSER_TEST_F(SessionRestoreTest, TwoWindowsCloseOneRestoreOnlyOne) {
@@ -1585,8 +1581,8 @@ IN_PROC_BROWSER_TEST_F(SessionRestoreTest, PersistAndRestoreUserAgentOverride) {
   blink::UserAgentOverride ua_override;
   ua_override.ua_string_override = "override";
   ua_override.ua_metadata_override.emplace();
-  ua_override.ua_metadata_override->brand = "Overrider";
-  ua_override.ua_metadata_override->major_version = "0";
+  ua_override.ua_metadata_override->brand_version_list.emplace_back("Overrider",
+                                                                    "0");
   browser()->tab_strip_model()->GetWebContentsAt(0)->SetUserAgentOverride(
       ua_override, false);
 
@@ -1668,7 +1664,7 @@ IN_PROC_BROWSER_TEST_F(SessionRestoreTest, RestorePinnedSelectedTab) {
 // Regression test for crbug.com/240156. When restoring tabs with a navigation,
 // the navigation should take active tab focus.
 // Flaky on Mac. http://crbug.com/656211.
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
 #define MAYBE_RestoreWithNavigateSelectedTab \
   DISABLED_RestoreWithNavigateSelectedTab
 #else
@@ -1697,20 +1693,20 @@ IN_PROC_BROWSER_TEST_F(SessionRestoreTest,
 IN_PROC_BROWSER_TEST_F(SessionRestoreTest, RestoreAfterAutoSubframe) {
   // Load a page with a blank iframe, then navigate the iframe.  This will be an
   // auto-subframe commit, and we expect it to be restored.
-  GURL main_url(ui_test_utils::GetTestUrl(
-      base::FilePath(base::FilePath::kCurrentDirectory),
-      base::FilePath(FILE_PATH_LITERAL("iframe_blank.html"))));
-  GURL subframe_url(ui_test_utils::GetTestUrl(
-      base::FilePath(base::FilePath::kCurrentDirectory),
-      base::FilePath(FILE_PATH_LITERAL("title1.html"))));
+  ASSERT_TRUE(embedded_test_server()->Start());
+  GURL main_url(embedded_test_server()->GetURL("/iframe_blank.html"));
+  GURL subframe_url(embedded_test_server()->GetURL("/title1.html"));
   ui_test_utils::NavigateToURL(browser(), main_url);
-  content::TestNavigationObserver observer(
-      browser()->tab_strip_model()->GetActiveWebContents());
-  std::string nav_frame_script =
-      "frames[0].location.href = '" + subframe_url.spec() + "';";
-  ASSERT_TRUE(content::ExecuteScript(
-      browser()->tab_strip_model()->GetActiveWebContents(), nav_frame_script));
-  observer.Wait();
+  {
+    content::TestNavigationObserver observer(
+        browser()->tab_strip_model()->GetActiveWebContents());
+    std::string nav_frame_script =
+        content::JsReplace("frames[0].location.href = $1;", subframe_url);
+    ASSERT_TRUE(
+        content::ExecJs(browser()->tab_strip_model()->GetActiveWebContents(),
+                        nav_frame_script));
+    observer.Wait();
+  }
 
   // Restore the session.
   Browser* new_browser = QuitBrowserAndRestore(browser(), 1);
@@ -1718,16 +1714,11 @@ IN_PROC_BROWSER_TEST_F(SessionRestoreTest, RestoreAfterAutoSubframe) {
   ASSERT_EQ(1, new_browser->tab_strip_model()->count());
 
   // The restored page should have the right iframe.
-  ASSERT_EQ(main_url,
-            new_browser->tab_strip_model()->GetActiveWebContents()->GetURL());
-  std::string actual_frame_url;
-  std::string frame_url_script =
-      "window.domAutomationController.send("
-      "frames[0].location.href);";
-  EXPECT_TRUE(content::ExecuteScriptAndExtractString(
-      new_browser->tab_strip_model()->GetActiveWebContents(), frame_url_script,
-      &actual_frame_url));
-  EXPECT_EQ(subframe_url.possibly_invalid_spec(), actual_frame_url);
+  content::WebContents* new_web_contents =
+      new_browser->tab_strip_model()->GetActiveWebContents();
+  ASSERT_EQ(main_url, new_web_contents->GetURL());
+  EXPECT_EQ(subframe_url.possibly_invalid_spec(),
+            content::EvalJs(new_web_contents, "frames[0].location.href"));
 }
 
 // Do a clobber restore from the new tab page. This test follows the code path
@@ -1753,12 +1744,17 @@ IN_PROC_BROWSER_TEST_F(SessionRestoreTest, ClobberRestoreTest) {
   ASSERT_EQ(0, new_browser->tab_strip_model()->active_index());
   // Use the existing tab to navigate to the NTP.
   ui_test_utils::NavigateToURL(new_browser, GURL(chrome::kChromeUINewTabURL));
+  content::WebContentsDestroyedWatcher existing_tab_destroyed_watcher(
+      new_browser->tab_strip_model()->GetWebContentsAt(0));
 
   // Restore the session again, clobbering the existing tab.
   SessionRestore::RestoreSession(
       profile, new_browser,
       SessionRestore::CLOBBER_CURRENT_TAB | SessionRestore::SYNCHRONOUS,
       std::vector<GURL>());
+
+  // Wait until the existing tab finished closing.
+  existing_tab_destroyed_watcher.Wait();
 
   // 2 tabs should have been restored, with the existing tab clobbered, giving
   // us a total of 2 tabs.
@@ -2019,7 +2015,7 @@ IN_PROC_BROWSER_TEST_F(SessionRestoreTest, RestoreAllBrowsers) {
 
 // PRE_CorrectLoadingOrder is flaky on ChromeOS MSAN and Mac.
 // See http://crbug.com/493167.
-#if (defined(OS_CHROMEOS) && defined(MEMORY_SANITIZER)) || defined(OS_MACOSX)
+#if (defined(OS_CHROMEOS) && defined(MEMORY_SANITIZER)) || defined(OS_MAC)
 #define MAYBE_PRE_CorrectLoadingOrder DISABLED_PRE_CorrectLoadingOrder
 #define MAYBE_CorrectLoadingOrder DISABLED_CorrectLoadingOrder
 #else
@@ -2246,6 +2242,8 @@ IN_PROC_BROWSER_TEST_F(MultiOriginSessionRestoreTest, SecFetchSite) {
 // Test that it is possible to navigate back to a restored about:blank history
 // entry with a non-null initiator origin.  This test cases covers the original
 // repro steps reported in https://crbug.com/1026474.
+//
+// See also TabRestoreTest.BackToAboutBlank
 IN_PROC_BROWSER_TEST_F(MultiOriginSessionRestoreTest, BackToAboutBlank1) {
   // Open about:blank in a new tab.
   GURL initial_url = embedded_test_server()->GetURL("foo.com", "/title1.html");
@@ -2482,6 +2480,11 @@ IN_PROC_BROWSER_TEST_F(MultiOriginSessionRestoreTest,
   EXPECT_EQ(c_url, subframe->GetLastCommittedURL());
   EXPECT_EQ(c_origin, subframe->GetLastCommittedOrigin());
 
+  // Check that main frame and subframe are in the same BrowsingInstance.
+  content::SiteInstance* subframe_instance_c = subframe->GetSiteInstance();
+  EXPECT_TRUE(new_tab->GetMainFrame()->GetSiteInstance()->IsRelatedSiteInstance(
+      subframe_instance_c));
+
   // Go back - this should reach: a.com(a.com-blank).
   {
     content::TestNavigationObserver nav_observer(new_tab);
@@ -2491,8 +2494,71 @@ IN_PROC_BROWSER_TEST_F(MultiOriginSessionRestoreTest,
   ASSERT_EQ(2u, new_tab->GetAllFrames().size());
   subframe = new_tab->GetAllFrames()[1];
   EXPECT_EQ(GURL(url::kAboutBlankURL), subframe->GetLastCommittedURL());
-  // TODO(lukasza): https://crbug.com/888079: The browser process should tell
-  // the renderer which (initiator-based) origin to commit.  Right now, Blink
-  // just falls back to an opaque origin.
-  EXPECT_TRUE(subframe->GetLastCommittedOrigin().opaque());
+  EXPECT_EQ(a_origin, subframe->GetLastCommittedOrigin());
+
+  // Check that we're still in the same BrowsingInstance.
+  EXPECT_TRUE(new_tab->GetMainFrame()->GetSiteInstance()->IsRelatedSiteInstance(
+      subframe->GetSiteInstance()));
+  EXPECT_TRUE(
+      subframe_instance_c->IsRelatedSiteInstance(subframe->GetSiteInstance()));
+}
+
+// Check that TabManager.TimeSinceTabClosedUntilRestored histogram is not
+// recorded on session restore.
+IN_PROC_BROWSER_TEST_F(SessionRestoreTest,
+                       TimeSinceTabClosedUntilRestoredNotRecorded) {
+  base::HistogramTester histogram_tester;
+  const char kTimeSinceTabClosedUntilRestored[] =
+      "TabManager.TimeSinceTabClosedUntilRestored";
+
+  // Add several tabs to the browser.
+  ui_test_utils::NavigateToURLWithDisposition(
+      browser(), GURL(url::kAboutBlankURL),
+      WindowOpenDisposition::NEW_FOREGROUND_TAB,
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP);
+  ui_test_utils::NavigateToURLWithDisposition(
+      browser(), GURL(url::kAboutBlankURL),
+      WindowOpenDisposition::NEW_FOREGROUND_TAB,
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP);
+
+  // Restart the browser and check that the metric is not recorded.
+  EXPECT_EQ(
+      histogram_tester.GetAllSamples(kTimeSinceTabClosedUntilRestored).size(),
+      0U);
+
+  QuitBrowserAndRestoreWithURL(browser(), 1, GURL(), true);
+
+  EXPECT_EQ(
+      histogram_tester.GetAllSamples(kTimeSinceTabClosedUntilRestored).size(),
+      0U);
+}
+
+// Check that TabManager.TimeSinceWindowClosedUntilRestored histogram is not
+// recorded on session restore.
+IN_PROC_BROWSER_TEST_F(SessionRestoreTest,
+                       TimeSinceWindowClosedUntilRestoredNotRecorded) {
+  base::HistogramTester histogram_tester;
+  const char kTimeSinceWindowClosedUntilRestored[] =
+      "TabManager.TimeSinceWindowClosedUntilRestored";
+
+  // Add several tabs to the browser.
+  ui_test_utils::NavigateToURLWithDisposition(
+      browser(), GURL(url::kAboutBlankURL),
+      WindowOpenDisposition::NEW_FOREGROUND_TAB,
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP);
+  ui_test_utils::NavigateToURLWithDisposition(
+      browser(), GURL(url::kAboutBlankURL),
+      WindowOpenDisposition::NEW_FOREGROUND_TAB,
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP);
+
+  // Restart the browser and check that the metric is not recorded.
+  EXPECT_EQ(histogram_tester.GetAllSamples(kTimeSinceWindowClosedUntilRestored)
+                .size(),
+            0U);
+
+  QuitBrowserAndRestoreWithURL(browser(), 1, GURL(), true);
+
+  EXPECT_EQ(histogram_tester.GetAllSamples(kTimeSinceWindowClosedUntilRestored)
+                .size(),
+            0U);
 }

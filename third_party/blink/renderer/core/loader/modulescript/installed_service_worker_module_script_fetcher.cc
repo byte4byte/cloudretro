@@ -20,7 +20,7 @@ namespace blink {
 InstalledServiceWorkerModuleScriptFetcher::
     InstalledServiceWorkerModuleScriptFetcher(
         WorkerGlobalScope* global_scope,
-        util::PassKey<ModuleScriptLoader> pass_key)
+        base::PassKey<ModuleScriptLoader> pass_key)
     : ModuleScriptFetcher(pass_key), global_scope_(global_scope) {
   DCHECK(global_scope_->IsServiceWorkerGlobalScope());
 }
@@ -110,7 +110,7 @@ void InstalledServiceWorkerModuleScriptFetcher::Fetch(
   client->NotifyFetchFinished(params, HeapVector<Member<ConsoleMessage>>());
 }
 
-void InstalledServiceWorkerModuleScriptFetcher::Trace(Visitor* visitor) {
+void InstalledServiceWorkerModuleScriptFetcher::Trace(Visitor* visitor) const {
   ModuleScriptFetcher::Trace(visitor);
   visitor->Trace(global_scope_);
 }

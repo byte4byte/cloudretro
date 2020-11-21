@@ -17,6 +17,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/post_task.h"
 #include "base/task/thread_pool.h"
+#include "base/time/clock.h"
 #include "build/build_config.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/image_fetcher/image_decoder_impl.h"
@@ -24,11 +25,10 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/background/ntp_background_service_factory.h"
 #include "chrome/browser/search/chrome_colors/chrome_colors_service.h"
-#include "chrome/browser/search/instant_io_context.h"
+#include "chrome/browser/search/instant_service_factory.h"
 #include "chrome/browser/search/instant_service_observer.h"
 #include "chrome/browser/search/local_ntp_source.h"
 #include "chrome/browser/search/most_visited_iframe_source.h"
-#include "chrome/browser/search/ntp_features.h"
 #include "chrome/browser/search/ntp_icon_source.h"
 #include "chrome/browser/search/search.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
@@ -47,7 +47,10 @@
 #include "components/ntp_tiles/constants.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
+#include "components/search/ntp_features.h"
+#include "components/search/search_provider_observer.h"
 #include "components/sync_preferences/pref_service_syncable.h"
+#include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
@@ -190,10 +193,6 @@ InstantService::InstantService(Profile* profile)
   if (!content::BrowserThread::CurrentlyOn(content::BrowserThread::UI))
     return;
 
-  // This depends on the existence of the typical browser threads. Therefore it
-  // is only instantiated here (after the check for a UI thread above).
-  instant_io_context_ = new InstantIOContext();
-
   registrar_.Add(this,
                  content::NOTIFICATION_RENDERER_PROCESS_CREATED,
                  content::NotificationService::AllSources());
@@ -214,8 +213,9 @@ InstantService::InstantService(Profile* profile)
                               weak_ptr_factory_.GetWeakPtr()));
     }
 
-    // 9 tiles are required for the custom links feature in order to balance the
-    // Most Visited rows (this is due to an additional "Add" button).
+    // If custom links are enabled, an additional tile may be returned making up
+    // to ntp_tiles::kMaxNumCustomLinks custom links including the
+    // "Add shortcut" button.
     most_visited_sites_->SetMostVisitedURLsObserver(
         this, ntp_tiles::kMaxNumMostVisited);
     most_visited_sites_->EnableCustomLinks(IsCustomLinksEnabled());
@@ -224,13 +224,6 @@ InstantService::InstantService(Profile* profile)
   most_visited_info_->use_most_visited = !IsCustomLinksEnabled();
   most_visited_info_->is_visible =
       pref_service_->GetBoolean(prefs::kNtpShortcutsVisible);
-
-  if (profile_ && profile_->GetResourceContext()) {
-    base::PostTask(
-        FROM_HERE, {content::BrowserThread::IO},
-        base::BindOnce(&InstantIOContext::SetUserDataOnIO,
-                       profile->GetResourceContext(), instant_io_context_));
-  }
 
   background_service_ = NtpBackgroundServiceFactory::GetForProfile(profile_);
 
@@ -274,12 +267,6 @@ InstantService::~InstantService() = default;
 
 void InstantService::AddInstantProcess(int process_id) {
   process_ids_.insert(process_id);
-
-  if (instant_io_context_.get()) {
-    base::PostTask(FROM_HERE, {content::BrowserThread::IO},
-                   base::BindOnce(&InstantIOContext::AddInstantProcessOnIO,
-                                  instant_io_context_, process_id));
-  }
 }
 
 bool InstantService::IsInstantProcess(int process_id) const {
@@ -302,19 +289,19 @@ void InstantService::OnNewTabPageOpened() {
 
 void InstantService::DeleteMostVisitedItem(const GURL& url) {
   if (most_visited_sites_) {
-    most_visited_sites_->AddOrRemoveBlacklistedUrl(url, true);
+    most_visited_sites_->AddOrRemoveBlockedUrl(url, true);
   }
 }
 
 void InstantService::UndoMostVisitedDeletion(const GURL& url) {
   if (most_visited_sites_) {
-    most_visited_sites_->AddOrRemoveBlacklistedUrl(url, false);
+    most_visited_sites_->AddOrRemoveBlockedUrl(url, false);
   }
 }
 
 void InstantService::UndoAllMostVisitedDeletions() {
   if (most_visited_sites_) {
-    most_visited_sites_->ClearBlacklistedUrls();
+    most_visited_sites_->ClearBlockedUrls();
   }
 }
 
@@ -432,15 +419,6 @@ void InstantService::UpdateMostVisitedInfo() {
   NotifyAboutMostVisitedInfo();
 }
 
-void InstantService::SendNewTabPageURLToRenderer(
-    content::RenderProcessHost* rph) {
-  if (auto* channel = rph->GetChannel()) {
-    mojo::AssociatedRemote<chrome::mojom::SearchBouncer> client;
-    channel->GetRemoteAssociatedInterface(&client);
-    client->SetNewTabPageURL(search::GetNewTabPageURL(profile_));
-  }
-}
-
 void InstantService::ResetCustomBackgroundInfo() {
   SetCustomBackgroundInfo(GURL(), std::string(), std::string(), GURL(),
                           std::string());
@@ -453,6 +431,9 @@ void InstantService::SetCustomBackgroundInfo(
     const GURL& action_url,
     const std::string& collection_id) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  if (IsCustomBackgroundDisabledByPolicy()) {
+    return;
+  }
   bool is_backdrop_collection =
       background_service_ &&
       background_service_->IsValidBackdropCollection(collection_id);
@@ -501,6 +482,9 @@ void InstantService::SetBackgroundToLocalResource() {
 }
 
 void InstantService::SelectLocalBackgroundImage(const base::FilePath& path) {
+  if (IsCustomBackgroundDisabledByPolicy()) {
+    return;
+  }
   base::ThreadPool::PostTaskAndReply(
       FROM_HERE, {base::TaskPriority::USER_VISIBLE, base::MayBlock()},
       base::BindOnce(&CopyFileToProfilePath, path, profile_->GetPath()),
@@ -525,17 +509,9 @@ void InstantService::SetNativeThemeForTesting(ui::NativeTheme* theme) {
 void InstantService::Shutdown() {
   process_ids_.clear();
 
-  if (instant_io_context_.get()) {
-    base::PostTask(FROM_HERE, {content::BrowserThread::IO},
-                   base::BindOnce(&InstantIOContext::ClearInstantProcessesOnIO,
-                                  instant_io_context_));
-  }
-
   if (most_visited_sites_) {
     most_visited_sites_.reset();
   }
-
-  instant_io_context_.reset();
 }
 
 void InstantService::OnNextCollectionImageAvailable() {
@@ -569,12 +545,6 @@ void InstantService::Observe(int type,
                              const content::NotificationDetails& details) {
   switch (type) {
     case content::NOTIFICATION_RENDERER_PROCESS_CREATED: {
-      content::RenderProcessHost* rph =
-          content::Source<content::RenderProcessHost>(source).ptr();
-      Profile* renderer_profile =
-          static_cast<Profile*>(rph->GetBrowserContext());
-      if (profile_ == renderer_profile)
-        SendNewTabPageURLToRenderer(rph);
       break;
     }
     case content::NOTIFICATION_RENDERER_PROCESS_TERMINATED: {
@@ -597,12 +567,6 @@ void InstantService::Observe(int type,
 
 void InstantService::OnRendererProcessTerminated(int process_id) {
   process_ids_.erase(process_id);
-
-  if (instant_io_context_.get()) {
-    base::PostTask(FROM_HERE, {content::BrowserThread::IO},
-                   base::BindOnce(&InstantIOContext::RemoveInstantProcessOnIO,
-                                  instant_io_context_, process_id));
-  }
 }
 
 void InstantService::OnNativeThemeUpdated(ui::NativeTheme* observed_theme) {
@@ -987,7 +951,7 @@ void InstantService::RemoveLocalBackgroundImageCopy() {
       chrome::kChromeSearchLocalNtpBackgroundFilename);
   base::ThreadPool::PostTask(
       FROM_HERE, {base::TaskPriority::BEST_EFFORT, base::MayBlock()},
-      base::BindOnce(IgnoreResult(&base::DeleteFile), path, false));
+      base::BindOnce(base::GetDeleteFileCallback(), path));
 }
 
 void InstantService::AddValidBackdropUrlForTesting(const GURL& url) const {
@@ -1013,6 +977,25 @@ void InstantService::RegisterProfilePrefs(PrefRegistrySimple* registry) {
                                 false);
   registry->RegisterBooleanPref(prefs::kNtpUseMostVisitedTiles, false);
   registry->RegisterBooleanPref(prefs::kNtpShortcutsVisible, true);
+}
+
+// static
+bool InstantService::ShouldServiceRequest(
+    const GURL& url,
+    content::BrowserContext* browser_context,
+    int render_process_id) {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+
+  auto* instant_service = InstantServiceFactory::GetForProfile(
+      static_cast<Profile*>(browser_context));
+
+  if (!instant_service)
+    return false;
+
+  // The process_id for the navigation request will be -1. If
+  // so, allow this request since it's not going to another renderer.
+  return render_process_id == -1 ||
+         instant_service->IsInstantProcess(render_process_id);
 }
 
 void InstantService::UpdateCustomBackgroundPrefsWithColor(

@@ -15,6 +15,7 @@
 #include "content/public/browser/manifest_icon_downloader.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "net/base/features.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
@@ -86,7 +87,10 @@ void OnGotMurmur2Hash(
 
 // Checks that WebApkIconHasher fetches the icon cached in the HTTP cache by
 // ManifestIconDownloader.
-IN_PROC_BROWSER_TEST_F(WebApkIconHasherBrowserTest, HasherUsesIconFromCache) {
+//
+// Disabled due to flakiness. https://crbug.com/1111439
+IN_PROC_BROWSER_TEST_F(WebApkIconHasherBrowserTest,
+                       DISABLED_HasherUsesIconFromCache) {
   const GURL kIconUrl = http_server_.GetURL("/launcher-icon-max-age.png");
 
   content::WebContents* web_contents = GetActiveWebContents();

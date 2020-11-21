@@ -3,10 +3,12 @@
 // found in the LICENSE file.
 
 // clang-format off
-import {ContentSetting,ContentSettingProvider,ContentSettingsTypes,SiteSettingsPrefsBrowserProxyImpl,SiteSettingSource} from 'chrome://settings/lazy_load.js';
-import {createContentSettingTypeToValuePair,createDefaultContentSetting,createSiteSettingsPrefs} from 'chrome://test/settings/test_util.js';
+import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
 import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+import {ContentSetting,ContentSettingProvider,ContentSettingsTypes,SiteSettingSource,SiteSettingsPrefsBrowserProxyImpl} from 'chrome://settings/lazy_load.js';
 import {TestSiteSettingsPrefsBrowserProxy} from 'chrome://test/settings/test_site_settings_prefs_browser_proxy.js';
+import {createContentSettingTypeToValuePair,createDefaultContentSetting,createSiteSettingsPrefs} from 'chrome://test/settings/test_util.js';
+import {isChildVisible} from 'chrome://test/test_util.m.js';
 // clang-format on
 
 /** @fileoverview Suite of tests for category-setting-exceptions. */
@@ -23,6 +25,12 @@ suite('CategorySettingExceptions', function() {
    */
   let browserProxy = null;
 
+  suiteSetup(function() {
+    loadTimeData.overrideValues({
+      enableContentSettingsRedesign: false,
+    });
+  });
+
   // Initialize a category-setting-exceptions before each test.
   setup(function() {
     browserProxy = new TestSiteSettingsPrefsBrowserProxy();
@@ -38,6 +46,10 @@ suite('CategorySettingExceptions', function() {
     assertTrue(!!testElement);
   });
 
+  test('header visibility', function() {
+    assertFalse(isChildVisible(testElement, '#exceptionHeader'));
+  });
+
   test(
       'allow site list is hidden when showAllowSiteList_ is false', function() {
         testElement.showAllowSiteList_ = false;
@@ -48,7 +60,7 @@ suite('CategorySettingExceptions', function() {
         // Make sure that the Allow and Session Only site lists are hidden.
         const siteListElements = testElement.querySelectorAll('site-list');
         siteListElements.forEach(element => {
-          if (element.categorySubtype == ContentSetting.BLOCK) {
+          if (element.categorySubtype === ContentSetting.BLOCK) {
             assertFalse(
                 element.hidden,
                 `site-list for ${
@@ -71,7 +83,7 @@ suite('CategorySettingExceptions', function() {
         // Make sure that the Allow and Session Only site lists are hidden.
         const siteListElements = testElement.querySelectorAll('site-list');
         siteListElements.forEach(element => {
-          if (element.categorySubtype == ContentSetting.ALLOW) {
+          if (element.categorySubtype === ContentSetting.ALLOW) {
             assertFalse(
                 element.hidden,
                 `site-list for ${
@@ -84,9 +96,8 @@ suite('CategorySettingExceptions', function() {
         });
       });
 
-  test('allow site list is hidden for NATIVE_FILE_SYSTEM_WRITE', function() {
-    testElement.category =
-        ContentSettingsTypes.NATIVE_FILE_SYSTEM_WRITE;
+  test('allow site list is hidden for FILE_SYSTEM_WRITE', function() {
+    testElement.category = ContentSettingsTypes.FILE_SYSTEM_WRITE;
 
     // Flush to be sure that the container is updated.
     flush();
@@ -99,7 +110,7 @@ suite('CategorySettingExceptions', function() {
     // Make sure that the Allow and Session Only site lists are hidden.
     const siteListElements = testElement.querySelectorAll('site-list');
     siteListElements.forEach(element => {
-      if (element.categorySubtype == ContentSetting.BLOCK) {
+      if (element.categorySubtype === ContentSetting.BLOCK) {
         assertFalse(
             element.hidden,
             `site-list for ${element.categorySubtype} should not be hidden`);
@@ -118,8 +129,7 @@ suite('CategorySettingExceptions', function() {
         const policyPref = createSiteSettingsPrefs(
             [
               createContentSettingTypeToValuePair(
-                  ContentSettingsTypes.COOKIES,
-                  createDefaultContentSetting({
+                  ContentSettingsTypes.COOKIES, createDefaultContentSetting({
                     setting: ContentSetting.ALLOW,
                     source: SiteSettingSource.POLICY
                   })),
@@ -156,8 +166,7 @@ suite('CategorySettingExceptions', function() {
         const dummyPref = createSiteSettingsPrefs(
             [
               createContentSettingTypeToValuePair(
-                  ContentSettingsTypes.COOKIES,
-                  createDefaultContentSetting({
+                  ContentSettingsTypes.COOKIES, createDefaultContentSetting({
                     setting: ContentSetting.ALLOW,
                   })),
             ],
@@ -184,4 +193,29 @@ suite('CategorySettingExceptions', function() {
                 });
         return Promise.all([initializationTest, updateTest]);
       });
+});
+
+suite('ContentSettingsRedesign', function() {
+  /**
+   * A site settings exceptions created before each test.
+   * @type {SiteSettingsExceptionsElement}
+   */
+  let testElement;
+
+  suiteSetup(function() {
+    loadTimeData.overrideValues({
+      enableContentSettingsRedesign: true,
+    });
+  });
+
+  // Initialize a category-setting-exceptions before each test.
+  setup(function() {
+    PolymerTest.clearBody();
+    testElement = document.createElement('category-setting-exceptions');
+    document.body.appendChild(testElement);
+  });
+
+  test('header visibility', function() {
+    assertTrue(isChildVisible(testElement, '#exceptionHeader'));
+  });
 });

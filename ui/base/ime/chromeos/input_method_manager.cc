@@ -4,14 +4,14 @@
 
 #include "ui/base/ime/chromeos/input_method_manager.h"
 
-#include "base/logging.h"
+#include "base/check.h"
 
 namespace chromeos {
 namespace input_method {
 
 namespace {
 InputMethodManager* g_input_method_manager = nullptr;
-}
+}  // namespace
 
 InputMethodManager::State::~State() = default;
 

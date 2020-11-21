@@ -8,6 +8,11 @@
 #include <memory>
 #include <utility>
 
+#include "ash/public/cpp/ambient/ambient_ui_model.h"
+#include "ash/public/cpp/assistant/assistant_state.h"
+#include "ash/public/cpp/assistant/controller/assistant_alarm_timer_controller.h"
+#include "ash/public/cpp/assistant/controller/assistant_controller.h"
+#include "ash/public/cpp/assistant/controller/assistant_notification_controller.h"
 #include "ash/public/cpp/session/session_controller.h"
 #include "base/bind.h"
 #include "base/command_line.h"
@@ -24,11 +29,11 @@
 #include "chromeos/constants/chromeos_switches.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/power_manager/power_supply_properties.pb.h"
+#include "chromeos/services/assistant/assistant_interaction_logger.h"
 #include "chromeos/services/assistant/assistant_manager_service.h"
 #include "chromeos/services/assistant/assistant_manager_service_delegate_impl.h"
-#include "chromeos/services/assistant/assistant_settings_manager.h"
 #include "chromeos/services/assistant/fake_assistant_manager_service_impl.h"
-#include "chromeos/services/assistant/fake_assistant_settings_manager_impl.h"
+#include "chromeos/services/assistant/fake_assistant_settings_impl.h"
 #include "chromeos/services/assistant/public/cpp/assistant_client.h"
 #include "chromeos/services/assistant/public/cpp/assistant_prefs.h"
 #include "chromeos/services/assistant/public/cpp/device_actions.h"
@@ -46,7 +51,7 @@
 #if BUILDFLAG(ENABLE_CROS_LIBASSISTANT)
 #include "chromeos/assistant/internal/internal_constants.h"
 #include "chromeos/services/assistant/assistant_manager_service_impl.h"
-#include "chromeos/services/assistant/assistant_settings_manager_impl.h"
+#include "chromeos/services/assistant/assistant_settings_impl.h"
 #include "chromeos/services/assistant/utils.h"
 #include "services/device/public/mojom/battery_monitor.mojom.h"
 #endif
@@ -56,36 +61,35 @@ namespace assistant {
 
 namespace {
 
+using chromeos::assistant::features::IsAmbientAssistantEnabled;
 using CommunicationErrorType = AssistantManagerService::CommunicationErrorType;
 
 constexpr char kScopeAuthGcm[] = "https://www.googleapis.com/auth/gcm";
 constexpr char kScopeAssistant[] =
     "https://www.googleapis.com/auth/assistant-sdk-prototype";
-constexpr char kScopeClearCutLog[] = "https://www.googleapis.com/auth/cclog";
+constexpr char kScopeGeller[] = "https://www.googleapis.com/auth/webhistory";
 
 constexpr base::TimeDelta kMinTokenRefreshDelay =
     base::TimeDelta::FromMilliseconds(1000);
 constexpr base::TimeDelta kMaxTokenRefreshDelay =
     base::TimeDelta::FromMilliseconds(60 * 1000);
 
-// Testing override for the AssistantSettingsManager implementation.
-AssistantSettingsManager* g_settings_manager_override = nullptr;
 // Testing override for the URI used to contact the s3 server.
 const char* g_s3_server_uri_override = nullptr;
+// Testing override for the device-id used by Libassistant to identify this
+// device.
+const char* g_device_id_override = nullptr;
 
-ash::mojom::AssistantState ToAssistantStatus(
-    AssistantManagerService::State state) {
+AssistantStatus ToAssistantStatus(AssistantManagerService::State state) {
   using State = AssistantManagerService::State;
-  using ash::mojom::AssistantState;
 
   switch (state) {
     case State::STOPPED:
     case State::STARTING:
-      return AssistantState::NOT_READY;
     case State::STARTED:
-      return AssistantState::READY;
+      return AssistantStatus::NOT_READY;
     case State::RUNNING:
-      return AssistantState::NEW_READY;
+      return AssistantStatus::READY;
   }
 }
 
@@ -95,7 +99,21 @@ base::Optional<std::string> GetS3ServerUriOverride() {
     return g_s3_server_uri_override;
   return base::nullopt;
 }
+
+base::Optional<std::string> GetDeviceIdOverride() {
+  if (g_device_id_override)
+    return g_device_id_override;
+  return base::nullopt;
+}
 #endif
+
+// Returns true if the system is currently in Ambient Mode (with ambient screen
+// shown or hidden, but not closed).
+bool InAmbientMode() {
+  DCHECK(chromeos::features::IsAmbientModeEnabled());
+  return ash::AmbientUiModel::Get()->ui_visibility() !=
+         ash::AmbientUiVisibility::kClosed;
+}
 
 // In the signed-out mode, we are going to run Assistant service without
 // using user's signed in account information.
@@ -103,8 +121,7 @@ bool IsSignedOutMode() {
   // We will switch the Libassitsant mode to signed-out/signed-in when user
   // enters/exits the ambient mode.
   const bool entered_ambient_mode =
-      chromeos::features::IsAmbientModeEnabled() &&
-      ash::AmbientModeState::Get()->enabled();
+      IsAmbientAssistantEnabled() && InAmbientMode();
 
   // Note that we shouldn't toggle the flag to true when exiting ambient
   // mode if we have been using fake gaia login, e.g. in the Tast test.
@@ -149,27 +166,27 @@ class Service::Context : public ServiceContext {
   ~Context() override = default;
 
   // ServiceContext:
-  ash::mojom::AssistantAlarmTimerController* assistant_alarm_timer_controller()
+  ash::AssistantAlarmTimerController* assistant_alarm_timer_controller()
       override {
-    return parent_->assistant_alarm_timer_controller_.get();
+    return ash::AssistantAlarmTimerController::Get();
   }
 
-  mojom::AssistantController* assistant_controller() override {
-    return parent_->assistant_controller_.get();
+  ash::AssistantController* assistant_controller() override {
+    return ash::AssistantController::Get();
   }
 
-  ash::mojom::AssistantNotificationController*
-  assistant_notification_controller() override {
-    return parent_->assistant_notification_controller_.get();
+  ash::AssistantNotificationController* assistant_notification_controller()
+      override {
+    return ash::AssistantNotificationController::Get();
   }
 
-  ash::mojom::AssistantScreenContextController*
-  assistant_screen_context_controller() override {
-    return parent_->assistant_screen_context_controller_.get();
+  ash::AssistantScreenContextController* assistant_screen_context_controller()
+      override {
+    return ash::AssistantScreenContextController::Get();
   }
 
   ash::AssistantStateBase* assistant_state() override {
-    return &parent_->assistant_state_;
+    return ash::AssistantState::Get();
   }
 
   CrasAudioHandler* cras_audio_handler() override {
@@ -198,16 +215,13 @@ class Service::Context : public ServiceContext {
 
 Service::Service(std::unique_ptr<network::PendingSharedURLLoaderFactory>
                      pending_url_loader_factory,
-                 signin::IdentityManager* identity_manager,
-                 PrefService* profile_prefs)
+                 signin::IdentityManager* identity_manager)
     : identity_manager_(identity_manager),
       token_refresh_timer_(std::make_unique<base::OneShotTimer>()),
       main_task_runner_(base::SequencedTaskRunnerHandle::Get()),
       context_(std::make_unique<Context>(this)),
-      pending_url_loader_factory_(std::move(pending_url_loader_factory)),
-      profile_prefs_(profile_prefs) {
+      pending_url_loader_factory_(std::move(pending_url_loader_factory)) {
   DCHECK(identity_manager_);
-  DCHECK(profile_prefs_);
   chromeos::PowerManagerClient* power_manager_client =
       context_->power_manager_client();
   power_manager_observer_.Add(power_manager_client);
@@ -216,24 +230,18 @@ Service::Service(std::unique_ptr<network::PendingSharedURLLoaderFactory>
 
 Service::~Service() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  // Add null check for |AmbientModeState| in case that |Service| is released
-  // after ash has gone.
-  auto* const ambient_mode_state = ash::AmbientModeState::Get();
-  if (chromeos::features::IsAmbientModeEnabled() && ambient_mode_state)
-    ambient_mode_state->RemoveObserver(this);
-
-  assistant_state_.RemoveObserver(this);
-}
-
-// static
-void Service::OverrideSettingsManagerForTesting(
-    AssistantSettingsManager* manager) {
-  g_settings_manager_override = manager;
+  ash::AssistantState::Get()->RemoveObserver(this);
+  ash::AssistantController::Get()->SetAssistant(nullptr);
 }
 
 // static
 void Service::OverrideS3ServerUriForTesting(const char* uri) {
   g_s3_server_uri_override = uri;
+}
+
+// static
+void Service::OverrideDeviceIdForTesting(const char* device_id) {
+  g_device_id_override = device_id;
 }
 
 void Service::SetAssistantManagerServiceForTesting(
@@ -242,47 +250,17 @@ void Service::SetAssistantManagerServiceForTesting(
   assistant_manager_service_for_testing_ = std::move(assistant_manager_service);
 }
 
-AssistantStateProxy* Service::GetAssistantStateProxyForTesting() {
-  return &assistant_state_;
-}
-
 void Service::Init() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
-  // Bind to AssistantStateController.
-  mojo::PendingRemote<ash::mojom::AssistantStateController> remote_controller;
-  AssistantClient::Get()->RequestAssistantStateController(
-      remote_controller.InitWithNewPipeAndPassReceiver());
-  assistant_state_.Init(std::move(remote_controller), profile_prefs_);
-  assistant_state_.AddObserver(this);
+  ash::AssistantState::Get()->AddObserver(this);
+
+  if (IsAmbientAssistantEnabled())
+    ambient_ui_model_observer_.Add(ash::AmbientUiModel::Get());
 
   DCHECK(!assistant_manager_service_);
 
-  if (chromeos::features::IsAmbientModeEnabled())
-    ash::AmbientModeState::Get()->AddObserver(this);
-
   RequestAccessToken();
-}
-
-void Service::BindAssistant(mojo::PendingReceiver<mojom::Assistant> receiver) {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  DCHECK(assistant_manager_service_);
-  assistant_receivers_.Add(assistant_manager_service_.get(),
-                           std::move(receiver));
-}
-
-void Service::BindSettingsManager(
-    mojo::PendingReceiver<mojom::AssistantSettingsManager> receiver) {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-
-  if (g_settings_manager_override) {
-    g_settings_manager_override->BindReceiver(std::move(receiver));
-    return;
-  }
-
-  DCHECK(assistant_manager_service_);
-  assistant_manager_service_->GetAssistantSettingsManager()->BindReceiver(
-      std::move(receiver));
 }
 
 void Service::Shutdown() {
@@ -290,6 +268,12 @@ void Service::Shutdown() {
 
   if (assistant_manager_service_)
     StopAssistantManagerService();
+}
+
+Assistant* Service::GetAssistant() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  DCHECK(assistant_manager_service_);
+  return assistant_manager_service_.get();
 }
 
 void Service::PowerChanged(const power_manager::PowerSupplyProperties& prop) {
@@ -390,7 +374,10 @@ void Service::OnStateChanged(AssistantManagerService::State new_state) {
   UpdateListeningState();
 }
 
-void Service::OnAmbientModeEnabled(bool enabled) {
+void Service::OnAmbientUiVisibilityChanged(
+    ash::AmbientUiVisibility visibility) {
+  DCHECK(IsAmbientAssistantEnabled());
+
   if (IsSignedOutMode()) {
     UpdateAssistantManagerState();
   } else {
@@ -402,12 +389,13 @@ void Service::OnAmbientModeEnabled(bool enabled) {
 
 void Service::UpdateAssistantManagerState() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  auto* assistant_state = ash::AssistantState::Get();
 
-  if (!assistant_state_.hotword_enabled().has_value() ||
-      !assistant_state_.settings_enabled().has_value() ||
-      !assistant_state_.locale().has_value() ||
+  if (!assistant_state->hotword_enabled().has_value() ||
+      !assistant_state->settings_enabled().has_value() ||
+      !assistant_state->locale().has_value() ||
       (!access_token_.has_value() && !IsSignedOutMode()) ||
-      !assistant_state_.arc_play_store_enabled().has_value()) {
+      !assistant_state->arc_play_store_enabled().has_value()) {
     // Assistant state has not finished initialization, let's wait.
     return;
   }
@@ -424,7 +412,7 @@ void Service::UpdateAssistantManagerState() {
   auto state = assistant_manager_service_->GetState();
   switch (state) {
     case AssistantManagerService::State::STOPPED:
-      if (assistant_state_.settings_enabled().value()) {
+      if (assistant_state->settings_enabled().value()) {
         assistant_manager_service_->Start(GetUserInfo(), ShouldEnableHotword());
         DVLOG(1) << "Request Assistant start";
       }
@@ -434,8 +422,8 @@ void Service::UpdateAssistantManagerState() {
       // If the Assistant is disabled by domain policy, the libassistant will
       // never becomes ready. Stop waiting for the state change and stop the
       // service.
-      if (assistant_state_.allowed_state() ==
-          ash::mojom::AssistantAllowedState::DISALLOWED_BY_POLICY) {
+      if (assistant_state->allowed_state() ==
+          AssistantAllowedState::DISALLOWED_BY_POLICY) {
         StopAssistantManagerService();
         return;
       }
@@ -449,17 +437,15 @@ void Service::UpdateAssistantManagerState() {
           kUpdateAssistantManagerDelay);
       break;
     case AssistantManagerService::State::RUNNING:
-      if (assistant_state_.settings_enabled().value()) {
+      if (assistant_state->settings_enabled().value()) {
         assistant_manager_service_->SetUser(GetUserInfo());
-        if (chromeos::features::IsAmbientModeEnabled()) {
-          assistant_manager_service_->EnableAmbientMode(
-              ash::AmbientModeState::Get()->enabled());
-        }
+        if (IsAmbientAssistantEnabled())
+          assistant_manager_service_->EnableAmbientMode(InAmbientMode());
         assistant_manager_service_->EnableHotword(ShouldEnableHotword());
         assistant_manager_service_->SetArcPlayStoreEnabled(
-            assistant_state_.arc_play_store_enabled().value());
+            assistant_state->arc_play_store_enabled().value());
         assistant_manager_service_->SetAssistantContextEnabled(
-            assistant_state_.IsScreenContextAllowed());
+            assistant_state->IsScreenContextAllowed());
       } else {
         StopAssistantManagerService();
       }
@@ -500,8 +486,8 @@ void Service::RequestAccessToken() {
   signin::ScopeSet scopes;
   scopes.insert(kScopeAssistant);
   scopes.insert(kScopeAuthGcm);
-  if (features::IsClearCutLogEnabled())
-    scopes.insert(kScopeClearCutLog);
+  if (features::IsOnDeviceAssistantEnabled())
+    scopes.insert(kScopeGeller);
 
   access_token_fetcher_ = identity_manager_->CreateAccessTokenFetcherForAccount(
       account_info.account_id, "cros_assistant", scopes,
@@ -550,6 +536,12 @@ void Service::CreateAssistantManagerService() {
   assistant_manager_service_ = CreateAndReturnAssistantManagerService();
   assistant_manager_service_->AddCommunicationErrorObserver(this);
   assistant_manager_service_->AddAndFireStateObserver(this);
+
+  if (AssistantInteractionLogger::IsLoggingEnabled()) {
+    interaction_logger_ = std::make_unique<AssistantInteractionLogger>();
+    assistant_manager_service_->AddAssistantInteractionSubscriber(
+        interaction_logger_.get());
+  }
 }
 
 std::unique_ptr<AssistantManagerService>
@@ -569,7 +561,7 @@ Service::CreateAndReturnAssistantManagerService() {
   DCHECK(pending_url_loader_factory_);
   return std::make_unique<AssistantManagerServiceImpl>(
       context(), std::move(delegate), std::move(pending_url_loader_factory_),
-      GetS3ServerUriOverride());
+      GetS3ServerUriOverride(), GetDeviceIdOverride());
 #else
   return std::make_unique<FakeAssistantManagerServiceImpl>();
 #endif
@@ -587,26 +579,10 @@ void Service::FinalizeAssistantManagerService() {
     return;
   is_assistant_manager_service_finalized_ = true;
 
-  // Bind to the AssistantController in ash.
-  AssistantClient::Get()->RequestAssistantController(
-      assistant_controller_.BindNewPipeAndPassReceiver());
-  mojo::PendingRemote<mojom::Assistant> remote_for_controller;
-  BindAssistant(remote_for_controller.InitWithNewPipeAndPassReceiver());
-  assistant_controller_->SetAssistant(std::move(remote_for_controller));
-
-  // Bind to the AssistantAlarmTimerController in ash.
-  AssistantClient::Get()->RequestAssistantAlarmTimerController(
-      assistant_alarm_timer_controller_.BindNewPipeAndPassReceiver());
-
-  // Bind to the AssistantNotificationController in ash.
-  AssistantClient::Get()->RequestAssistantNotificationController(
-      assistant_notification_controller_.BindNewPipeAndPassReceiver());
-
-  // Bind to the AssistantScreenContextController in ash.
-  AssistantClient::Get()->RequestAssistantScreenContextController(
-      assistant_screen_context_controller_.BindNewPipeAndPassReceiver());
-
   AddAshSessionObserver();
+
+  ash::AssistantController::Get()->SetAssistant(
+      assistant_manager_service_.get());
 }
 
 void Service::StopAssistantManagerService() {
@@ -614,8 +590,7 @@ void Service::StopAssistantManagerService() {
 
   assistant_manager_service_->Stop();
   weak_ptr_factory_.InvalidateWeakPtrs();
-  AssistantClient::Get()->OnAssistantStatusChanged(
-      ash::mojom::AssistantState::NOT_READY);
+  AssistantClient::Get()->OnAssistantStatusChanged(AssistantStatus::NOT_READY);
 }
 
 void Service::AddAshSessionObserver() {
@@ -638,7 +613,8 @@ void Service::UpdateListeningState() {
 
   bool should_listen =
       !locked_ &&
-      !assistant_state_.locked_full_screen_enabled().value_or(false) &&
+      !ash::AssistantState::Get()->locked_full_screen_enabled().value_or(
+          false) &&
       session_active_;
   DVLOG(1) << "Update assistant listening state: " << should_listen;
   assistant_manager_service_->EnableListening(should_listen);
@@ -658,15 +634,16 @@ bool Service::ShouldEnableHotword() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   bool dsp_available = context()->cras_audio_handler()->HasHotwordDevice();
+  auto* assistant_state = ash::AssistantState::Get();
 
   // Disable hotword if hotword is not set to always on and power source is not
   // connected.
-  if (!dsp_available && !assistant_state_.hotword_always_on().value_or(false) &&
+  if (!dsp_available && !assistant_state->hotword_always_on().value_or(false) &&
       !power_source_connected_) {
     return false;
   }
 
-  return assistant_state_.hotword_enabled().value();
+  return assistant_state->hotword_enabled().value();
 }
 
 }  // namespace assistant

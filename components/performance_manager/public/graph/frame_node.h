@@ -7,16 +7,16 @@
 
 #include "base/containers/flat_set.h"
 #include "base/macros.h"
-#include "components/performance_manager/public/frame_priority/frame_priority.h"
+#include "base/optional.h"
+#include "base/types/strong_alias.h"
+#include "components/performance_manager/public/execution_context_priority/execution_context_priority.h"
 #include "components/performance_manager/public/graph/node.h"
 #include "components/performance_manager/public/mojom/coordination_unit.mojom.h"
 #include "components/performance_manager/public/mojom/lifecycle.mojom.h"
+#include "third_party/blink/public/common/tokens/tokens.h"
+#include "ui/gfx/geometry/rect.h"
 
 class GURL;
-
-namespace base {
-class UnguessableToken;
-}  // namespace base
 
 namespace performance_manager {
 
@@ -25,6 +25,8 @@ class PageNode;
 class ProcessNode;
 class RenderFrameHostProxy;
 class WorkerNode;
+
+using execution_context_priority::PriorityAndReason;
 
 // Frame nodes form a tree structure, each FrameNode at most has one parent that
 // is a FrameNode. Conceptually, a frame corresponds to a
@@ -54,14 +56,19 @@ class WorkerNode;
 class FrameNode : public Node {
  public:
   using FrameNodeVisitor = base::RepeatingCallback<bool(const FrameNode*)>;
-  using InterventionPolicy = mojom::InterventionPolicy;
   using LifecycleState = mojom::LifecycleState;
   using Observer = FrameNodeObserver;
-  using PriorityAndReason = frame_priority::PriorityAndReason;
+  using PageNodeVisitor = base::RepeatingCallback<bool(const PageNode*)>;
 
   class ObserverDefaultImpl;
 
   static const char* kDefaultPriorityReason;
+
+  enum class Visibility {
+    kUnknown,
+    kVisible,
+    kNotVisible,
+  };
 
   FrameNode();
   ~FrameNode() override;
@@ -84,9 +91,9 @@ class FrameNode : public Node {
   // be current at a time. This is a constant over the lifetime of the frame.
   virtual int GetFrameTreeNodeId() const = 0;
 
-  // Gets the devtools token associated with this frame. This is a constant over
-  // the lifetime of the frame.
-  virtual const base::UnguessableToken& GetDevToolsToken() const = 0;
+  // Gets the unique token associated with this frame. This is a constant over
+  // the lifetime of the frame and unique across all frames for all time.
+  virtual const blink::LocalFrameToken& GetFrameToken() const = 0;
 
   // Gets the ID of the browsing instance to which this frame belongs. This is a
   // constant over the lifetime of the frame.
@@ -110,13 +117,20 @@ class FrameNode : public Node {
   // VisitChildFrameNodes when that makes sense.
   virtual const base::flat_set<const FrameNode*> GetChildFrameNodes() const = 0;
 
+  // Visits the page nodes that have been opened by this frame. The iteration
+  // is halted if the visitor returns false. Returns true if every call to the
+  // visitor returned true, false otherwise.
+  virtual bool VisitOpenedPageNodes(const PageNodeVisitor& visitor) const = 0;
+
+  // Returns the set of opened pages associatted with this frame. Note that
+  // this incurs a full container copy all the opened nodes. Please use
+  // VisitOpenedPageNodes when that makes sense. This can change over the
+  // lifetime of the frame.
+  virtual const base::flat_set<const PageNode*> GetOpenedPageNodes() const = 0;
+
   // Returns the current lifecycle state of this frame. See
   // FrameNodeObserver::OnFrameLifecycleStateChanged.
   virtual LifecycleState GetLifecycleState() const = 0;
-
-  // Returns the freeze policy set via origin trial. kDefault when no freeze
-  // policy is set via origin trial.
-  virtual InterventionPolicy GetOriginTrialFreezePolicy() const = 0;
 
   // Returns true if this frame had a non-empty before-unload handler at the
   // time of its last transition to the frozen lifecycle state. This is only
@@ -160,6 +174,18 @@ class FrameNode : public Node {
   // Returns true if at least one form of the frame has been interacted with.
   virtual bool HadFormInteraction() const = 0;
 
+  // Returns true if the frame is audible, false otherwise.
+  virtual bool IsAudible() const = 0;
+
+  // Returns the intersection of this frame with the viewport. This is initially
+  // null on node creation and is initialized during layout when the viewport
+  // intersection is first calculated. May only be called for a child frame.
+  virtual const base::Optional<gfx::Rect>& GetViewportIntersection() const = 0;
+
+  // Returns true if the frame is visible. This value is based on the viewport
+  // intersection of the frame, and the visibility of the page.
+  virtual Visibility GetVisibility() const = 0;
+
   // Returns a proxy to the RenderFrameHost associated with this node. The
   // proxy may only be dereferenced on the UI thread.
   virtual const RenderFrameHostProxy& GetRenderFrameHostProxy() const = 0;
@@ -172,9 +198,6 @@ class FrameNode : public Node {
 // implement the entire interface.
 class FrameNodeObserver {
  public:
-  using InterventionPolicy = mojom::InterventionPolicy;
-  using PriorityAndReason = frame_priority::PriorityAndReason;
-
   FrameNodeObserver();
   virtual ~FrameNodeObserver();
 
@@ -197,11 +220,6 @@ class FrameNodeObserver {
   // Invoked when the LifecycleState property changes.
   virtual void OnFrameLifecycleStateChanged(const FrameNode* frame_node) = 0;
 
-  // Invoked when the OriginTrialFreezePolicy changes.
-  virtual void OnOriginTrialFreezePolicyChanged(
-      const FrameNode* frame_node,
-      const InterventionPolicy& previous_value) = 0;
-
   // Invoked when the URL property changes.
   virtual void OnURLChanged(const FrameNode* frame_node,
                             const GURL& previous_value) = 0;
@@ -223,6 +241,17 @@ class FrameNodeObserver {
 
   // Called when the frame receives a form interaction.
   virtual void OnHadFormInteractionChanged(const FrameNode* frame_node) = 0;
+
+  // Invoked when the IsAudible property changes.
+  virtual void OnIsAudibleChanged(const FrameNode* frame_node) = 0;
+
+  // Invoked when a frame's intersection with the viewport changes
+  virtual void OnViewportIntersectionChanged(const FrameNode* frame_node) = 0;
+
+  // Invoked when the visibility property changes.
+  virtual void OnFrameVisibilityChanged(
+      const FrameNode* frame_node,
+      FrameNode::Visibility previous_value) = 0;
 
   // Events with no property changes.
 
@@ -257,9 +286,6 @@ class FrameNode::ObserverDefaultImpl : public FrameNodeObserver {
   void OnIsCurrentChanged(const FrameNode* frame_node) override {}
   void OnNetworkAlmostIdleChanged(const FrameNode* frame_node) override {}
   void OnFrameLifecycleStateChanged(const FrameNode* frame_node) override {}
-  void OnOriginTrialFreezePolicyChanged(
-      const FrameNode* frame_node,
-      const InterventionPolicy& previous_value) override {}
   void OnURLChanged(const FrameNode* frame_node,
                     const GURL& previous_value) override {}
   void OnIsAdFrameChanged(const FrameNode* frame_node) override {}
@@ -270,6 +296,11 @@ class FrameNode::ObserverDefaultImpl : public FrameNodeObserver {
       const FrameNode* frame_node,
       const PriorityAndReason& previous_value) override {}
   void OnHadFormInteractionChanged(const FrameNode* frame_node) override {}
+  void OnIsAudibleChanged(const FrameNode* frame_node) override {}
+  void OnViewportIntersectionChanged(const FrameNode* frame_node) override {}
+  void OnFrameVisibilityChanged(const FrameNode* frame_node,
+                                FrameNode::Visibility previous_value) override {
+  }
   void OnNonPersistentNotificationCreated(
       const FrameNode* frame_node) override {}
   void OnFirstContentfulPaint(

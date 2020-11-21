@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <memory>
 #include <string>
 
 #include "base/macros.h"
@@ -15,6 +16,7 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "components/policy/policy_constants.h"
 #include "components/prefs/pref_service.h"
+#include "content/public/test/browser_test.h"
 
 #if defined(OS_WIN)
 #include <windows.h>
@@ -64,7 +66,7 @@ class PolicyInitializationBrowserTest : public InProcessBrowserTest {
   }
   void CreatedBrowserMainParts(content::BrowserMainParts* parts) override {
     static_cast<ChromeBrowserMainParts*>(parts)->AddParts(
-        new ChromeBrowserMainExtraPartsPolicyValueChecker());
+        std::make_unique<ChromeBrowserMainExtraPartsPolicyValueChecker>());
   }
 
  private:

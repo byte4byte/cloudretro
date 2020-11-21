@@ -26,7 +26,10 @@
 #include "third_party/blink/renderer/bindings/core/v8/v8_gc_controller.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_iterator_result_value.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_uint8_array.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_bidirectional_stream.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_quic_transport_options.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_receive_stream.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_rtc_dtls_fingerprint.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_send_stream.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_web_transport_close_info.h"
 #include "third_party/blink/renderer/core/frame/csp/content_security_policy.h"
@@ -38,6 +41,7 @@
 #include "third_party/blink/renderer/core/typed_arrays/dom_typed_array.h"
 #include "third_party/blink/renderer/modules/webtransport/receive_stream.h"
 #include "third_party/blink/renderer/modules/webtransport/send_stream.h"
+#include "third_party/blink/renderer/modules/webtransport/test_utils.h"
 #include "third_party/blink/renderer/platform/bindings/exception_code.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/heap/persistent.h"
@@ -64,20 +68,29 @@ class QuicTransportConnector final
   struct ConnectArgs {
     ConnectArgs(
         const KURL& url,
+        Vector<network::mojom::blink::QuicTransportCertificateFingerprintPtr>
+            fingerprints,
         mojo::PendingRemote<network::mojom::blink::QuicTransportHandshakeClient>
             handshake_client)
-        : url(url), handshake_client(std::move(handshake_client)) {}
+        : url(url),
+          fingerprints(std::move(fingerprints)),
+          handshake_client(std::move(handshake_client)) {}
 
     KURL url;
+    Vector<network::mojom::blink::QuicTransportCertificateFingerprintPtr>
+        fingerprints;
     mojo::PendingRemote<network::mojom::blink::QuicTransportHandshakeClient>
         handshake_client;
   };
 
   void Connect(
       const KURL& url,
+      Vector<network::mojom::blink::QuicTransportCertificateFingerprintPtr>
+          fingerprints,
       mojo::PendingRemote<network::mojom::blink::QuicTransportHandshakeClient>
           handshake_client) override {
-    connect_args_.push_back(ConnectArgs(url, std::move(handshake_client)));
+    connect_args_.push_back(
+        ConnectArgs(url, std::move(fingerprints), std::move(handshake_client)));
   }
 
   Vector<ConnectArgs> TakeConnectArgs() { return std::move(connect_args_); }
@@ -118,6 +131,7 @@ class MockQuicTransport : public network::mojom::blink::QuicTransport {
                     void(uint32_t, mojo::ScopedDataPipeConsumerHandle)>));
 
   void SendFin(uint32_t stream_id) override {}
+  void AbortStream(uint32_t stream_id, uint64_t code) override {}
 
  private:
   mojo::Receiver<network::mojom::blink::QuicTransport> receiver_;
@@ -127,6 +141,10 @@ class QuicTransportTest : public ::testing::Test {
  public:
   using AcceptUnidirectionalStreamCallback =
       base::OnceCallback<void(uint32_t, mojo::ScopedDataPipeConsumerHandle)>;
+  using AcceptBidirectionalStreamCallback =
+      base::OnceCallback<void(uint32_t,
+                              mojo::ScopedDataPipeConsumerHandle,
+                              mojo::ScopedDataPipeProducerHandle)>;
 
   void AddBinder(const V8TestingScope& scope) {
     interface_broker_ =
@@ -137,10 +155,14 @@ class QuicTransportTest : public ::testing::Test {
                             weak_ptr_factory_.GetWeakPtr()));
   }
 
+  static QuicTransportOptions* EmptyOptions() {
+    return MakeGarbageCollected<QuicTransportOptions>();
+  }
+
   // Creates a QuicTransport object with the given |url|.
   QuicTransport* Create(const V8TestingScope& scope, const String& url) {
     AddBinder(scope);
-    return QuicTransport::Create(scope.GetScriptState(), url,
+    return QuicTransport::Create(scope.GetScriptState(), url, EmptyOptions(),
                                  ASSERT_NO_EXCEPTION);
   }
 
@@ -167,10 +189,17 @@ class QuicTransportTest : public ::testing::Test {
     mock_quic_transport_ = std::make_unique<StrictMock<MockQuicTransport>>(
         quic_transport_to_pass.InitWithNewPipeAndPassReceiver());
 
-    // This is called on every connection, so expect it in every test.
+    // These are called on every connection, so expect them in every test.
     EXPECT_CALL(*mock_quic_transport_, AcceptUnidirectionalStream(_))
         .WillRepeatedly([this](AcceptUnidirectionalStreamCallback callback) {
-          pending_accept_callbacks_.push_back(std::move(callback));
+          pending_unidirectional_accept_callbacks_.push_back(
+              std::move(callback));
+        });
+
+    EXPECT_CALL(*mock_quic_transport_, AcceptBidirectionalStream(_))
+        .WillRepeatedly([this](AcceptBidirectionalStreamCallback callback) {
+          pending_bidirectional_accept_callbacks_.push_back(
+              std::move(callback));
         });
 
     handshake_client->OnConnectionEstablished(
@@ -214,22 +243,16 @@ class QuicTransportTest : public ::testing::Test {
   }
 
   mojo::ScopedDataPipeProducerHandle DoAcceptUnidirectionalStream() {
-    MojoCreateDataPipeOptions options;
-    options.struct_size = sizeof(MojoCreateDataPipeOptions);
-    options.flags = MOJO_CREATE_DATA_PIPE_FLAG_NONE;
-    options.element_num_bytes = 1;
-    options.capacity_num_bytes = 0;
-
     mojo::ScopedDataPipeProducerHandle producer;
     mojo::ScopedDataPipeConsumerHandle consumer;
-    MojoResult result = mojo::CreateDataPipe(&options, &producer, &consumer);
-    if (result != MOJO_RESULT_OK) {
-      ADD_FAILURE() << "CreateDataPipe() returned " << result;
-    }
 
-    std::move(pending_accept_callbacks_.front())
+    // There's no good way to handle failure to create the pipe, so just
+    // continue.
+    CreateDataPipeForWebTransportTests(&producer, &consumer);
+
+    std::move(pending_unidirectional_accept_callbacks_.front())
         .Run(next_stream_id_++, std::move(consumer));
-    pending_accept_callbacks_.pop_front();
+    pending_unidirectional_accept_callbacks_.pop_front();
 
     return producer;
   }
@@ -237,24 +260,8 @@ class QuicTransportTest : public ::testing::Test {
   ReceiveStream* ReadReceiveStream(const V8TestingScope& scope,
                                    QuicTransport* quic_transport) {
     ReadableStream* streams = quic_transport->receiveStreams();
-    auto* script_state = scope.GetScriptState();
-    auto* reader = streams->getReader(script_state, ASSERT_NO_EXCEPTION);
 
-    ScriptPromise read_promise =
-        reader->read(script_state, ASSERT_NO_EXCEPTION);
-
-    ScriptPromiseTester read_tester(script_state, read_promise);
-    read_tester.WaitUntilSettled();
-    EXPECT_TRUE(read_tester.IsFulfilled());
-
-    v8::Local<v8::Value> result = read_tester.Value().V8Value();
-    DCHECK(result->IsObject());
-    v8::Local<v8::Value> v8value;
-    bool done = false;
-    EXPECT_TRUE(
-        V8UnpackIteratorResult(script_state, result.As<v8::Object>(), &done)
-            .ToLocal(&v8value));
-    EXPECT_FALSE(done);
+    v8::Local<v8::Value> v8value = ReadValueFromStream(scope, streams);
 
     ReceiveStream* receive_stream =
         V8ReceiveStream::ToImplWithTypeCheck(scope.GetIsolate(), v8value);
@@ -276,7 +283,10 @@ class QuicTransportTest : public ::testing::Test {
   }
 
   BrowserInterfaceBrokerProxy* interface_broker_ = nullptr;
-  WTF::Deque<AcceptUnidirectionalStreamCallback> pending_accept_callbacks_;
+  WTF::Deque<AcceptUnidirectionalStreamCallback>
+      pending_unidirectional_accept_callbacks_;
+  WTF::Deque<AcceptBidirectionalStreamCallback>
+      pending_bidirectional_accept_callbacks_;
   QuicTransportConnector connector_;
   std::unique_ptr<MockQuicTransport> mock_quic_transport_;
   mojo::Remote<network::mojom::blink::QuicTransportClient> client_remote_;
@@ -289,7 +299,8 @@ class QuicTransportTest : public ::testing::Test {
 TEST_F(QuicTransportTest, FailWithNullURL) {
   V8TestingScope scope;
   auto& exception_state = scope.GetExceptionState();
-  QuicTransport::Create(scope.GetScriptState(), String(), exception_state);
+  QuicTransport::Create(scope.GetScriptState(), String(), EmptyOptions(),
+                        exception_state);
   EXPECT_TRUE(exception_state.HadException());
   EXPECT_EQ(static_cast<int>(DOMExceptionCode::kSyntaxError),
             exception_state.Code());
@@ -298,7 +309,8 @@ TEST_F(QuicTransportTest, FailWithNullURL) {
 TEST_F(QuicTransportTest, FailWithEmptyURL) {
   V8TestingScope scope;
   auto& exception_state = scope.GetExceptionState();
-  QuicTransport::Create(scope.GetScriptState(), String(""), exception_state);
+  QuicTransport::Create(scope.GetScriptState(), String(""), EmptyOptions(),
+                        exception_state);
   EXPECT_TRUE(exception_state.HadException());
   EXPECT_EQ(static_cast<int>(DOMExceptionCode::kSyntaxError),
             exception_state.Code());
@@ -309,7 +321,7 @@ TEST_F(QuicTransportTest, FailWithNoScheme) {
   V8TestingScope scope;
   auto& exception_state = scope.GetExceptionState();
   QuicTransport::Create(scope.GetScriptState(), String("no-scheme"),
-                        exception_state);
+                        EmptyOptions(), exception_state);
   EXPECT_TRUE(exception_state.HadException());
   EXPECT_EQ(static_cast<int>(DOMExceptionCode::kSyntaxError),
             exception_state.Code());
@@ -320,7 +332,7 @@ TEST_F(QuicTransportTest, FailWithHttpsURL) {
   V8TestingScope scope;
   auto& exception_state = scope.GetExceptionState();
   QuicTransport::Create(scope.GetScriptState(), String("https://example.com/"),
-                        exception_state);
+                        EmptyOptions(), exception_state);
   EXPECT_TRUE(exception_state.HadException());
   EXPECT_EQ(static_cast<int>(DOMExceptionCode::kSyntaxError),
             exception_state.Code());
@@ -333,7 +345,7 @@ TEST_F(QuicTransportTest, FailWithNoHost) {
   V8TestingScope scope;
   auto& exception_state = scope.GetExceptionState();
   QuicTransport::Create(scope.GetScriptState(), String("quic-transport:///"),
-                        exception_state);
+                        EmptyOptions(), exception_state);
   EXPECT_TRUE(exception_state.HadException());
   EXPECT_EQ(static_cast<int>(DOMExceptionCode::kSyntaxError),
             exception_state.Code());
@@ -346,7 +358,7 @@ TEST_F(QuicTransportTest, FailWithURLFragment) {
   auto& exception_state = scope.GetExceptionState();
   QuicTransport::Create(scope.GetScriptState(),
                         String("quic-transport://example.com/#failing"),
-                        exception_state);
+                        EmptyOptions(), exception_state);
   EXPECT_TRUE(exception_state.HadException());
   EXPECT_EQ(static_cast<int>(DOMExceptionCode::kSyntaxError),
             exception_state.Code());
@@ -360,12 +372,12 @@ TEST_F(QuicTransportTest, FailByCSP) {
   V8TestingScope scope;
   auto& exception_state = scope.GetExceptionState();
   scope.GetExecutionContext()
-      ->GetContentSecurityPolicyForWorld()
+      ->GetContentSecurityPolicyForCurrentWorld()
       ->DidReceiveHeader("connect-src 'none'",
                          network::mojom::ContentSecurityPolicyType::kEnforce,
                          network::mojom::ContentSecurityPolicySource::kHTTP);
   QuicTransport::Create(scope.GetScriptState(),
-                        String("quic-transport://example.com/"),
+                        String("quic-transport://example.com/"), EmptyOptions(),
                         exception_state);
   EXPECT_TRUE(exception_state.HadException());
   EXPECT_EQ(static_cast<int>(DOMExceptionCode::kSecurityError),
@@ -381,12 +393,12 @@ TEST_F(QuicTransportTest, PassCSP) {
   // https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Security-Policy/connect-src.
   auto& exception_state = scope.GetExceptionState();
   scope.GetExecutionContext()
-      ->GetContentSecurityPolicyForWorld()
+      ->GetContentSecurityPolicyForCurrentWorld()
       ->DidReceiveHeader("connect-src quic-transport://example.com",
                          network::mojom::ContentSecurityPolicyType::kEnforce,
                          network::mojom::ContentSecurityPolicySource::kHTTP);
   QuicTransport::Create(scope.GetScriptState(),
-                        String("quic-transport://example.com/"),
+                        String("quic-transport://example.com/"), EmptyOptions(),
                         exception_state);
   EXPECT_FALSE(exception_state.HadException());
 }
@@ -396,13 +408,14 @@ TEST_F(QuicTransportTest, SendConnect) {
   AddBinder(scope);
   auto* quic_transport = QuicTransport::Create(
       scope.GetScriptState(), String("quic-transport://example.com/"),
-      ASSERT_NO_EXCEPTION);
+      EmptyOptions(), ASSERT_NO_EXCEPTION);
 
   test::RunPendingTasks();
 
   auto args = connector_.TakeConnectArgs();
   ASSERT_EQ(1u, args.size());
   EXPECT_EQ(KURL("quic-transport://example.com/"), args[0].url);
+  EXPECT_TRUE(args[0].fingerprints.IsEmpty());
   EXPECT_TRUE(quic_transport->HasPendingActivity());
 }
 
@@ -424,7 +437,7 @@ TEST_F(QuicTransportTest, FailedConnect) {
   AddBinder(scope);
   auto* quic_transport = QuicTransport::Create(
       scope.GetScriptState(), String("quic-transport://example.com/"),
-      ASSERT_NO_EXCEPTION);
+      EmptyOptions(), ASSERT_NO_EXCEPTION);
   ScriptPromiseTester ready_tester(scope.GetScriptState(),
                                    quic_transport->ready());
   ScriptPromiseTester closed_tester(scope.GetScriptState(),
@@ -438,7 +451,7 @@ TEST_F(QuicTransportTest, FailedConnect) {
   mojo::Remote<network::mojom::blink::QuicTransportHandshakeClient>
       handshake_client(std::move(args[0].handshake_client));
 
-  handshake_client->OnHandshakeFailed();
+  handshake_client->OnHandshakeFailed(nullptr);
 
   test::RunPendingTasks();
   EXPECT_FALSE(quic_transport->HasPendingActivity());
@@ -446,12 +459,37 @@ TEST_F(QuicTransportTest, FailedConnect) {
   EXPECT_TRUE(closed_tester.IsRejected());
 }
 
+TEST_F(QuicTransportTest, SendConnectWithFingerprint) {
+  V8TestingScope scope;
+  AddBinder(scope);
+  auto* fingerprints = MakeGarbageCollected<RTCDtlsFingerprint>();
+  fingerprints->setAlgorithm("sha-256");
+  fingerprints->setValue(
+      "ED:3D:D7:C3:67:10:94:68:D1:DC:D1:26:5C:B2:74:D7:1C:A2:63:3E:94:94:C0:84:"
+      "39:D6:64:FA:08:B9:77:37");
+  auto* options = MakeGarbageCollected<QuicTransportOptions>();
+  options->setServerCertificateFingerprints({fingerprints});
+  QuicTransport::Create(scope.GetScriptState(),
+                        String("quic-transport://example.com/"), options,
+                        ASSERT_NO_EXCEPTION);
+
+  test::RunPendingTasks();
+
+  auto args = connector_.TakeConnectArgs();
+  ASSERT_EQ(1u, args.size());
+  ASSERT_EQ(1u, args[0].fingerprints.size());
+  EXPECT_EQ(args[0].fingerprints[0]->algorithm, "sha-256");
+  EXPECT_EQ(args[0].fingerprints[0]->fingerprint,
+            "ED:3D:D7:C3:67:10:94:68:D1:DC:D1:26:5C:B2:74:D7:1C:A2:63:3E:94:94:"
+            "C0:84:39:D6:64:FA:08:B9:77:37");
+}
+
 TEST_F(QuicTransportTest, CloseDuringConnect) {
   V8TestingScope scope;
   AddBinder(scope);
   auto* quic_transport = QuicTransport::Create(
       scope.GetScriptState(), String("quic-transport://example.com/"),
-      ASSERT_NO_EXCEPTION);
+      EmptyOptions(), ASSERT_NO_EXCEPTION);
   ScriptPromiseTester ready_tester(scope.GetScriptState(),
                                    quic_transport->ready());
   ScriptPromiseTester closed_tester(scope.GetScriptState(),
@@ -516,8 +554,7 @@ TEST_F(QuicTransportTest, GarbageCollection) {
 
   // Pretend the stack is empty. This will avoid accidentally treating any
   // copies of the |quic_transport| pointer as references.
-  V8GCController::CollectAllGarbageForTesting(
-      scope.GetIsolate(), v8::EmbedderHeapTracer::EmbedderStackState::kEmpty);
+  ThreadState::Current()->CollectAllGarbageForTesting();
 
   EXPECT_TRUE(quic_transport);
 
@@ -525,8 +562,7 @@ TEST_F(QuicTransportTest, GarbageCollection) {
 
   test::RunPendingTasks();
 
-  V8GCController::CollectAllGarbageForTesting(
-      scope.GetIsolate(), v8::EmbedderHeapTracer::EmbedderStackState::kEmpty);
+  ThreadState::Current()->CollectAllGarbageForTesting();
 
   EXPECT_FALSE(quic_transport);
 }
@@ -550,8 +586,7 @@ TEST_F(QuicTransportTest, GarbageCollectMojoConnectionError) {
 
   test::RunPendingTasks();
 
-  V8GCController::CollectAllGarbageForTesting(
-      scope.GetIsolate(), v8::EmbedderHeapTracer::EmbedderStackState::kEmpty);
+  ThreadState::Current()->CollectAllGarbageForTesting();
 
   EXPECT_FALSE(quic_transport);
   EXPECT_TRUE(closed_tester.IsRejected());
@@ -650,7 +685,7 @@ Vector<uint8_t> GetValueAsVector(ScriptState* script_state,
   }
 
   Vector<uint8_t> result;
-  result.Append(array->Data(), array->lengthAsSizeT());
+  result.Append(array->Data(), array->length());
   return result;
 }
 
@@ -666,7 +701,8 @@ TEST_F(QuicTransportTest, ReceiveDatagramBeforeRead) {
 
   auto* readable = quic_transport->receiveDatagrams();
   auto* script_state = scope.GetScriptState();
-  auto* reader = readable->getReader(script_state, ASSERT_NO_EXCEPTION);
+  auto* reader =
+      readable->GetDefaultReaderForTesting(script_state, ASSERT_NO_EXCEPTION);
   ScriptPromise result = reader->read(script_state, ASSERT_NO_EXCEPTION);
   ScriptPromiseTester tester(script_state, result);
   tester.WaitUntilSettled();
@@ -681,7 +717,8 @@ TEST_F(QuicTransportTest, ReceiveDatagramDuringRead) {
       CreateAndConnectSuccessfully(scope, "quic-transport://example.com");
   auto* readable = quic_transport->receiveDatagrams();
   auto* script_state = scope.GetScriptState();
-  auto* reader = readable->getReader(script_state, ASSERT_NO_EXCEPTION);
+  auto* reader =
+      readable->GetDefaultReaderForTesting(script_state, ASSERT_NO_EXCEPTION);
   ScriptPromise result = reader->read(script_state, ASSERT_NO_EXCEPTION);
 
   const std::array<uint8_t, 1> chunk = {'A'};
@@ -714,7 +751,8 @@ TEST_F(QuicTransportTest, DatagramsAreDropped) {
 
   auto* readable = quic_transport->receiveDatagrams();
   auto* script_state = scope.GetScriptState();
-  auto* reader = readable->getReader(script_state, ASSERT_NO_EXCEPTION);
+  auto* reader =
+      readable->GetDefaultReaderForTesting(script_state, ASSERT_NO_EXCEPTION);
   ScriptPromise result1 = reader->read(script_state, ASSERT_NO_EXCEPTION);
   ScriptPromise result2 = reader->read(script_state, ASSERT_NO_EXCEPTION);
 
@@ -776,8 +814,9 @@ TEST_F(QuicTransportTest, CreateSendStreamBeforeConnect) {
   V8TestingScope scope;
 
   auto* script_state = scope.GetScriptState();
-  auto* quic_transport = QuicTransport::Create(
-      script_state, "quic-transport://example.com", ASSERT_NO_EXCEPTION);
+  auto* quic_transport =
+      QuicTransport::Create(script_state, "quic-transport://example.com",
+                            EmptyOptions(), ASSERT_NO_EXCEPTION);
   auto& exception_state = scope.GetExceptionState();
   ScriptPromise send_stream_promise =
       quic_transport->createSendStream(script_state, exception_state);
@@ -831,8 +870,7 @@ TEST_F(QuicTransportTest, SendStreamGarbageCollection) {
     send_stream = CreateSendStreamSuccessfully(scope, quic_transport);
   }
 
-  V8GCController::CollectAllGarbageForTesting(
-      scope.GetIsolate(), v8::EmbedderHeapTracer::EmbedderStackState::kEmpty);
+  ThreadState::Current()->CollectAllGarbageForTesting();
 
   EXPECT_TRUE(quic_transport);
   EXPECT_TRUE(send_stream);
@@ -841,8 +879,7 @@ TEST_F(QuicTransportTest, SendStreamGarbageCollection) {
 
   test::RunPendingTasks();
 
-  V8GCController::CollectAllGarbageForTesting(
-      scope.GetIsolate(), v8::EmbedderHeapTracer::EmbedderStackState::kEmpty);
+  ThreadState::Current()->CollectAllGarbageForTesting();
 
   EXPECT_FALSE(quic_transport);
   EXPECT_FALSE(send_stream);
@@ -868,8 +905,7 @@ TEST_F(QuicTransportTest, SendStreamGarbageCollectionLocalClose) {
 
   // Pretend the stack is empty. This will avoid accidentally treating any
   // copies of the |send_stream| pointer as references.
-  V8GCController::CollectAllGarbageForTesting(
-      scope.GetIsolate(), v8::EmbedderHeapTracer::EmbedderStackState::kEmpty);
+  ThreadState::Current()->CollectAllGarbageForTesting();
 
   ASSERT_TRUE(send_stream);
 
@@ -881,8 +917,7 @@ TEST_F(QuicTransportTest, SendStreamGarbageCollectionLocalClose) {
   tester.WaitUntilSettled();
   EXPECT_TRUE(tester.IsFulfilled());
 
-  V8GCController::CollectAllGarbageForTesting(
-      scope.GetIsolate(), v8::EmbedderHeapTracer::EmbedderStackState::kEmpty);
+  ThreadState::Current()->CollectAllGarbageForTesting();
 
   EXPECT_FALSE(send_stream);
 }
@@ -900,8 +935,7 @@ TEST_F(QuicTransportTest, SendStreamGarbageCollectionRemoteClose) {
     send_stream = CreateSendStreamSuccessfully(scope, quic_transport);
   }
 
-  V8GCController::CollectAllGarbageForTesting(
-      scope.GetIsolate(), v8::EmbedderHeapTracer::EmbedderStackState::kEmpty);
+  ThreadState::Current()->CollectAllGarbageForTesting();
 
   ASSERT_TRUE(send_stream);
 
@@ -910,8 +944,7 @@ TEST_F(QuicTransportTest, SendStreamGarbageCollectionRemoteClose) {
 
   test::RunPendingTasks();
 
-  V8GCController::CollectAllGarbageForTesting(
-      scope.GetIsolate(), v8::EmbedderHeapTracer::EmbedderStackState::kEmpty);
+  ThreadState::Current()->CollectAllGarbageForTesting();
 
   EXPECT_FALSE(send_stream);
 }
@@ -939,8 +972,7 @@ TEST_F(QuicTransportTest, ReceiveStreamGarbageCollectionCancel) {
 
   // Pretend the stack is empty. This will avoid accidentally treating any
   // copies of the |receive_stream| pointer as references.
-  V8GCController::CollectAllGarbageForTesting(
-      scope.GetIsolate(), v8::EmbedderHeapTracer::EmbedderStackState::kEmpty);
+  ThreadState::Current()->CollectAllGarbageForTesting();
 
   ASSERT_TRUE(receive_stream);
 
@@ -959,8 +991,7 @@ TEST_F(QuicTransportTest, ReceiveStreamGarbageCollectionCancel) {
   tester.WaitUntilSettled();
   EXPECT_TRUE(tester.IsFulfilled());
 
-  V8GCController::CollectAllGarbageForTesting(
-      scope.GetIsolate(), v8::EmbedderHeapTracer::EmbedderStackState::kEmpty);
+  ThreadState::Current()->CollectAllGarbageForTesting();
 
   EXPECT_FALSE(receive_stream);
 }
@@ -980,8 +1011,7 @@ TEST_F(QuicTransportTest, ReceiveStreamGarbageCollectionRemoteClose) {
     receive_stream = ReadReceiveStream(scope, quic_transport);
   }
 
-  V8GCController::CollectAllGarbageForTesting(
-      scope.GetIsolate(), v8::EmbedderHeapTracer::EmbedderStackState::kEmpty);
+  ThreadState::Current()->CollectAllGarbageForTesting();
 
   ASSERT_TRUE(receive_stream);
 
@@ -990,8 +1020,7 @@ TEST_F(QuicTransportTest, ReceiveStreamGarbageCollectionRemoteClose) {
 
   test::RunPendingTasks();
 
-  V8GCController::CollectAllGarbageForTesting(
-      scope.GetIsolate(), v8::EmbedderHeapTracer::EmbedderStackState::kEmpty);
+  ThreadState::Current()->CollectAllGarbageForTesting();
 
   ASSERT_TRUE(receive_stream);
 
@@ -999,8 +1028,7 @@ TEST_F(QuicTransportTest, ReceiveStreamGarbageCollectionRemoteClose) {
 
   test::RunPendingTasks();
 
-  V8GCController::CollectAllGarbageForTesting(
-      scope.GetIsolate(), v8::EmbedderHeapTracer::EmbedderStackState::kEmpty);
+  ThreadState::Current()->CollectAllGarbageForTesting();
 
   EXPECT_FALSE(receive_stream);
 }
@@ -1025,8 +1053,7 @@ TEST_F(QuicTransportTest, ReceiveStreamGarbageCollectionRemoteCloseReverse) {
     receive_stream = ReadReceiveStream(scope, quic_transport);
   }
 
-  V8GCController::CollectAllGarbageForTesting(
-      scope.GetIsolate(), v8::EmbedderHeapTracer::EmbedderStackState::kEmpty);
+  ThreadState::Current()->CollectAllGarbageForTesting();
 
   ASSERT_TRUE(receive_stream);
 
@@ -1034,8 +1061,7 @@ TEST_F(QuicTransportTest, ReceiveStreamGarbageCollectionRemoteCloseReverse) {
 
   test::RunPendingTasks();
 
-  V8GCController::CollectAllGarbageForTesting(
-      scope.GetIsolate(), v8::EmbedderHeapTracer::EmbedderStackState::kEmpty);
+  ThreadState::Current()->CollectAllGarbageForTesting();
 
   ASSERT_TRUE(receive_stream);
 
@@ -1043,8 +1069,7 @@ TEST_F(QuicTransportTest, ReceiveStreamGarbageCollectionRemoteCloseReverse) {
 
   test::RunPendingTasks();
 
-  V8GCController::CollectAllGarbageForTesting(
-      scope.GetIsolate(), v8::EmbedderHeapTracer::EmbedderStackState::kEmpty);
+  ThreadState::Current()->CollectAllGarbageForTesting();
 
   EXPECT_FALSE(receive_stream);
 }
@@ -1101,8 +1126,8 @@ TEST_F(QuicTransportTest, CreateReceiveStream) {
   producer.reset();
   quic_transport->OnIncomingStreamClosed(/*stream_id=*/0, true);
 
-  auto* reader =
-      receive_stream->readable()->getReader(script_state, ASSERT_NO_EXCEPTION);
+  auto* reader = receive_stream->readable()->GetDefaultReaderForTesting(
+      script_state, ASSERT_NO_EXCEPTION);
   ScriptPromise read_promise = reader->read(script_state, ASSERT_NO_EXCEPTION);
   ScriptPromiseTester read_tester(script_state, read_promise);
   read_tester.WaitUntilSettled();
@@ -1118,7 +1143,7 @@ TEST_F(QuicTransportTest, CreateReceiveStream) {
       V8Uint8Array::ToImplWithTypeCheck(scope.GetIsolate(), value);
   ASSERT_TRUE(u8array);
   EXPECT_THAT(base::make_span(static_cast<uint8_t*>(u8array->Data()),
-                              u8array->byteLengthAsSizeT()),
+                              u8array->byteLength()),
               ElementsAre('w', 'h', 'a', 't'));
 }
 
@@ -1133,8 +1158,8 @@ TEST_F(QuicTransportTest, CreateReceiveStreamThenClose) {
 
   ReceiveStream* receive_stream = ReadReceiveStream(scope, quic_transport);
 
-  auto* reader =
-      receive_stream->readable()->getReader(script_state, ASSERT_NO_EXCEPTION);
+  auto* reader = receive_stream->readable()->GetDefaultReaderForTesting(
+      script_state, ASSERT_NO_EXCEPTION);
   ScriptPromise read_promise = reader->read(script_state, ASSERT_NO_EXCEPTION);
   ScriptPromiseTester read_tester(script_state, read_promise);
 
@@ -1164,8 +1189,8 @@ TEST_F(QuicTransportTest, CreateReceiveStreamThenRemoteClose) {
 
   ReceiveStream* receive_stream = ReadReceiveStream(scope, quic_transport);
 
-  auto* reader =
-      receive_stream->readable()->getReader(script_state, ASSERT_NO_EXCEPTION);
+  auto* reader = receive_stream->readable()->GetDefaultReaderForTesting(
+      script_state, ASSERT_NO_EXCEPTION);
   ScriptPromise read_promise = reader->read(script_state, ASSERT_NO_EXCEPTION);
   ScriptPromiseTester read_tester(script_state, read_promise);
 
@@ -1182,6 +1207,65 @@ TEST_F(QuicTransportTest, CreateReceiveStreamThenRemoteClose) {
   // TODO(ricea): Fix this message if possible.
   EXPECT_EQ(exception->message(),
             "The stream was aborted by the remote server");
+}
+
+// BidirectionalStreams are thoroughly tested in bidirectional_stream_test.cc.
+// Here we just test the QuicTransport APIs.
+TEST_F(QuicTransportTest, CreateBidirectionalStream) {
+  V8TestingScope scope;
+
+  auto* quic_transport =
+      CreateAndConnectSuccessfully(scope, "quic-transport://example.com");
+
+  EXPECT_CALL(
+      *mock_quic_transport_,
+      CreateStream(Truly(ValidConsumerHandle), Truly(ValidProducerHandle), _))
+      .WillOnce([](Unused, Unused,
+                   base::OnceCallback<void(bool, uint32_t)> callback) {
+        std::move(callback).Run(true, 0);
+      });
+
+  auto* script_state = scope.GetScriptState();
+  ScriptPromise bidirectional_stream_promise =
+      quic_transport->createBidirectionalStream(script_state,
+                                                ASSERT_NO_EXCEPTION);
+  ScriptPromiseTester tester(script_state, bidirectional_stream_promise);
+
+  tester.WaitUntilSettled();
+
+  EXPECT_TRUE(tester.IsFulfilled());
+  auto* bidirectional_stream = V8BidirectionalStream::ToImplWithTypeCheck(
+      scope.GetIsolate(), tester.Value().V8Value());
+  EXPECT_TRUE(bidirectional_stream);
+}
+
+TEST_F(QuicTransportTest, ReceiveBidirectionalStream) {
+  V8TestingScope scope;
+
+  auto* quic_transport =
+      CreateAndConnectSuccessfully(scope, "quic-transport://example.com");
+
+  mojo::ScopedDataPipeProducerHandle outgoing_producer;
+  mojo::ScopedDataPipeConsumerHandle outgoing_consumer;
+  ASSERT_TRUE(CreateDataPipeForWebTransportTests(&outgoing_producer,
+                                                 &outgoing_consumer));
+
+  mojo::ScopedDataPipeProducerHandle incoming_producer;
+  mojo::ScopedDataPipeConsumerHandle incoming_consumer;
+  ASSERT_TRUE(CreateDataPipeForWebTransportTests(&incoming_producer,
+                                                 &incoming_consumer));
+
+  std::move(pending_bidirectional_accept_callbacks_.front())
+      .Run(next_stream_id_++, std::move(incoming_consumer),
+           std::move(outgoing_producer));
+
+  ReadableStream* streams = quic_transport->receiveBidirectionalStreams();
+
+  v8::Local<v8::Value> v8value = ReadValueFromStream(scope, streams);
+
+  BidirectionalStream* bidirectional_stream =
+      V8BidirectionalStream::ToImplWithTypeCheck(scope.GetIsolate(), v8value);
+  EXPECT_TRUE(bidirectional_stream);
 }
 
 }  // namespace

@@ -29,36 +29,43 @@ using base::UserMetricsAction;
 namespace importer {
 
 void ShowImportLockDialog(gfx::NativeWindow parent,
-                          const base::Callback<void(bool)>& callback) {
-  ImportLockDialogView::Show(parent, callback);
+                          base::OnceCallback<void(bool)> callback) {
+  ImportLockDialogView::Show(parent, std::move(callback));
 }
 
 }  // namespace importer
 
 // static
 void ImportLockDialogView::Show(gfx::NativeWindow parent,
-                                const base::Callback<void(bool)>& callback) {
+                                base::OnceCallback<void(bool)> callback) {
   views::DialogDelegate::CreateDialogWidget(
-      new ImportLockDialogView(callback), NULL, NULL)->Show();
+      new ImportLockDialogView(std::move(callback)), nullptr, nullptr)
+      ->Show();
   base::RecordAction(UserMetricsAction("ImportLockDialogView_Shown"));
 }
 
 ImportLockDialogView::ImportLockDialogView(
-    const base::Callback<void(bool)>& callback)
-    : callback_(callback) {
-  DialogDelegate::SetButtonLabel(
-      ui::DIALOG_BUTTON_OK, l10n_util::GetStringUTF16(IDS_IMPORTER_LOCK_OK));
+    base::OnceCallback<void(bool)> callback)
+    : callback_(std::move(callback)) {
+  SetTitle(IDS_IMPORTER_LOCK_TITLE);
+
+  SetButtonLabel(ui::DIALOG_BUTTON_OK,
+                 l10n_util::GetStringUTF16(IDS_IMPORTER_LOCK_OK));
 
   auto done_callback = [](ImportLockDialogView* dialog, bool accepted) {
     if (dialog->callback_) {
       base::ThreadTaskRunnerHandle::Get()->PostTask(
-          FROM_HERE, base::BindOnce(dialog->callback_, accepted));
+          FROM_HERE, base::BindOnce(std::move(dialog->callback_), accepted));
     }
   };
-  DialogDelegate::SetAcceptCallback(
+  SetAcceptCallback(
       base::BindOnce(done_callback, base::Unretained(this), true));
-  DialogDelegate::SetCancelCallback(
+  SetCancelCallback(
       base::BindOnce(done_callback, base::Unretained(this), false));
+
+  SetShowCloseButton(false);
+  set_fixed_width(views::LayoutProvider::Get()->GetDistanceMetric(
+      views::DISTANCE_MODAL_DIALOG_PREFERRED_WIDTH));
 
   SetLayoutManager(std::make_unique<views::FillLayout>());
   views::Label* description_label =
@@ -72,19 +79,4 @@ ImportLockDialogView::ImportLockDialogView(
   chrome::RecordDialogCreation(chrome::DialogIdentifier::IMPORT_LOCK);
 }
 
-ImportLockDialogView::~ImportLockDialogView() {
-}
-
-gfx::Size ImportLockDialogView::CalculatePreferredSize() const {
-  const int width = ChromeLayoutProvider::Get()->GetDistanceMetric(
-      DISTANCE_MODAL_DIALOG_PREFERRED_WIDTH);
-  return gfx::Size(width, GetHeightForWidth(width));
-}
-
-base::string16 ImportLockDialogView::GetWindowTitle() const {
-  return l10n_util::GetStringUTF16(IDS_IMPORTER_LOCK_TITLE);
-}
-
-bool ImportLockDialogView::ShouldShowCloseButton() const {
-  return false;
-}
+ImportLockDialogView::~ImportLockDialogView() = default;

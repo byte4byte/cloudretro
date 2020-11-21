@@ -8,6 +8,7 @@
 #include "base/strings/stringprintf.h"
 #include "base/threading/thread_restrictions.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "extensions/browser/extension_host.h"
 #include "extensions/browser/process_manager.h"
@@ -45,7 +46,7 @@ class FileIFrameAPITest : public extensions::ExtensionBrowserTest {
     ASSERT_TRUE(background_host);
     content::RenderFrameHost* file_iframe = content::FrameMatchingPredicate(
         background_host->host_contents(),
-        base::Bind(&content::FrameMatchesName, "file_iframe"));
+        base::BindRepeating(&content::FrameMatchesName, "file_iframe"));
     bool is_file_url = file_iframe->GetLastCommittedURL() == GURL("file:///");
     EXPECT_EQ(expect_will_load_file_iframe, is_file_url)
         << "Unexpected committed url: "

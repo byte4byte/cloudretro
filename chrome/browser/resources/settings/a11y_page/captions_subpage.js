@@ -6,6 +6,7 @@
  * @fileoverview 'settings-captions' is a component for showing captions
  * settings subpage (chrome://settings/captions).
  */
+
 (function() {
 
 Polymer({
@@ -33,7 +34,7 @@ Polymer({
       value() {
         return [
           {
-            value: 100, // Default
+            value: 100,  // Default
             name: loadTimeData.getString('captionsOpacityOpaque')
           },
           {
@@ -57,30 +58,18 @@ Polymer({
       type: Array,
       value() {
         return [
-          {
-            value: '',
-            name: loadTimeData.getString('captionsDefaultSetting')
-          },
-          {
-            value: '0,0,0',
-            name: loadTimeData.getString('captionsColorBlack')
-          },
+          {value: '', name: loadTimeData.getString('captionsDefaultSetting')},
+          {value: '0,0,0', name: loadTimeData.getString('captionsColorBlack')},
           {
             value: '255,255,255',
             name: loadTimeData.getString('captionsColorWhite')
           },
-          {
-            value: '255,0,0',
-            name: loadTimeData.getString('captionsColorRed')
-          },
+          {value: '255,0,0', name: loadTimeData.getString('captionsColorRed')},
           {
             value: '0,255,0',
             name: loadTimeData.getString('captionsColorGreen')
           },
-          {
-            value: '0,0,255',
-            name: loadTimeData.getString('captionsColorBlue')
-          },
+          {value: '0,0,255', name: loadTimeData.getString('captionsColorBlue')},
           {
             value: '255,255,0',
             name: loadTimeData.getString('captionsColorYellow')
@@ -99,7 +88,8 @@ Polymer({
 
     /**
      * List of fonts populated by the fonts browser proxy.
-     * @private {!DropdownMenuOptionList} */
+     * @private {!DropdownMenuOptionList}
+     */
     textFontOptions_: Object,
 
     /**
@@ -112,7 +102,7 @@ Polymer({
       value() {
         return [
           {
-            value: 100, // Default
+            value: 100,  // Default
             name: loadTimeData.getString('captionsOpacityOpaque')
           },
           {
@@ -169,11 +159,33 @@ Polymer({
         return [
           {value: '25%', name: loadTimeData.getString('verySmall')},
           {value: '50%', name: loadTimeData.getString('small')},
-          {value: '', name: loadTimeData.getString('medium')}, // Default = 100%
+          {
+            value: '',
+            name: loadTimeData.getString('medium')
+          },  // Default = 100%
           {value: '150%', name: loadTimeData.getString('large')},
           {value: '200%', name: loadTimeData.getString('veryLarge')},
         ];
       },
+    },
+
+    /** @private */
+    enableLiveCaption_: {
+      type: Boolean,
+      value: function() {
+        return loadTimeData.getBoolean('enableLiveCaption');
+      },
+    },
+
+    /**
+     * The subtitle to display under the Live Caption heading. Generally, this
+     * is a generic subtitle describing the feature. While the SODA model is
+     * being downloading, this displays the download progress.
+     * @private
+     */
+    enableLiveCaptionSubtitle_: {
+      type: String,
+      value: loadTimeData.getString('captionsEnableLiveCaptionSubtitle'),
     },
   },
 
@@ -188,6 +200,11 @@ Polymer({
   /** @override */
   ready() {
     this.browserProxy_.fetchFontsData().then(this.setFontsData_.bind(this));
+
+    this.addWebUIListener(
+        'enable-live-caption-subtitle-changed',
+        this.onEnableLiveCaptionSubtitleChanged_.bind(this));
+    chrome.send('captionsSubpageReady');
   },
 
   /**
@@ -238,8 +255,8 @@ Polymer({
    */
   computeTextColor_() {
     const textColor = this.formatRGAString_(
-      'accessibility.captions.text_color',
-      'accessibility.captions.text_opacity');
+        'accessibility.captions.text_color',
+        'accessibility.captions.text_opacity');
 
     // Return the preference value or the default text color for
     // video::-webkit-media-text-track-container defined in mediaControls.css.
@@ -272,11 +289,30 @@ Polymer({
    * @private
    */
   computePadding_(size) {
-    if (size == '') {
+    if (size === '') {
       return '1%';
     }
 
-    return `${+size.slice(0, -1) / 100}%`;
-  }
+    return `${+ size.slice(0, -1) / 100}%`;
+  },
+
+  /**
+   * @param {!Event} event
+   * @private
+   */
+  onA11yLiveCaptionChange_(event) {
+    const a11yLiveCaptionOn = event.target.checked;
+    chrome.metricsPrivate.recordBoolean(
+        'Accessibility.LiveCaption.EnableFromSettings', a11yLiveCaptionOn);
+  },
+
+  /**
+   * @private
+   * @param {!string} enableLiveCaptionSubtitle The message sent from the webui
+   *     to be displayed as a subtitle to Live Captions.
+   */
+  onEnableLiveCaptionSubtitleChanged_(enableLiveCaptionSubtitle) {
+    this.enableLiveCaptionSubtitle_ = enableLiveCaptionSubtitle;
+  },
 });
 })();

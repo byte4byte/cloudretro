@@ -102,25 +102,24 @@ ChooserBubbleUiViewDelegate::ChooserBubbleUiViewDelegate(
   // | Get help                         |
   // ------------------------------------
 
-  DialogDelegate::SetButtonLabel(ui::DIALOG_BUTTON_OK,
-                                   chooser_controller->GetOkButtonLabel());
-  DialogDelegate::SetButtonLabel(ui::DIALOG_BUTTON_CANCEL,
-                                   chooser_controller->GetCancelButtonLabel());
+  SetButtonLabel(ui::DIALOG_BUTTON_OK, chooser_controller->GetOkButtonLabel());
+  SetButtonLabel(ui::DIALOG_BUTTON_CANCEL,
+                 chooser_controller->GetCancelButtonLabel());
 
   SetLayoutManager(std::make_unique<views::FillLayout>());
   device_chooser_content_view_ =
       new DeviceChooserContentView(this, std::move(chooser_controller));
   AddChildView(device_chooser_content_view_);
 
-  DialogDelegate::SetExtraView(device_chooser_content_view_->CreateExtraView());
+  SetExtraView(device_chooser_content_view_->CreateExtraView());
 
-  DialogDelegate::SetAcceptCallback(
+  SetAcceptCallback(
       base::BindOnce(&DeviceChooserContentView::Accept,
                      base::Unretained(device_chooser_content_view_)));
-  DialogDelegate::SetCancelCallback(
+  SetCancelCallback(
       base::BindOnce(&DeviceChooserContentView::Cancel,
                      base::Unretained(device_chooser_content_view_)));
-  DialogDelegate::SetCloseCallback(
+  SetCloseCallback(
       base::BindOnce(&DeviceChooserContentView::Close,
                      base::Unretained(device_chooser_content_view_)));
 
@@ -185,6 +184,9 @@ base::OnceClosure ShowDeviceChooserDialog(
   if (!browser)
     return base::DoNothing();
 
+  if (browser->tab_strip_model()->GetActiveWebContents() != contents)
+    return base::DoNothing();
+
   auto bubble = std::make_unique<ChooserBubbleUiViewDelegate>(
       browser, contents, std::move(controller));
 
@@ -194,10 +196,11 @@ base::OnceClosure ShowDeviceChooserDialog(
   gfx::NativeView parent = parent_widget->GetNativeView();
   DCHECK(parent);
   bubble->set_parent_window(parent);
+  bubble->UpdateAnchor(browser);
 
   base::OnceClosure close_closure = bubble->MakeCloseClosure();
   views::Widget* widget =
-      views::BubbleDialogDelegateView::CreateBubble(bubble.release());
+      views::BubbleDialogDelegateView::CreateBubble(std::move(bubble));
   if (browser->window()->IsActive())
     widget->Show();
   else

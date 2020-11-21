@@ -20,7 +20,10 @@ MockQuotaManagerProxy::MockQuotaManagerProxy(
       last_notified_delta_(0),
       registered_client_(nullptr) {}
 
-void MockQuotaManagerProxy::RegisterClient(scoped_refptr<QuotaClient> client) {
+void MockQuotaManagerProxy::RegisterClient(
+    scoped_refptr<QuotaClient> client,
+    QuotaClientType client_type,
+    const std::vector<blink::mojom::StorageType>& storage_types) {
   DCHECK(!registered_client_);
   registered_client_ = std::move(client);
 }
@@ -53,7 +56,7 @@ void MockQuotaManagerProxy::NotifyStorageAccessed(
 }
 
 void MockQuotaManagerProxy::NotifyStorageModified(
-    QuotaClient::ID client_id,
+    storage::QuotaClientType client_id,
     const url::Origin& origin,
     blink::mojom::StorageType type,
     int64_t delta) {

@@ -60,6 +60,12 @@ const char* AutocompleteProvider::TypeToString(Type type) {
       return "ZeroSuggest";
     case TYPE_ZERO_SUGGEST_LOCAL_HISTORY:
       return "LocalHistoryZeroSuggest";
+    case TYPE_QUERY_TILE:
+      return "QueryTile";
+    case TYPE_MOST_VISITED_SITES:
+      return "MostVisitedSites";
+    case TYPE_VERBATIM_MATCH:
+      return "VerbatimMatch";
     default:
       NOTREACHED() << "Unhandled AutocompleteProvider::Type " << type;
       return "Unknown";
@@ -130,6 +136,12 @@ metrics::OmniboxEventProto_ProviderType AutocompleteProvider::
       return metrics::OmniboxEventProto::ZERO_SUGGEST;
     case TYPE_ZERO_SUGGEST_LOCAL_HISTORY:
       return metrics::OmniboxEventProto::ZERO_SUGGEST_LOCAL_HISTORY;
+    case TYPE_QUERY_TILE:
+      return metrics::OmniboxEventProto::QUERY_TILE;
+    case TYPE_MOST_VISITED_SITES:
+      return metrics::OmniboxEventProto::ZERO_SUGGEST;
+    case TYPE_VERBATIM_MATCH:
+      return metrics::OmniboxEventProto::ZERO_SUGGEST;
     default:
       NOTREACHED() << "Unhandled AutocompleteProvider::Type " << type_;
       return metrics::OmniboxEventProto::UNKNOWN_PROVIDER;

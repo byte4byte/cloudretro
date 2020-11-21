@@ -13,7 +13,7 @@
 
 #include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "content/public/test/browser_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/metrics_proto/sampled_profile.pb.h"
@@ -210,6 +210,29 @@ TEST_F(MetricProviderTest, OnSessionRestoreDone) {
   EXPECT_FALSE(profile.has_ms_after_resume());
   EXPECT_TRUE(profile.has_ms_after_login());
   EXPECT_TRUE(profile.has_ms_after_boot());
+}
+
+TEST_F(MetricProviderTest, EnableAndDisableRecording) {
+  metric_provider_->OnUserLoggedIn();
+
+  // Upon disabling recording, we would expect no cached profiles after a
+  // profiling interval.
+  metric_provider_->DisableRecording();
+  task_environment_.FastForwardBy(kPeriodicCollectionInterval);
+
+  std::vector<SampledProfile> stored_profiles;
+  EXPECT_FALSE(metric_provider_->GetSampledProfiles(&stored_profiles));
+  EXPECT_TRUE(stored_profiles.empty());
+
+  // Upon enabling recording, we would find a cached PERIODIC_COLLECTION profile
+  // after a profiling interval.
+  metric_provider_->EnableRecording();
+  task_environment_.FastForwardBy(kPeriodicCollectionInterval);
+
+  EXPECT_TRUE(metric_provider_->GetSampledProfiles(&stored_profiles));
+  EXPECT_EQ(stored_profiles.size(), 1u);
+  EXPECT_EQ(SampledProfile::PERIODIC_COLLECTION,
+            stored_profiles[0].trigger_event());
 }
 
 }  // namespace metrics

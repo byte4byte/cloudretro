@@ -16,6 +16,7 @@
 // TODO(katie): This may need to move into Content as part of the TTS refactor.
 
 namespace chromeos {
+namespace test {
 
 struct SpeechMonitorUtterance {
   SpeechMonitorUtterance(std::string text_, std::string lang_)
@@ -70,7 +71,8 @@ class SpeechMonitor : public content::TtsPlatform {
   typedef std::pair<std::function<bool()>, std::string> ReplayArgs;
 
   // TtsPlatform implementation.
-  bool PlatformImplAvailable() override;
+  bool PlatformImplSupported() override;
+  bool PlatformImplInitialized() override;
   void Speak(int utterance_id,
              const std::string& utterance,
              const std::string& lang,
@@ -89,6 +91,7 @@ class SpeechMonitor : public content::TtsPlatform {
   std::string GetError() override;
   void ClearError() override;
   void SetError(const std::string& error) override;
+  void Shutdown() override;
 
   void MaybeContinueReplay();
   void MaybePrintExpectations();
@@ -127,6 +130,7 @@ class SpeechMonitor : public content::TtsPlatform {
   DISALLOW_COPY_AND_ASSIGN(SpeechMonitor);
 };
 
+}  // namespace test
 }  // namespace chromeos
 
 #endif  // CHROME_BROWSER_CHROMEOS_ACCESSIBILITY_SPEECH_MONITOR_H_

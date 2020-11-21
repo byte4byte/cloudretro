@@ -11,7 +11,6 @@ import android.text.Selection;
 import android.text.SpannableStringBuilder;
 import android.text.TextWatcher;
 
-import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
@@ -22,7 +21,7 @@ import org.mockito.MockitoAnnotations;
 import org.robolectric.RuntimeEnvironment;
 import org.robolectric.annotation.Config;
 
-import org.chromium.base.metrics.RecordHistogram;
+import org.chromium.base.Callback;
 import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.components.omnibox.OmniboxUrlEmphasizer;
 import org.chromium.components.omnibox.OmniboxUrlEmphasizer.UrlEmphasisColorSpan;
@@ -44,27 +43,23 @@ public class UrlBarMediatorUnitTest {
     TextWatcher mMockTextWatcher;
     @Mock
     TextWatcher mAnotherMockTextWatcher;
+    @Mock
+    Callback<Boolean> mFocusChangeCallback;
 
     PropertyModel mModel;
     UrlBarMediator mMediator;
 
     @Before
     public void setUp() {
-        RecordHistogram.setDisabledForTests(true);
         MockitoAnnotations.initMocks(this);
 
         mModel = new PropertyModel(UrlBarProperties.ALL_KEYS);
-        mMediator = new UrlBarMediator(mModel) {
+        mMediator = new UrlBarMediator(mModel, mFocusChangeCallback) {
             @Override
             protected String sanitizeTextForPaste(String text) {
                 return text.trim();
             }
         };
-    }
-
-    @After
-    public void tearDown() {
-        RecordHistogram.setDisabledForTests(false);
     }
 
     @Test

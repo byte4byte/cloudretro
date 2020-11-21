@@ -14,7 +14,7 @@
 #include "base/observer_list.h"
 #include "base/optional.h"
 #include "chromeos/services/assistant/assistant_manager_service.h"
-#include "chromeos/services/assistant/fake_assistant_settings_manager_impl.h"
+#include "chromeos/services/assistant/fake_assistant_settings_impl.h"
 
 namespace chromeos {
 namespace assistant {
@@ -42,7 +42,7 @@ class COMPONENT_EXPORT(ASSISTANT_SERVICE) FakeAssistantManagerServiceImpl
   void SetArcPlayStoreEnabled(bool enabled) override;
   void SetAssistantContextEnabled(bool enable) override;
   State GetState() const override;
-  AssistantSettingsManager* GetAssistantSettingsManager() override;
+  AssistantSettings* GetAssistantSettings() override;
   void AddCommunicationErrorObserver(
       CommunicationErrorObserver* observer) override {}
   void RemoveCommunicationErrorObserver(
@@ -52,31 +52,30 @@ class COMPONENT_EXPORT(ASSISTANT_SERVICE) FakeAssistantManagerServiceImpl
   void SyncDeviceAppsStatus() override {}
   void UpdateInternalMediaPlayerStatus(MediaSessionAction action) override;
 
-  // mojom::Assistant overrides:
+  // Assistant overrides:
   void StartEditReminderInteraction(const std::string& client_id) override;
   void StartScreenContextInteraction(
       ax::mojom::AssistantStructurePtr assistant_structure,
       const std::vector<uint8_t>& assistant_screenshot) override;
   void StartTextInteraction(const std::string& query,
-                            mojom::AssistantQuerySource source,
+                            AssistantQuerySource source,
                             bool allow_tts) override;
   void StartVoiceInteraction() override;
-  void StartWarmerWelcomeInteraction(int num_warmer_welcome_triggered,
-                                     bool allow_tts) override;
   void StopActiveInteraction(bool cancel_conversation) override;
   void AddAssistantInteractionSubscriber(
-      mojo::PendingRemote<mojom::AssistantInteractionSubscriber> subscriber)
-      override;
-  void RetrieveNotification(mojom::AssistantNotificationPtr notification,
+      AssistantInteractionSubscriber* subscriber) override;
+  void RemoveAssistantInteractionSubscriber(
+      AssistantInteractionSubscriber* subscriber) override;
+  void RetrieveNotification(const AssistantNotification& notification,
                             int action_index) override;
-  void DismissNotification(
-      mojom::AssistantNotificationPtr notification) override;
+  void DismissNotification(const AssistantNotification& notification) override;
   void OnAccessibilityStatusChanged(bool spoken_feedback_enabled) override;
-  void SendAssistantFeedback(mojom::AssistantFeedbackPtr feedback) override;
-  void NotifyEntryIntoAssistantUi(
-      mojom::AssistantEntryPoint entry_point) override;
+  void SendAssistantFeedback(const AssistantFeedback& feedback) override;
+  void NotifyEntryIntoAssistantUi(AssistantEntryPoint entry_point) override;
   void AddTimeToTimer(const std::string& id, base::TimeDelta duration) override;
-  void RemoveAlarmTimer(const std::string& id) override;
+  void PauseTimer(const std::string& id) override;
+  void RemoveAlarmOrTimer(const std::string& id) override;
+  void ResumeTimer(const std::string& id) override;
 
   // Update the state to the corresponding value, and inform the
   // |AssistantStateObserver| of the change.
@@ -98,7 +97,7 @@ class COMPONENT_EXPORT(ASSISTANT_SERVICE) FakeAssistantManagerServiceImpl
   State state_ = State::STOPPED;
   base::Optional<std::string> gaia_id_;
   base::Optional<std::string> access_token_;
-  FakeAssistantSettingsManagerImpl assistant_settings_manager_;
+  FakeAssistantSettingsImpl assistant_settings_;
   base::ObserverList<StateObserver> state_observers_;
   MediaSessionAction action_ = MediaSessionAction::kPause;
 

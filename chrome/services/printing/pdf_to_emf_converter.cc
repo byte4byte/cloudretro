@@ -15,6 +15,7 @@
 #include "mojo/public/cpp/bindings/remote.h"
 #include "pdf/pdf.h"
 #include "printing/emf_win.h"
+#include "printing/mojom/print.mojom.h"
 #include "ui/gfx/gdi_util.h"
 
 namespace printing {
@@ -80,8 +81,12 @@ PdfToEmfConverter::PdfToEmfConverter(
 PdfToEmfConverter::~PdfToEmfConverter() = default;
 
 void PdfToEmfConverter::SetPrintMode() {
-  chrome_pdf::SetPDFUseGDIPrinting(pdf_render_settings_.mode ==
-                                   PdfRenderSettings::Mode::GDI_TEXT);
+  bool use_gdi_printing =
+      pdf_render_settings_.mode == PdfRenderSettings::Mode::GDI_TEXT ||
+      pdf_render_settings_.mode ==
+          PdfRenderSettings::Mode::EMF_WITH_REDUCED_RASTERIZATION_AND_GDI_TEXT;
+  chrome_pdf::SetPDFUseGDIPrinting(use_gdi_printing);
+
   int printing_mode;
   switch (pdf_render_settings_.mode) {
     case PdfRenderSettings::Mode::TEXTONLY:
@@ -93,8 +98,11 @@ void PdfToEmfConverter::SetPrintMode() {
     case PdfRenderSettings::Mode::POSTSCRIPT_LEVEL3:
       printing_mode = chrome_pdf::PrintingMode::kPostScript3;
       break;
+    case PdfRenderSettings::Mode::EMF_WITH_REDUCED_RASTERIZATION:
+    case PdfRenderSettings::Mode::EMF_WITH_REDUCED_RASTERIZATION_AND_GDI_TEXT:
+      printing_mode = chrome_pdf::PrintingMode::kEmfWithReducedRasterization;
+      break;
     default:
-      // Not using postscript or text only.
       printing_mode = chrome_pdf::PrintingMode::kEmf;
   }
   chrome_pdf::SetPDFUsePrintMode(printing_mode);
@@ -149,7 +157,8 @@ base::ReadOnlySharedMemoryRegion PdfToEmfConverter::RenderPdfPageToMetafile(
 
   // The underlying metafile is of type Emf and ignores the arguments passed
   // to StartPage().
-  metafile.StartPage(gfx::Size(), gfx::Rect(), 1);
+  metafile.StartPage(gfx::Size(), gfx::Rect(), 1,
+                     mojom::PageOrientation::kUpright);
   int offset_x = postscript ? pdf_render_settings_.offsets.x() : 0;
   int offset_y = postscript ? pdf_render_settings_.offsets.y() : 0;
 

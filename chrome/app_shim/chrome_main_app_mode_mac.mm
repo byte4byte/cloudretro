@@ -12,10 +12,10 @@
 
 #include "base/at_exit.h"
 #include "base/bind.h"
+#include "base/check.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
-#include "base/logging.h"
 #include "base/mac/bundle_locations.h"
 #include "base/mac/mac_logging.h"
 #include "base/macros.h"
@@ -62,12 +62,6 @@ __attribute__((visibility("default"))) int APP_SHIM_ENTRY_POINT_NAME(
     const app_mode::ChromeAppModeInfo* info);
 
 }  // extern "C"
-
-void PostRepeatingDelayedTask() {
-  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-      FROM_HERE, base::BindOnce(&PostRepeatingDelayedTask),
-      base::TimeDelta::FromDays(1));
-}
 
 int APP_SHIM_ENTRY_POINT_NAME(const app_mode::ChromeAppModeInfo* info) {
   base::CommandLine::Init(info->argc, info->argv);
@@ -141,14 +135,6 @@ int APP_SHIM_ENTRY_POINT_NAME(const app_mode::ChromeAppModeInfo* info) {
         base::MessagePumpType::UI);
     ui::WindowResizeHelperMac::Get()->Init(main_task_executor.task_runner());
     base::PlatformThread::SetName("CrAppShimMain");
-
-    // TODO(https://crbug.com/925998): This workaround ensures that there is
-    // always delayed work enqueued. If there is ever not enqueued delayed work,
-    // then NSMenus and NSAlerts can start misbehaving (see
-    // https://crbug.com/920795 for examples). This workaround is not an
-    // appropriate solution to the problem, and should be replaced by a fix in
-    // the relevant message pump code.
-    PostRepeatingDelayedTask();
 
     AppShimController::Params controller_params;
     // Note that |info->user_data_dir| for shims contains the app data path,

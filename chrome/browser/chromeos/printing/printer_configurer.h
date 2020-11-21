@@ -28,14 +28,20 @@ enum PrinterSetupResult {
   kNativePrintersNotAllowed = 4,  // Tried adding/editing printers policy set
   kInvalidPrinterUpdate = 5,      // Tried updating printer with invalid values
   kComponentUnavailable = 6,      // Could not install component
-  kEditSuccess = 7,               // Printer editted successfully
-  // Space left for additional errors
+  kEditSuccess = 7,               // Printer edited successfully
+  kPrinterSentWrongResponse = 8,  // Printer sent unexpected response
+  kPrinterIsNotAutoconfigurable = 9,  // Printer requires PPD
 
   // PPD errors
   kPpdTooLarge = 10,       // PPD exceeds size limit
   kInvalidPpd = 11,        // PPD rejected by cupstestppd
   kPpdNotFound = 12,       // Could not find PPD
   kPpdUnretrievable = 13,  // Could not download PPD
+
+  // Other errors
+  kIoError = 14,                // I/O error in CUPS
+  kMemoryAllocationError = 15,  // Memory allocation error in Cups
+  kBadUri = 16,                 // Printer's URI is incorrect
   // Space left for additional errors
 
   // Specific DBus errors. This must stay in sync with the DbusLibraryError
@@ -53,17 +59,6 @@ enum class UsbPrinterSetupSource {
   kPrintPreview = 1,    // USB printer installed via Print Preview.
   kAutoconfigured = 2,  // USB printer installed automatically.
   kMaxValue = kAutoconfigured,
-};
-
-// These values are persisted to logs. Entries should not be renumbered and
-// numeric values should never be reused.
-enum class PrinterSetupSource {
-  kPrintPreview = 0,       // Printer was setup from Print Preview.
-  kSettings = 1,           // Printer was setup from Settings.
-  kAutoUsbConfigurer = 2,  // Printer was setup by automatic USB configurer.
-  kArcPrintService = 3,    // Printer was setup by arc print service.
-  kExtensionApi = 4,       // Printer was setup via Extensions API.
-  kMaxValue = kExtensionApi,
 };
 
 using PrinterSetupCallback = base::OnceCallback<void(PrinterSetupResult)>;
@@ -106,8 +101,8 @@ class PrinterConfigurer {
   DISALLOW_COPY_AND_ASSIGN(PrinterConfigurer);
 };
 
-// Stream operator for ease of logging |result|.
-std::ostream& operator<<(std::ostream& out, const PrinterSetupResult& result);
+// Return a message for |result| that can be used in device-log.
+std::string ResultCodeToMessage(const PrinterSetupResult result);
 
 }  // namespace chromeos
 

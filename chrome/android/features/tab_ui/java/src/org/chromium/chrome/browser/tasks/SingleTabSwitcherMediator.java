@@ -10,62 +10,75 @@ import static org.chromium.chrome.browser.tasks.SingleTabViewProperties.IS_VISIB
 import static org.chromium.chrome.browser.tasks.SingleTabViewProperties.TITLE;
 
 import android.graphics.drawable.Drawable;
-import android.view.View;
+import android.os.SystemClock;
+
+import androidx.annotation.VisibleForTesting;
 
 import org.chromium.base.ObserverList;
-import org.chromium.chrome.browser.compositor.layouts.LayoutManager;
+import org.chromium.base.StrictModeContext;
+import org.chromium.base.metrics.RecordUserAction;
+import org.chromium.chrome.browser.compositor.layouts.LayoutManagerImpl;
+import org.chromium.chrome.browser.flags.CachedFeatureFlags;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.tabmodel.EmptyTabModelObserver;
+import org.chromium.chrome.browser.tab.TabSelectionType;
 import org.chromium.chrome.browser.tabmodel.EmptyTabModelSelectorObserver;
 import org.chromium.chrome.browser.tabmodel.TabList;
 import org.chromium.chrome.browser.tabmodel.TabModel;
 import org.chromium.chrome.browser.tabmodel.TabModelObserver;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.browser.tabmodel.TabModelSelectorObserver;
+import org.chromium.chrome.browser.tasks.pseudotab.PseudoTab;
 import org.chromium.chrome.browser.tasks.tab_management.TabListFaviconProvider;
 import org.chromium.chrome.browser.tasks.tab_management.TabSwitcher;
+import org.chromium.chrome.browser.tasks.tab_management.TabUiFeatureUtilities;
+import org.chromium.chrome.features.start_surface.StartSurfaceConfiguration;
 import org.chromium.ui.modelutil.PropertyModel;
 
 /** Mediator of the single tab tab switcher. */
-class SingleTabSwitcherMediator implements TabSwitcher.Controller {
+public class SingleTabSwitcherMediator implements TabSwitcher.Controller {
+    @VisibleForTesting
+    public static final String SINGLE_TAB_TITLE_AVAILABLE_TIME_UMA = "SingleTabTitleAvailableTime";
+
     private final ObserverList<TabSwitcher.OverviewModeObserver> mObservers = new ObserverList<>();
     private final TabModelSelector mTabModelSelector;
     private final PropertyModel mPropertyModel;
-    private final TabModel mNormalTabModel;
     private final TabListFaviconProvider mTabListFaviconProvider;
     private final TabModelObserver mNormalTabModelObserver;
     private final TabModelSelectorObserver mTabModelSelectorObserver;
     private TabSwitcher.OnTabSelectingListener mTabSelectingListener;
     private boolean mShouldIgnoreNextSelect;
+    private boolean mSelectedTabDidNotChangedAfterShown;
+    private boolean mAddNormalTabModelObserverPending;
+    private Long mTabTitleAvailableTime;
+    private boolean mFaviconInitialized;
 
     SingleTabSwitcherMediator(PropertyModel propertyModel, TabModelSelector tabModelSelector,
             TabListFaviconProvider tabListFaviconProvider) {
         mTabModelSelector = tabModelSelector;
         mPropertyModel = propertyModel;
-        mNormalTabModel = mTabModelSelector.getModel(false);
         mTabListFaviconProvider = tabListFaviconProvider;
 
         mPropertyModel.set(FAVICON, mTabListFaviconProvider.getDefaultFaviconDrawable(false));
-        mPropertyModel.set(CLICK_LISTENER, new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                if (mTabSelectingListener != null
-                        && mNormalTabModel.index() != TabList.INVALID_TAB_INDEX) {
-                    mTabSelectingListener.onTabSelecting(LayoutManager.time(),
-                            mNormalTabModel.getTabAt(mNormalTabModel.index()).getId());
-                }
+        mPropertyModel.set(CLICK_LISTENER, v -> {
+            if (mTabSelectingListener != null
+                    && mTabModelSelector.getCurrentTabId() != TabList.INVALID_TAB_INDEX) {
+                selectTheCurrentTab();
             }
         });
 
-        mNormalTabModelObserver = new EmptyTabModelObserver() {
+        mNormalTabModelObserver = new TabModelObserver() {
             @Override
             public void didSelectTab(Tab tab, int type, int lastId) {
                 assert overviewVisible();
-                if (mShouldIgnoreNextSelect) {
+
+                mSelectedTabDidNotChangedAfterShown = false;
+                updateSelectedTab(tab);
+                if (type == TabSelectionType.FROM_CLOSE || mShouldIgnoreNextSelect) {
                     mShouldIgnoreNextSelect = false;
                     return;
                 }
-                mTabSelectingListener.onTabSelecting(LayoutManager.time(), tab.getId());
+                mTabSelectingListener.onTabSelecting(LayoutManagerImpl.time(), tab.getId());
             }
         };
         mTabModelSelectorObserver = new EmptyTabModelSelectorObserver() {
@@ -73,7 +86,53 @@ class SingleTabSwitcherMediator implements TabSwitcher.Controller {
             public void onTabModelSelected(TabModel newModel, TabModel oldModel) {
                 if (!newModel.isIncognito()) mShouldIgnoreNextSelect = true;
             }
+
+            @Override
+            public void onTabStateInitialized() {
+                TabModel normalTabModel = mTabModelSelector.getModel(false);
+                if (mAddNormalTabModelObserverPending) {
+                    mAddNormalTabModelObserverPending = false;
+                    normalTabModel.addObserver(mNormalTabModelObserver);
+                }
+
+                int selectedTabIndex = normalTabModel.index();
+                if (selectedTabIndex != TabList.INVALID_TAB_INDEX) {
+                    assert normalTabModel.getCount() > 0;
+
+                    Tab tab = normalTabModel.getTabAt(selectedTabIndex);
+                    mPropertyModel.set(TITLE, tab.getTitle());
+                    if (mTabTitleAvailableTime == null) {
+                        mTabTitleAvailableTime = SystemClock.elapsedRealtime();
+                    }
+                    // Favicon should be updated here unless mTabListFaviconProvider hasn't been
+                    // initialized yet.
+                    assert !mFaviconInitialized;
+                    if (mTabListFaviconProvider.isInitialized()) {
+                        mFaviconInitialized = true;
+                        updateFavicon(tab);
+                    }
+                }
+            }
         };
+    }
+
+    void initWithNative() {
+        if (mFaviconInitialized || !mTabModelSelector.isTabStateInitialized()) return;
+
+        TabModel normalTabModel = mTabModelSelector.getModel(false);
+        int selectedTabIndex = normalTabModel.index();
+        if (selectedTabIndex != TabList.INVALID_TAB_INDEX) {
+            assert normalTabModel.getCount() > 0;
+            Tab tab = normalTabModel.getTabAt(selectedTabIndex);
+            updateFavicon(tab);
+            mFaviconInitialized = true;
+        }
+    }
+
+    private void updateFavicon(Tab tab) {
+        assert mTabListFaviconProvider.isInitialized();
+        mTabListFaviconProvider.getFaviconForUrlAsync(tab.getUrlString(), false,
+                (Drawable favicon) -> { mPropertyModel.set(FAVICON, favicon); });
     }
 
     void setOnTabSelectingListener(TabSwitcher.OnTabSelectingListener listener) {
@@ -99,7 +158,7 @@ class SingleTabSwitcherMediator implements TabSwitcher.Controller {
     @Override
     public void hideOverview(boolean animate) {
         mShouldIgnoreNextSelect = false;
-        mNormalTabModel.removeObserver(mNormalTabModelObserver);
+        mTabModelSelector.getModel(false).removeObserver(mNormalTabModelObserver);
         mTabModelSelector.removeObserver(mTabModelSelectorObserver);
 
         mPropertyModel.set(IS_VISIBLE, false);
@@ -116,17 +175,35 @@ class SingleTabSwitcherMediator implements TabSwitcher.Controller {
 
     @Override
     public void showOverview(boolean animate) {
-        mNormalTabModel.addObserver(mNormalTabModelObserver);
+        mSelectedTabDidNotChangedAfterShown = true;
         mTabModelSelector.addObserver(mTabModelSelectorObserver);
 
-        int selectedTabIndex = mNormalTabModel.index();
-        if (selectedTabIndex != TabList.INVALID_TAB_INDEX) {
-            assert mNormalTabModel.getCount() > 0;
+        if (CachedFeatureFlags.isEnabled(ChromeFeatureList.INSTANT_START)
+                && !mTabModelSelector.isTabStateInitialized()) {
+            mAddNormalTabModelObserverPending = true;
 
-            Tab tab = mNormalTabModel.getTabAt(selectedTabIndex);
-            mPropertyModel.set(TITLE, tab.getTitle());
-            mTabListFaviconProvider.getFaviconForUrlAsync(tab.getUrlString(), false,
-                    (Drawable favicon) -> { mPropertyModel.set(FAVICON, favicon); });
+            PseudoTab activeTab;
+            try (StrictModeContext ignored = StrictModeContext.allowDiskReads()) {
+                activeTab = PseudoTab.getActiveTabFromStateFile();
+            }
+            if (activeTab != null) {
+                mPropertyModel.set(TITLE, activeTab.getTitle());
+                if (mTabTitleAvailableTime == null) {
+                    mTabTitleAvailableTime = SystemClock.elapsedRealtime();
+                }
+            }
+        } else {
+            TabModel normalTabModel = mTabModelSelector.getModel(false);
+            normalTabModel.addObserver(mNormalTabModelObserver);
+
+            int selectedTabIndex = normalTabModel.index();
+            if (selectedTabIndex != TabList.INVALID_TAB_INDEX) {
+                assert normalTabModel.getCount() > 0;
+                updateSelectedTab(normalTabModel.getTabAt(selectedTabIndex));
+                if (mTabTitleAvailableTime == null) {
+                    mTabTitleAvailableTime = SystemClock.elapsedRealtime();
+                }
+            }
         }
         mPropertyModel.set(IS_VISIBLE, true);
 
@@ -140,9 +217,38 @@ class SingleTabSwitcherMediator implements TabSwitcher.Controller {
 
     @Override
     public boolean onBackPressed() {
+        if (overviewVisible() && !mTabModelSelector.isIncognitoSelected()
+                && mTabModelSelector.getCurrentTabId() != TabList.INVALID_TAB_INDEX) {
+            selectTheCurrentTab();
+            return true;
+        }
         return false;
     }
 
     @Override
     public void enableRecordingFirstMeaningfulPaint(long activityCreateTimeMs) {}
+
+    @Override
+    public void onOverviewShownAtLaunch(long activityCreationTimeMs) {
+        if (mTabTitleAvailableTime == null) return;
+
+        StartSurfaceConfiguration.recordHistogram(SINGLE_TAB_TITLE_AVAILABLE_TIME_UMA,
+                mTabTitleAvailableTime - activityCreationTimeMs,
+                TabUiFeatureUtilities.supportInstantStart(false));
+    }
+
+    private void updateSelectedTab(Tab tab) {
+        mPropertyModel.set(TITLE, tab.getTitle());
+        mTabListFaviconProvider.getFaviconForUrlAsync(tab.getUrlString(), false,
+                (Drawable favicon) -> { mPropertyModel.set(FAVICON, favicon); });
+    }
+
+    private void selectTheCurrentTab() {
+        assert !mTabModelSelector.isIncognitoSelected();
+        if (mSelectedTabDidNotChangedAfterShown) {
+            RecordUserAction.record("MobileTabReturnedToCurrentTab.SingleTabCard");
+        }
+        mTabSelectingListener.onTabSelecting(
+                LayoutManagerImpl.time(), mTabModelSelector.getCurrentTabId());
+    }
 }

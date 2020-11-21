@@ -9,25 +9,48 @@
 #include "base/base_paths.h"
 #include "base/base_paths_fuchsia.h"
 #include "base/command_line.h"
+#include "base/files/file_util.h"
 #include "base/path_service.h"
 #include "content/public/common/content_switches.h"
 #include "fuchsia/base/init_logging.h"
 #include "fuchsia/engine/browser/web_engine_browser_main.h"
 #include "fuchsia/engine/browser/web_engine_content_browser_client.h"
+#include "fuchsia/engine/common/cors_exempt_headers.h"
 #include "fuchsia/engine/common/web_engine_content_client.h"
 #include "fuchsia/engine/renderer/web_engine_content_renderer_client.h"
+#include "fuchsia/engine/switches.h"
 #include "ui/base/resource/resource_bundle.h"
 
 namespace {
 
 WebEngineMainDelegate* g_current_web_engine_main_delegate = nullptr;
 
-void InitializeResourceBundle() {
-  base::FilePath pak_file;
-  bool result = base::PathService::Get(base::DIR_ASSETS, &pak_file);
+void InitializeResources() {
+  constexpr char kWebEnginePakPath[] = "web_engine.pak";
+  constexpr char kWebUiResourcesPakPath[] = "ui/resources/webui_resources.pak";
+  constexpr char kWebUiGeneratedResourcesPakPath[] =
+      "ui/resources/webui_generated_resources.pak";
+
+  base::FilePath asset_root;
+  bool result = base::PathService::Get(base::DIR_ASSETS, &asset_root);
   DCHECK(result);
-  pak_file = pak_file.Append(FILE_PATH_LITERAL("web_engine.pak"));
-  ui::ResourceBundle::InitSharedInstanceWithPakPath(pak_file);
+  ui::ResourceBundle::InitSharedInstanceWithPakPath(
+      asset_root.Append(kWebEnginePakPath));
+
+  // Conditionally load WebUI resource PAK if visible from namespace.
+  base::FilePath webui_resources_path =
+      asset_root.Append(kWebUiResourcesPakPath);
+  if (base::PathExists(webui_resources_path)) {
+    ui::ResourceBundle::GetSharedInstance().AddDataPackFromPath(
+        webui_resources_path, ui::SCALE_FACTOR_NONE);
+  }
+
+  base::FilePath webui_generated_resources_path =
+      asset_root.Append(kWebUiGeneratedResourcesPakPath);
+  if (base::PathExists(webui_generated_resources_path)) {
+    ui::ResourceBundle::GetSharedInstance().AddDataPackFromPath(
+        webui_generated_resources_path, ui::SCALE_FACTOR_NONE);
+  }
 }
 
 }  // namespace
@@ -52,11 +75,17 @@ bool WebEngineMainDelegate::BasicStartupComplete(int* exit_code) {
     *exit_code = 1;
     return true;
   }
+
+  SetCorsExemptHeaders(base::SplitString(
+      base::CommandLine::ForCurrentProcess()->GetSwitchValueNative(
+          switches::kCorsExemptHeaders),
+      ",", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY));
+
   return false;
 }
 
 void WebEngineMainDelegate::PreSandboxStartup() {
-  InitializeResourceBundle();
+  InitializeResources();
 }
 
 int WebEngineMainDelegate::RunProcess(

@@ -13,9 +13,10 @@
 #include "base/strings/string16.h"
 #include "components/autofill/core/browser/field_types.h"
 #include "components/autofill/core/browser/proto/server.pb.h"
-#include "components/autofill/core/common/password_form.h"
 #include "components/autofill/core/common/renderer_id.h"
+#include "components/autofill/core/common/signatures.h"
 #include "components/password_manager/core/browser/form_parsing/password_field_prediction.h"
+#include "components/password_manager/core/browser/password_form.h"
 
 namespace autofill {
 struct FormData;
@@ -58,11 +59,10 @@ class VotesUploader {
   ~VotesUploader();
 
   // Send appropriate votes based on what is currently being saved.
-  void SendVotesOnSave(
-      const autofill::FormData& observed,
-      const autofill::PasswordForm& submitted_form,
-      const std::vector<const autofill::PasswordForm*>& best_matches,
-      autofill::PasswordForm* pending_credentials);
+  void SendVotesOnSave(const autofill::FormData& observed,
+                       const PasswordForm& submitted_form,
+                       const std::vector<const PasswordForm*>& best_matches,
+                       PasswordForm* pending_credentials);
 
   // Check to see if |pending| corresponds to an account creation form. If we
   // think that it does, we label it as such and upload this state to the
@@ -70,29 +70,29 @@ class VotesUploader {
   // we will trigger password generation in the future. This function will
   // update generation_upload_status of |pending| if an upload is performed.
   void SendVoteOnCredentialsReuse(const autofill::FormData& observed,
-                                  const autofill::PasswordForm& submitted_form,
-                                  autofill::PasswordForm* pending);
+                                  const PasswordForm& submitted_form,
+                                  PasswordForm* pending);
 
   // Tries to set all votes (e.g. autofill field types, generation vote) to
   // a |FormStructure| and upload it to the server. Returns true on success.
-  bool UploadPasswordVote(const autofill::PasswordForm& form_to_upload,
-                          const autofill::PasswordForm& submitted_form,
+  bool UploadPasswordVote(const PasswordForm& form_to_upload,
+                          const PasswordForm& submitted_form,
                           const autofill::ServerFieldType password_type,
                           const std::string& login_form_signature);
 
   // Sends USERNAME and PASSWORD votes, when a credential is used to login for
   // the first time. |form_to_upload| is the submitted login form.
   void UploadFirstLoginVotes(
-      const std::vector<const autofill::PasswordForm*>& best_matches,
-      const autofill::PasswordForm& pending_credentials,
-      const autofill::PasswordForm& form_to_upload);
+      const std::vector<const PasswordForm*>& best_matches,
+      const PasswordForm& pending_credentials,
+      const PasswordForm& form_to_upload);
 
   // Searches for |username| in |all_possible_usernames| of |matches|. If the
   // username value is found in |all_possible_usernames| and the password value
   // of the match is equal to |password|, the match is saved to
   // |username_correction_vote_| and the method returns true.
   bool FindCorrectedUsernameElement(
-      const std::vector<const autofill::PasswordForm*>& matches,
+      const std::vector<const PasswordForm*>& matches,
       const base::string16& username,
       const base::string16& password);
 
@@ -129,11 +129,11 @@ class VotesUploader {
     is_manual_generation_ = is_manual_generation;
   }
 
-  const base::string16& get_generation_element() const {
+  autofill::FieldRendererId get_generation_element() const {
     return generation_element_;
   }
 
-  void set_generation_element(const base::string16& generation_element) {
+  void set_generation_element(autofill::FieldRendererId generation_element) {
     generation_element_ = generation_element;
   }
 
@@ -181,15 +181,14 @@ class VotesUploader {
 
   // Sets the known-value flag for each field, indicating that the field
   // contained a previously stored credential on submission.
-  void SetKnownValueFlag(
-      const autofill::PasswordForm& pending_credentials,
-      const std::vector<const autofill::PasswordForm*>& best_matches,
-      autofill::FormStructure* form_to_upload);
+  void SetKnownValueFlag(const PasswordForm& pending_credentials,
+                         const std::vector<const PasswordForm*>& best_matches,
+                         autofill::FormStructure* form_to_upload);
 
   // Searches for |username| in |all_possible_usernames| of |match|. If the
   // username value is found, the match is saved to |username_correction_vote_|
   // and the function returns true.
-  bool FindUsernameInOtherPossibleUsernames(const autofill::PasswordForm& match,
+  bool FindUsernameInOtherPossibleUsernames(const PasswordForm& match,
                                             const base::string16& username);
 
   bool StartUploadRequest(
@@ -198,8 +197,8 @@ class VotesUploader {
 
   // Save a vote |field_type| for a field with |field_signature| from a form
   // with |form_signature| to FieldInfoManager.
-  void SaveFieldVote(uint64_t form_signature,
-                     uint32_t field_signature,
+  void SaveFieldVote(autofill::FormSignature form_signature,
+                     autofill::FieldSignature field_signature,
                      autofill::ServerFieldType field_type);
 
   // The client which implements embedder-specific PasswordManager operations.
@@ -212,7 +211,7 @@ class VotesUploader {
   bool is_manual_generation_ = false;
 
   // A password field name that is used for generation.
-  base::string16 generation_element_;
+  autofill::FieldRendererId generation_element_;
 
   // True iff a user edited the username value in a prompt and new username is
   // the value of another field of the observed form.
@@ -224,7 +223,7 @@ class VotesUploader {
   // The matched credential is copied to |username_correction_vote_|, but
   // |username_correction_vote_.username_element| is set to the name of the
   // field where the matched username was found.
-  base::Optional<autofill::PasswordForm> username_correction_vote_;
+  base::Optional<PasswordForm> username_correction_vote_;
 
   // Whether the password values have been shown to the user on the save prompt.
   bool has_passwords_revealed_vote_ = false;

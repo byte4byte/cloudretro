@@ -4,11 +4,17 @@
 
 package org.chromium.chrome.browser.share.clipboard;
 
-import android.content.Context;
+import static org.chromium.chrome.browser.preferences.ChromePreferenceKeys.CLIPBOARD_SHARED_URI;
+
 import android.net.Uri;
+import android.text.TextUtils;
+
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 
 import org.chromium.base.Callback;
-import org.chromium.chrome.browser.share.ShareImageFileUtils;
+import org.chromium.chrome.browser.preferences.SharedPreferencesManager;
+import org.chromium.components.browser_ui.share.ShareImageFileUtils;
 import org.chromium.ui.base.Clipboard;
 
 /**
@@ -17,8 +23,26 @@ import org.chromium.ui.base.Clipboard;
 public class ClipboardImageFileProvider implements Clipboard.ImageFileProvider {
     @Override
     public void storeImageAndGenerateUri(
-            Context context, byte[] imageData, String fileExtension, Callback<Uri> callback) {
-        ShareImageFileUtils.generateTemporaryUriFromData(
-                context, imageData, fileExtension, callback);
+            byte[] imageData, String fileExtension, Callback<Uri> callback) {
+        ShareImageFileUtils.generateTemporaryUriFromData(imageData, fileExtension, callback);
+    }
+
+    @Override
+    public void storeLastCopiedImageUri(@NonNull Uri uri) {
+        SharedPreferencesManager.getInstance().writeString(CLIPBOARD_SHARED_URI, uri.toString());
+    }
+
+    @Override
+    public @Nullable Uri getLastCopiedImageUri() {
+        String uriString =
+                SharedPreferencesManager.getInstance().readString(CLIPBOARD_SHARED_URI, null);
+        if (TextUtils.isEmpty(uriString)) return null;
+
+        return Uri.parse(uriString);
+    }
+
+    @Override
+    public void clearLastCopiedImageUri() {
+        SharedPreferencesManager.getInstance().removeKey(CLIPBOARD_SHARED_URI);
     }
 }

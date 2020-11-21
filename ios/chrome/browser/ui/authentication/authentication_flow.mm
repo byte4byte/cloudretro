@@ -4,8 +4,9 @@
 
 #import "ios/chrome/browser/ui/authentication/authentication_flow.h"
 
+#include "base/check_op.h"
 #import "base/ios/block_types.h"
-#include "base/logging.h"
+#include "base/notreached.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/chrome/browser/main/browser.h"
 #include "ios/chrome/browser/signin/authentication_service.h"
@@ -141,11 +142,11 @@ NSError* IdentityMissingError() {
   [self continueSignin];
 }
 
-- (void)cancelAndDismiss {
+- (void)cancelAndDismissAnimated:(BOOL)animated {
   if (_state == DONE)
     return;
 
-  [_performer cancelAndDismiss];
+  [_performer cancelAndDismissAnimated:animated];
   if (_state != DONE) {
     // The performer might not have been able to continue the flow if it was
     // waiting for a callback (e.g. waiting for AccountReconcilor). In this
@@ -332,9 +333,11 @@ NSError* IdentityMissingError() {
 }
 
 - (void)checkSigninSteps {
-  _browserStateIdentity = AuthenticationServiceFactory::GetForBrowserState(
-                              _browser->GetBrowserState())
-                              ->GetAuthenticatedIdentity();
+  AuthenticationService* authentication_service =
+      AuthenticationServiceFactory::GetForBrowserState(
+          _browser->GetBrowserState());
+  authentication_service->WaitUntilCacheIsPopulated();
+  _browserStateIdentity = authentication_service->GetAuthenticatedIdentity();
   if (_browserStateIdentity)
     _shouldSignOut = YES;
 

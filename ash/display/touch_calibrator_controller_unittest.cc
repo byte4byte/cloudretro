@@ -24,6 +24,8 @@
 #include "ui/events/event_handler.h"
 #include "ui/events/test/event_generator.h"
 #include "ui/events/test/events_test_utils.h"
+#include "ui/views/widget/unique_widget_ptr.h"
+#include "ui/views/widget/widget.h"
 
 namespace ash {
 namespace {
@@ -71,9 +73,9 @@ class TouchCalibratorControllerTest : public AshTestBase {
     return ctrl.touch_point_quad_;
   }
 
-  std::map<int64_t, std::unique_ptr<TouchCalibratorView>>& GetCalibratorViews(
+  std::map<int64_t, views::UniqueWidgetPtr>& GetCalibratorViews(
       TouchCalibratorController* ctrl) {
-    return ctrl->touch_calibrator_views_;
+    return ctrl->touch_calibrator_widgets_;
   }
 
   const display::Display& InitDisplays() {
@@ -93,7 +95,7 @@ class TouchCalibratorControllerTest : public AshTestBase {
   void StartCalibrationChecks(TouchCalibratorController* ctrl,
                               const display::Display& target_display) {
     EXPECT_FALSE(ctrl->IsCalibrating());
-    EXPECT_FALSE(!!ctrl->touch_calibrator_views_.size());
+    EXPECT_FALSE(!!ctrl->touch_calibrator_widgets_.size());
 
     TouchCalibratorController::TouchCalibrationCallback empty_callback;
 
@@ -105,11 +107,12 @@ class TouchCalibratorControllerTest : public AshTestBase {
 
     // There should be a touch calibrator view associated with each of the
     // active displays.
-    EXPECT_EQ(ctrl->touch_calibrator_views_.size(),
+    EXPECT_EQ(ctrl->touch_calibrator_widgets_.size(),
               display_manager()->GetCurrentDisplayIdList().size());
 
     TouchCalibratorView* target_calibrator_view =
-        ctrl->touch_calibrator_views_[target_display.id()].get();
+        static_cast<TouchCalibratorView*>(
+            GetCalibratorViews(ctrl)[target_display.id()]->GetContentsView());
 
     // End the background fade in animation.
     target_calibrator_view->SkipCurrentAnimation();
@@ -148,13 +151,11 @@ class TouchCalibratorControllerTest : public AshTestBase {
 
     ui::TouchEvent press_touch_event(
         ui::ET_TOUCH_PRESSED, location, ui::EventTimeForNow(),
-        ui::PointerDetails(ui::EventPointerType::POINTER_TYPE_TOUCH, 12, 1.0f,
-                           1.0f, 0.0f),
+        ui::PointerDetails(ui::EventPointerType::kTouch, 12, 1.0f, 1.0f, 0.0f),
         0);
     ui::TouchEvent release_touch_event(
         ui::ET_TOUCH_RELEASED, location, ui::EventTimeForNow(),
-        ui::PointerDetails(ui::EventPointerType::POINTER_TYPE_TOUCH, 12, 1.0f,
-                           1.0f, 0.0f),
+        ui::PointerDetails(ui::EventPointerType::kTouch, 12, 1.0f, 1.0f, 0.0f),
         0);
 
     press_touch_event.set_source_device_id(touch_device_id);
@@ -432,8 +433,9 @@ TEST_F(TouchCalibratorControllerTest, HighDPIMonitorsCalibration) {
       TouchCalibratorController::TouchCalibrationCallback());
 
   // Skip any UI animations associated with the start of calibration.
-  GetCalibratorViews(&touch_calibrator_controller)[touch_display.id()]
-      .get()
+  static_cast<TouchCalibratorView*>(
+      GetCalibratorViews(&touch_calibrator_controller)[touch_display.id()]
+          ->GetContentsView())
       ->SkipCurrentAnimation();
 
   // Reinitialize the transforms, as starting calibration resets them.
@@ -525,8 +527,9 @@ TEST_F(TouchCalibratorControllerTest, RotatedHighDPIMonitorsCalibration) {
       TouchCalibratorController::TouchCalibrationCallback());
 
   // Skip any UI animations associated with the start of calibration.
-  GetCalibratorViews(&touch_calibrator_controller)[touch_display.id()]
-      .get()
+  static_cast<TouchCalibratorView*>(
+      GetCalibratorViews(&touch_calibrator_controller)[touch_display.id()]
+          ->GetContentsView())
       ->SkipCurrentAnimation();
 
   // Reinitialize the transforms, as starting calibration resets them.

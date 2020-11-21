@@ -76,6 +76,7 @@ class CORE_EXPORT IntersectionGeometry {
                        const Element& target,
                        const Vector<Length>& root_margin,
                        const Vector<float>& thresholds,
+                       const Vector<Length>& target_margin,
                        unsigned flags,
                        CachedRects* cached_rects = nullptr);
 
@@ -83,6 +84,7 @@ class CORE_EXPORT IntersectionGeometry {
                        const Node& explicit_root,
                        const Element& target,
                        const Vector<float>& thresholds,
+                       const Vector<Length>& target_margin,
                        unsigned flags,
                        CachedRects* cached_rects = nullptr);
 
@@ -101,8 +103,7 @@ class CORE_EXPORT IntersectionGeometry {
   PhysicalRect TargetRect() const { return target_rect_; }
   PhysicalRect IntersectionRect() const { return intersection_rect_; }
 
-  // The intersection rect without applying viewport clipping in the coordinate
-  // system of the root's viewport.
+  // The intersection rect without applying viewport clipping.
   PhysicalRect UnclippedIntersectionRect() const {
     return unclipped_intersection_rect_;
   }
@@ -128,6 +129,7 @@ class CORE_EXPORT IntersectionGeometry {
                        const LayoutObject* root,
                        const LayoutObject* target,
                        const Vector<float>& thresholds,
+                       const Vector<Length>& target_margin,
                        CachedRects* cached_rects);
   // Map intersection_rect from the coordinate system of the target to the
   // coordinate system of the root, applying intervening clips.

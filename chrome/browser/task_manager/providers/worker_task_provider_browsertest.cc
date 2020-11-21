@@ -5,8 +5,8 @@
 #include <memory>
 #include <vector>
 
-#include "base/bind_helpers.h"
 #include "base/callback_forward.h"
+#include "base/callback_helpers.h"
 #include "base/command_line.h"
 #include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -28,6 +28,7 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/service_worker_context.h"
 #include "content/public/browser/storage_partition.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "net/dns/mock_host_resolver.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -190,7 +191,7 @@ IN_PROC_BROWSER_TEST_F(WorkerTaskProviderBrowserTest,
       base::CompareCase::INSENSITIVE_ASCII));
 
   GetServiceWorkerContext(browser())->StopAllServiceWorkersForOrigin(
-      embedded_test_server()->base_url());
+      url::Origin::Create(embedded_test_server()->base_url()));
   WaitUntilTaskCount(0);
 
   StopUpdating();
@@ -227,7 +228,7 @@ IN_PROC_BROWSER_TEST_F(WorkerTaskProviderBrowserTest,
       base::CompareCase::INSENSITIVE_ASCII));
 
   GetServiceWorkerContext(incognito)->StopAllServiceWorkersForOrigin(
-      embedded_test_server()->base_url());
+      url::Origin::Create(embedded_test_server()->base_url()));
   WaitUntilTaskCount(0);
 
   StopUpdating();
@@ -280,12 +281,12 @@ IN_PROC_BROWSER_TEST_F(WorkerTaskProviderBrowserTest,
       base::CompareCase::INSENSITIVE_ASCII));
 
   GetServiceWorkerContext(browser_1)->StopAllServiceWorkersForOrigin(
-      embedded_test_server()->base_url());
+      url::Origin::Create(embedded_test_server()->base_url()));
   WaitUntilTaskCount(1);
   EXPECT_EQ(task_2, tasks()[0]);
 
   GetServiceWorkerContext(browser_2)->StopAllServiceWorkersForOrigin(
-      embedded_test_server()->base_url());
+      url::Origin::Create(embedded_test_server()->base_url()));
   WaitUntilTaskCount(0);
 
   StopUpdating();
@@ -319,7 +320,7 @@ IN_PROC_BROWSER_TEST_F(WorkerTaskProviderBrowserTest, CreateExistingTasks) {
       base::CompareCase::INSENSITIVE_ASCII));
 
   GetServiceWorkerContext(browser())->StopAllServiceWorkersForOrigin(
-      embedded_test_server()->base_url());
+      url::Origin::Create(embedded_test_server()->base_url()));
   WaitUntilTaskCount(0);
 
   StopUpdating();

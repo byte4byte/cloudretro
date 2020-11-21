@@ -37,10 +37,12 @@
 #include "base/optional.h"
 #include "build/build_config.h"
 #include "mojo/public/cpp/bindings/associated_remote.h"
+#include "net/http/structured_headers.h"
 #include "services/network/public/mojom/web_client_hints_types.mojom-blink.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
 #include "third_party/blink/public/common/client_hints/client_hints.h"
 #include "third_party/blink/public/common/device_memory/approximated_device_memory.h"
+#include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/mojom/conversions/conversions.mojom-blink.h"
 #include "third_party/blink/public/mojom/feature_policy/feature_policy.mojom-blink.h"
 #include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
@@ -99,6 +101,7 @@
 #include "third_party/blink/renderer/platform/loader/fetch/detachable_use_counter.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_load_priority.h"
+#include "third_party/blink/renderer/platform/loader/fetch/resource_loader_options.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_loading_log.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_timing_info.h"
 #include "third_party/blink/renderer/platform/loader/fetch/unique_identifier.h"
@@ -120,25 +123,14 @@ namespace {
 // If that flag is disabled (the default), then all hints are always sent for
 // first-party subresources, and the kAllowClientHintsToThirdParty feature
 // controls whether some specific hints are sent to third parties. (Only
-// device-memory, resource-width, viewport-width and the limited UA hints are
-// sent under this model). This feature is enabled by default on Android, and
-// disabled by default on all other platforms.
+// device-memory, resource-width, viewport-width and DPR are sent under this
+// model). This feature is enabled by default on Android, and disabled by
+// default on all other platforms.
 //
 // When the runtime flag is enabled, all client hints except UA are controlled
 // entirely by feature policy on all platforms. In that case, hints will
 // generally be sent for first-party resources, and not for third-party
 // resources, unless specifically enabled by policy.
-
-// If kAllowClientHintsToThirdParty is enabled, then device-memory,
-// resource-width and viewport-width client hints can be sent to third-party
-// origins if the first-party has opted in to receiving client hints.
-#if defined(OS_ANDROID)
-const base::Feature kAllowClientHintsToThirdParty{
-    "AllowClientHintsToThirdParty", base::FEATURE_ENABLED_BY_DEFAULT};
-#else
-const base::Feature kAllowClientHintsToThirdParty{
-    "AllowClientHintsToThirdParty", base::FEATURE_DISABLED_BY_DEFAULT};
-#endif
 
 // Determines FetchCacheMode for |frame|. This FetchCacheMode should be a base
 // policy to consider one of each resource belonging to the frame, and should
@@ -187,33 +179,15 @@ mojom::FetchCacheMode DetermineFrameCacheMode(Frame* frame) {
 }
 
 // Simple function to add quotes to make headers strings.
-const AtomicString AddBrandVersionQuotes(const std::string& brand,
-                                         const std::string& version) {
-  if (brand.empty())
-    return AtomicString("");
-
-  StringBuilder quoted_string;
-  quoted_string.Append("\"");
-  quoted_string.Append(brand.data());
-  quoted_string.Append("\"");
-  if (!version.empty()) {
-    quoted_string.Append(";v=\"");
-    quoted_string.Append(version.data());
-    quoted_string.Append("\"");
+const AtomicString SerializeHeaderString(std::string str) {
+  std::string output;
+  if (!str.empty()) {
+    output = net::structured_headers::SerializeItem(
+                 net::structured_headers::Item(str))
+                 .value_or(std::string());
   }
-  return quoted_string.ToAtomicString();
-}
 
-// Simple function to add quotes to make headers strings.
-const AtomicString AddQuotes(std::string str) {
-  if (str.empty())
-    return AtomicString("");
-
-  StringBuilder quoted_string;
-  quoted_string.Append("\"");
-  quoted_string.Append(str.data());
-  quoted_string.Append("\"");
-  return quoted_string.ToAtomicString();
+  return AtomicString(output.c_str());
 }
 
 }  // namespace
@@ -251,7 +225,9 @@ struct FrameFetchContext::FrozenState final : GarbageCollected<FrozenState> {
   const base::Optional<UserAgentMetadata> user_agent_metadata;
   const bool is_svg_image_chrome_client;
 
-  void Trace(Visitor* visitor) { visitor->Trace(content_security_policy); }
+  void Trace(Visitor* visitor) const {
+    visitor->Trace(content_security_policy);
+  }
 };
 
 ResourceFetcher* FrameFetchContext::CreateFetcherForCommittedDocument(
@@ -261,12 +237,16 @@ ResourceFetcher* FrameFetchContext::CreateFetcherForCommittedDocument(
       *MakeGarbageCollected<FrameResourceFetcherProperties>(loader, document));
   LocalFrame* frame = document.GetFrame();
   DCHECK(frame);
+  auto* frame_fetch_context =
+      MakeGarbageCollected<FrameFetchContext>(loader, document, properties);
   ResourceFetcherInit init(
-      properties,
-      MakeGarbageCollected<FrameFetchContext>(loader, document, properties),
+      properties, frame_fetch_context,
       frame->GetTaskRunner(TaskType::kNetworking),
-      MakeGarbageCollected<LoaderFactoryForFrame>(loader, document));
-  init.use_counter = MakeGarbageCollected<DetachableUseCounter>(&document);
+      frame->GetTaskRunner(TaskType::kNetworkingUnfreezable),
+      MakeGarbageCollected<LoaderFactoryForFrame>(loader, *frame->DomWindow()),
+      frame->DomWindow());
+  init.use_counter =
+      MakeGarbageCollected<DetachableUseCounter>(frame->DomWindow());
   init.console_logger = MakeGarbageCollected<DetachableConsoleLogger>(
       document.GetExecutionContext());
   // Frame loading should normally start with |kTight| throttling, as the
@@ -275,6 +255,7 @@ ResourceFetcher* FrameFetchContext::CreateFetcherForCommittedDocument(
       ResourceLoadScheduler::ThrottlingPolicy::kTight;
   init.frame_or_worker_scheduler = frame->GetFrameScheduler();
   init.archive = loader.Archive();
+  init.loading_behavior_observer = frame_fetch_context;
   ResourceFetcher* fetcher = MakeGarbageCollected<ResourceFetcher>(init);
   fetcher->SetResourceLoadObserver(
       MakeGarbageCollected<ResourceLoadObserverForFrame>(
@@ -312,24 +293,20 @@ scoped_refptr<const SecurityOrigin> FrameFetchContext::GetTopFrameOrigin()
 SubresourceFilter* FrameFetchContext::GetSubresourceFilter() const {
   if (GetResourceFetcherProperties().IsDetached())
     return nullptr;
-  DocumentLoader* document_loader = MasterDocumentLoader();
-  return document_loader ? document_loader->GetSubresourceFilter() : nullptr;
+  return document_loader_->GetSubresourceFilter();
 }
 
 PreviewsResourceLoadingHints*
 FrameFetchContext::GetPreviewsResourceLoadingHints() const {
   if (GetResourceFetcherProperties().IsDetached())
     return nullptr;
-  DocumentLoader* document_loader = MasterDocumentLoader();
-  if (!document_loader)
-    return nullptr;
-  return document_loader->GetPreviewsResourceLoadingHints();
+  return document_loader_->GetPreviewsResourceLoadingHints();
 }
 
-WebURLRequest::PreviewsState FrameFetchContext::previews_state() const {
-  DocumentLoader* document_loader = MasterDocumentLoader();
-  return document_loader ? document_loader->GetPreviewsState()
-                         : WebURLRequest::kPreviewsUnspecified;
+PreviewsState FrameFetchContext::previews_state() const {
+  if (GetResourceFetcherProperties().IsDetached())
+    return PreviewsTypes::kPreviewsUnspecified;
+  return document_loader_->GetPreviewsState();
 }
 
 LocalFrame* FrameFetchContext::GetFrame() const {
@@ -349,11 +326,14 @@ void FrameFetchContext::AddAdditionalRequestHeaders(ResourceRequest& request) {
     return;
 
   // Reload should reflect the current data saver setting.
-  if (IsReloadLoadType(MasterDocumentLoader()->LoadType()))
+  if (IsReloadLoadType(document_loader_->LoadType()))
     request.ClearHttpHeaderField(http_names::kSaveData);
 
   if (save_data_enabled_)
     request.SetHttpHeaderField(http_names::kSaveData, "on");
+
+  AddBackForwardCacheExperimentHTTPHeaderIfNeeded(
+      document_->GetExecutionContext(), request);
 }
 
 // TODO(toyoshim, arthursonzogni): PlzNavigate doesn't use this function to set
@@ -379,25 +359,18 @@ mojom::FetchCacheMode FrameFetchContext::ResourceRequestCachePolicy(
   return cache_mode;
 }
 
-inline DocumentLoader* FrameFetchContext::MasterDocumentLoader() const {
-  DCHECK(!GetResourceFetcherProperties().IsDetached());
-  return document_loader_;
-}
-
 void FrameFetchContext::PrepareRequest(
     ResourceRequest& request,
-    const FetchInitiatorInfo& initiator_info,
+    ResourceLoaderOptions& options,
     WebScopedVirtualTimePauser& virtual_time_pauser,
     ResourceType resource_type) {
   // TODO(yhirano): Clarify which statements are actually needed when
   // this is called during redirect.
-  const bool for_redirect =
-      (request.GetRedirectStatus() ==
-       ResourceRequest::RedirectStatus::kFollowedRedirect);
+  const bool for_redirect = request.GetRedirectInfo().has_value();
 
   SetFirstPartyCookie(request);
   if (request.GetRequestContext() ==
-      mojom::RequestContextType::SERVICE_WORKER) {
+      mojom::blink::RequestContextType::SERVICE_WORKER) {
     // The top frame origin is defined to be null for service worker main
     // resource requests.
     DCHECK(!request.TopFrameOrigin());
@@ -411,15 +384,13 @@ void FrameFetchContext::PrepareRequest(
   if (GetResourceFetcherProperties().IsDetached())
     return;
 
-  DocumentLoader* document_loader = MasterDocumentLoader();
-  if (document_loader->ForceFetchCacheMode())
-    request.SetCacheMode(*document_loader->ForceFetchCacheMode());
+  if (document_loader_->ForceFetchCacheMode())
+    request.SetCacheMode(*document_loader_->ForceFetchCacheMode());
 
-  if (request.GetPreviewsState() == WebURLRequest::kPreviewsUnspecified) {
-    WebURLRequest::PreviewsState request_previews_state =
-        document_loader->GetPreviewsState();
-    if (request_previews_state == WebURLRequest::kPreviewsUnspecified)
-      request_previews_state = WebURLRequest::kPreviewsOff;
+  if (request.GetPreviewsState() == PreviewsTypes::kPreviewsUnspecified) {
+    PreviewsState request_previews_state = document_loader_->GetPreviewsState();
+    if (request_previews_state == PreviewsTypes::kPreviewsUnspecified)
+      request_previews_state = PreviewsTypes::kPreviewsOff;
     request.SetPreviewsState(request_previews_state);
   }
 
@@ -431,13 +402,14 @@ void FrameFetchContext::PrepareRequest(
         WebScopedVirtualTimePauser::VirtualTaskDuration::kNonInstant);
   }
 
-  probe::PrepareRequest(Probe(), document_loader, request, initiator_info,
+  probe::PrepareRequest(Probe(), document_loader_, request, options,
                         resource_type);
 
   // ServiceWorker hook ups.
-  if (document_loader->GetServiceWorkerNetworkProvider()) {
+  if (document_loader_->GetServiceWorkerNetworkProvider()) {
     WrappedResourceRequest webreq(request);
-    document_loader->GetServiceWorkerNetworkProvider()->WillSendRequest(webreq);
+    document_loader_->GetServiceWorkerNetworkProvider()->WillSendRequest(
+        webreq);
   }
 }
 
@@ -466,21 +438,16 @@ void FrameFetchContext::ModifyRequestForCSP(ResourceRequest& resource_request) {
   if (GetResourceFetcherProperties().IsDetached())
     return;
 
-  // Record the latest requiredCSP value that will be used when sending this
-  // request.
-  GetFrame()->Loader().RecordLatestRequiredCSP();
   GetFrame()->Loader().ModifyRequestForCSP(
       resource_request,
-      &GetResourceFetcherProperties().GetFetchClientSettingsObject(), document_,
-      mojom::RequestContextFrameType::kNone);
+      &GetResourceFetcherProperties().GetFetchClientSettingsObject(),
+      document_->domWindow(), mojom::blink::RequestContextFrameType::kNone);
 }
 
 void FrameFetchContext::AddClientHintsIfNecessary(
     const ClientHintsPreferences& hints_preferences,
     const FetchParameters::ResourceWidth& resource_width,
     ResourceRequest& request) {
-  WebEnabledClientHints enabled_hints;
-
   // If the feature is enabled, then client hints are allowed only on secure
   // URLs.
   if (!ClientHintsPreferences::IsClientHintsAllowed(request.Url()))
@@ -495,7 +462,13 @@ void FrameFetchContext::AddClientHintsIfNecessary(
   // policy is used to enable hints for all subresources, based on the policy of
   // the requesting document, and the origin of the resource.
   const FeaturePolicy* policy =
-      document_ ? document_->GetSecurityContext().GetFeaturePolicy() : nullptr;
+      document_
+          ? document_->domWindow()->GetSecurityContext().GetFeaturePolicy()
+          : nullptr;
+
+  url::Origin resource_origin =
+      SecurityOrigin::Create(request.Url())->ToUrlOrigin();
+  bool is_1p_origin = IsFirstPartyOrigin(request.Url());
 
   // Sec-CH-UA is special: we always send the header to all origins that are
   // eligible for client hints (e.g. secure transport, JavaScript enabled).
@@ -506,46 +479,46 @@ void FrameFetchContext::AddClientHintsIfNecessary(
   // specifying accomponying client hints, in which case we disable sending
   // them.
   base::Optional<UserAgentMetadata> ua = GetUserAgentMetadata();
-  if (RuntimeEnabledFeatures::UserAgentClientHintEnabled() && ua.has_value()) {
-    request.SetHttpHeaderField(
-        blink::kClientHintsHeaderMapping[static_cast<size_t>(
-            network::mojom::blink::WebClientHintsType::kUA)],
-        AddBrandVersionQuotes(ua->brand, ua->major_version));
+  if (ClientHintsPreferences::UserAgentClientHintEnabled() && ua.has_value()) {
+    // ShouldSendClientHint is called to make sure UA is controlled by
+    // FeaturePolicy.
+    if (ShouldSendClientHint(ClientHintsMode::kStandard, policy,
+                             resource_origin, is_1p_origin,
+                             network::mojom::blink::WebClientHintsType::kUA,
+                             hints_preferences)) {
+      request.SetHttpHeaderField(
+          blink::kClientHintsHeaderMapping[static_cast<size_t>(
+              network::mojom::blink::WebClientHintsType::kUA)],
+          ua->SerializeBrandVersionList().c_str());
+    }
 
     // We also send Sec-CH-UA-Mobile to all hints. It is a one-bit header
     // identifying if the browser has opted for a "mobile" experience
     // Formatted using the "sh-boolean" format from:
     // https://httpwg.org/http-extensions/draft-ietf-httpbis-header-structure.html#boolean
-    request.SetHttpHeaderField(
-        blink::kClientHintsHeaderMapping[static_cast<size_t>(
-            network::mojom::blink::WebClientHintsType::kUAMobile)],
-        ua->mobile ? "?1" : "?0");
+    // ShouldSendClientHint is called to make sure it's controlled by
+    // FeaturePolicy.
+    if (ShouldSendClientHint(
+            ClientHintsMode::kStandard, policy, resource_origin, is_1p_origin,
+            network::mojom::blink::WebClientHintsType::kUAMobile,
+            hints_preferences)) {
+      request.SetHttpHeaderField(
+          blink::kClientHintsHeaderMapping[static_cast<size_t>(
+              network::mojom::blink::WebClientHintsType::kUAMobile)],
+          ua->mobile ? "?1" : "?0");
+    }
   }
 
   // If the frame is detached, then don't send any hints other than UA.
   if (!policy)
     return;
 
-  url::Origin resource_origin =
-      SecurityOrigin::Create(request.Url())->ToUrlOrigin();
-  bool is_1p_origin = IsFirstPartyOrigin(request.Url());
 
   if (!RuntimeEnabledFeatures::FeaturePolicyForClientHintsEnabled() &&
-      !base::FeatureList::IsEnabled(kAllowClientHintsToThirdParty) &&
+      !base::FeatureList::IsEnabled(features::kAllowClientHintsToThirdParty) &&
       !is_1p_origin) {
     // No client hints for 3p origins.
     return;
-  }
-  // Persisted client hints preferences should be read for the top-frame's
-  // origin.
-  if (GetContentSettingsClient() &&
-      !GetResourceFetcherProperties().IsDetached()) {
-    const SecurityOrigin* top_security_origin =
-        GetFrame()->Tree().Top().GetSecurityContext()->GetSecurityOrigin();
-    if (!top_security_origin->IsOpaque()) {
-      GetContentSettingsClient()->GetAllowedClientHintsFromSource(
-          KURL(top_security_origin->ToString()), &enabled_hints);
-    }
   }
 
   // The next 4 hints should be enabled if we're allowing legacy hints to third
@@ -553,8 +526,7 @@ void FrameFetchContext::AddClientHintsIfNecessary(
   if (ShouldSendClientHint(
           ClientHintsMode::kLegacy, policy, resource_origin, is_1p_origin,
           network::mojom::blink::WebClientHintsType::kDeviceMemory,
-          mojom::blink::FeaturePolicyFeature::kClientHintDeviceMemory,
-          hints_preferences, enabled_hints)) {
+          hints_preferences)) {
     request.SetHttpHeaderField(
         "Device-Memory",
         AtomicString(String::Number(
@@ -562,19 +534,16 @@ void FrameFetchContext::AddClientHintsIfNecessary(
   }
 
   float dpr = GetDevicePixelRatio();
-  if (ShouldSendClientHint(ClientHintsMode::kLegacy, policy, resource_origin,
-                           is_1p_origin,
-                           network::mojom::blink::WebClientHintsType::kDpr,
-                           mojom::blink::FeaturePolicyFeature::kClientHintDPR,
-                           hints_preferences, enabled_hints)) {
+  if (ShouldSendClientHint(
+          ClientHintsMode::kLegacy, policy, resource_origin, is_1p_origin,
+          network::mojom::blink::WebClientHintsType::kDpr, hints_preferences)) {
     request.SetHttpHeaderField("DPR", AtomicString(String::Number(dpr)));
   }
 
   if (ShouldSendClientHint(
           ClientHintsMode::kLegacy, policy, resource_origin, is_1p_origin,
           network::mojom::blink::WebClientHintsType::kViewportWidth,
-          mojom::blink::FeaturePolicyFeature::kClientHintViewportWidth,
-          hints_preferences, enabled_hints) &&
+          hints_preferences) &&
       !GetResourceFetcherProperties().IsDetached() && GetFrame()->View()) {
     request.SetHttpHeaderField(
         "Viewport-Width",
@@ -584,8 +553,7 @@ void FrameFetchContext::AddClientHintsIfNecessary(
   if (ShouldSendClientHint(
           ClientHintsMode::kLegacy, policy, resource_origin, is_1p_origin,
           network::mojom::blink::WebClientHintsType::kResourceWidth,
-          mojom::blink::FeaturePolicyFeature::kClientHintWidth,
-          hints_preferences, enabled_hints)) {
+          hints_preferences)) {
     if (resource_width.is_set) {
       float physical_width = resource_width.width * dpr;
       request.SetHttpHeaderField(
@@ -593,11 +561,9 @@ void FrameFetchContext::AddClientHintsIfNecessary(
     }
   }
 
-  if (ShouldSendClientHint(ClientHintsMode::kStandard, policy, resource_origin,
-                           is_1p_origin,
-                           network::mojom::blink::WebClientHintsType::kRtt,
-                           mojom::blink::FeaturePolicyFeature::kClientHintRTT,
-                           hints_preferences, enabled_hints)) {
+  if (ShouldSendClientHint(
+          ClientHintsMode::kStandard, policy, resource_origin, is_1p_origin,
+          network::mojom::blink::WebClientHintsType::kRtt, hints_preferences)) {
     base::Optional<base::TimeDelta> http_rtt =
         GetNetworkStateNotifier().GetWebHoldbackHttpRtt();
     if (!http_rtt) {
@@ -612,11 +578,10 @@ void FrameFetchContext::AddClientHintsIfNecessary(
         AtomicString(String::Number(rtt)));
   }
 
-  if (ShouldSendClientHint(
-          ClientHintsMode::kStandard, policy, resource_origin, is_1p_origin,
-          network::mojom::blink::WebClientHintsType::kDownlink,
-          mojom::blink::FeaturePolicyFeature::kClientHintDownlink,
-          hints_preferences, enabled_hints)) {
+  if (ShouldSendClientHint(ClientHintsMode::kStandard, policy, resource_origin,
+                           is_1p_origin,
+                           network::mojom::blink::WebClientHintsType::kDownlink,
+                           hints_preferences)) {
     base::Optional<double> throughput_mbps =
         GetNetworkStateNotifier().GetWebHoldbackDownlinkThroughputMbps();
     if (!throughput_mbps) {
@@ -631,11 +596,9 @@ void FrameFetchContext::AddClientHintsIfNecessary(
         AtomicString(String::Number(mbps)));
   }
 
-  if (ShouldSendClientHint(ClientHintsMode::kStandard, policy, resource_origin,
-                           is_1p_origin,
-                           network::mojom::blink::WebClientHintsType::kEct,
-                           mojom::blink::FeaturePolicyFeature::kClientHintECT,
-                           hints_preferences, enabled_hints)) {
+  if (ShouldSendClientHint(
+          ClientHintsMode::kStandard, policy, resource_origin, is_1p_origin,
+          network::mojom::blink::WebClientHintsType::kEct, hints_preferences)) {
     base::Optional<WebEffectiveConnectionType> holdback_ect =
         GetNetworkStateNotifier().GetWebHoldbackEffectiveType();
     if (!holdback_ect)
@@ -651,8 +614,7 @@ void FrameFetchContext::AddClientHintsIfNecessary(
   if (ShouldSendClientHint(ClientHintsMode::kStandard, policy, resource_origin,
                            is_1p_origin,
                            network::mojom::blink::WebClientHintsType::kLang,
-                           mojom::blink::FeaturePolicyFeature::kClientHintLang,
-                           hints_preferences, enabled_hints)) {
+                           hints_preferences)) {
     request.SetHttpHeaderField(
         blink::kClientHintsHeaderMapping[static_cast<size_t>(
             network::mojom::blink::WebClientHintsType::kLang)],
@@ -663,51 +625,58 @@ void FrameFetchContext::AddClientHintsIfNecessary(
   }
 
   if (ua.has_value() &&
-      ShouldSendClientHint(
-          ClientHintsMode::kStandard, policy, resource_origin, is_1p_origin,
-          network::mojom::blink::WebClientHintsType::kUAArch,
-          mojom::blink::FeaturePolicyFeature::kClientHintUAArch,
-          hints_preferences, enabled_hints)) {
+      ShouldSendClientHint(ClientHintsMode::kStandard, policy, resource_origin,
+                           is_1p_origin,
+                           network::mojom::blink::WebClientHintsType::kUAArch,
+                           hints_preferences)) {
     request.SetHttpHeaderField(
         blink::kClientHintsHeaderMapping[static_cast<size_t>(
             network::mojom::blink::WebClientHintsType::kUAArch)],
-        AddQuotes(ua->architecture));
+        SerializeHeaderString(ua->architecture));
   }
 
   if (ua.has_value() &&
       ShouldSendClientHint(
           ClientHintsMode::kStandard, policy, resource_origin, is_1p_origin,
           network::mojom::blink::WebClientHintsType::kUAPlatform,
-          mojom::blink::FeaturePolicyFeature::kClientHintUAPlatform,
-          hints_preferences, enabled_hints)) {
+          hints_preferences)) {
     request.SetHttpHeaderField(
         blink::kClientHintsHeaderMapping[static_cast<size_t>(
             network::mojom::blink::WebClientHintsType::kUAPlatform)],
-        AddBrandVersionQuotes(ua->platform, ua->platform_version));
+        SerializeHeaderString(ua->platform));
   }
 
   if (ua.has_value() &&
       ShouldSendClientHint(
           ClientHintsMode::kStandard, policy, resource_origin, is_1p_origin,
-          network::mojom::blink::WebClientHintsType::kUAModel,
-          mojom::blink::FeaturePolicyFeature::kClientHintUAModel,
-          hints_preferences, enabled_hints)) {
+          network::mojom::blink::WebClientHintsType::kUAPlatformVersion,
+          hints_preferences)) {
+    request.SetHttpHeaderField(
+        blink::kClientHintsHeaderMapping[static_cast<size_t>(
+            network::mojom::blink::WebClientHintsType::kUAPlatformVersion)],
+        SerializeHeaderString(ua->platform_version));
+  }
+
+  if (ua.has_value() &&
+      ShouldSendClientHint(ClientHintsMode::kStandard, policy, resource_origin,
+                           is_1p_origin,
+                           network::mojom::blink::WebClientHintsType::kUAModel,
+                           hints_preferences)) {
     request.SetHttpHeaderField(
         blink::kClientHintsHeaderMapping[static_cast<size_t>(
             network::mojom::blink::WebClientHintsType::kUAModel)],
-        AddQuotes(ua->model));
+        SerializeHeaderString(ua->model));
   }
 
   if (ua.has_value() &&
       ShouldSendClientHint(
           ClientHintsMode::kStandard, policy, resource_origin, is_1p_origin,
           network::mojom::blink::WebClientHintsType::kUAFullVersion,
-          mojom::blink::FeaturePolicyFeature::kClientHintUAFullVersion,
-          hints_preferences, enabled_hints)) {
+          hints_preferences)) {
     request.SetHttpHeaderField(
         blink::kClientHintsHeaderMapping[static_cast<size_t>(
             network::mojom::blink::WebClientHintsType::kUAFullVersion)],
-        AddQuotes(ua->full_version));
+        SerializeHeaderString(ua->full_version));
   }
 }
 
@@ -715,14 +684,16 @@ void FrameFetchContext::PopulateResourceRequest(
     ResourceType type,
     const ClientHintsPreferences& hints_preferences,
     const FetchParameters::ResourceWidth& resource_width,
-    ResourceRequest& request) {
+    ResourceRequest& request,
+    const ResourceLoaderOptions& options) {
   if (!GetResourceFetcherProperties().IsDetached())
-    probe::SetDevToolsIds(Probe(), request);
+    probe::SetDevToolsIds(Probe(), request, options.initiator_info);
 
   ModifyRequestForCSP(request);
   AddClientHintsIfNecessary(hints_preferences, resource_width, request);
 
-  const ContentSecurityPolicy* csp = GetContentSecurityPolicy();
+  const ContentSecurityPolicy* csp =
+      GetContentSecurityPolicyForWorld(options.world_for_csp.get());
   if (csp && csp->ShouldSendCSPHeader(type))
     // TODO(crbug.com/993769): Test if this header returns duplicated values
     // (i.e. "CSP: active, active") on asynchronous "stale-while-revalidate"
@@ -783,16 +754,18 @@ void FrameFetchContext::DispatchDidBlockRequest(
     ResourceType resource_type) const {
   if (GetResourceFetcherProperties().IsDetached())
     return;
-  probe::DidBlockRequest(Probe(), resource_request, MasterDocumentLoader(),
-                         Url(), fetch_initiator_info, blocked_reason,
-                         resource_type);
+  probe::DidBlockRequest(Probe(), resource_request, document_loader_, Url(),
+                         fetch_initiator_info, blocked_reason, resource_type);
 }
 
-bool FrameFetchContext::ShouldBypassMainWorldCSP() const {
+const ContentSecurityPolicy*
+FrameFetchContext::GetContentSecurityPolicyForWorld(
+    const DOMWrapperWorld* world) const {
   if (GetResourceFetcherProperties().IsDetached())
-    return false;
+    return frozen_state_->content_security_policy;
 
-  return ContentSecurityPolicy::ShouldBypassMainWorld(GetFrame()->DomWindow());
+  return document_->GetExecutionContext()->GetContentSecurityPolicyForWorld(
+      world);
 }
 
 bool FrameFetchContext::IsSVGImageChromeClient() const {
@@ -805,15 +778,13 @@ bool FrameFetchContext::IsSVGImageChromeClient() const {
 void FrameFetchContext::CountUsage(WebFeature feature) const {
   if (GetResourceFetcherProperties().IsDetached())
     return;
-  if (DocumentLoader* loader = MasterDocumentLoader())
-    loader->GetUseCounterHelper().Count(feature, GetFrame());
+  document_loader_->GetUseCounterHelper().Count(feature, GetFrame());
 }
 
 void FrameFetchContext::CountDeprecation(WebFeature feature) const {
   if (GetResourceFetcherProperties().IsDetached())
     return;
-  if (MasterDocumentLoader())
-    Deprecation::CountDeprecation(MasterDocumentLoader(), feature);
+  Deprecation::CountDeprecation(document_->domWindow(), feature);
 }
 
 bool FrameFetchContext::ShouldBlockWebSocketByMixedContentCheck(
@@ -840,8 +811,8 @@ FrameFetchContext::CreateWebSocketHandshakeThrottle() {
 }
 
 bool FrameFetchContext::ShouldBlockFetchByMixedContentCheck(
-    mojom::RequestContextType request_context,
-    ResourceRequest::RedirectStatus redirect_status,
+    mojom::blink::RequestContextType request_context,
+    const base::Optional<ResourceRequest::RedirectInfo>& redirect_info,
     const KURL& url,
     ReportingDisposition reporting_disposition,
     const base::Optional<String>& devtools_id) const {
@@ -849,9 +820,15 @@ bool FrameFetchContext::ShouldBlockFetchByMixedContentCheck(
     // TODO(yhirano): Implement the detached case.
     return false;
   }
+  const KURL& url_before_redirects =
+      redirect_info ? redirect_info->original_url : url;
+  ResourceRequest::RedirectStatus redirect_status =
+      redirect_info ? RedirectStatus::kFollowedRedirect
+                    : RedirectStatus::kNoRedirect;
   return MixedContentChecker::ShouldBlockFetch(
-      GetFrame(), request_context, redirect_status, url, devtools_id,
-      reporting_disposition);
+      GetFrame(), request_context, url_before_redirects, redirect_status, url,
+      devtools_id, reporting_disposition,
+      document_loader_->GetContentSecurityNotifier());
 }
 
 bool FrameFetchContext::ShouldBlockFetchAsCredentialedSubresource(
@@ -862,7 +839,7 @@ bool FrameFetchContext::ShouldBlockFetchAsCredentialedSubresource(
     return false;
 
   if (resource_request.GetRequestContext() ==
-      mojom::RequestContextType::XML_HTTP_REQUEST) {
+      mojom::blink::RequestContextType::XML_HTTP_REQUEST) {
     return false;
   }
 
@@ -904,7 +881,7 @@ const ContentSecurityPolicy* FrameFetchContext::GetContentSecurityPolicy()
     const {
   if (GetResourceFetcherProperties().IsDetached())
     return frozen_state_->content_security_policy;
-  return document_->GetContentSecurityPolicy();
+  return document_->domWindow()->GetContentSecurityPolicy();
 }
 
 void FrameFetchContext::AddConsoleMessage(ConsoleMessage* message) const {
@@ -940,6 +917,12 @@ base::Optional<UserAgentMetadata> FrameFetchContext::GetUserAgentMetadata()
   return GetLocalFrameClient()->UserAgentMetadata();
 }
 
+const FeaturePolicy* FrameFetchContext::GetFeaturePolicy() const {
+  return document_
+             ? document_->domWindow()->GetSecurityContext().GetFeaturePolicy()
+             : nullptr;
+}
+
 const ClientHintsPreferences FrameFetchContext::GetClientHintsPreferences()
     const {
   if (GetResourceFetcherProperties().IsDetached())
@@ -961,17 +944,17 @@ bool FrameFetchContext::ShouldSendClientHint(
     const url::Origin& resource_origin,
     bool is_1p_origin,
     network::mojom::blink::WebClientHintsType type,
-    mojom::blink::FeaturePolicyFeature feature_policy_feature,
-    const ClientHintsPreferences& hints_preferences,
-    const WebEnabledClientHints& enabled_hints) const {
+    const ClientHintsPreferences& hints_preferences) const {
   bool origin_ok;
 
   if (mode == ClientHintsMode::kLegacy &&
-      base::FeatureList::IsEnabled(kAllowClientHintsToThirdParty)) {
+      base::FeatureList::IsEnabled(features::kAllowClientHintsToThirdParty)) {
     origin_ok = true;
   } else if (RuntimeEnabledFeatures::FeaturePolicyForClientHintsEnabled()) {
-    origin_ok = (policy && policy->IsFeatureEnabledForOrigin(
-                               feature_policy_feature, resource_origin));
+    origin_ok =
+        (policy && policy->IsFeatureEnabledForOrigin(
+                       kClientHintsFeaturePolicyMapping[static_cast<int>(type)],
+                       resource_origin));
   } else {
     origin_ok = is_1p_origin;
   }
@@ -981,10 +964,11 @@ bool FrameFetchContext::ShouldSendClientHint(
 
   // |hints_preferences| is used only in case of the preload scanner;
   // GetClientHintsPreferences() has things parsed for this document
-  // normally (whether via headers of http-equiv), and |enabled_hints| are
-  // previously persistent settings.
-  return GetClientHintsPreferences().ShouldSend(type) ||
-         hints_preferences.ShouldSend(type) || enabled_hints.IsEnabled(type);
+  // by browser (from accept-ch header on this response or previously persisted)
+  // with renderer-parsed http-equiv merged in.
+  return IsClientHintSentByDefault(type) ||
+         GetClientHintsPreferences().ShouldSend(type) ||
+         hints_preferences.ShouldSend(type);
 }
 
 FetchContext* FrameFetchContext::Detach() {
@@ -1001,7 +985,7 @@ FetchContext* FrameFetchContext::Detach() {
   return this;
 }
 
-void FrameFetchContext::Trace(Visitor* visitor) {
+void FrameFetchContext::Trace(Visitor* visitor) const {
   visitor->Trace(document_loader_);
   visitor->Trace(document_);
   visitor->Trace(frozen_state_);
@@ -1028,23 +1012,21 @@ bool FrameFetchContext::CalculateIfAdSubresource(
 
 bool FrameFetchContext::SendConversionRequestInsteadOfRedirecting(
     const KURL& url,
-    ResourceRequest::RedirectStatus redirect_status,
+    const base::Optional<ResourceRequest::RedirectInfo>& redirect_info,
     ReportingDisposition reporting_disposition) const {
-  if (!RuntimeEnabledFeatures::ConversionMeasurementEnabled())
+  if (GetResourceFetcherProperties().IsDetached())
     return false;
 
-  if (GetResourceFetcherProperties().IsDetached()) {
+  if (!RuntimeEnabledFeatures::ConversionMeasurementEnabled(
+          document_->domWindow())) {
     return false;
   }
 
   LocalFrame* frame = document_->GetFrame();
   DCHECK(frame);
   // Only register conversions pings that are redirects in the main frame.
-  // TODO(https://crbug.com/1042919): This should also validate that the
-  // redirect is same origin to ensure that the reporting domain has consented
-  // to the registration event.
-  if (!frame->IsMainFrame() ||
-      redirect_status != ResourceRequest::RedirectStatus::kFollowedRedirect) {
+  if (!frame->IsMainFrame() || !redirect_info ||
+      !SecurityOrigin::AreSameOrigin(url, redirect_info->previous_url)) {
     return false;
   }
 
@@ -1052,6 +1034,17 @@ bool FrameFetchContext::SendConversionRequestInsteadOfRedirecting(
       "/.well-known/register-conversion";
   if (url.GetPath() != kWellKnownConversionRegsitrationPath)
     return false;
+
+  if (!document_->domWindow()->IsFeatureEnabled(
+          mojom::blink::FeaturePolicyFeature::kConversionMeasurement)) {
+    String message =
+        "The 'conversion-measurement' feature policy must be enabled to "
+        "register a conversion.";
+    document_->AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
+        mojom::blink::ConsoleMessageSource::kOther,
+        mojom::blink::ConsoleMessageLevel::kError, message));
+    return false;
+  }
 
   // Only allow conversion registration on secure pages with a secure conversion
   // redirect.
@@ -1089,12 +1082,40 @@ bool FrameFetchContext::SendConversionRequestInsteadOfRedirecting(
   GetFrame()->GetRemoteNavigationAssociatedInterfaces()->GetInterface(
       &conversion_host);
   conversion_host->RegisterConversion(std::move(conversion));
+
+  // Log use counters once we have a conversion.
+  UseCounter::Count(document_->domWindow(),
+                    mojom::blink::WebFeature::kConversionAPIAll);
+  UseCounter::Count(document_->domWindow(),
+                    mojom::blink::WebFeature::kConversionRegistration);
+
   return true;
 }
 
 mojo::PendingReceiver<mojom::blink::WorkerTimingContainer>
 FrameFetchContext::TakePendingWorkerTimingReceiver(int request_id) {
-  return MasterDocumentLoader()->TakePendingWorkerTimingReceiver(request_id);
+  DCHECK(!GetResourceFetcherProperties().IsDetached());
+  return document_loader_->TakePendingWorkerTimingReceiver(request_id);
+}
+
+void FrameFetchContext::DidObserveLoadingBehavior(
+    LoadingBehaviorFlag behavior) {
+  if (GetResourceFetcherProperties().IsDetached())
+    return;
+  GetFrame()->Loader().GetDocumentLoader()->DidObserveLoadingBehavior(behavior);
+}
+
+std::unique_ptr<ResourceLoadInfoNotifierWrapper>
+FrameFetchContext::CreateResourceLoadInfoNotifierWrapper() {
+  if (GetResourceFetcherProperties().IsDetached())
+    return nullptr;
+  return GetLocalFrameClient()->CreateResourceLoadInfoNotifierWrapper();
+}
+
+mojom::blink::ContentSecurityNotifier&
+FrameFetchContext::GetContentSecurityNotifier() const {
+  DCHECK(!GetResourceFetcherProperties().IsDetached());
+  return document_loader_->GetContentSecurityNotifier();
 }
 
 base::Optional<ResourceRequestBlockedReason> FrameFetchContext::CanRequest(
@@ -1103,7 +1124,7 @@ base::Optional<ResourceRequestBlockedReason> FrameFetchContext::CanRequest(
     const KURL& url,
     const ResourceLoaderOptions& options,
     ReportingDisposition reporting_disposition,
-    ResourceRequest::RedirectStatus redirect_status) const {
+    const base::Optional<ResourceRequest::RedirectInfo>& redirect_info) const {
   if (!GetResourceFetcherProperties().IsDetached() &&
       document_->IsFreezingInProgress() && !resource_request.GetKeepalive()) {
     AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
@@ -1113,7 +1134,7 @@ base::Optional<ResourceRequestBlockedReason> FrameFetchContext::CanRequest(
     return ResourceRequestBlockedReason::kOther;
   }
   return BaseFetchContext::CanRequest(type, resource_request, url, options,
-                                      reporting_disposition, redirect_status);
+                                      reporting_disposition, redirect_info);
 }
 
 CoreProbeSink* FrameFetchContext::Probe() const {

@@ -34,15 +34,12 @@ void CopyArchivedBinaries(
   int limit = FileTypePolicies::GetInstance()->GetMaxArchivedBinariesToReport();
 
   dest_binaries->Clear();
-  for (int i = 0; i < limit && i < src_binaries.size(); i++) {
-    *dest_binaries->Add() = src_binaries[i];
+  for (int i = 0; dest_binaries->size() < limit && i < src_binaries.size();
+       i++) {
+    if (src_binaries[i].is_executable() || src_binaries[i].is_archive()) {
+      *dest_binaries->Add() = src_binaries[i];
+    }
   }
-}
-
-void RecordArchivedArchiveFileExtensionType(const base::FilePath& file) {
-  base::UmaHistogramSparse(
-      "SBClientDownload.ArchivedArchiveExtensions",
-      FileTypePolicies::GetInstance()->UmaValueForFile(file));
 }
 
 FileAnalyzer::Results ExtractFileFeatures(
@@ -94,12 +91,12 @@ void FileAnalyzer::Start(const base::FilePath& target_path,
     StartExtractZipFeatures();
   } else if (inspection_type == DownloadFileType::RAR) {
     StartExtractRarFeatures();
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
   } else if (inspection_type == DownloadFileType::DMG) {
     StartExtractDmgFeatures();
 #endif
   } else {
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
     // Checks for existence of "koly" signature even if file doesn't have
     // archive-type extension, then calls ExtractFileOrDmgFeatures() with
     // result.
@@ -162,21 +159,10 @@ void FileAnalyzer::OnZipAnalysisFinished(
                        &results_.archived_binaries);
 
   // Log metrics for ZIP analysis
-  if (results_.archived_executable) {
-    UMA_HISTOGRAM_COUNTS_1M("SBClientDownload.ZipFileArchivedBinariesCount",
-                            archive_results.archived_binary.size());
-  }
   UMA_HISTOGRAM_BOOLEAN("SBClientDownload.ZipFileSuccess",
                         archive_results.success);
-  UMA_HISTOGRAM_BOOLEAN("SBClientDownload.ZipFileHasExecutable",
-                        archive_results.has_executable);
-  UMA_HISTOGRAM_BOOLEAN(
-      "SBClientDownload.ZipFileHasArchiveButNoExecutable",
-      archive_results.has_archive && !archive_results.has_executable);
   UMA_HISTOGRAM_MEDIUM_TIMES("SBClientDownload.ExtractZipFeaturesTimeMedium",
                              base::TimeTicks::Now() - zip_analysis_start_time_);
-  for (const auto& file_name : archive_results.archived_archive_filenames)
-    RecordArchivedArchiveFileExtensionType(file_name);
 
   if (!results_.archived_executable) {
     if (archive_results.has_archive) {
@@ -222,21 +208,8 @@ void FileAnalyzer::OnRarAnalysisFinished(
                        &results_.archived_binaries);
 
   // Log metrics for Rar Analysis
-  if (results_.archived_executable) {
-    UMA_HISTOGRAM_COUNTS_100("SBClientDownload.RarFileArchivedBinariesCount",
-                             archive_results.archived_binary.size());
-  }
-  UMA_HISTOGRAM_BOOLEAN("SBClientDownload.RarFileSuccess",
-                        archive_results.success);
-  UMA_HISTOGRAM_BOOLEAN("SBClientDownload.RarFileHasExecutable",
-                        results_.archived_executable);
-  UMA_HISTOGRAM_BOOLEAN(
-      "SBClientDownload.RarFileHasArchiveButNoExecutable",
-      archive_results.has_archive && !archive_results.has_executable);
   UMA_HISTOGRAM_MEDIUM_TIMES("SBClientDownload.ExtractRarFeaturesTimeMedium",
                              base::TimeTicks::Now() - rar_analysis_start_time_);
-  for (const auto& file_name : archive_results.archived_archive_filenames)
-    RecordArchivedArchiveFileExtensionType(file_name);
 
   if (!results_.archived_executable) {
     if (archive_results.has_archive) {
@@ -256,7 +229,7 @@ void FileAnalyzer::OnRarAnalysisFinished(
   std::move(callback_).Run(std::move(results_));
 }
 
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
 // This is called for .DMGs and other files that can be parsed by
 // SandboxedDMGAnalyzer.
 void FileAnalyzer::StartExtractDmgFeatures() {
@@ -321,6 +294,6 @@ void FileAnalyzer::OnDmgAnalysisFinished(
 
   std::move(callback_).Run(std::move(results_));
 }
-#endif  // defined(OS_MACOSX)
+#endif  // defined(OS_MAC)
 
 }  // namespace safe_browsing

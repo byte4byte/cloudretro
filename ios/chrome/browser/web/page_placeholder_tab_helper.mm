@@ -5,7 +5,7 @@
 #import "ios/chrome/browser/web/page_placeholder_tab_helper.h"
 
 #include "base/bind.h"
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "base/threading/thread_task_runner_handle.h"
 #import "ios/chrome/browser/snapshots/snapshot_tab_helper.h"
 #import "ios/chrome/browser/ui/util/named_guide.h"
@@ -117,10 +117,6 @@ void PagePlaceholderTabHelper::AddPlaceholder() {
 }
 
 void PagePlaceholderTabHelper::DisplaySnapshotImage(UIImage* snapshot) {
-  DCHECK(web_state_->IsVisible())
-      << "The WebState must be visible to display a page placeholder.";
-  DCHECK([web_state_->GetView() window])
-      << "The WebState's view must be in the main window's view hierarchy.";
   UIView* web_state_view = web_state_->GetView();
   NamedGuide* guide = [NamedGuide guideWithName:kContentAreaGuide
                                            view:web_state_view];

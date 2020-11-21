@@ -4,7 +4,7 @@
 
 #include "content/public/app/content_main_delegate.h"
 
-#include "base/logging.h"
+#include "base/check.h"
 #include "build/build_config.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/common/content_client.h"
@@ -24,30 +24,17 @@ int ContentMainDelegate::RunProcess(
   return -1;
 }
 
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
 
 void ContentMainDelegate::ZygoteStarting(
-    std::vector<std::unique_ptr<service_manager::ZygoteForkDelegate>>*
-        delegates) {}
+    std::vector<std::unique_ptr<ZygoteForkDelegate>>* delegates) {}
 
-#endif  // defined(OS_LINUX)
+#endif  // defined(OS_LINUX) || defined(OS_CHROMEOS)
 
 int ContentMainDelegate::TerminateForFatalInitializationError() {
   CHECK(false);
   return 0;
 }
-
-service_manager::ProcessType ContentMainDelegate::OverrideProcessType() {
-  return service_manager::ProcessType::kDefault;
-}
-
-void ContentMainDelegate::AdjustServiceProcessCommandLine(
-    const service_manager::Identity& identity,
-    base::CommandLine* command_line) {}
-
-void ContentMainDelegate::OnServiceManagerInitialized(
-    base::OnceClosure quit_closure,
-    service_manager::BackgroundServiceManager* service_manager) {}
 
 bool ContentMainDelegate::ShouldCreateFeatureList() {
   return true;

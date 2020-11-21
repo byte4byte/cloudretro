@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_DOWNLOAD_DOWNLOAD_STATS_H_
 
 #include "build/build_config.h"
+#include "chrome/browser/download/download_prompt_status.h"
 #include "components/download/public/common/download_danger_type.h"
 #include "components/download/public/common/download_path_reservation_tracker.h"
 
@@ -88,6 +89,18 @@ enum class DownloadPathGenerationEvent {
   COUNT
 };
 
+// Records reasons that will result in the download being canceled with
+// DOWNLOAD_INTERRUPT_REASON_USER_CANCELED.
+// Used in UMA, do not remove, change or reuse existing entries.
+// Update histograms.xml and enums.xml when adding entries.
+enum class DownloadCancelReason {
+  // Existed download path after download target determination.
+  kExistingDownloadPath = 0,
+  // Canceled due to download target determiner confirmation result.
+  kTargetConfirmationResult = 1,
+  kMaxValue = kTargetConfirmationResult
+};
+
 // Increment one of the above counts.
 void RecordDownloadCount(ChromeDownloadCountTypes type);
 
@@ -117,6 +130,9 @@ void RecordDownloadPathGeneration(DownloadPathGenerationEvent event,
 void RecordDownloadPathValidation(download::PathValidationResult result,
                                   bool is_transient);
 
+// Record download cancel reason.
+void RecordDownloadCancelReason(DownloadCancelReason reason);
+
 // Records drags of completed downloads from the shelf. Used in UMA, do not
 // remove, change or reuse existing entries. Update histograms.xml and
 // enums.xml when adding entries.
@@ -134,5 +150,13 @@ enum class DownloadShelfDragEvent {
 };
 
 void RecordDownloadShelfDragEvent(DownloadShelfDragEvent drag_event);
+
+#ifdef OS_ANDROID
+// Records whether the download dialog is shown to the user.
+void RecordDownloadPromptStatus(DownloadPromptStatus status);
+
+// Records whether the download later dialog is shown to the user.
+void RecordDownloadLaterPromptStatus(DownloadLaterPromptStatus status);
+#endif  // OS_ANDROID
 
 #endif  // CHROME_BROWSER_DOWNLOAD_DOWNLOAD_STATS_H_

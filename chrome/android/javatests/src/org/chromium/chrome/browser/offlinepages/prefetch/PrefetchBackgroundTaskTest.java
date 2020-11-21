@@ -9,7 +9,8 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 import android.content.Context;
-import android.support.test.filters.SmallTest;
+
+import androidx.test.filters.SmallTest;
 
 import org.junit.After;
 import org.junit.Before;
@@ -190,12 +191,12 @@ public class PrefetchBackgroundTaskTest {
         OfflineTestUtil.setPrefetchingEnabledByServer(true);
         OfflineTestUtil.setGCMTokenForTesting("dummy_gcm_token");
 
-        PrefetchBackgroundTask.alwaysSupportServiceManagerOnlyForTesting();
+        PrefetchBackgroundTask.alwaysSupportMinimalBrowserForTesting();
     }
 
     @After
     public void tearDown() {
-        mNativeTestRule.assertOnlyServiceManagerStarted();
+        mNativeTestRule.assertMinimalBrowserStarted();
     }
 
     private void scheduleTask(int additionalDelaySeconds) {

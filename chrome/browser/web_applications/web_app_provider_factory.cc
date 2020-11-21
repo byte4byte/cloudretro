@@ -4,13 +4,12 @@
 
 #include "chrome/browser/web_applications/web_app_provider_factory.h"
 
+#include "chrome/browser/metrics/ukm_background_recorder_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/model_type_store_service_factory.h"
 #include "chrome/browser/web_applications/components/web_app_utils.h"
 #include "chrome/browser/web_applications/web_app_provider.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
-#include "extensions/browser/extension_system_provider.h"
-#include "extensions/browser/extensions_browser_client.h"
 
 namespace web_app {
 
@@ -31,9 +30,9 @@ WebAppProviderFactory::WebAppProviderFactory()
           "WebAppProvider",
           BrowserContextDependencyManager::GetInstance()) {
   WebAppProviderBaseFactory::SetInstance(this);
-  DependsOn(
-      extensions::ExtensionsBrowserClient::Get()->GetExtensionSystemFactory());
+  DependsOnExtensionsSystem();
   DependsOn(ModelTypeStoreServiceFactory::GetInstance());
+  DependsOn(ukm::UkmBackgroundRecorderFactory::GetInstance());
 }
 
 WebAppProviderFactory::~WebAppProviderFactory() {

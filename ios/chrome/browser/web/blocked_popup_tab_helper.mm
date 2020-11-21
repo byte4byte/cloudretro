@@ -20,7 +20,9 @@
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "ios/chrome/browser/infobars/confirm_infobar_metrics_recorder.h"
+#include "ios/chrome/browser/infobars/infobar_ios.h"
 #include "ios/chrome/browser/infobars/infobar_manager_impl.h"
+#import "ios/chrome/browser/ui/infobars/coordinators/infobar_confirm_coordinator.h"
 #include "ios/chrome/grit/ios_strings.h"
 #include "ios/web/public/navigation/referrer.h"
 #include "net/base/mac/url_conversions.h"
@@ -88,7 +90,7 @@ class BlockPopupInfoBarDelegate : public ConfirmInfoBarDelegate {
       host_content_map_settings->SetContentSettingCustomScope(
           ContentSettingsPattern::FromURL(popup.referrer.url),
           ContentSettingsPattern::Wildcard(), ContentSettingsType::POPUPS,
-          std::string(), CONTENT_SETTING_ALLOW);
+          CONTENT_SETTING_ALLOW);
     }
     return true;
   }
@@ -123,7 +125,7 @@ bool BlockedPopupTabHelper::ShouldBlockPopup(const GURL& source_url) {
   HostContentSettingsMap* settings_map =
       ios::HostContentSettingsMapFactory::GetForBrowserState(GetBrowserState());
   ContentSetting setting = settings_map->GetContentSetting(
-      source_url, source_url, ContentSettingsType::POPUPS, std::string());
+      source_url, source_url, ContentSettingsType::POPUPS);
   return setting != CONTENT_SETTING_ALLOW;
 }
 
@@ -159,13 +161,19 @@ void BlockedPopupTabHelper::ShowInfoBar() {
   std::unique_ptr<BlockPopupInfoBarDelegate> delegate(
       std::make_unique<BlockPopupInfoBarDelegate>(GetBrowserState(), web_state_,
                                                   popups_));
-  std::unique_ptr<infobars::InfoBar> infobar =
-      infobar_manager->CreateConfirmInfoBar(std::move(delegate));
-  if (infobar_) {
-    infobar_ = infobar_manager->ReplaceInfoBar(infobar_, std::move(infobar));
-  } else {
-    infobar_ = infobar_manager->AddInfoBar(std::move(infobar));
-  }
+
+    InfobarConfirmCoordinator* coordinator = [[InfobarConfirmCoordinator alloc]
+        initWithInfoBarDelegate:delegate.get()
+                   badgeSupport:NO
+                           type:InfobarType::kInfobarTypeConfirm];
+    std::unique_ptr<infobars::InfoBar> infobar =
+        std::make_unique<InfoBarIOS>(coordinator, std::move(delegate));
+
+    if (infobar_) {
+      infobar_ = infobar_manager->ReplaceInfoBar(infobar_, std::move(infobar));
+    } else {
+      infobar_ = infobar_manager->AddInfoBar(std::move(infobar));
+    }
   [ConfirmInfobarMetricsRecorder
       recordConfirmInfobarEvent:MobileMessagesConfirmInfobarEvents::Presented
           forInfobarConfirmType:InfobarConfirmType::

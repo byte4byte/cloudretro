@@ -58,21 +58,40 @@ bool StringListDirective::AllowOrProcessValue(const String& src) {
     allow_any_ = true;
     return false;
   }
+  if (src == "'none'") {
+    if (list_.size() > 1) {
+      Policy()->ReportInvalidSourceExpression(GetName(), src);
+    }
+    return false;
+  }
   return IsPolicyName(src);
 }
 
-bool StringListDirective::Allows(const String& string_piece,
-                                 bool is_duplicate) {
-  if (is_duplicate && !allow_duplicates_)
-    return false;
-  if (is_duplicate && string_piece == "default")
-    return false;
-  if (!IsPolicyName(string_piece))
-    return false;
-  return allow_any_ || list_.Contains(string_piece);
+bool StringListDirective::Allows(
+    const String& value,
+    bool is_duplicate,
+    ContentSecurityPolicy::AllowTrustedTypePolicyDetails& violation_details) {
+  if (is_duplicate && !allow_duplicates_) {
+    violation_details = ContentSecurityPolicy::AllowTrustedTypePolicyDetails::
+        kDisallowedDuplicateName;
+  } else if (is_duplicate && value == "default") {
+    violation_details = ContentSecurityPolicy::AllowTrustedTypePolicyDetails::
+        kDisallowedDuplicateName;
+  } else if (!IsPolicyName(value)) {
+    violation_details =
+        ContentSecurityPolicy::AllowTrustedTypePolicyDetails::kDisallowedName;
+  } else if (!(allow_any_ || list_.Contains(value))) {
+    violation_details =
+        ContentSecurityPolicy::AllowTrustedTypePolicyDetails::kDisallowedName;
+  } else {
+    violation_details =
+        ContentSecurityPolicy::AllowTrustedTypePolicyDetails::kAllowed;
+  }
+  return violation_details ==
+         ContentSecurityPolicy::AllowTrustedTypePolicyDetails::kAllowed;
 }
 
-void StringListDirective::Trace(Visitor* visitor) {
+void StringListDirective::Trace(Visitor* visitor) const {
   CSPDirective::Trace(visitor);
 }
 

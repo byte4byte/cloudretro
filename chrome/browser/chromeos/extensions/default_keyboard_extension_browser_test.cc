@@ -9,6 +9,7 @@
 
 #include "ash/public/cpp/keyboard/keyboard_switches.h"
 #include "base/command_line.h"
+#include "base/files/file_util.h"
 #include "base/run_loop.h"
 #include "base/threading/thread_restrictions.h"
 #include "chrome/browser/ui/ash/keyboard/chrome_keyboard_controller_client.h"
@@ -21,6 +22,7 @@
 #include "content/public/browser/render_widget_host_iterator.h"
 #include "content/public/browser/site_instance.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "extensions/common/extension.h"
 #include "ui/aura/window_tree_host.h"

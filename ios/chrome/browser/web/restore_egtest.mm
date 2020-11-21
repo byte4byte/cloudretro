@@ -6,6 +6,7 @@
 #include "base/strings/sys_string_conversions.h"
 #import "base/test/ios/wait_util.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey.h"
+#import "ios/chrome/test/earl_grey/chrome_earl_grey_ui.h"
 #import "ios/chrome/test/earl_grey/chrome_matchers.h"
 #import "ios/chrome/test/earl_grey/chrome_test_case.h"
 #include "ios/net/url_test_util.h"
@@ -147,8 +148,7 @@ bool WaitForOmniboxContaining(std::string text) {
 
 // Navigates to a set of cross-domains, chrome URLs and error pages, and then
 // tests that they are properly restored.
-// TODO(crbug.com/1073932): Re-enable this.
-- (void)DISABLED_testRestoreHistory {
+- (void)testRestoreHistory {
   [self setUpRestoreServers];
   [self loadTestPages];
   [self verifyRestoredTestPages:YES];
@@ -156,8 +156,7 @@ bool WaitForOmniboxContaining(std::string text) {
 
 // Navigates to a set of cross-domains, chrome URLs and error pages, and then
 // tests that they are properly restored in airplane mode.
-// TODO(crbug.com/1073932): Re-enable this.
-- (void)DISABLED_testRestoreNoNetwork {
+- (void)testRestoreNoNetwork {
   [self setUpRestoreServers];
   [self loadTestPages];
   self.serverRespondsWithContent = false;
@@ -191,7 +190,6 @@ bool WaitForOmniboxContaining(std::string text) {
 // Tests that only the selected web state is loaded Restore-after-Crash.  This
 // is only possible in EG2.
 - (void)testRestoreOneWebstateOnlyAfterCrash {
-#if defined(CHROME_EARL_GREY_2)
   // Visit the background page.
   int visitCounter = 0;
   self.testServer->RegisterRequestHandler(
@@ -220,7 +218,6 @@ bool WaitForOmniboxContaining(std::string text) {
       assertWithMatcher:grey_notNil()];
   [ChromeEarlGrey waitForWebStateContainingText:"Echo"];
   GREYAssertEqual(1, visitCounter, @"The page should not reload");
-#endif
 }
 
 #pragma mark Utility methods
@@ -237,16 +234,10 @@ bool WaitForOmniboxContaining(std::string text) {
 }
 
 - (void)triggerRestore {
-// TODO(crbug.com/1067821):|AppLaunchManager| relaunching with
-// |ForceRelaunchByCleanShutdown| policy won't work in EG1 or on real device.
-#if defined(CHROME_EARL_GREY_1) || !TARGET_IPHONE_SIMULATOR
-  [ChromeEarlGrey triggerRestoreViaTabGridRemoveAllUndo];
-#elif defined(CHROME_EARL_GREY_2)
   [ChromeEarlGrey saveSessionImmediately];
   [[AppLaunchManager sharedManager] ensureAppLaunchedWithFeaturesEnabled:{}
       disabled:{}
       relaunchPolicy:ForceRelaunchByCleanShutdown];
-#endif  // defined(CHROME_EARL_GREY_2)
 }
 
 - (void)loadTestPages {
@@ -263,7 +254,7 @@ bool WaitForOmniboxContaining(std::string text) {
   const GURL errorPage = GURL("http://invalid.");
   [ChromeEarlGrey loadURL:errorPage];
   [ChromeEarlGrey waitForWebStateContainingText:"ERR_"];
-  [[GREYUIThreadExecutor sharedInstance] drainUntilIdle];
+  [ChromeEarlGreyUI waitForAppToIdle];
 
   // Load page2.
   const GURL pageTwo = self.secondTestServer->GetURL(kPageTwoPath);
@@ -286,8 +277,10 @@ bool WaitForOmniboxContaining(std::string text) {
   // Confirm page1 is still in the history.
   [[EarlGrey selectElementWithMatcher:BackButton()]
       performAction:grey_longPress()];
-  [[EarlGrey selectElementWithMatcher:grey_text(base::SysUTF8ToNSString(
-                                          kPageOneTitle))]
+  [[EarlGrey
+      selectElementWithMatcher:grey_allOf(grey_text(base::SysUTF8ToNSString(
+                                              kPageOneTitle)),
+                                          grey_sufficientlyVisible(), nil)]
       assertWithMatcher:grey_notNil()];
   [[EarlGrey selectElementWithMatcher:BackButton()] performAction:grey_tap()];
 
@@ -297,13 +290,13 @@ bool WaitForOmniboxContaining(std::string text) {
       WaitForOmniboxContaining("invalid."),
       @"Timeout while waiting for  omnibox text to become \"invalid.\".");
   [ChromeEarlGrey waitForWebStateContainingText:"ERR_"];
-  [[GREYUIThreadExecutor sharedInstance] drainUntilIdle];
+  [ChromeEarlGreyUI waitForAppToIdle];
   [self triggerRestore];
   GREYAssert(
       WaitForOmniboxContaining("invalid."),
       @"Timeout while waiting for  omnibox text to become \"invalid.\".");
   [ChromeEarlGrey waitForWebStateContainingText:"ERR_"];
-  [[GREYUIThreadExecutor sharedInstance] drainUntilIdle];
+  [ChromeEarlGreyUI waitForAppToIdle];
 
   // Go back to chrome url.
   [[EarlGrey selectElementWithMatcher:BackButton()] performAction:grey_tap()];
@@ -325,8 +318,10 @@ bool WaitForOmniboxContaining(std::string text) {
     [ChromeEarlGrey waitForWebStateContainingText:kPageOneContent];
     [[EarlGrey selectElementWithMatcher:ForwardButton()]
         performAction:grey_longPress()];
-    [[EarlGrey selectElementWithMatcher:grey_text(base::SysUTF8ToNSString(
-                                            kPageTwoTitle))]
+    [[EarlGrey
+        selectElementWithMatcher:grey_allOf(grey_text(base::SysUTF8ToNSString(
+                                                kPageTwoTitle)),
+                                            grey_sufficientlyVisible(), nil)]
         assertWithMatcher:grey_notNil()];
     [[EarlGrey selectElementWithMatcher:ForwardButton()]
         performAction:grey_tap()];
@@ -338,8 +333,10 @@ bool WaitForOmniboxContaining(std::string text) {
     [ChromeEarlGrey waitForWebStateContainingText:kPageOneContent];
     [[EarlGrey selectElementWithMatcher:ForwardButton()]
         performAction:grey_longPress()];
-    [[EarlGrey selectElementWithMatcher:grey_text(base::SysUTF8ToNSString(
-                                            kPageTwoTitle))]
+    [[EarlGrey
+        selectElementWithMatcher:grey_allOf(grey_text(base::SysUTF8ToNSString(
+                                                kPageTwoTitle)),
+                                            grey_sufficientlyVisible(), nil)]
         assertWithMatcher:grey_notNil()];
     [[EarlGrey selectElementWithMatcher:ForwardButton()]
         performAction:grey_tap()];

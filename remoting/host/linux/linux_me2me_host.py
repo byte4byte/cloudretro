@@ -32,6 +32,7 @@ import re
 import signal
 import socket
 import subprocess
+import syslog
 import tempfile
 import threading
 import time
@@ -237,12 +238,42 @@ def gen_xorg_config(sizes):
           video_ram=XORG_DUMMY_VIDEO_RAM))
 
 
+def display_manager_is_gdm():
+  try:
+    # Open as binary to avoid any encoding errors
+    with open('/etc/X11/default-display-manager', 'rb') as file:
+      if file.read().strip() in [b'/usr/sbin/gdm', b'/usr/sbin/gdm3']:
+        return True
+    # Fall through to process checking even if the file doesn't contain gdm.
+  except:
+    # If we can't read the file, move on to checking the process list.
+    pass
+
+  for process in psutil.process_iter():
+    if process.name() in ['gdm', 'gdm3']:
+      return True
+
+  return False
+
+
 def is_supported_platform():
   # Always assume that the system is supported if the config directory or
   # session file exist.
   if (os.path.isdir(CONFIG_DIR) or os.path.isfile(SESSION_FILE_PATH) or
       os.path.isfile(SYSTEM_SESSION_FILE_PATH)):
     return True
+
+  # There's a bug in recent versions of GDM that will prevent a user from
+  # logging in via GDM when there is already an x11 session running for that
+  # user (such as the one started by CRD). Since breaking local login is a
+  # pretty serious issue, we want to disallow host set up through the website.
+  # Unfortunately, there's no way to return a specific error to the website, so
+  # we just return False to indicate an unsupported platform. The user can still
+  # set up the host using the headless setup flow, where we can at least display
+  # a warning. See https://gitlab.gnome.org/GNOME/gdm/-/issues/580 for details
+  # of the bug and fix.
+  if display_manager_is_gdm():
+    return False;
 
   # The session chooser expects a Debian-style Xsession script.
   return os.path.isfile(DEBIAN_XSESSION_PATH);
@@ -994,7 +1025,10 @@ class ParentProcessLogger(object):
           # for the host to start).
           # Trapping the error here means the host can continue running.
           logging.info("Caught IOError writing READY message.")
-      self._write_file.close()
+      try:
+        self._write_file.close()
+      except IOError:
+        pass
 
   @staticmethod
   def try_start_logging(write_fd):
@@ -1020,6 +1054,7 @@ class ParentProcessLogger(object):
     """
     instance = ParentProcessLogger.__instance
     if instance is not None:
+      ParentProcessLogger.__instance = None
       instance._release_parent(success)
 
 
@@ -1327,7 +1362,7 @@ def watch_for_resolution_changes(initial_size):
 
     xrandr_output = subprocess.Popen(["xrandr"],
                                      stdout=subprocess.PIPE).communicate()[0]
-    matches = re.search(r'current (\d+) x (\d+), maximum (\d+) x (\d+)',
+    matches = re.search(br'current (\d+) x (\d+), maximum (\d+) x (\d+)',
                         xrandr_output)
 
     # No need to handle ValueError. If xrandr fails to give valid output,
@@ -1398,9 +1433,6 @@ Web Store: https://chrome.google.com/remotedesktop"""
   parser.add_argument("--watch-resolution", dest="watch_resolution",
                       type=int, nargs=2, default=False, action="store",
                       help=argparse.SUPPRESS)
-  parser.add_argument("--skip-config-upgrade", dest="skip_config_upgrade",
-                      default=False, action="store_true",
-                      help="Skip running the config upgrade tool.")
   parser.add_argument(dest="args", nargs="*", help=argparse.SUPPRESS)
   options = parser.parse_args()
 
@@ -1498,7 +1530,7 @@ Web Store: https://chrome.google.com/remotedesktop"""
     return 0
 
   if options.watch_resolution:
-    watch_for_resolution_changes(options.watch_resolution)
+    watch_for_resolution_changes(tuple(options.watch_resolution))
     return 0
 
   if not options.start:
@@ -1532,6 +1564,22 @@ Web Store: https://chrome.google.com/remotedesktop"""
   # Start logging to user-session messaging pipe if it exists.
   ParentProcessLogger.try_start_logging(USER_SESSION_MESSAGE_FD)
 
+  if display_manager_is_gdm():
+    # See https://gitlab.gnome.org/GNOME/gdm/-/issues/580 for details on the
+    # bug.
+    gdm_message = (
+        "WARNING: This system uses GDM. Some GDM versions have a bug that "
+        "prevents local login while Chrome Remote Desktop is running. If you "
+        "run into this issue, you can stop Chrome Remote Desktop by visiting "
+        "https://remotedesktop.google.com/access on another machine and "
+        "clicking the delete icon next to this machine. It may take up to five "
+        "minutes for the Chrome Remote Desktop to exit on this machine and for "
+        "local login to start working again.")
+    logging.warning(gdm_message)
+    # Also log to syslog so the user has a higher change of discovering the
+    # message if they go searching.
+    syslog.syslog(syslog.LOG_WARNING | syslog.LOG_DAEMON, gdm_message)
+
   if USE_XORG_ENV_VAR in os.environ:
     default_sizes = DEFAULT_SIZES_XORG
   else:
@@ -1564,15 +1612,6 @@ Web Store: https://chrome.google.com/remotedesktop"""
 
   # Register an exit handler to clean up session process and the PID file.
   atexit.register(cleanup)
-
-  # Run the config upgrade tool, to update the refresh token if needed.
-  # TODO(lambroslambrou): Respect CHROME_REMOTE_DESKTOP_HOST_EXTRA_PARAMS
-  # and the GOOGLE_CLIENT... variables, and fix the tool to work in a
-  # test environment.
-  if not options.skip_config_upgrade:
-    args = [HOST_BINARY_PATH, "--upgrade-token",
-            "--host-config=%s" % config_file]
-    subprocess.check_call(args);
 
   # Load the initial host configuration.
   host_config = Config(config_file)

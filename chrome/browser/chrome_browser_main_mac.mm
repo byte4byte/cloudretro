@@ -8,27 +8,26 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/files/file_path.h"
-#include "base/files/file_util.h"
 #include "base/mac/bundle_locations.h"
 #import "base/mac/foundation_util.h"
 #include "base/mac/mac_util.h"
 #include "base/mac/scoped_nsobject.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/path_service.h"
-#include "base/task/post_task.h"
-#include "base/task/task_traits.h"
-#include "base/task/thread_pool.h"
-#include "base/threading/thread_task_runner_handle.h"
+#include "base/strings/sys_string_conversions.h"
+#include "build/branding_buildflags.h"
 #import "chrome/browser/app_controller_mac.h"
 #include "chrome/browser/apps/app_shim/app_shim_listener.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_process_platform_part.h"
+#include "chrome/browser/buildflags.h"
 #import "chrome/browser/chrome_browser_application_mac.h"
 #include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/mac/install_from_dmg.h"
 #import "chrome/browser/mac/keystone_glue.h"
 #include "chrome/browser/mac/mac_startup_profiler.h"
 #include "chrome/browser/ui/cocoa/main_menu_builder.h"
+#include "chrome/common/channel_info.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -36,6 +35,7 @@
 #include "components/crash/core/app/crashpad.h"
 #include "components/metrics/metrics_service.h"
 #include "components/os_crypt/os_crypt.h"
+#include "components/version_info/channel.h"
 #include "content/public/common/main_function_params.h"
 #include "content/public/common/result_codes.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -43,31 +43,9 @@
 #include "ui/base/resource/resource_handle.h"
 #include "ui/native_theme/native_theme_mac.h"
 
-namespace {
-
-// Writes an undocumented sentinel file that prevents Spotlight from indexing
-// below a particular path in order to reap some power savings.
-void EnsureMetadataNeverIndexFileOnFileThread(
-    const base::FilePath& user_data_dir) {
-  const char kMetadataNeverIndexFilename[] = ".metadata_never_index";
-  base::FilePath metadata_file_path =
-      user_data_dir.Append(kMetadataNeverIndexFilename);
-  if (base::PathExists(metadata_file_path))
-    return;
-
-  if (base::WriteFile(metadata_file_path, nullptr, 0) == -1)
-    DLOG(FATAL) << "Could not write .metadata_never_index file.";
-}
-
-void EnsureMetadataNeverIndexFile(const base::FilePath& user_data_dir) {
-  base::ThreadPool::PostTask(
-      FROM_HERE,
-      {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
-       base::TaskShutdownBehavior::BLOCK_SHUTDOWN},
-      base::BindOnce(&EnsureMetadataNeverIndexFileOnFileThread, user_data_dir));
-}
-
-}  // namespace
+#if BUILDFLAG(ENABLE_CHROMIUM_UPDATER)
+#include "chrome/browser/mac/install_updater.h"
+#endif  // BUILDFLAG(ENABLE_CHROMIUM_UPDATER)
 
 // ChromeBrowserMainPartsMac ---------------------------------------------------
 
@@ -102,9 +80,13 @@ void ChromeBrowserMainPartsMac::PreMainMessageLoopStart() {
   // point (needed to load the nib).
   CHECK(ui::ResourceBundle::HasSharedInstance());
 
+#if BUILDFLAG(ENABLE_CHROMIUM_UPDATER)
+  InstallUpdaterAndRegisterBrowser();
+#else
   // This is a no-op if the KeystoneRegistration framework is not present.
   // The framework is only distributed with branded Google Chrome builds.
   [[KeystoneGlue defaultKeystoneGlue] registerWithKeystone];
+#endif  // BUILDFLAG(ENABLE_CHROMIUM_UPDATER)
 
   // Disk image installation is sort of a first-run task, so it shares the
   // no first run switches.
@@ -172,9 +154,6 @@ void ChromeBrowserMainPartsMac::PostProfileInit() {
 
   g_browser_process->metrics_service()->RecordBreakpadRegistration(
       crash_reporter::GetUploadsEnabled());
-
-  if (first_run::IsChromeFirstRun())
-    EnsureMetadataNeverIndexFile(user_data_dir());
 
   // Activation of Keystone is not automatic but done in response to the
   // counting and reporting of profiles.

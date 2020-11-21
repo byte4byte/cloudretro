@@ -23,6 +23,8 @@
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/image/image.h"
+#include "ui/views/bubble/bubble_dialog_delegate_view.h"
+#include "ui/views/style/platform_style.h"
 #include "ui/views/test/test_views.h"
 
 // A helper class that owns an instance of a BrowserActionsContainer; this is
@@ -35,7 +37,6 @@ class ExtensionActionTestHelperViews::TestToolbarActionsBarHelper
                               BrowserActionsContainer* main_bar)
       : browser_actions_container_(
             new BrowserActionsContainer(browser, main_bar, this, true)) {
-    container_parent_.set_owned_by_client();
     container_parent_.SetSize(gfx::Size(1000, 1000));
     container_parent_.Layout();
     container_parent_.AddChildView(browser_actions_container_);
@@ -148,6 +149,13 @@ ExtensionsContainer* ExtensionActionTestHelperViews::GetExtensionsContainer() {
   return GetToolbarActionsBar();
 }
 
+void ExtensionActionTestHelperViews::WaitForExtensionsContainerLayout() {
+  // In case the feature |kExtensionsToolbarMenu| is disabled, the tests wait
+  // for layout completion themselves instead of calling into the
+  // |ExtensionActionTestHelper|.
+  NOTREACHED();
+}
+
 std::unique_ptr<ExtensionActionTestHelper>
 ExtensionActionTestHelperViews::CreateOverflowBar(Browser* browser) {
   CHECK(!GetToolbarActionsBar()->in_overflow_mode())
@@ -158,16 +166,33 @@ ExtensionActionTestHelperViews::CreateOverflowBar(Browser* browser) {
           browser, browser_actions_container_)));
 }
 
+void ExtensionActionTestHelperViews::LayoutForOverflowBar() {
+  CHECK(GetToolbarActionsBar()->in_overflow_mode());
+  // This will update the container's preferred size which will in turn trigger
+  // a layout in the parent ResizeAwareParentView.
+  test_helper_->browser_actions_container()->RefreshToolbarActionViews();
+}
+
 gfx::Size ExtensionActionTestHelperViews::GetMinPopupSize() {
-  return gfx::Size(ExtensionPopup::kMinWidth, ExtensionPopup::kMinHeight);
+  return ExtensionPopup::kMinSize;
 }
 
 gfx::Size ExtensionActionTestHelperViews::GetMaxPopupSize() {
-  return gfx::Size(ExtensionPopup::kMaxWidth, ExtensionPopup::kMaxHeight);
+  return ExtensionPopup::kMaxSize;
 }
 
 gfx::Size ExtensionActionTestHelperViews::GetToolbarActionSize() {
   return GetToolbarActionsBar()->GetViewSize();
+}
+
+gfx::Size
+ExtensionActionTestHelperViews::GetMaxAvailableSizeToFitBubbleOnScreen(
+    int action_index) {
+  return views::BubbleDialogDelegate::GetMaxAvailableScreenSpaceToPlaceBubble(
+      browser_actions_container_->GetToolbarActionViewAt(action_index),
+      views::BubbleBorder::TOP_RIGHT,
+      views::PlatformStyle::kAdjustBubbleIfOffscreen,
+      views::BubbleFrameView::PreferredArrowAdjustment::kMirror);
 }
 
 ExtensionActionTestHelperViews::ExtensionActionTestHelperViews(

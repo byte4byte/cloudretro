@@ -18,8 +18,6 @@
 #include "chrome/browser/themes/theme_helper.h"
 #include "chrome/common/buildflags.h"
 #include "components/keyed_service/core/keyed_service.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
 #include "extensions/buildflags/buildflags.h"
 #include "extensions/common/extension_id.h"
 #include "ui/base/theme_provider.h"
@@ -44,8 +42,7 @@ class BrowserThemeProviderDelegate {
   virtual const CustomThemeSupplier* GetThemeSupplier() const = 0;
 };
 
-class ThemeService : public content::NotificationObserver,
-                     public KeyedService,
+class ThemeService : public KeyedService,
                      public ui::NativeThemeObserver,
                      public BrowserThemeProviderDelegate {
  public:
@@ -81,11 +78,6 @@ class ThemeService : public content::NotificationObserver,
 
   // KeyedService:
   void Shutdown() override;
-
-  // Overridden from content::NotificationObserver:
-  void Observe(int type,
-               const content::NotificationSource& source,
-               const content::NotificationDetails& details) override;
 
   // Overridden from ui::NativeThemeObserver:
   void OnNativeThemeUpdated(ui::NativeTheme* observed_theme) override;
@@ -155,6 +147,9 @@ class ThemeService : public content::NotificationObserver,
   BuildReinstallerForCurrentTheme();
 
   const ThemeHelper& theme_helper_for_testing() const { return theme_helper_; }
+
+  // Don't create "Cached Theme.pak" in the extension directory, for testing.
+  static void DisableThemePackForTesting();
 
  protected:
   // Set a custom default theme instead of the normal default theme.
@@ -277,8 +272,6 @@ class ThemeService : public content::NotificationObserver,
 
   // The number of infobars currently displayed.
   int number_of_reinstallers_ = 0;
-
-  content::NotificationRegistrar registrar_;
 
   std::unique_ptr<ThemeSyncableService> theme_syncable_service_;
 

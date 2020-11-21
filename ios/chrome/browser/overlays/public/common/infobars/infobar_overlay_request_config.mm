@@ -4,7 +4,6 @@
 
 #import "ios/chrome/browser/overlays/public/common/infobars/infobar_overlay_request_config.h"
 
-#include "base/logging.h"
 #import "ios/chrome/browser/infobars/infobar_ios.h"
 #include "ios/chrome/browser/ui/badges/badge_type_util.h"
 
@@ -18,11 +17,13 @@ OVERLAY_USER_DATA_SETUP_IMPL(InfobarOverlayRequestConfig);
 
 InfobarOverlayRequestConfig::InfobarOverlayRequestConfig(
     InfoBarIOS* infobar,
-    InfobarOverlayType overlay_type)
+    InfobarOverlayType overlay_type,
+    bool is_high_priority)
     : infobar_(infobar->GetWeakPtr()),
       infobar_type_(infobar->infobar_type()),
       has_badge_(BadgeTypeForInfobarType(infobar_type_) !=
                  BadgeType::kBadgeTypeNone),
+      is_high_priority_(is_high_priority),
       overlay_type_(overlay_type) {}
 
 InfobarOverlayRequestConfig::~InfobarOverlayRequestConfig() = default;

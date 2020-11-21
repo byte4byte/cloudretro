@@ -19,9 +19,9 @@ namespace web {
 class PolicyDecisionStateTrackerTest : public PlatformTest {
  public:
   PolicyDecisionStateTrackerTest()
-      : policy_decision_state_tracker_(
-            base::Bind(&PolicyDecisionStateTrackerTest::OnDecisionDetermined,
-                       base::Unretained(this))) {}
+      : policy_decision_state_tracker_(base::BindOnce(
+            &PolicyDecisionStateTrackerTest::OnDecisionDetermined,
+            base::Unretained(this))) {}
 
   void OnDecisionDetermined(
       WebStatePolicyDecider::PolicyDecision policy_decision) {
@@ -280,6 +280,66 @@ TEST_F(PolicyDecisionStateTrackerTest, ShowErrorMixed) {
 
   // The error received first should take precedence.
   EXPECT_EQ(policy_decision_->GetDisplayError().code, error1.code);
+}
+
+// Test fixture that supports destroying its PolicyDecisionStateTracker,
+// allowing destructor behavior to be tested.
+class PolicyDecisionStateTrackerDestructionTest : public PlatformTest {
+ public:
+  PolicyDecisionStateTrackerDestructionTest()
+      : policy_decision_state_tracker_(
+            std::make_unique<PolicyDecisionStateTracker>(
+                base::BindOnce(&PolicyDecisionStateTrackerDestructionTest::
+                                   OnDecisionDetermined,
+                               base::Unretained(this)))) {}
+
+  void OnDecisionDetermined(
+      WebStatePolicyDecider::PolicyDecision policy_decision) {
+    policy_decision_ = policy_decision;
+  }
+
+  void DestroyPolicyDecisionStateTracker() {
+    policy_decision_state_tracker_.reset();
+  }
+
+  std::unique_ptr<PolicyDecisionStateTracker> policy_decision_state_tracker_;
+  base::Optional<WebStatePolicyDecider::PolicyDecision> policy_decision_;
+};
+
+// Tests the case where no decisions have been received by the time the
+// PolicyDecisionStateTracker is destroyed.
+TEST_F(PolicyDecisionStateTrackerDestructionTest, NoDecisionsReceived) {
+  int num_decisions_requested = 3;
+  policy_decision_state_tracker_->FinishedRequestingDecisions(
+      num_decisions_requested);
+
+  DestroyPolicyDecisionStateTracker();
+
+  EXPECT_TRUE(policy_decision_);
+  EXPECT_TRUE(policy_decision_->ShouldCancelNavigation());
+}
+
+// Tests the case where some but not all decisions have been received by the
+// time the PolicyDecisionStateTracker is destroyed.
+TEST_F(PolicyDecisionStateTrackerDestructionTest, OnlySomeDecisionsReceived) {
+  int num_decisions_requested = 3;
+  policy_decision_state_tracker_->FinishedRequestingDecisions(
+      num_decisions_requested);
+
+  policy_decision_state_tracker_->OnSinglePolicyDecisionReceived(
+      WebStatePolicyDecider::PolicyDecision::Allow());
+  EXPECT_FALSE(policy_decision_state_tracker_->DeterminedFinalResult());
+  EXPECT_FALSE(policy_decision_);
+
+  policy_decision_state_tracker_->OnSinglePolicyDecisionReceived(
+      WebStatePolicyDecider::PolicyDecision::Allow());
+  EXPECT_FALSE(policy_decision_state_tracker_->DeterminedFinalResult());
+  EXPECT_FALSE(policy_decision_);
+
+  DestroyPolicyDecisionStateTracker();
+
+  EXPECT_TRUE(policy_decision_);
+  EXPECT_TRUE(policy_decision_->ShouldCancelNavigation());
 }
 
 }  // namespace web

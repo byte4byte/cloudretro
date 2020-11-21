@@ -8,10 +8,12 @@ import android.content.Context;
 
 import androidx.annotation.VisibleForTesting;
 
-import org.chromium.chrome.browser.payments.PaymentApp;
+import org.chromium.chrome.R;
 import org.chromium.chrome.browser.payments.ui.LineItem;
-import org.chromium.chrome.browser.widget.bottomsheet.BottomSheetController;
+import org.chromium.components.browser_ui.bottomsheet.BottomSheetController;
 import org.chromium.components.payments.CurrencyFormatter;
+import org.chromium.components.payments.PaymentApp;
+import org.chromium.payments.mojom.PaymentComplete;
 import org.chromium.ui.modelutil.PropertyModel;
 import org.chromium.ui.modelutil.PropertyModelChangeProcessor;
 
@@ -74,7 +76,7 @@ public class MinimalUICoordinator {
     /**
      * Shows the minimal UI.
      *
-     * @param chromeActivity  The activity where the UI should be shown.
+     * @param context         The context where the UI should be shown.
      * @param app             The app that contains the details to display and can be invoked
      *                        upon user confirmation.
      * @param formatter       Formats the account balance amount according to its currency.
@@ -135,7 +137,7 @@ public class MinimalUICoordinator {
      * has closed.
      * @param observer The observer to notify when the UI has closed.
      */
-    public void showCompleteAndClose(CompleteAndCloseObserver observer) {
+    private void showCompleteAndClose(CompleteAndCloseObserver observer) {
         mMediator.showCompleteAndClose(observer);
     }
 
@@ -148,6 +150,21 @@ public class MinimalUICoordinator {
      */
     public void showErrorAndClose(ErrorAndCloseObserver observer, int errorMessageResourceId) {
         mMediator.showErrorAndClose(observer, null, errorMessageResourceId);
+    }
+
+    /**
+     * Runs when the payment request is closed.
+     * @param result The status of PaymentComplete.
+     * @param onErroredAndClosed The function called when the UI errors and closes.
+     * @param onCompletedAndClosed The function called when the UI completes and closes.
+     */
+    public void onPaymentRequestComplete(int result, ErrorAndCloseObserver onErroredAndClosed,
+            CompleteAndCloseObserver onCompletedAndClosed) {
+        if (result == PaymentComplete.FAIL) {
+            showErrorAndClose(onErroredAndClosed, R.string.payments_error_message);
+        } else {
+            showCompleteAndClose(onCompletedAndClosed);
+        }
     }
 
     /** Confirms payment in minimal UI. Used only in tests. */

@@ -12,6 +12,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "content/public/browser/storage_partition.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/test_utils.h"
 #include "net/base/load_flags.h"
 #include "net/http/http_status_code.h"
@@ -19,7 +20,7 @@
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
-#include "net/url_request/url_request_status.h"
+#include "net/url_request/referrer_policy.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/codec/png_codec.h"
@@ -150,7 +151,7 @@ IN_PROC_BROWSER_TEST_F(BitmapFetcherBrowserTest, StartTest) {
   // an image in a callback to OnImageDecoded().
   fetcher.Init(
       std::string(),
-      net::URLRequest::REDUCE_REFERRER_GRANULARITY_ON_TRANSITION_CROSS_ORIGIN,
+      net::ReferrerPolicy::REDUCE_GRANULARITY_ON_TRANSITION_CROSS_ORIGIN,
       network::mojom::CredentialsMode::kInclude);
   fetcher.Start(
       content::BrowserContext::GetDefaultStoragePartition(browser()->profile())
@@ -175,6 +176,7 @@ IN_PROC_BROWSER_TEST_F(BitmapFetcherBrowserTest, OnImageDecodedTest) {
 
   BitmapFetcher fetcher(url, &delegate, TRAFFIC_ANNOTATION_FOR_TESTS);
 
+  fetcher.SetStartTimeForTesting();
   fetcher.OnImageDecoded(image);
 
   // Ensure image is marked as succeeded.
@@ -196,7 +198,7 @@ IN_PROC_BROWSER_TEST_F(BitmapFetcherBrowserTest, OnURLFetchFailureTest) {
 
   fetcher.Init(
       std::string(),
-      net::URLRequest::REDUCE_REFERRER_GRANULARITY_ON_TRANSITION_CROSS_ORIGIN,
+      net::ReferrerPolicy::REDUCE_GRANULARITY_ON_TRANSITION_CROSS_ORIGIN,
       network::mojom::CredentialsMode::kInclude);
   fetcher.Start(
       content::BrowserContext::GetDefaultStoragePartition(browser()->profile())
@@ -216,7 +218,7 @@ IN_PROC_BROWSER_TEST_F(BitmapFetcherBrowserTest, HandleImageFailedTest) {
 
   fetcher.Init(
       std::string(),
-      net::URLRequest::REDUCE_REFERRER_GRANULARITY_ON_TRANSITION_CROSS_ORIGIN,
+      net::ReferrerPolicy::REDUCE_GRANULARITY_ON_TRANSITION_CROSS_ORIGIN,
       network::mojom::CredentialsMode::kInclude);
   fetcher.Start(
       content::BrowserContext::GetDefaultStoragePartition(browser()->profile())
@@ -236,7 +238,7 @@ IN_PROC_BROWSER_TEST_F(BitmapFetcherBrowserTest, DataURLNonImage) {
 
   fetcher.Init(
       std::string(),
-      net::URLRequest::REDUCE_REFERRER_GRANULARITY_ON_TRANSITION_CROSS_ORIGIN,
+      net::ReferrerPolicy::REDUCE_GRANULARITY_ON_TRANSITION_CROSS_ORIGIN,
       network::mojom::CredentialsMode::kInclude);
   fetcher.Start(
       content::BrowserContext::GetDefaultStoragePartition(browser()->profile())
@@ -259,7 +261,7 @@ IN_PROC_BROWSER_TEST_F(BitmapFetcherBrowserTest, DataURLImage) {
 
   fetcher.Init(
       std::string(),
-      net::URLRequest::REDUCE_REFERRER_GRANULARITY_ON_TRANSITION_CROSS_ORIGIN,
+      net::ReferrerPolicy::REDUCE_GRANULARITY_ON_TRANSITION_CROSS_ORIGIN,
       network::mojom::CredentialsMode::kInclude);
   fetcher.Start(
       content::BrowserContext::GetDefaultStoragePartition(browser()->profile())

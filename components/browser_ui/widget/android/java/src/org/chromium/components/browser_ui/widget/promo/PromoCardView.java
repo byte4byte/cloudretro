@@ -14,7 +14,6 @@ import androidx.annotation.Nullable;
 
 import org.chromium.components.browser_ui.widget.R;
 import org.chromium.ui.widget.ButtonCompat;
-import org.chromium.ui.widget.ChromeImageButton;
 
 /**
  * A promo card view that contains an image view in the top center, a block of short description,
@@ -23,9 +22,11 @@ import org.chromium.ui.widget.ChromeImageButton;
 class PromoCardView extends LinearLayout {
     ImageView mPromoImage;
     TextView mTitle;
-    TextView mDescription;
     ButtonCompat mPrimaryButton;
-    ChromeImageButton mDismissButton;
+
+    @Nullable
+    TextView mDescription;
+    @Nullable
     ButtonCompat mSecondaryButton;
 
     public PromoCardView(Context context) {
@@ -45,7 +46,6 @@ class PromoCardView extends LinearLayout {
         mTitle = findViewById(R.id.promo_title);
         mDescription = findViewById(R.id.promo_description);
         mPrimaryButton = findViewById(R.id.promo_primary_button);
-        mDismissButton = findViewById(R.id.promo_close_button);
         mSecondaryButton = findViewById(R.id.promo_secondary_button);
     }
 }

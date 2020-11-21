@@ -132,6 +132,24 @@ export class MockItemDelegate extends ClickMock {
 }
 
 /**
+ * A mock to intercept User Action logging calls and verify how many times they
+ * were called.
+ */
+export class MetricsPrivateMock {
+  constructor() {
+    this.userActionMap = new Map();
+  }
+
+  getUserActionCount(metricName) {
+    return this.userActionMap.get(metricName) || 0;
+  }
+
+  recordUserAction(metricName) {
+    this.userActionMap.set(metricName, this.getUserActionCount(metricName) + 1);
+  }
+}
+
+/**
  * @param {!HTMLElement} element
  * @return {boolean} whether or not the element passed in is visible
  */
@@ -181,6 +199,8 @@ export function createExtensionInfo(opt_properties) {
           updateRequired: false,
           blockedByPolicy: false,
           custodianApprovalRequired: false,
+          parentDisabledPermissions: false,
+          reloading: false,
         },
         homePage: {specified: false, url: ''},
         iconUrl: 'chrome://extension-icon/' + id + '/24/0',
@@ -211,7 +231,7 @@ export function createExtensionInfo(opt_properties) {
 export function findMatches(root, query) {
   let elements = new Set();
   function doSearch(node) {
-    if (node.nodeType == Node.ELEMENT_NODE) {
+    if (node.nodeType === Node.ELEMENT_NODE) {
       const matches = node.querySelectorAll(query);
       for (let match of matches) {
         elements.add(match);

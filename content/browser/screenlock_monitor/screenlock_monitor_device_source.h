@@ -9,6 +9,7 @@
 
 #include "base/macros.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "content/browser/screenlock_monitor/screenlock_monitor_source.h"
 #include "content/common/content_export.h"
 
@@ -17,9 +18,9 @@
 #include <wtsapi32.h>
 #endif  // OS_WIN
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "components/session_manager/core/session_manager_observer.h"
-#endif  // OS_CHROMEOS
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 #if defined(OS_WIN)
 namespace base {
@@ -60,12 +61,12 @@ class CONTENT_EXPORT ScreenlockMonitorDeviceSource
   SessionMessageWindow session_message_window_;
 #endif  // OS_WIN
 
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
   void StartListeningForScreenlock();
   void StopListeningForScreenlock();
-#endif  // OS_MACOSX
+#endif  // OS_MAC
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   class ScreenLockListener : public session_manager::SessionManagerObserver {
    public:
     ScreenLockListener();
@@ -79,7 +80,7 @@ class CONTENT_EXPORT ScreenlockMonitorDeviceSource
   };
 
   ScreenLockListener screenlock_listener_;
-#endif  // OS_CHROMEOS
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
   DISALLOW_COPY_AND_ASSIGN(ScreenlockMonitorDeviceSource);
 };

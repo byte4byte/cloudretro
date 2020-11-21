@@ -6,24 +6,36 @@
 
 #include "ash/resources/vector_icons/vector_icons.h"
 #include "ash/strings/grit/ash_strings.h"
-#include "ash/style/ash_color_provider.h"
-#include "ash/style/default_color_constants.h"
 #include "ash/system/audio/mic_gain_slider_controller.h"
 #include "ash/system/tray/tray_constants.h"
 #include "components/vector_icons/vector_icons.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/views/layout/box_layout.h"
 
 using chromeos::CrasAudioHandler;
 
 namespace ash {
 
 MicGainSliderView::MicGainSliderView(MicGainSliderController* controller,
-                                     uint64_t device_id)
-    : UnifiedSliderView(controller,
-                        kImeMenuMicrophoneIcon,
-                        IDS_ASH_STATUS_TRAY_VOLUME_SLIDER_LABEL),
-      device_id_(device_id) {
+                                     uint64_t device_id,
+                                     bool internal)
+    : UnifiedSliderView(
+          base::BindRepeating(&MicGainSliderController::SliderButtonPressed,
+                              base::Unretained(controller)),
+          controller,
+          kImeMenuMicrophoneIcon,
+          IDS_ASH_STATUS_TRAY_VOLUME_SLIDER_LABEL),
+      device_id_(device_id),
+      internal_(internal) {
   CrasAudioHandler::Get()->AddAudioObserver(this);
+
+  auto* layout = SetLayoutManager(std::make_unique<views::BoxLayout>(
+      views::BoxLayout::Orientation::kHorizontal, kMicGainSliderViewPadding,
+      kMicGainSliderViewSpacing));
+  slider()->SetBorder(views::CreateEmptyBorder(kMicGainSliderPadding));
+  layout->SetFlexForView(slider(), 1);
+  layout->set_cross_axis_alignment(
+      views::BoxLayout::CrossAxisAlignment::kCenter);
 
   Update(false /* by_user */);
 }
@@ -33,14 +45,26 @@ MicGainSliderView::~MicGainSliderView() {
 }
 
 void MicGainSliderView::Update(bool by_user) {
-  if (CrasAudioHandler::Get()->GetPrimaryActiveInputNode() != device_id_) {
+  auto* audio_handler = CrasAudioHandler::Get();
+  uint64_t active_device_id = audio_handler->GetPrimaryActiveInputNode();
+  auto* active_device = audio_handler->GetDeviceFromId(active_device_id);
+
+  // If the device has dual internal mics the internal mic shown in the ui is a
+  // stub. We need to show this slider despite the device_id_ not matching the
+  // active input node.
+  bool show_internal_stub = internal_ &&
+                            (active_device && active_device->IsInternalMic()) &&
+                            audio_handler->HasDualInternalMic();
+
+  if (audio_handler->GetPrimaryActiveInputNode() != device_id_ &&
+      !show_internal_stub) {
     SetVisible(false);
     return;
   }
 
   SetVisible(true);
-  bool is_muted = CrasAudioHandler::Get()->IsInputMuted();
-  float level = CrasAudioHandler::Get()->GetInputGainPercent() / 100.f;
+  bool is_muted = audio_handler->IsInputMuted();
+  float level = audio_handler->GetInputGainPercent() / 100.f;
   // To indicate that the volume is muted, set the volume slider to the minimal
   // visual style.
   slider()->SetRenderingStyle(
@@ -71,15 +95,15 @@ void MicGainSliderView::Update(bool by_user) {
 }
 
 void MicGainSliderView::OnInputNodeGainChanged(uint64_t node_id, int gain) {
-  Update(false /* by_user */);
+  Update(true /* by_user */);
 }
 
 void MicGainSliderView::OnInputMuteChanged(bool mute_on) {
-  Update(false /* by_user */);
+  Update(true /* by_user */);
 }
 
 void MicGainSliderView::OnActiveInputNodeChanged() {
-  Update(false /* by_user */);
+  Update(true /* by_user */);
 }
 
 const char* MicGainSliderView::GetClassName() const {

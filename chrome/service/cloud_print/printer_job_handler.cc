@@ -8,7 +8,7 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/files/file_util.h"
 #include "base/hash/md5.h"
 #include "base/json/json_reader.h"
@@ -145,7 +145,7 @@ void PrinterJobHandler::Shutdown() {
 CloudPrintURLFetcher::ResponseAction PrinterJobHandler::HandleRawResponse(
     const net::URLFetcher* source,
     const GURL& url,
-    const net::URLRequestStatus& status,
+    net::Error error,
     int response_code,
     const std::string& data) {
   // 415 (Unsupported media type) error while fetching data from the server
@@ -386,11 +386,10 @@ PrinterJobHandler::HandlePrintDataResponse(const net::URLFetcher* source,
   if (base::CreateTemporaryFile(&job_details_.print_data_file_path_)) {
     UMA_HISTOGRAM_ENUMERATION("CloudPrint.JobHandlerEvent", JOB_HANDLER_DATA,
                               JOB_HANDLER_MAX);
-    int ret = base::WriteFile(job_details_.print_data_file_path_,
-                              data.c_str(), data.length());
+    bool ret = base::WriteFile(job_details_.print_data_file_path_, data);
     source->GetResponseHeaders()->GetMimeType(
         &job_details_.print_data_mime_type_);
-    if (ret == static_cast<int>(data.length())) {
+    if (ret) {
       UpdateJobStatus(PRINT_JOB_STATUS_IN_PROGRESS, JOB_SUCCESS);
       return CloudPrintURLFetcher::STOP_PROCESSING;
     }

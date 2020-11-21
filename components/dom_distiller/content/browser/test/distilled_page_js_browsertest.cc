@@ -11,6 +11,7 @@
 #include "build/build_config.h"
 #include "components/dom_distiller/content/browser/distiller_javascript_utils.h"
 #include "components/dom_distiller/content/browser/test/test_util.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/shell/browser/shell.h"
@@ -49,13 +50,28 @@ class DistilledPageJsTest : public content::ContentBrowserTest {
   std::unique_ptr<FakeDistilledPage> distilled_page_;
 };
 
-#if defined(OS_WIN)
+// Pincher is only used on Android.
+#if !defined(OS_ANDROID)
 #define MAYBE_Pinch DISABLED_Pinch
 #else
 #define MAYBE_Pinch Pinch
 #endif
 IN_PROC_BROWSER_TEST_F(DistilledPageJsTest, MAYBE_Pinch) {
   LoadAndExecuteTestScript("pinch_tester.js");
+}
+
+// FontSizeSlider is only used on Desktop.
+#if defined(OS_ANDROID)
+#define MAYBE_FontSizeSlider DISABLED_FontSizeSlider
+#else
+#define MAYBE_FontSizeSlider FontSizeSlider
+#endif
+IN_PROC_BROWSER_TEST_F(DistilledPageJsTest, MAYBE_FontSizeSlider) {
+  LoadAndExecuteTestScript("font_size_slider_tester.js");
+}
+
+IN_PROC_BROWSER_TEST_F(DistilledPageJsTest, SettingsDialogTest) {
+  LoadAndExecuteTestScript("settings_dialog_tester.js");
 }
 
 }  // namespace

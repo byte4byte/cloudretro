@@ -4,7 +4,7 @@
 
 #import "ios/chrome/browser/infobars/overlays/infobar_overlay_tab_helper.h"
 
-#include "base/logging.h"
+#include "base/check.h"
 #include "ios/chrome/browser/infobars/infobar_ios.h"
 #include "ios/chrome/browser/infobars/infobar_manager_impl.h"
 #import "ios/chrome/browser/infobars/overlays/infobar_overlay_request_factory.h"
@@ -34,7 +34,7 @@ InfobarOverlayTabHelper::~InfobarOverlayTabHelper() = default;
 InfobarOverlayTabHelper::OverlayRequestScheduler::OverlayRequestScheduler(
     web::WebState* web_state,
     InfobarOverlayTabHelper* tab_helper)
-    : tab_helper_(tab_helper), scoped_observer_(this) {
+    : tab_helper_(tab_helper), web_state_(web_state), scoped_observer_(this) {
   DCHECK(tab_helper_);
   InfoBarManager* manager = InfoBarManagerImpl::FromWebState(web_state);
   DCHECK(manager);
@@ -46,12 +46,23 @@ InfobarOverlayTabHelper::OverlayRequestScheduler::~OverlayRequestScheduler() =
 
 void InfobarOverlayTabHelper::OverlayRequestScheduler::OnInfoBarAdded(
     InfoBar* infobar) {
+  InfoBarIOS* ios_infobar = static_cast<InfoBarIOS*>(infobar);
   // Skip showing banner if it was requested. Badge and modals will keep
   // showing.
-  if (static_cast<InfoBarIOS*>(infobar)->skip_banner())
+  if (ios_infobar->skip_banner())
     return;
-  tab_helper_->request_inserter()->AddOverlayRequest(
-      infobar, InfobarOverlayType::kBanner);
+  InsertParams params(ios_infobar);
+  params.overlay_type = InfobarOverlayType::kBanner;
+  // If the Infobar high priority, then insert it into the front of the banner
+  // queue.
+  params.insertion_index =
+      ios_infobar->high_priority()
+          ? 0
+          : OverlayRequestQueue::FromWebState(web_state_,
+                                              OverlayModality::kInfobarBanner)
+                ->size();
+  params.source = InfobarOverlayInsertionSource::kInfoBarManager;
+  tab_helper_->request_inserter()->InsertOverlayRequest(params);
 }
 
 void InfobarOverlayTabHelper::OverlayRequestScheduler::OnManagerShuttingDown(

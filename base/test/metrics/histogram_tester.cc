@@ -41,8 +41,15 @@ void HistogramTester::ExpectUniqueSample(
   } else {
     // No histogram means there were zero samples.
     EXPECT_EQ(0, expected_count)
-        << "Histogram \"" << name << "\" does not exist.";
+        << "Zero samples found for Histogram \"" << name << "\".";
   }
+}
+
+void HistogramTester::ExpectUniqueTimeSample(
+    StringPiece name,
+    TimeDelta sample,
+    HistogramBase::Count expected_count) const {
+  ExpectUniqueSample(name, sample.InMilliseconds(), expected_count);
 }
 
 void HistogramTester::ExpectBucketCount(

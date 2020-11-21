@@ -4,7 +4,7 @@
 
 #import "ios/web/web_state/ui/crw_web_view_proxy_impl.h"
 
-#include "base/logging.h"
+#include "base/check.h"
 #import "ios/web/common/crw_content_view.h"
 #import "ios/web/public/ui/crw_web_view_scroll_view_proxy.h"
 #import "ios/web/web_state/ui/crw_web_controller.h"
@@ -173,10 +173,6 @@ UIView* GetFirstResponderSubview(UIView* view) {
 
 - (void)addSubview:(UIView*)view {
   return [_contentView addSubview:view];
-}
-
-- (BOOL)hasSearchableTextContent {
-  return _contentView != nil && [_webController contentIsHTML];
 }
 
 - (UIView*)keyboardAccessory {

@@ -13,7 +13,7 @@ import 'chrome://resources/cr_elements/cr_input/cr_input.m.js';
 import {WebUIListenerBehavior} from 'chrome://resources/js/web_ui_listener_behavior.m.js';
 import {html, Polymer} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
-import {loadTimeData} from '../i18n_setup.m.js';
+import {loadTimeData} from '../i18n_setup.js';
 
 import {SearchEngine, SearchEnginesBrowserProxy, SearchEnginesBrowserProxyImpl, SearchEnginesInfo} from './search_engines_browser_proxy.m.js';
 
@@ -105,7 +105,7 @@ Polymer({
     if (this.model) {
       const engineWasRemoved = ['defaults', 'others', 'extensions'].every(
           engineType =>
-              searchEnginesInfo[engineType].every(e => e.id != this.model.id));
+              searchEnginesInfo[engineType].every(e => e.id !== this.model.id));
       if (engineWasRemoved) {
         this.cancel_();
         return;
@@ -135,7 +135,7 @@ Polymer({
   validateElement_(inputElement) {
     // If element is empty, disable the action button, but don't show the red
     // invalid message.
-    if (inputElement.value == '') {
+    if (inputElement.value === '') {
       inputElement.invalid = false;
       this.updateActionButtonState_();
       return;

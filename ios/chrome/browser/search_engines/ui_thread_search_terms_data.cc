@@ -4,7 +4,7 @@
 
 #include "ios/chrome/browser/search_engines/ui_thread_search_terms_data.h"
 
-#include "base/logging.h"
+#include "base/check.h"
 #include "base/strings/string16.h"
 #include "components/google/core/common/google_util.h"
 #include "components/omnibox/browser/omnibox_field_trial.h"
@@ -71,7 +71,9 @@ std::string UIThreadSearchTermsData::GetSearchClient() const {
   return std::string();
 }
 
-std::string UIThreadSearchTermsData::GetSuggestClient() const {
+std::string UIThreadSearchTermsData::GetSuggestClient(bool from_ntp) const {
+  // IOS does not send non-searchbox suggest requests from NTP at this time.
+  DCHECK(!from_ntp);
   DCHECK(thread_checker_.CalledOnValidThread());
   return "chrome";
 }

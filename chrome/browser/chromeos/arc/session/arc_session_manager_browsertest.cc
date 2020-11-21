@@ -19,6 +19,7 @@
 #include "chrome/browser/chromeos/arc/arc_util.h"
 #include "chrome/browser/chromeos/arc/session/arc_service_launcher.h"
 #include "chrome/browser/chromeos/arc/session/arc_session_manager.h"
+#include "chrome/browser/chromeos/arc/session/arc_session_manager_observer.h"
 #include "chrome/browser/chromeos/arc/test/arc_data_removed_waiter.h"
 #include "chrome/browser/chromeos/arc/test/test_arc_session_manager.h"
 #include "chrome/browser/chromeos/certificate_provider/certificate_provider_service.h"
@@ -52,11 +53,9 @@
 #include "components/user_manager/scoped_user_manager.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/test/browser_test.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_builder.h"
-#include "net/base/upload_bytes_element_reader.h"
-#include "net/base/upload_data_stream.h"
-#include "net/url_request/url_request_test_job.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
 
@@ -80,7 +79,7 @@ std::unique_ptr<KeyedService> CreateCertificateProviderService(
 namespace arc {
 
 // Waits for the "arc.enabled" preference value from true to false.
-class ArcPlayStoreDisabledWaiter : public ArcSessionManager::Observer {
+class ArcPlayStoreDisabledWaiter : public ArcSessionManagerObserver {
  public:
   ArcPlayStoreDisabledWaiter() { ArcSessionManager::Get()->AddObserver(this); }
 
@@ -95,7 +94,7 @@ class ArcPlayStoreDisabledWaiter : public ArcSessionManager::Observer {
   }
 
  private:
-  // ArcSessionManager::Observer override:
+  // ArcSessionManagerObserver override:
   void OnArcPlayStoreEnabledChanged(bool enabled) override {
     if (!enabled) {
       DCHECK(run_loop_);

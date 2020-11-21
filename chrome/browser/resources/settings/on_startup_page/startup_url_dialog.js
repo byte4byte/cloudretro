@@ -9,7 +9,7 @@ import '../settings_shared_css.m.js';
 
 import {html, Polymer} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
-import {loadTimeData} from '../i18n_setup.m.js';
+import {loadTimeData} from '../i18n_setup.js';
 
 import {StartupPageInfo, StartupUrlsPageBrowserProxy, StartupUrlsPageBrowserProxyImpl} from './startup_urls_page_browser_proxy.js';
 
@@ -89,7 +89,7 @@ Polymer({
    * @private
    */
   hasError_() {
-    return this.error_ != UrlInputError.NONE;
+    return this.error_ !== UrlInputError.NONE;
   },
 
   /**
@@ -124,7 +124,7 @@ Polymer({
 
   /** @private */
   validate_() {
-    if (this.url_.length == 0) {
+    if (this.url_.length === 0) {
       this.$.actionButton.disabled = true;
       this.error_ = UrlInputError.NONE;
       return;

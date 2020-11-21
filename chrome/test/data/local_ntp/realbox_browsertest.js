@@ -106,6 +106,7 @@ test.realbox.getUrlMatch = function(modifiers = {}) {
         fillIntoEdit: 'https://helloworld.com',
         swapContentsAndDescription: true,
         type: 'url-what-you-typed',
+        suggestionGroupId: -1,
       },
       modifiers);
 };
@@ -129,6 +130,7 @@ test.realbox.getSearchMatch = function(modifiers = {}) {
         fillIntoEdit: 'hello world',
         swapContentsAndDescription: false,
         type: 'search-what-you-typed',
+        suggestionGroupId: -1,
       },
       modifiers);
 };
@@ -163,7 +165,6 @@ function setUp() {
   setUpPage('local-ntp-template');
 
   configData.realboxEnabled = true;
-  configData.suggestionTransparencyEnabled = true;
 
   chrome.embeddedSearch = {
     newTabPage: {},

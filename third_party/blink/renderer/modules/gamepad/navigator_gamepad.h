@@ -43,7 +43,6 @@ class Gamepad;
 
 namespace blink {
 
-class Document;
 class GamepadDispatcher;
 class GamepadHapticActuator;
 class GamepadList;
@@ -56,21 +55,18 @@ class MODULES_EXPORT NavigatorGamepad final
       public PlatformEventController,
       public LocalDOMWindow::EventListenerObserver,
       public Gamepad::Client {
-  USING_GARBAGE_COLLECTED_MIXIN(NavigatorGamepad);
-
  public:
   static const char kSupplementName[];
 
-  static NavigatorGamepad* From(Document&);
   static NavigatorGamepad& From(Navigator&);
 
   explicit NavigatorGamepad(Navigator&);
   ~NavigatorGamepad() override;
 
-  static GamepadList* getGamepads(Navigator&);
+  static GamepadList* getGamepads(Navigator&, ExceptionState&);
   GamepadList* Gamepads();
 
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
 
  private:
   void SampleGamepads();

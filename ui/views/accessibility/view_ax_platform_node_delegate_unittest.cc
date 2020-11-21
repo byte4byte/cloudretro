@@ -5,15 +5,18 @@
 #include "ui/views/accessibility/view_ax_platform_node_delegate.h"
 
 #include <memory>
+#include <string>
 #include <utility>
 #include <vector>
 
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/gtest_util.h"
 #include "ui/accessibility/ax_action_data.h"
 #include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/accessibility/platform/ax_platform_node.h"
 #include "ui/accessibility/platform/ax_platform_node_base.h"
+#include "ui/base/models/table_model.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/rect_conversions.h"
 #include "ui/gfx/geometry/size.h"
@@ -24,6 +27,8 @@
 #include "ui/views/accessibility/ax_widget_obj_wrapper.h"
 #include "ui/views/controls/button/button.h"
 #include "ui/views/controls/label.h"
+#include "ui/views/controls/scroll_view.h"
+#include "ui/views/controls/table/table_view.h"
 #include "ui/views/test/views_test_base.h"
 #include "ui/views/widget/widget.h"
 
@@ -34,13 +39,63 @@ namespace {
 
 class TestButton : public Button {
  public:
-  TestButton() : Button(nullptr) {}
+  TestButton() : Button(Button::PressedCallback()) {}
   TestButton(const TestButton&) = delete;
   TestButton& operator=(const TestButton&) = delete;
   ~TestButton() override = default;
 };
 
+class TestAXEventObserver : public AXEventObserver {
+ public:
+  explicit TestAXEventObserver(AXAuraObjCache* cache) : cache_(cache) {
+    AXEventManager::Get()->AddObserver(this);
+  }
+  TestAXEventObserver(const TestAXEventObserver&) = delete;
+  TestAXEventObserver& operator=(const TestAXEventObserver&) = delete;
+  ~TestAXEventObserver() override {
+    AXEventManager::Get()->RemoveObserver(this);
+  }
+
+  // AXEventObserver:
+  void OnViewEvent(View* view, ax::mojom::Event event_type) override {
+    std::vector<AXAuraObjWrapper*> out_children;
+    AXAuraObjWrapper* ax_obj = cache_->GetOrCreate(view->GetWidget());
+    ax_obj->GetChildren(&out_children);
+  }
+
+ private:
+  AXAuraObjCache* cache_;
+};
+
 }  // namespace
+
+class TestTableModel : public ui::TableModel {
+ public:
+  TestTableModel() = default;
+
+  // ui::TableModel:
+  int RowCount() override { return 10; }
+
+  base::string16 GetText(int row, int column_id) override {
+    if (row == -1)
+      return base::string16();
+
+    const char* const cells[5][4] = {
+        {"Orange", "Orange", "South america", "$5"},
+        {"Apple", "Green", "Canada", "$3"},
+        {"Blue berries", "Blue", "Mexico", "$10.3"},
+        {"Strawberries", "Red", "California", "$7"},
+        {"Cantaloupe", "Orange", "South america", "$5"},
+    };
+
+    return base::ASCIIToUTF16(cells[row % 5][column_id]);
+  }
+
+  void SetObserver(ui::TableModelObserver* observer) override {}
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(TestTableModel);
+};
 
 class ViewAXPlatformNodeDelegateTest : public ViewsTestBase {
  public:
@@ -148,6 +203,43 @@ class ViewAXPlatformNodeDelegateTest : public ViewsTestBase {
   Label* label_ = nullptr;
 };
 
+class ViewAXPlatformNodeDelegateTableTest
+    : public ViewAXPlatformNodeDelegateTest {
+ public:
+  void SetUp() override {
+    ViewAXPlatformNodeDelegateTest::SetUp();
+
+    std::vector<ui::TableColumn> columns;
+    columns.push_back(TestTableColumn(0, "Fruit"));
+    columns.push_back(TestTableColumn(1, "Color"));
+    columns.push_back(TestTableColumn(2, "Origin"));
+    columns.push_back(TestTableColumn(3, "Price"));
+
+    model_ = std::make_unique<TestTableModel>();
+    auto table =
+        std::make_unique<TableView>(model_.get(), columns, TEXT_ONLY, true);
+    table_ = table.get();
+    widget_->GetContentsView()->AddChildView(
+        TableView::CreateScrollViewWithTable(std::move(table)));
+  }
+
+  ui::TableColumn TestTableColumn(int id, const std::string& title) {
+    ui::TableColumn column;
+    column.id = id;
+    column.title = base::ASCIIToUTF16(title.c_str());
+    column.sortable = true;
+    return column;
+  }
+
+  ViewAXPlatformNodeDelegate* table_accessibility() {
+    return view_accessibility(table_);
+  }
+
+ private:
+  std::unique_ptr<TestTableModel> model_;
+  TableView* table_ = nullptr;  // Owned by parent.
+};
+
 TEST_F(ViewAXPlatformNodeDelegateTest, RoleShouldMatch) {
   EXPECT_EQ(ax::mojom::Role::kButton, button_accessibility()->GetData().role);
   // Since the label is a subview of |button_|, and the button is keyboard
@@ -178,7 +270,7 @@ TEST_F(ViewAXPlatformNodeDelegateTest, LabelIsChildOfButton) {
   button_->SetInstallFocusRingOnFocus(false);
 
   // |button_| is focusable, so |label_| (as its child) should be ignored.
-  EXPECT_EQ(View::FocusBehavior::ACCESSIBLE_ONLY, button_->GetFocusBehavior());
+  EXPECT_NE(View::FocusBehavior::NEVER, button_->GetFocusBehavior());
   EXPECT_EQ(1, button_accessibility()->GetChildCount());
   EXPECT_EQ(button_->GetNativeViewAccessible(),
             label_accessibility()->GetParent());
@@ -331,35 +423,139 @@ TEST_F(ViewAXPlatformNodeDelegateTest, SetSizeAndPosition) {
   EXPECT_EQ(view_accessibility(group_ids[4])->GetPosInSet(), 1);
 }
 
-TEST_F(ViewAXPlatformNodeDelegateTest, Navigation) {
-  View::Views view_ids = SetUpExtraViews();
+TEST_F(ViewAXPlatformNodeDelegateTest, TreeNavigation) {
+  // Adds one extra parent view with four child views to our widget. The parent
+  // view is added as the next sibling of the already present button view.
+  //
+  // Widget
+  // ++Button
+  // ++++Label
+  // 0 = ++ParentView
+  // 1 = ++++ChildView1
+  // 2 = ++++ChildView2
+  // 3 = ChildView3
+  // 4 = ChildView4
+  View::Views extra_views = SetUpExtraViews();
+  ViewAXPlatformNodeDelegate* parent_view = view_accessibility(extra_views[0]);
+  ViewAXPlatformNodeDelegate* child_view_1 = view_accessibility(extra_views[1]);
+  ViewAXPlatformNodeDelegate* child_view_2 = view_accessibility(extra_views[2]);
+  ViewAXPlatformNodeDelegate* child_view_3 = view_accessibility(extra_views[3]);
+  ViewAXPlatformNodeDelegate* child_view_4 = view_accessibility(extra_views[4]);
 
-  EXPECT_EQ(view_accessibility(view_ids[0])->GetNextSibling(), nullptr);
-  EXPECT_EQ(view_accessibility(view_ids[0])->GetPreviousSibling(),
-            view_accessibility(button_)->GetNativeObject());
-  EXPECT_EQ(view_accessibility(view_ids[0])->GetIndexInParent(), 3);
+  EXPECT_EQ(view_accessibility(widget_->GetContentsView())->GetNativeObject(),
+            parent_view->GetParent());
+  EXPECT_EQ(4, parent_view->GetChildCount());
 
-  EXPECT_EQ(view_accessibility(view_ids[1])->GetNextSibling(),
-            view_accessibility(view_ids[2])->GetNativeObject());
-  EXPECT_EQ(view_accessibility(view_ids[1])->GetPreviousSibling(), nullptr);
-  EXPECT_EQ(view_accessibility(view_ids[1])->GetIndexInParent(), 0);
+  EXPECT_EQ(2, button_accessibility()->GetIndexInParent());
+  EXPECT_EQ(3, parent_view->GetIndexInParent());
 
-  EXPECT_EQ(view_accessibility(view_ids[2])->GetNextSibling(),
-            view_accessibility(view_ids[3])->GetNativeObject());
-  EXPECT_EQ(view_accessibility(view_ids[2])->GetPreviousSibling(),
-            view_accessibility(view_ids[1])->GetNativeObject());
-  EXPECT_EQ(view_accessibility(view_ids[2])->GetIndexInParent(), 1);
+  EXPECT_EQ(child_view_1->GetNativeObject(), parent_view->ChildAtIndex(0));
+  EXPECT_EQ(child_view_2->GetNativeObject(), parent_view->ChildAtIndex(1));
+  EXPECT_EQ(child_view_3->GetNativeObject(), parent_view->ChildAtIndex(2));
+  EXPECT_EQ(child_view_4->GetNativeObject(), parent_view->ChildAtIndex(3));
 
-  EXPECT_EQ(view_accessibility(view_ids[3])->GetNextSibling(),
-            view_accessibility(view_ids[4])->GetNativeObject());
-  EXPECT_EQ(view_accessibility(view_ids[3])->GetPreviousSibling(),
-            view_accessibility(view_ids[2])->GetNativeObject());
-  EXPECT_EQ(view_accessibility(view_ids[3])->GetIndexInParent(), 2);
+  EXPECT_EQ(nullptr, parent_view->GetNextSibling());
+  EXPECT_EQ(button_accessibility()->GetNativeObject(),
+            parent_view->GetPreviousSibling());
 
-  EXPECT_EQ(view_accessibility(view_ids[4])->GetNextSibling(), nullptr);
-  EXPECT_EQ(view_accessibility(view_ids[4])->GetPreviousSibling(),
-            view_accessibility(view_ids[3])->GetNativeObject());
-  EXPECT_EQ(view_accessibility(view_ids[4])->GetIndexInParent(), 3);
+  EXPECT_EQ(parent_view->GetNativeObject(), child_view_1->GetParent());
+  EXPECT_EQ(0, child_view_1->GetChildCount());
+  EXPECT_EQ(0, child_view_1->GetIndexInParent());
+  EXPECT_EQ(child_view_2->GetNativeObject(), child_view_1->GetNextSibling());
+  EXPECT_EQ(nullptr, child_view_1->GetPreviousSibling());
+
+  EXPECT_EQ(parent_view->GetNativeObject(), child_view_2->GetParent());
+  EXPECT_EQ(0, child_view_2->GetChildCount());
+  EXPECT_EQ(1, child_view_2->GetIndexInParent());
+  EXPECT_EQ(child_view_3->GetNativeObject(), child_view_2->GetNextSibling());
+  EXPECT_EQ(child_view_1->GetNativeObject(),
+            child_view_2->GetPreviousSibling());
+
+  EXPECT_EQ(parent_view->GetNativeObject(), child_view_3->GetParent());
+  EXPECT_EQ(0, child_view_3->GetChildCount());
+  EXPECT_EQ(2, child_view_3->GetIndexInParent());
+  EXPECT_EQ(child_view_4->GetNativeObject(), child_view_3->GetNextSibling());
+  EXPECT_EQ(child_view_2->GetNativeObject(),
+            child_view_3->GetPreviousSibling());
+
+  EXPECT_EQ(parent_view->GetNativeObject(), child_view_4->GetParent());
+  EXPECT_EQ(0, child_view_4->GetChildCount());
+  EXPECT_EQ(3, child_view_4->GetIndexInParent());
+  EXPECT_EQ(nullptr, child_view_4->GetNextSibling());
+  EXPECT_EQ(child_view_3->GetNativeObject(),
+            child_view_4->GetPreviousSibling());
+}
+
+TEST_F(ViewAXPlatformNodeDelegateTest, TreeNavigationWithIgnoredViews) {
+  // Adds one extra parent view with four child views to our widget. The parent
+  // view is added as the next sibling of the already present button view.
+  //
+  // Widget
+  // ++Button
+  // ++++Label
+  // 0 = ++ParentView
+  // 1 = ++++ChildView1
+  // 2 = ++++ChildView2
+  // 3 = ChildView3
+  // 4 = ChildView4
+  View::Views extra_views = SetUpExtraViews();
+  ViewAXPlatformNodeDelegate* contents_view =
+      view_accessibility(widget_->GetContentsView());
+  ViewAXPlatformNodeDelegate* parent_view = view_accessibility(extra_views[0]);
+  ViewAXPlatformNodeDelegate* child_view_1 = view_accessibility(extra_views[1]);
+  ViewAXPlatformNodeDelegate* child_view_2 = view_accessibility(extra_views[2]);
+  ViewAXPlatformNodeDelegate* child_view_3 = view_accessibility(extra_views[3]);
+  ViewAXPlatformNodeDelegate* child_view_4 = view_accessibility(extra_views[4]);
+
+  // Mark the parent view and the second child view as ignored.
+  parent_view->OverrideIsIgnored(true);
+  child_view_2->OverrideIsIgnored(true);
+
+  EXPECT_EQ(contents_view->GetNativeObject(), parent_view->GetParent());
+  EXPECT_EQ(3, parent_view->GetChildCount());
+
+  EXPECT_EQ(2, button_accessibility()->GetIndexInParent());
+  EXPECT_EQ(-1, parent_view->GetIndexInParent());
+
+  EXPECT_EQ(child_view_1->GetNativeObject(), parent_view->ChildAtIndex(0));
+  EXPECT_EQ(child_view_3->GetNativeObject(), parent_view->ChildAtIndex(1));
+  EXPECT_EQ(child_view_4->GetNativeObject(), parent_view->ChildAtIndex(2));
+
+  EXPECT_EQ(button_accessibility()->GetNativeObject(),
+            contents_view->ChildAtIndex(2));
+  EXPECT_EQ(child_view_1->GetNativeObject(), contents_view->ChildAtIndex(3));
+  EXPECT_EQ(child_view_3->GetNativeObject(), contents_view->ChildAtIndex(4));
+  EXPECT_EQ(child_view_4->GetNativeObject(), contents_view->ChildAtIndex(5));
+
+  EXPECT_EQ(nullptr, parent_view->GetNextSibling());
+  EXPECT_EQ(nullptr, parent_view->GetPreviousSibling());
+
+  EXPECT_EQ(contents_view->GetNativeObject(), child_view_1->GetParent());
+  EXPECT_EQ(0, child_view_1->GetChildCount());
+  EXPECT_EQ(3, child_view_1->GetIndexInParent());
+  EXPECT_EQ(child_view_3->GetNativeObject(), child_view_1->GetNextSibling());
+  EXPECT_EQ(button_accessibility()->GetNativeObject(),
+            child_view_1->GetPreviousSibling());
+
+  EXPECT_EQ(contents_view->GetNativeObject(), child_view_2->GetParent());
+  EXPECT_EQ(0, child_view_2->GetChildCount());
+  EXPECT_EQ(-1, child_view_2->GetIndexInParent());
+  EXPECT_EQ(nullptr, child_view_2->GetNextSibling());
+  EXPECT_EQ(nullptr, child_view_2->GetPreviousSibling());
+
+  EXPECT_EQ(contents_view->GetNativeObject(), child_view_3->GetParent());
+  EXPECT_EQ(0, child_view_3->GetChildCount());
+  EXPECT_EQ(4, child_view_3->GetIndexInParent());
+  EXPECT_EQ(child_view_4->GetNativeObject(), child_view_3->GetNextSibling());
+  EXPECT_EQ(child_view_1->GetNativeObject(),
+            child_view_3->GetPreviousSibling());
+
+  EXPECT_EQ(contents_view->GetNativeObject(), child_view_4->GetParent());
+  EXPECT_EQ(0, child_view_4->GetChildCount());
+  EXPECT_EQ(5, child_view_4->GetIndexInParent());
+  EXPECT_EQ(nullptr, child_view_4->GetNextSibling());
+  EXPECT_EQ(child_view_3->GetNativeObject(),
+            child_view_4->GetPreviousSibling());
 }
 
 TEST_F(ViewAXPlatformNodeDelegateTest, OverrideHasPopup) {
@@ -403,6 +599,22 @@ TEST_F(ViewAXPlatformNodeDelegateTest, FocusOnMenuClose) {
             button_accessibility()->GetFocus());
 }
 
+TEST_F(ViewAXPlatformNodeDelegateTableTest, TableHasHeader) {
+  EXPECT_TRUE(table_accessibility()->GetTableHasColumnOrRowHeaderNode());
+  EXPECT_EQ(size_t{4}, table_accessibility()->GetColHeaderNodeIds().size());
+  EXPECT_TRUE(table_accessibility()->GetColHeaderNodeIds(5).empty());
+}
+
+TEST_F(ViewAXPlatformNodeDelegateTableTest, TableHasCell) {
+  EXPECT_NE(base::nullopt, table_accessibility()->GetCellId(0, 0));
+  EXPECT_NE(base::nullopt, table_accessibility()->GetCellId(0, 3));
+  EXPECT_NE(base::nullopt, table_accessibility()->GetCellId(9, 3));
+  EXPECT_DCHECK_DEATH(table_accessibility()->GetCellId(-1, 0));
+  EXPECT_DCHECK_DEATH(table_accessibility()->GetCellId(0, -1));
+  EXPECT_DCHECK_DEATH(table_accessibility()->GetCellId(10, 0));
+  EXPECT_DCHECK_DEATH(table_accessibility()->GetCellId(0, 4));
+}
+
 #if defined(USE_AURA)
 class DerivedTestView : public View {
  public:
@@ -412,33 +624,11 @@ class DerivedTestView : public View {
   void OnBlur() override { SetVisible(false); }
 };
 
-class TestAXEventObserver : public AXEventObserver {
- public:
-  explicit TestAXEventObserver(AXAuraObjCache* cache) : cache_(cache) {
-    AXEventManager::Get()->AddObserver(this);
-  }
-  TestAXEventObserver(const TestAXEventObserver&) = delete;
-  TestAXEventObserver& operator=(const TestAXEventObserver&) = delete;
-  ~TestAXEventObserver() override {
-    AXEventManager::Get()->RemoveObserver(this);
-  }
-
-  // AXEventObserver:
-  void OnViewEvent(View* view, ax::mojom::Event event_type) override {
-    std::vector<AXAuraObjWrapper*> out_children;
-    AXAuraObjWrapper* ax_obj = cache_->GetOrCreate(view->GetWidget());
-    ax_obj->GetChildren(&out_children);
-  }
-
- private:
-  AXAuraObjCache* cache_;
-};
-
-using ViewAccessibilityTest = ViewsTestBase;
+using AXViewTest = ViewsTestBase;
 
 // Check if the destruction of the widget ends successfully if |view|'s
 // visibility changed during destruction.
-TEST_F(ViewAccessibilityTest, LayoutCalledInvalidateRootView) {
+TEST_F(AXViewTest, LayoutCalledInvalidateRootView) {
   // TODO(jamescook): Construct a real AutomationManagerAura rather than using
   // this observer to simulate it.
   AXAuraObjCache cache;

@@ -16,7 +16,9 @@ import org.chromium.base.annotations.NativeMethods;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.autofill.settings.AutofillEditorBase;
 import org.chromium.chrome.browser.preferences.Pref;
-import org.chromium.chrome.browser.preferences.PrefServiceBridge;
+import org.chromium.chrome.browser.profiles.Profile;
+import org.chromium.components.prefs.PrefService;
+import org.chromium.components.user_prefs.UserPrefs;
 import org.chromium.content_public.browser.WebContents;
 
 import java.util.ArrayList;
@@ -109,6 +111,7 @@ public class PersonalDataManager {
         private String mGUID;
         private String mOrigin;
         private boolean mIsLocal;
+        private String mHonorificPrefix;
         private String mFullName;
         private String mCompanyName;
         private String mStreetAddress;
@@ -125,21 +128,23 @@ public class PersonalDataManager {
 
         @CalledByNative("AutofillProfile")
         public static AutofillProfile create(String guid, String origin, boolean isLocal,
-                String fullName, String companyName, String streetAddress, String region,
-                String locality, String dependentLocality, String postalCode, String sortingCode,
-                String country, String phoneNumber, String emailAddress, String languageCode) {
-            return new AutofillProfile(guid, origin, isLocal, fullName, companyName, streetAddress,
-                    region, locality, dependentLocality, postalCode, sortingCode, country,
-                    phoneNumber, emailAddress, languageCode);
+                String honorificPrefix, String fullName, String companyName, String streetAddress,
+                String region, String locality, String dependentLocality, String postalCode,
+                String sortingCode, String country, String phoneNumber, String emailAddress,
+                String languageCode) {
+            return new AutofillProfile(guid, origin, isLocal, honorificPrefix, fullName,
+                    companyName, streetAddress, region, locality, dependentLocality, postalCode,
+                    sortingCode, country, phoneNumber, emailAddress, languageCode);
         }
 
-        public AutofillProfile(String guid, String origin, boolean isLocal, String fullName,
-                String companyName, String streetAddress, String region, String locality,
-                String dependentLocality, String postalCode, String sortingCode, String countryCode,
-                String phoneNumber, String emailAddress, String languageCode) {
+        public AutofillProfile(String guid, String origin, boolean isLocal, String honorificPrefix,
+                String fullName, String companyName, String streetAddress, String region,
+                String locality, String dependentLocality, String postalCode, String sortingCode,
+                String countryCode, String phoneNumber, String emailAddress, String languageCode) {
             mGUID = guid;
             mOrigin = origin;
             mIsLocal = isLocal;
+            mHonorificPrefix = honorificPrefix;
             mFullName = fullName;
             mCompanyName = companyName;
             mStreetAddress = streetAddress;
@@ -160,9 +165,9 @@ public class PersonalDataManager {
          */
         public AutofillProfile() {
             this("" /* guid */, AutofillEditorBase.SETTINGS_ORIGIN /* origin */, true /* isLocal */,
-                    "" /* fullName */, "" /* companyName */, "" /* streetAddress */,
-                    "" /* region */, "" /* locality */, "" /* dependentLocality */,
-                    "" /* postalCode */, "" /* sortingCode */,
+                    "" /* honorificPrefix */, "" /* fullName */, "" /* companyName */,
+                    "" /* streetAddress */, "" /* region */, "" /* locality */,
+                    "" /* dependentLocality */, "" /* postalCode */, "" /* sortingCode */,
                     Locale.getDefault().getCountry() /* country */, "" /* phoneNumber */,
                     "" /* emailAddress */, "" /* languageCode */);
         }
@@ -172,6 +177,7 @@ public class PersonalDataManager {
             mGUID = profile.getGUID();
             mOrigin = profile.getOrigin();
             mIsLocal = profile.getIsLocal();
+            mHonorificPrefix = profile.getHonorificPrefix();
             mFullName = profile.getFullName();
             mCompanyName = profile.getCompanyName();
             mStreetAddress = profile.getStreetAddress();
@@ -189,13 +195,13 @@ public class PersonalDataManager {
 
         /** TODO(estade): remove this constructor. */
         @VisibleForTesting
-        public AutofillProfile(String guid, String origin, String fullName, String companyName,
-                String streetAddress, String region, String locality, String dependentLocality,
-                String postalCode, String sortingCode, String countryCode, String phoneNumber,
-                String emailAddress, String languageCode) {
-            this(guid, origin, true /* isLocal */, fullName, companyName, streetAddress, region,
-                    locality, dependentLocality, postalCode, sortingCode, countryCode, phoneNumber,
-                    emailAddress, languageCode);
+        public AutofillProfile(String guid, String origin, String honorificPrefix, String fullName,
+                String companyName, String streetAddress, String region, String locality,
+                String dependentLocality, String postalCode, String sortingCode, String countryCode,
+                String phoneNumber, String emailAddress, String languageCode) {
+            this(guid, origin, true /* isLocal */, honorificPrefix, fullName, companyName,
+                    streetAddress, region, locality, dependentLocality, postalCode, sortingCode,
+                    countryCode, phoneNumber, emailAddress, languageCode);
         }
 
         @CalledByNative("AutofillProfile")
@@ -206,6 +212,10 @@ public class PersonalDataManager {
         @CalledByNative("AutofillProfile")
         public String getOrigin() {
             return mOrigin;
+        }
+
+        public String getHonorificPrefix() {
+            return mHonorificPrefix;
         }
 
         @CalledByNative("AutofillProfile")
@@ -276,7 +286,6 @@ public class PersonalDataManager {
             return mIsLocal;
         }
 
-        @VisibleForTesting
         public void setGUID(String guid) {
             mGUID = guid;
         }
@@ -289,6 +298,10 @@ public class PersonalDataManager {
             mOrigin = origin;
         }
 
+        public void setHonorificPrefix(String honorificPrefix) {
+            mHonorificPrefix = honorificPrefix;
+        }
+
         public void setFullName(String fullName) {
             mFullName = fullName;
         }
@@ -297,7 +310,6 @@ public class PersonalDataManager {
             mCompanyName = companyName;
         }
 
-        @VisibleForTesting
         public void setStreetAddress(String streetAddress) {
             mStreetAddress = streetAddress;
         }
@@ -322,7 +334,6 @@ public class PersonalDataManager {
             mSortingCode = sortingCode;
         }
 
-        @VisibleForTesting
         public void setCountryCode(String countryCode) {
             mCountryCode = countryCode;
         }
@@ -335,7 +346,6 @@ public class PersonalDataManager {
             mEmailAddress = emailAddress;
         }
 
-        @VisibleForTesting
         public void setLanguageCode(String languageCode) {
             mLanguageCode = languageCode;
         }
@@ -370,20 +380,35 @@ public class PersonalDataManager {
         private int mIssuerIconDrawableId;
         private String mBillingAddressId;
         private String mServerId;
+        // The label set for the card. This could be one of Card Network + LastFour, Nickname +
+        // LastFour or a Google specific string for Google-issued cards. This is used for displaying
+        // the card in PaymentMethods in Settings.
+        private String mCardLabel;
+        private String mNickname;
 
         @CalledByNative("CreditCard")
         public static CreditCard create(String guid, String origin, boolean isLocal,
-                boolean isCached, String name, String number, String obfuscatedNumber, String month,
-                String year, String basicCardIssuerNetwork, int iconId, String billingAddressId,
-                String serverId) {
-            return new CreditCard(guid, origin, isLocal, isCached, name, number, obfuscatedNumber,
-                    month, year, basicCardIssuerNetwork, iconId, billingAddressId, serverId);
+                boolean isCached, String name, String number, String mObfuscatedNumber,
+                String month, String year, String basicCardIssuerNetwork, int iconId,
+                String billingAddressId, String serverId, String cardLabel, String nickname) {
+            return new CreditCard(guid, origin, isLocal, isCached, name, number, mObfuscatedNumber,
+                    month, year, basicCardIssuerNetwork, iconId, billingAddressId, serverId,
+                    cardLabel, nickname);
         }
 
         public CreditCard(String guid, String origin, boolean isLocal, boolean isCached,
                 String name, String number, String obfuscatedNumber, String month, String year,
                 String basicCardIssuerNetwork, int issuerIconDrawableId, String billingAddressId,
                 String serverId) {
+            this(guid, origin, isLocal, isCached, name, number, obfuscatedNumber, month, year,
+                    basicCardIssuerNetwork, issuerIconDrawableId, billingAddressId, serverId,
+                    /* cardLabel= */ obfuscatedNumber, /* nickname= */ "");
+        }
+
+        public CreditCard(String guid, String origin, boolean isLocal, boolean isCached,
+                String name, String number, String obfuscatedNumber, String month, String year,
+                String basicCardIssuerNetwork, int issuerIconDrawableId, String billingAddressId,
+                String serverId, String cardLabel, String nickname) {
             mGUID = guid;
             mOrigin = origin;
             mIsLocal = isLocal;
@@ -397,6 +422,8 @@ public class PersonalDataManager {
             mIssuerIconDrawableId = issuerIconDrawableId;
             mBillingAddressId = billingAddressId;
             mServerId = serverId;
+            mCardLabel = cardLabel;
+            mNickname = nickname;
         }
 
         public CreditCard() {
@@ -484,7 +511,15 @@ public class PersonalDataManager {
             return mServerId;
         }
 
-        @VisibleForTesting
+        public String getCardLabel() {
+            return mCardLabel;
+        }
+
+        @CalledByNative("CreditCard")
+        public String getNickname() {
+            return mNickname;
+        }
+
         public void setGUID(String guid) {
             mGUID = guid;
         }
@@ -497,7 +532,6 @@ public class PersonalDataManager {
             mName = name;
         }
 
-        @VisibleForTesting
         public void setNumber(String number) {
             mNumber = number;
         }
@@ -506,7 +540,6 @@ public class PersonalDataManager {
             mObfuscatedNumber = obfuscatedNumber;
         }
 
-        @VisibleForTesting
         public void setMonth(String month) {
             mMonth = month;
         }
@@ -525,6 +558,14 @@ public class PersonalDataManager {
 
         public void setBillingAddressId(String id) {
             mBillingAddressId = id;
+        }
+
+        public void setCardLabel(String cardLabel) {
+            mCardLabel = cardLabel;
+        }
+
+        public void setNickname(String nickname) {
+            mNickname = nickname;
         }
 
         public boolean hasValidCreditCardExpirationDate() {
@@ -759,6 +800,15 @@ public class PersonalDataManager {
                 mPersonalDataManagerAndroid, PersonalDataManager.this, card);
     }
 
+    @VisibleForTesting
+    public void addServerCreditCardForTestWithAdditionalFields(
+            CreditCard card, String nickname, int cardIssuer) {
+        ThreadUtils.assertOnUiThread();
+        assert !card.getIsLocal();
+        PersonalDataManagerJni.get().addServerCreditCardForTestWithAdditionalFields(
+                mPersonalDataManagerAndroid, PersonalDataManager.this, card, nickname, cardIssuer);
+    }
+
     public void deleteCreditCard(String guid) {
         ThreadUtils.assertOnUiThread();
         PersonalDataManagerJni.get().removeByGUID(
@@ -958,14 +1008,14 @@ public class PersonalDataManager {
      * @return Whether the Autofill feature for Profiles (addresses) is enabled.
      */
     public static boolean isAutofillProfileEnabled() {
-        return PrefServiceBridge.getInstance().getBoolean(Pref.AUTOFILL_PROFILE_ENABLED);
+        return getPrefService().getBoolean(Pref.AUTOFILL_PROFILE_ENABLED);
     }
 
     /**
      * @return Whether the Autofill feature for Credit Cards is enabled.
      */
     public static boolean isAutofillCreditCardEnabled() {
-        return PrefServiceBridge.getInstance().getBoolean(Pref.AUTOFILL_CREDIT_CARD_ENABLED);
+        return getPrefService().getBoolean(Pref.AUTOFILL_CREDIT_CARD_ENABLED);
     }
 
     /**
@@ -973,7 +1023,7 @@ public class PersonalDataManager {
      * @param enable True to disable profile Autofill, false otherwise.
      */
     public static void setAutofillProfileEnabled(boolean enable) {
-        PrefServiceBridge.getInstance().setBoolean(Pref.AUTOFILL_PROFILE_ENABLED, enable);
+        getPrefService().setBoolean(Pref.AUTOFILL_PROFILE_ENABLED, enable);
     }
 
     /**
@@ -981,15 +1031,14 @@ public class PersonalDataManager {
      * @param enable True to disable credit card Autofill, false otherwise.
      */
     public static void setAutofillCreditCardEnabled(boolean enable) {
-        PrefServiceBridge.getInstance().setBoolean(Pref.AUTOFILL_CREDIT_CARD_ENABLED, enable);
+        getPrefService().setBoolean(Pref.AUTOFILL_CREDIT_CARD_ENABLED, enable);
     }
 
     /**
      * @return Whether the Autofill feature for FIDO authentication is enabled.
      */
     public static boolean isAutofillCreditCardFidoAuthEnabled() {
-        return PrefServiceBridge.getInstance().getBoolean(
-                Pref.AUTOFILL_CREDIT_CARD_FIDO_AUTH_ENABLED);
+        return getPrefService().getBoolean(Pref.AUTOFILL_CREDIT_CARD_FIDO_AUTH_ENABLED);
     }
 
     /**
@@ -999,8 +1048,7 @@ public class PersonalDataManager {
      * @param enable True to enable credit card FIDO authentication, false otherwise.
      */
     public static void setAutofillCreditCardFidoAuthEnabled(boolean enable) {
-        PrefServiceBridge.getInstance().setBoolean(
-                Pref.AUTOFILL_CREDIT_CARD_FIDO_AUTH_ENABLED, enable);
+        getPrefService().setBoolean(Pref.AUTOFILL_CREDIT_CARD_FIDO_AUTH_ENABLED, enable);
     }
 
     /**
@@ -1056,6 +1104,10 @@ public class PersonalDataManager {
         return DateUtils.SECOND_IN_MILLIS * sRequestTimeoutSeconds;
     }
 
+    private static PrefService getPrefService() {
+        return UserPrefs.get(Profile.getLastUsedRegularProfile());
+    }
+
     @NativeMethods
     interface Natives {
         long init(PersonalDataManager caller);
@@ -1099,6 +1151,8 @@ public class PersonalDataManager {
                 PersonalDataManager caller, String cardNumber, boolean emptyIfInvalid);
         void addServerCreditCardForTest(
                 long nativePersonalDataManagerAndroid, PersonalDataManager caller, CreditCard card);
+        void addServerCreditCardForTestWithAdditionalFields(long nativePersonalDataManagerAndroid,
+                PersonalDataManager caller, CreditCard card, String nickname, int cardIssuer);
         void removeByGUID(
                 long nativePersonalDataManagerAndroid, PersonalDataManager caller, String guid);
         void recordAndLogProfileUse(

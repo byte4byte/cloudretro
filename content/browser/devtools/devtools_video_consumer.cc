@@ -19,9 +19,8 @@ namespace content {
 
 namespace {
 
-// Frame capture period is 10 frames per second by default.
 constexpr base::TimeDelta kDefaultMinCapturePeriod =
-    base::TimeDelta::FromMilliseconds(100);
+    base::TimeDelta::FromMilliseconds(10);
 
 // Frame size can change every frame.
 constexpr base::TimeDelta kDefaultMinPeriod = base::TimeDelta();
@@ -172,7 +171,7 @@ void DevToolsVideoConsumer::OnFrameCaptured(
          mojo::PendingRemote<viz::mojom::FrameSinkVideoConsumerFrameCallbacks>
              callbacks) {},
       std::move(mapping), std::move(callbacks)));
-  frame->metadata()->MergeInternalValuesFrom(info->metadata);
+  frame->set_metadata(info->metadata);
   if (info->color_space.has_value())
     frame->set_color_space(info->color_space.value());
 

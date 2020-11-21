@@ -11,7 +11,6 @@
 #include "chrome/browser/search/instant_service.h"
 #include "chrome/browser/search/instant_service_factory.h"
 #include "chrome/browser/search/instant_service_observer.h"
-#include "chrome/browser/search/ntp_features.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/browser.h"
@@ -24,8 +23,10 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/search/ntp_features.h"
 #include "content/public/browser/url_data_source.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/browser/extension_registry.h"
@@ -81,14 +82,13 @@ class InstantThemeTest : public extensions::ExtensionBrowserTest,
   InstantThemeTest() {}
 
  protected:
-  void SetUpInProcessBrowserTestFixture() override {
+  void SetUpOnMainThread() override {
     ASSERT_TRUE(https_test_server().Start());
     GURL base_url = https_test_server().GetURL("/instant_extended.html");
     GURL ntp_url = https_test_server().GetURL("/instant_extended_ntp.html");
-    InstantTestBase::Init(base_url, ntp_url, false);
-  }
+    ASSERT_NO_FATAL_FAILURE(
+        SetupInstant(browser()->profile(), base_url, ntp_url));
 
-  void SetUpOnMainThread() override {
     extensions::ExtensionBrowserTest::SetUpOnMainThread();
 
     content::URLDataSource::Add(profile(),
@@ -148,10 +148,9 @@ class InstantThemeTest : public extensions::ExtensionBrowserTest,
 
 IN_PROC_BROWSER_TEST_F(InstantThemeTest, ThemeBackgroundAccess) {
   ASSERT_NO_FATAL_FAILURE(InstallThemeAndVerify("theme", "camo theme"));
-  ASSERT_NO_FATAL_FAILURE(SetupInstant(browser()));
 
   ui_test_utils::NavigateToURLWithDisposition(
-      browser(), GURL(chrome::kChromeUINewTabURL),
+      browser(), GURL(chrome::kChromeSearchLocalNtpUrl),
       WindowOpenDisposition::NEW_FOREGROUND_TAB,
       ui_test_utils::BROWSER_TEST_WAIT_FOR_TAB |
           ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP);
@@ -187,7 +186,7 @@ IN_PROC_BROWSER_TEST_F(InstantThemeTest, ThemeAppliedToExistingTab) {
   observer.WaitForThemeApplied(false);
 
   // Get the default (no theme) css setting
-  std::string original_css_text = "";
+  std::string original_css_text;
   EXPECT_TRUE(instant_test_utils::GetStringFromJS(active_tab, helper_js,
                                                   &original_css_text));
 
@@ -200,7 +199,7 @@ IN_PROC_BROWSER_TEST_F(InstantThemeTest, ThemeAppliedToExistingTab) {
   observer.WaitForThemeApplied(true);
 
   // Get the current tab's theme CSS setting.
-  std::string css_text = "";
+  std::string css_text;
   EXPECT_TRUE(
       instant_test_utils::GetStringFromJS(active_tab, helper_js, &css_text));
 
@@ -210,7 +209,7 @@ IN_PROC_BROWSER_TEST_F(InstantThemeTest, ThemeAppliedToExistingTab) {
   observer.WaitForThemeApplied(true);
 
   // Get the previous tab's theme CSS setting.
-  std::string previous_tab_css_text = "";
+  std::string previous_tab_css_text;
   EXPECT_TRUE(instant_test_utils::GetStringFromJS(active_tab, helper_js,
                                                   &previous_tab_css_text));
 
@@ -240,7 +239,7 @@ IN_PROC_BROWSER_TEST_F(InstantThemeTest, ThemeAppliedToNewTab) {
   ASSERT_EQ(1, browser()->tab_strip_model()->active_index());
 
   // Get the default (no theme) css setting
-  std::string original_css_text = "";
+  std::string original_css_text;
   EXPECT_TRUE(instant_test_utils::GetStringFromJS(active_tab, helper_js,
                                                   &original_css_text));
 
@@ -249,7 +248,7 @@ IN_PROC_BROWSER_TEST_F(InstantThemeTest, ThemeAppliedToNewTab) {
   observer.WaitForThemeApplied(true);
 
   // Get the current tab's theme CSS setting.
-  std::string css_text = "";
+  std::string css_text;
   EXPECT_TRUE(
       instant_test_utils::GetStringFromJS(active_tab, helper_js, &css_text));
 
@@ -261,7 +260,7 @@ IN_PROC_BROWSER_TEST_F(InstantThemeTest, ThemeAppliedToNewTab) {
   ASSERT_EQ(2, browser()->tab_strip_model()->active_index());
 
   // Get the new tab's theme CSS setting.
-  std::string new_tab_css_text = "";
+  std::string new_tab_css_text;
   EXPECT_TRUE(instant_test_utils::GetStringFromJS(active_tab, helper_js,
                                                   &new_tab_css_text));
 
@@ -271,7 +270,7 @@ IN_PROC_BROWSER_TEST_F(InstantThemeTest, ThemeAppliedToNewTab) {
 }
 
 // The test is flaky on linux asan. crbug.com/1045708.
-#if defined(OS_LINUX) && defined(ADDRESS_SANITIZER)
+#if (defined(OS_LINUX) || defined(OS_CHROMEOS)) && defined(ADDRESS_SANITIZER)
 #define MAYBE_ThemeChangedWhenApplyingNewTheme \
   DISABLED_ThemeChangedWhenApplyingNewTheme
 #else
@@ -296,7 +295,7 @@ IN_PROC_BROWSER_TEST_F(InstantThemeTest,
   ASSERT_EQ(1, browser()->tab_strip_model()->active_index());
 
   // Get the default (no theme) css setting
-  std::string original_css_text = "";
+  std::string original_css_text;
   EXPECT_TRUE(instant_test_utils::GetStringFromJS(active_tab, helper_js,
                                                   &original_css_text));
 
@@ -305,7 +304,7 @@ IN_PROC_BROWSER_TEST_F(InstantThemeTest,
   observer.WaitForThemeApplied(true);
 
   // Get the current tab's theme CSS setting.
-  std::string css_text = "";
+  std::string css_text;
   EXPECT_TRUE(
       instant_test_utils::GetStringFromJS(active_tab, helper_js, &css_text));
 
@@ -314,7 +313,7 @@ IN_PROC_BROWSER_TEST_F(InstantThemeTest,
   observer.WaitForThemeApplied(true);
 
   // Get the current tab's theme CSS setting.
-  std::string new_css_text = "";
+  std::string new_css_text;
   EXPECT_TRUE(instant_test_utils::GetStringFromJS(active_tab, helper_js,
                                                   &new_css_text));
 

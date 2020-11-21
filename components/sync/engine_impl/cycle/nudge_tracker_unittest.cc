@@ -37,9 +37,9 @@ class NudgeTrackerTest : public ::testing::Test {
  public:
   NudgeTrackerTest() { SetInvalidationsInSync(); }
 
-  static size_t GetHintBufferSize() {
+  size_t GetHintBufferSize() {
     // Assumes that no test has adjusted this size.
-    return NudgeTracker::kDefaultMaxPayloadsPerType;
+    return nudge_tracker_.GetDefaultMaxPayloadsPerTypeForTesting();
   }
 
   bool InvalidationsOutOfSync() const {
@@ -825,10 +825,6 @@ TEST_F(NudgeTrackerTest, NudgeDelayTest) {
   // Sessions has a "slow nudge".
   EXPECT_EQ(nudge_tracker_.RecordLocalChange(ModelTypeSet(SESSIONS)),
             nudge_tracker_.RecordLocalChange(ModelTypeSet(BOOKMARKS)));
-
-  // Favicons have the same delay as sessions.
-  EXPECT_EQ(nudge_tracker_.RecordLocalChange(ModelTypeSet(SESSIONS)),
-            nudge_tracker_.RecordLocalChange(ModelTypeSet(FAVICON_TRACKING)));
 
   // Autofill has the longer delay of all.
   EXPECT_GT(nudge_tracker_.RecordLocalChange(ModelTypeSet(AUTOFILL)),

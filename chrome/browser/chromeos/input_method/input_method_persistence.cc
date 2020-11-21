@@ -5,15 +5,21 @@
 #include "chrome/browser/chromeos/input_method/input_method_persistence.h"
 
 #include "base/logging.h"
+#include "base/notreached.h"
 #include "base/system/sys_info.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/language_preferences.h"
 #include "chrome/browser/chromeos/login/lock/screen_locker.h"
+#include "chrome/browser/chromeos/login/login_pref_names.h"
+#include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/ui/ash/login_screen_client.h"
 #include "chrome/common/pref_names.h"
+#include "components/account_id/account_id.h"
 #include "components/prefs/pref_service.h"
 #include "components/prefs/scoped_user_pref_update.h"
+#include "components/user_manager/known_user.h"
 #include "ui/base/ime/chromeos/input_method_util.h"
 
 namespace chromeos {
@@ -28,57 +34,21 @@ void PersistSystemInputMethod(const std::string& input_method) {
         language_prefs::kPreferredKeyboardLayout, input_method);
 }
 
-static void SetUserLastInputMethodPreference(const std::string& username,
-                                             const std::string& input_method,
-                                             PrefService* local_state) {
-  if (!username.empty() && !local_state->ReadOnly()) {
-    bool update_succeed = false;
-    {
-      // Updater may have side-effects, therefore we do not replace
-      // entry while updater exists.
-      DictionaryPrefUpdate updater(local_state, prefs::kUsersLastInputMethod);
-      base::DictionaryValue* const users_last_input_methods = updater.Get();
-      if (users_last_input_methods) {
-        users_last_input_methods->SetKey(username, base::Value(input_method));
-        update_succeed = true;
-      }
-    }
-    if (!update_succeed) {
-      // Somehow key kUsersLastInputMethod has value of invalid type.
-      // Replace and retry.
-      local_state->Set(prefs::kUsersLastInputMethod, base::DictionaryValue());
-
-      DictionaryPrefUpdate updater(local_state, prefs::kUsersLastInputMethod);
-      base::DictionaryValue* const users_last_input_methods = updater.Get();
-      if (users_last_input_methods) {
-        users_last_input_methods->SetKey(username, base::Value(input_method));
-        update_succeed = true;
-      }
-    }
-    if (!update_succeed) {
-      DVLOG(1) << "Failed to replace local_state.kUsersLastInputMethod: '"
-               << prefs::kUsersLastInputMethod << "' for '" << username << "'";
-    }
-  }
+// Returns the user email, whether or not they have consented to browser sync.
+AccountId GetUserAccount(Profile* profile) {
+  const user_manager::User* user =
+      ProfileHelper::Get()->GetUserByProfile(profile);
+  if (!user)
+    return EmptyAccountId();
+  return user->GetAccountId();
 }
 
-// Update user Last keyboard layout for login screen
-static void SetUserLastInputMethod(
-    const std::string& input_method,
-    const chromeos::input_method::InputMethodManager* const manager,
-    Profile* profile) {
-  // Skip if it's not a keyboard layout. Drop input methods including
-  // extension ones.
-  if (!manager->IsLoginKeyboard(input_method))
+static void SetUserLastInputMethodPreference(const AccountId& account_id,
+                                             const std::string& input_method) {
+  if (!account_id.is_valid())
     return;
-
-  if (profile == NULL)
-    return;
-
-  PrefService* const local_state = g_browser_process->local_state();
-
-  SetUserLastInputMethodPreference(profile->GetProfileUserName(), input_method,
-                                   local_state);
+  user_manager::known_user::SetUserLastLoginInputMethod(account_id,
+                                                        input_method);
 }
 
 void PersistUserInputMethod(const std::string& input_method,
@@ -92,25 +62,25 @@ void PersistUserInputMethod(const std::string& input_method,
     user_prefs = profile->GetPrefs();
   if (!user_prefs)
     return;
-  SetUserLastInputMethod(input_method, manager, profile);
+
+  InputMethodPersistence::SetUserLastLoginInputMethod(input_method, manager,
+                                                      profile);
 
   const std::string current_input_method_on_pref =
-      user_prefs->GetString(prefs::kLanguageCurrentInputMethod);
+      user_prefs->GetString(::prefs::kLanguageCurrentInputMethod);
   if (current_input_method_on_pref == input_method)
     return;
 
-  user_prefs->SetString(prefs::kLanguagePreviousInputMethod,
+  user_prefs->SetString(::prefs::kLanguagePreviousInputMethod,
                         current_input_method_on_pref);
-  user_prefs->SetString(prefs::kLanguageCurrentInputMethod,
-                        input_method);
+  user_prefs->SetString(::prefs::kLanguageCurrentInputMethod, input_method);
 }
 
 }  // namespace
 
 InputMethodPersistence::InputMethodPersistence(
     InputMethodManager* input_method_manager)
-    : input_method_manager_(input_method_manager),
-      ui_session_(InputMethodManager::STATE_LOGIN_SCREEN) {
+    : input_method_manager_(input_method_manager) {
   input_method_manager_->AddObserver(this);
 }
 
@@ -121,18 +91,15 @@ InputMethodPersistence::~InputMethodPersistence() {
 void InputMethodPersistence::InputMethodChanged(InputMethodManager* manager,
                                                 Profile* profile,
                                                 bool show_message) {
-  DCHECK_EQ(input_method_manager_, manager);
-  // We might get here during the locking process. When locker is already
-  // created but session state has not changed yet.
-  if (ScreenLocker::default_screen_locker()) {
-    // We use a special set of input methods on the lock screen. Do not update.
+  if (!g_browser_process || g_browser_process->IsShuttingDown())
     return;
-  }
+
+  DCHECK_EQ(input_method_manager_, manager);
   const std::string current_input_method =
       manager->GetActiveIMEState()->GetCurrentInputMethod().id();
   // Save the new input method id depending on the current browser state.
-  switch (ui_session_) {
-    case InputMethodManager::STATE_LOGIN_SCREEN:
+  switch (manager->GetActiveIMEState()->GetUIStyle()) {
+    case InputMethodManager::UIStyle::kLogin:
       if (!manager->IsLoginKeyboard(current_input_method)) {
         DVLOG(1) << "Only keyboard layouts are supported: "
                  << current_input_method;
@@ -140,29 +107,44 @@ void InputMethodPersistence::InputMethodChanged(InputMethodManager* manager,
       }
       PersistSystemInputMethod(current_input_method);
       return;
-    case InputMethodManager::STATE_BROWSER_SCREEN:
+    case InputMethodManager::UIStyle::kNormal:
       PersistUserInputMethod(current_input_method, manager, profile);
       return;
-    case InputMethodManager::STATE_LOCK_SCREEN:
-    case InputMethodManager::STATE_SECONDARY_LOGIN_SCREEN:
-      // We use a special set of input methods on the screen. Do not update.
+    case InputMethodManager::UIStyle::kLock:
+      // We are either in unit test, or screen should be locked.
+      DCHECK(!LoginScreenClient::HasInstance() ||
+             ScreenLocker::default_screen_locker());
       return;
-    case InputMethodManager::STATE_TERMINATING:
+    case InputMethodManager::UIStyle::kSecondaryLogin:
+      // We use a special set of input methods on the screen. Do not update.
       return;
   }
   NOTREACHED();
 }
 
-void InputMethodPersistence::OnSessionStateChange(
-    InputMethodManager::UISessionState new_ui_session) {
-  ui_session_ = new_ui_session;
+// static
+void InputMethodPersistence::SetUserLastLoginInputMethod(
+    const std::string& input_method_id,
+    const chromeos::input_method::InputMethodManager* const manager,
+    Profile* profile) {
+  if (!profile)
+    return;
+
+  // Skip if it's not a keyboard layout. Drop input methods including
+  // extension ones.
+  if (!manager->IsLoginKeyboard(input_method_id))
+    return;
+
+  // TODO(https://crbug.com/1121565): Create more general fix for all the data
+  // that is required on the lock screen.
+  profile->GetPrefs()->SetString(prefs::kLastLoginInputMethod, input_method_id);
+  SetUserLastInputMethodPreference(GetUserAccount(profile), input_method_id);
 }
 
 void SetUserLastInputMethodPreferenceForTesting(
-    const std::string& username,
-    const std::string& input_method,
-    PrefService* const local_state) {
-  SetUserLastInputMethodPreference(username, input_method, local_state);
+    const AccountId& account_id,
+    const std::string& input_method) {
+  SetUserLastInputMethodPreference(account_id, input_method);
 }
 
 }  // namespace input_method

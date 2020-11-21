@@ -12,6 +12,7 @@
 #include "components/sync/base/sync_base_switches.h"
 #include "components/sync/engine/sync_engine_switches.h"
 #include "components/sync/nigori/nigori_test_utils.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/test_launcher.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -33,7 +34,13 @@ using bookmarks_helper::BookmarksMatchVerifierChecker;
 class TwoClientCustomPassphraseSyncTest : public SyncTest {
  public:
   TwoClientCustomPassphraseSyncTest() : SyncTest(TWO_CLIENT) {}
-  ~TwoClientCustomPassphraseSyncTest() override {}
+  ~TwoClientCustomPassphraseSyncTest() override = default;
+
+  bool UseVerifier() override {
+    // TODO(crbug.com/1137720): rewrite test to not use verifier (currently
+    // needed because of WaitForBookmarksToMatchVerifier()).
+    return true;
+  }
 
   bool WaitForBookmarksToMatchVerifier() {
     return BookmarksMatchVerifierChecker().Wait();
@@ -50,9 +57,6 @@ class TwoClientCustomPassphraseSyncTest : public SyncTest {
     ASSERT_TRUE(AddURL(index, 1, "Test bookmark",
                        GURL("https://google.com/synced-bookmark-2")));
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(TwoClientCustomPassphraseSyncTest);
 };
 
 class TwoClientCustomPassphraseSyncTestScryptEnabledInPreTest
@@ -61,13 +65,14 @@ class TwoClientCustomPassphraseSyncTestScryptEnabledInPreTest
   TwoClientCustomPassphraseSyncTestScryptEnabledInPreTest() {
     if (content::IsPreTest()) {
       override_features_.InitWithFeatures(
-          /*enable_features=*/{switches::kSyncUseScryptForNewCustomPassphrases},
-          /*disable_features=*/{
+          /*enabled_features=*/{switches::
+                                    kSyncUseScryptForNewCustomPassphrases},
+          /*disabled_features=*/{
               switches::kSyncForceDisableScryptForCustomPassphrase});
     } else {
       override_features_.InitWithFeatures(
-          /*enable_features=*/{},
-          /*disable_features=*/{
+          /*enabled_features=*/{},
+          /*disabled_features=*/{
               switches::kSyncUseScryptForNewCustomPassphrases,
               switches::kSyncForceDisableScryptForCustomPassphrase});
     }

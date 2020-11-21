@@ -19,7 +19,6 @@
 #include "ui/views/widget/widget_observer.h"
 
 class ContentSettingImageModel;
-class FeaturePromoBubbleView;
 
 namespace content {
 class WebContents;
@@ -41,6 +40,9 @@ class ContentSettingImageView : public IconLabelBubbleView,
  public:
   class Delegate {
    public:
+    // Delegate should return true if the content setting icon should be hidden.
+    virtual bool ShouldHideContentSettingImage() = 0;
+
     // Gets the web contents the ContentSettingImageView is for.
     virtual content::WebContents* GetContentSettingWebContents() = 0;
 
@@ -82,8 +84,6 @@ class ContentSettingImageView : public IconLabelBubbleView,
 
   ContentSettingImageModel::ImageType GetTypeForTesting() const;
 
-  FeaturePromoBubbleView* indicator_promo() { return indicator_promo_; }
-
  private:
   // views::WidgetObserver:
   void OnWidgetDestroying(views::Widget* widget) override;
@@ -96,13 +96,9 @@ class ContentSettingImageView : public IconLabelBubbleView,
   views::BubbleDialogDelegateView* bubble_view_;
   base::Optional<SkColor> icon_color_;
 
-  // Promotional UI that appears under the indicator icon in the right side of
-  // the omnibox and encourages its use. Owned by |indicator_promo_|'s
-  // NativeWidget.
-  FeaturePromoBubbleView* indicator_promo_ = nullptr;
-
   // Observes destruction of bubble's Widgets spawned by this ImageView.
-  ScopedObserver<views::Widget, views::WidgetObserver> observer_{this};
+  base::ScopedObservation<views::Widget, views::WidgetObserver> observation_{
+      this};
   bool can_animate_ = true;
 
   DISALLOW_COPY_AND_ASSIGN(ContentSettingImageView);

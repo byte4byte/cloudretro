@@ -6,19 +6,20 @@ package org.chromium.chrome.browser.autofill_assistant;
 
 import androidx.annotation.Nullable;
 
-import org.chromium.chrome.browser.ChromeActivity;
+import org.chromium.chrome.browser.app.ChromeActivity;
 import org.chromium.chrome.browser.autofill_assistant.overlay.AssistantOverlayCoordinator;
-import org.chromium.chrome.browser.help.HelpAndFeedback;
+import org.chromium.chrome.browser.feedback.HelpAndFeedbackLauncherImpl;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.ui.TabObscuringHandler;
-import org.chromium.chrome.browser.widget.bottomsheet.BottomSheetController;
+import org.chromium.components.browser_ui.bottomsheet.BottomSheetController;
+import org.chromium.components.browser_ui.bottomsheet.BottomSheetController.SheetState;
 
 /**
  * The main coordinator for the Autofill Assistant, responsible for instantiating all other
  * sub-components and shutting down the Autofill Assistant.
  */
-class AssistantCoordinator {
-    private static final String FEEDBACK_CATEGORY_TAG =
+public class AssistantCoordinator {
+    public static final String FEEDBACK_CATEGORY_TAG =
             "com.android.chrome.USER_INITIATED_FEEDBACK_REPORT_AUTOFILL_ASSISTANT";
 
     private final ChromeActivity mActivity;
@@ -40,8 +41,8 @@ class AssistantCoordinator {
         } else {
             mModel = new AssistantModel();
             mOverlayCoordinator = new AssistantOverlayCoordinator(activity,
-                    activity.getFullscreenManager(), activity.getCompositorViewHolder(),
-                    activity.getScrim(), mModel.getOverlayModel());
+                    activity.getBrowserControlsManager(), activity.getCompositorViewHolder(),
+                    controller.getScrimCoordinator(), mModel.getOverlayModel());
         }
 
         mBottomBarCoordinator = new AssistantBottomBarCoordinator(activity, mModel, controller,
@@ -49,9 +50,8 @@ class AssistantCoordinator {
                 tabObscuringHandler);
         mKeyboardCoordinator = new AssistantKeyboardCoordinator(activity,
                 activity.getWindowAndroid().getKeyboardDelegate(),
-                activity.getCompositorViewHolder(), mModel, keyboardCoordinatorDelegate);
-
-        mModel.setVisible(true);
+                activity.getCompositorViewHolder(), mModel, keyboardCoordinatorDelegate,
+                controller);
     }
 
     /** Detaches and destroys the view. */
@@ -87,9 +87,15 @@ class AssistantCoordinator {
         Profile profile =
                 Profile.fromWebContents(mActivity.getActivityTabProvider().get().getWebContents());
 
-        HelpAndFeedback.getInstance().showFeedback(mActivity, profile,
+        HelpAndFeedbackLauncherImpl.getInstance().showFeedback(mActivity, profile,
                 mActivity.getActivityTab().getUrlString(), FEEDBACK_CATEGORY_TAG,
                 null /* feed context */,
                 FeedbackContext.buildContextString(mActivity, debugContext, 4));
+    }
+
+    public void show() {
+        // Simulates native's initialization.
+        mModel.setVisible(true);
+        mBottomBarCoordinator.restoreState(SheetState.HALF);
     }
 }

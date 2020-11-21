@@ -9,7 +9,7 @@
 
 #include <memory>
 
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
@@ -109,6 +109,9 @@ void SadTabTabHelper::RenderProcessGone(web::WebState* web_state) {
     return;
   }
 
+  // Only show Sad Tab if renderer has crashed in a tab currently visible to the
+  // user and only if application is active. Otherwise simpy reloading the page
+  // is a better user experience.
   if (!web_state->IsVisible()) {
     requires_reload_on_becoming_visible_ = true;
     return;
@@ -121,18 +124,11 @@ void SadTabTabHelper::RenderProcessGone(web::WebState* web_state) {
 
   OnVisibleCrash(web_state->GetLastCommittedURL());
 
-  if (base::FeatureList::IsEnabled(web::kReloadSadTab)) {
-    if (repeated_failure_) {
-      // Only show Sad Tab if renderer has crashed in a tab currently visible to
-      // the user and only if application is active. Otherwise simpy reloading
-      // the page is a better user experience.
-      PresentSadTab();
-    } else {
-      web_state->GetNavigationManager()->Reload(web::ReloadType::NORMAL,
-                                                true /* check_for_repost */);
-    }
-  } else {
+  if (repeated_failure_) {
     PresentSadTab();
+  } else {
+    web_state->GetNavigationManager()->Reload(web::ReloadType::NORMAL,
+                                              true /* check_for_repost */);
   }
 }
 

@@ -8,7 +8,7 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/files/file_path.h"
 #include "base/macros.h"
 #include "chrome/browser/browser_process.h"
@@ -73,7 +73,7 @@ class DemoResourcesTest : public testing::Test {
 
   void InitializeCrosComponentManager() {
     auto fake_cros_component_manager =
-        std::make_unique<FakeCrOSComponentManager>();
+        base::MakeRefCounted<FakeCrOSComponentManager>();
     fake_cros_component_manager->set_queue_load_requests(true);
     fake_cros_component_manager->set_supported_components(
         {kOfflineResourcesComponent});

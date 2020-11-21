@@ -10,8 +10,8 @@ login.createScreen('ArcTermsOfServiceScreen', 'arc-tos', function() {
   return {
     EXTERNAL_API: [
       'setMetricsMode', 'setBackupAndRestoreMode', 'setLocationServicesMode',
-      'loadPlayStoreToS', 'setArcManaged', 'hideSkipButton', 'setupForDemoMode',
-      'clearDemoMode', 'setTosForTesting'
+      'loadPlayStoreToS', 'setArcManaged', 'setupForDemoMode', 'clearDemoMode',
+      'setTosForTesting'
     ],
 
     /** @override */
@@ -92,6 +92,7 @@ login.createScreen('ArcTermsOfServiceScreen', 'arc-tos', function() {
       }]);
 
       this.getElement_('arcPolicyLink').onclick = function() {
+        chrome.send('login.ArcTermsOfServiceScreen.userActed', ['policy-link']);
         termsView.executeScript(
             {code: 'getPrivacyPolicyLink();'}, function(results) {
               if (results && results.length == 1 &&
@@ -148,13 +149,6 @@ login.createScreen('ArcTermsOfServiceScreen', 'arc-tos', function() {
       $('arc-tos-root').backupRestore = enabled;
       $('arc-tos-root').backupRestoreManaged = managed;
     },
-
-    /**
-     * Hides the "Skip" button in the ToS screen.
-     * TODO(lgcheng@, crbug/1059048) remove this external API and related
-     * skip code.
-     */
-    hideSkipButton() {},
 
     /**
      * Loads Play Store ToS in case country code has been changed or previous
@@ -461,7 +455,7 @@ login.createScreen('ArcTermsOfServiceScreen', 'arc-tos', function() {
     onBeforeShow(data) {
       this.focusButton_();
 
-      $('arc-tos-root').onBeforeShow();
+      cr.ui.login.invokePolymerMethod($('arc-tos-root'), 'onBeforeShow');
 
       var isDemoModeSetup = this.isDemoModeSetup_();
       if (isDemoModeSetup) {
@@ -539,6 +533,16 @@ login.createScreen('ArcTermsOfServiceScreen', 'arc-tos', function() {
      */
     isDemoModeSetup_() {
       return $('arc-tos-root').demoMode;
+    },
+
+    /**
+     * Shows loading screen for debugging purpose
+     */
+    showLoadingScreenForTesting() {
+      this.removeClass_('arc-tos-loaded');
+      this.removeClass_('error');
+      this.addClass_('arc-tos-loading');
+      this.enableButtons_(false);
     }
   };
 });

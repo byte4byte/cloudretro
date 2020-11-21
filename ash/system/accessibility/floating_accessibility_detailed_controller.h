@@ -9,6 +9,7 @@
 #include "ash/system/tray/detailed_view_delegate.h"
 #include "ash/system/tray/tray_bubble_view.h"
 #include "ui/views/bubble/bubble_border.h"
+#include "ui/wm/public/activation_change_observer.h"
 
 namespace ash {
 
@@ -19,11 +20,13 @@ class AccessibilityDetailedView;
 // Controller for the detailed view of accessibility floating menu.
 class ASH_EXPORT FloatingAccessibilityDetailedController
     : public TrayBubbleView::Delegate,
-      public DetailedViewDelegate {
+      public DetailedViewDelegate,
+      public ::wm::ActivationChangeObserver {
  public:
   class Delegate {
    public:
     virtual void OnDetailedMenuClosed() {}
+    virtual views::Widget* GetBubbleWidget() = 0;
     virtual ~Delegate() = default;
   };
 
@@ -36,6 +39,7 @@ class ASH_EXPORT FloatingAccessibilityDetailedController
   // DetailedViewDelegate:
   void CloseBubble() override;
   void TransitionToMainView(bool restore_focus) override;
+  base::string16 GetAccessibleNameForBubble() override;
 
   void OnAccessibilityStatusChanged();
 
@@ -43,11 +47,17 @@ class ASH_EXPORT FloatingAccessibilityDetailedController
   friend class FloatingAccessibilityControllerTest;
   class DetailedBubbleView;
   // DetailedViewDelegate:
-  views::Button* CreateHelpButton(views::ButtonListener* listener) override;
-  views::Button* CreateSettingsButton(views::ButtonListener* listener,
-                                      int setting_accessible_name_id) override;
+  views::Button* CreateBackButton(
+      views::Button::PressedCallback callback) override;
+  views::Button* CreateHelpButton(
+      views::Button::PressedCallback callback) override;
   // TrayBubbleView::Delegate:
   void BubbleViewDestroyed() override;
+
+  // ::wm::ActivationChangeObserver:
+  void OnWindowActivated(ActivationReason reason,
+                         aura::Window* gained_active,
+                         aura::Window* lost_active) override;
 
   DetailedBubbleView* bubble_view_ = nullptr;
   views::Widget* bubble_widget_ = nullptr;

@@ -5,26 +5,26 @@
 #ifndef REMOTING_PROTOCOL_TRANSPORT_CONTEXT_H_
 #define REMOTING_PROTOCOL_TRANSPORT_CONTEXT_H_
 
-#include <array>
 #include <list>
 #include <memory>
 #include <string>
-#include <vector>
 
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "remoting/base/session_options.h"
+#include "base/time/time.h"
 #include "remoting/protocol/ice_config.h"
 #include "remoting/protocol/network_settings.h"
 #include "remoting/protocol/transport.h"
+
+namespace network {
+class SharedURLLoaderFactory;
+}  // namespace network
 
 namespace rtc {
 class NetworkManager;
 }  // namespace rtc
 
 namespace remoting {
-
-class UrlRequestFactory;
 
 namespace protocol {
 
@@ -36,31 +36,26 @@ class IceConfigRequest;
 // TURN configuration.
 class TransportContext : public base::RefCountedThreadSafe<TransportContext> {
  public:
-  // TODO(yuweih): See if we still need this enum.
-  enum RelayMode {
-    TURN,
-
-    LAST_RELAYMODE = TURN
-  };
-  static const int kNumRelayModes = RelayMode::LAST_RELAYMODE + 1;
-
-  typedef base::Callback<void(const IceConfig& ice_config)>
+  typedef base::OnceCallback<void(const IceConfig& ice_config)>
       GetIceConfigCallback;
 
   static scoped_refptr<TransportContext> ForTests(TransportRole role);
 
-  TransportContext(std::unique_ptr<PortAllocatorFactory> port_allocator_factory,
-                   std::unique_ptr<UrlRequestFactory> url_request_factory,
-                   const NetworkSettings& network_settings,
-                   TransportRole role);
+  TransportContext(
+      std::unique_ptr<PortAllocatorFactory> port_allocator_factory,
+      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
+      const NetworkSettings& network_settings,
+      TransportRole role);
 
   void set_turn_ice_config(const IceConfig& ice_config) {
-    ice_config_[TURN] = ice_config;
+    // If an external entity is providing the ICE Config, then disable the
+    // local caching logic and use the provided config.
+    //
+    // Note: Using this method to provide a config means the caller is
+    // responsible for ensuring the ICE config's validity and freshness.
+    last_request_completion_time_ = base::Time::Max();
+    ice_config_ = ice_config;
   }
-
-  // Sets relay mode for all future calls of GetIceConfig(). Doesn't affect
-  // previous GetIceConfig() requests.
-  void set_relay_mode(RelayMode relay_mode) { relay_mode_ = relay_mode; }
 
   // Sets a reference to the NetworkManager that holds the list of
   // network interfaces. If the NetworkManager is deleted while this
@@ -71,29 +66,20 @@ class TransportContext : public base::RefCountedThreadSafe<TransportContext> {
     network_manager_ = network_manager;
   }
 
-  // Sets the options for the current session.
-  void set_session_options(const SessionOptions& session_options) {
-    session_options_ = session_options;
-  }
-
   // Prepares fresh ICE configs. It may be called while connection is being
   // negotiated to minimize the chance that the following GetIceConfig() will
   // be blocking.
   void Prepare();
 
   // Requests fresh STUN and TURN information.
-  void GetIceConfig(const GetIceConfigCallback& callback);
+  void GetIceConfig(GetIceConfigCallback callback);
 
   PortAllocatorFactory* port_allocator_factory() {
     return port_allocator_factory_.get();
   }
-  UrlRequestFactory* url_request_factory() {
-    return url_request_factory_.get();
-  }
   const NetworkSettings& network_settings() const { return network_settings_; }
   TransportRole role() const { return role_; }
   rtc::NetworkManager* network_manager() const { return network_manager_; }
-  const SessionOptions& session_options() const { return session_options_; }
 
   // Returns the suggested bandwidth cap for TURN relay connections, or 0 if
   // no rate-limit is set in the IceConfig.
@@ -105,26 +91,22 @@ class TransportContext : public base::RefCountedThreadSafe<TransportContext> {
   ~TransportContext();
 
   void EnsureFreshIceConfig();
-  void OnIceConfig(RelayMode relay_mode, const IceConfig& ice_config);
+  void OnIceConfig(const IceConfig& ice_config);
 
   std::unique_ptr<PortAllocatorFactory> port_allocator_factory_;
-  std::unique_ptr<UrlRequestFactory> url_request_factory_;
+  scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory_;
   NetworkSettings network_settings_;
-  SessionOptions session_options_;
   TransportRole role_;
-
-  RelayMode relay_mode_ = RelayMode::TURN;
 
   rtc::NetworkManager* network_manager_ = nullptr;
 
-  std::array<std::unique_ptr<IceConfigRequest>, kNumRelayModes>
-      ice_config_request_;
-  std::array<IceConfig, kNumRelayModes> ice_config_;
+  IceConfig ice_config_;
 
-  // When there is an active |ice_config_request_| stores list of callbacks to
-  // be called once the request is finished.
-  std::array<std::list<GetIceConfigCallback>, kNumRelayModes>
-      pending_ice_config_callbacks_;
+  base::Time last_request_completion_time_;
+  std::unique_ptr<IceConfigRequest> ice_config_request_;
+
+  // Called once |ice_config_request_| completes.
+  std::list<GetIceConfigCallback> pending_ice_config_callbacks_;
 
   DISALLOW_COPY_AND_ASSIGN(TransportContext);
 };

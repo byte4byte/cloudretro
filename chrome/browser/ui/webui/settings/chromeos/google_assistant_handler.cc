@@ -6,10 +6,10 @@
 
 #include <utility>
 
-#include "ash/public/cpp/assistant/assistant_settings.h"
 #include "ash/public/cpp/assistant/assistant_setup.h"
+#include "ash/public/cpp/assistant/controller/assistant_controller.h"
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/values.h"
 #include "chrome/browser/ui/webui/chromeos/assistant_optin/assistant_optin_ui.h"
 #include "chromeos/audio/cras_audio_handler.h"
@@ -74,7 +74,7 @@ void GoogleAssistantHandler::RegisterMessages() {
 void GoogleAssistantHandler::HandleShowGoogleAssistantSettings(
     const base::ListValue* args) {
   CHECK_EQ(0U, args->GetSize());
-  ash::OpenAssistantSettings();
+  ash::AssistantController::Get()->OpenAssistantSettings();
 }
 
 void GoogleAssistantHandler::HandleRetrainVoiceModel(
@@ -87,23 +87,15 @@ void GoogleAssistantHandler::HandleRetrainVoiceModel(
 void GoogleAssistantHandler::HandleSyncVoiceModelStatus(
     const base::ListValue* args) {
   CHECK_EQ(0U, args->GetSize());
-  if (!settings_manager_.is_bound())
-    BindAssistantSettingsManager();
 
-  settings_manager_->SyncSpeakerIdEnrollmentStatus();
+  auto* settings = assistant::AssistantSettings::Get();
+  if (settings)
+    settings->SyncSpeakerIdEnrollmentStatus();
 }
 
 void GoogleAssistantHandler::HandleInitialized(const base::ListValue* args) {
   CHECK_EQ(0U, args->GetSize());
   AllowJavascript();
-}
-
-void GoogleAssistantHandler::BindAssistantSettingsManager() {
-  DCHECK(!settings_manager_.is_bound());
-
-  // Set up settings mojom.
-  chromeos::assistant::AssistantService::Get()->BindSettingsManager(
-      settings_manager_.BindNewPipeAndPassReceiver());
 }
 
 }  // namespace settings

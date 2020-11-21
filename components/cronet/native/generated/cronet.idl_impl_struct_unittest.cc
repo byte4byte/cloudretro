@@ -8,7 +8,6 @@
 
 #include <math.h>
 
-#include "base/logging.h"
 #include "base/macros.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -257,6 +256,10 @@ TEST_F(CronetStructTest, TestCronet_UrlRequestParams) {
       second, Cronet_UrlRequestParams_request_finished_executor_get(first));
   EXPECT_EQ(Cronet_UrlRequestParams_request_finished_executor_get(first),
             Cronet_UrlRequestParams_request_finished_executor_get(second));
+  Cronet_UrlRequestParams_idempotency_set(
+      second, Cronet_UrlRequestParams_idempotency_get(first));
+  EXPECT_EQ(Cronet_UrlRequestParams_idempotency_get(first),
+            Cronet_UrlRequestParams_idempotency_get(second));
   Cronet_UrlRequestParams_Destroy(first);
   Cronet_UrlRequestParams_Destroy(second);
 }

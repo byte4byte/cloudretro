@@ -33,20 +33,6 @@ class DocWriter(xml_formatted_writer.XMLFormattedWriter):
   files.
   '''
 
-  def _MapListToString(self, item_map, items):
-    '''Creates a comma-separated list.
-
-    Args:
-      item_map: A dictionary containing all the elements of 'items' as
-        keys.
-      items: A list of arbitrary items.
-
-    Returns:
-      Looks up each item of 'items' in 'item_maps' and concatenates the
-      resulting items into a comma-separated list.
-    '''
-    return ', '.join([item_map[x] for x in items])
-
   def _AddTextWithLinks(self, parent, text):
     '''Parse a string for URLs and add it to a DOM node with the URLs replaced
     with <a> HTML links.
@@ -242,26 +228,26 @@ class DocWriter(xml_formatted_writer.XMLFormattedWriter):
     <dl>
       <dt>Windows (Windows clients):</dt>
       <dd>
-        Software\Policies\Chromium\DisabledPlugins\0 = "Java"
-        Software\Policies\Chromium\DisabledPlugins\1 = "Shockwave Flash"
+        Software\Policies\Chromium\URLAllowlist\0 = "www.example.com"
+        Software\Policies\Chromium\URLAllowlist\1 = "www.google.com"
       </dd>
       <dt>Windows (Chromium OS clients):</dt>
       <dd>
-        Software\Policies\ChromiumOS\DisabledPlugins\0 = "Java"
-        Software\Policies\ChromiumOS\DisabledPlugins\1 = "Shockwave Flash"
+        Software\Policies\ChromiumOS\URLAllowlist\0 = "www.example.com"
+        Software\Policies\ChromiumOS\URLAllowlist\1 = "www.google.com"
       </dd>
       <dt>Android/Linux:</dt>
       <dd>
         [
-          "Java",
-          "Shockwave Flash"
+          "www.example.com",
+          "www.google.com"
         ]
       </dd>
       <dt>Mac:</dt>
       <dd>
         <array>
-          <string>Java</string>
-          <string>Shockwave Flash</string>
+          <string>www.example.com</string>
+          <string>www.google.com</string>
         </array>
       </dd>
     </dl>
@@ -546,9 +532,9 @@ class DocWriter(xml_formatted_writer.XMLFormattedWriter):
     for supported_on in supported_on_list:
       text = []
       product = supported_on['product']
-      platforms = supported_on['platforms']
+      platform = supported_on['platform']
       text.append(self._PRODUCT_MAP[product])
-      text.append('(%s)' % self._MapListToString(self._PLATFORM_MAP, platforms))
+      text.append('(%s)' % (self._PLATFORM_MAP[platform]))
       if supported_on['since_version']:
         since_version = self.GetLocalizedMessage('since_version')
         text.append(since_version.replace('$6', supported_on['since_version']))

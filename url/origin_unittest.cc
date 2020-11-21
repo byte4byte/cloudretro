@@ -5,7 +5,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "base/logging.h"
 #include "base/macros.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -108,6 +107,11 @@ class OriginTest : public ::testing::Test {
 
   base::Optional<std::string> SerializeWithNonce(const Origin& origin) {
     return origin.SerializeWithNonce();
+  }
+
+  base::Optional<std::string> SerializeWithNonceAndInitIfNeeded(
+      Origin& origin) {
+    return origin.SerializeWithNonceAndInitIfNeeded();
   }
 
   base::Optional<Origin> Deserialize(const std::string& value) {
@@ -847,6 +851,10 @@ TEST_F(OriginTest, GetDebugString) {
       http_opaque_origin.GetDebugString().c_str(),
       ::testing::MatchesRegex(
           "null \\[internally: \\(\\w*\\) derived from http://192.168.9.1\\]"));
+  EXPECT_THAT(
+      http_opaque_origin.GetDebugString(false /* include_nonce */).c_str(),
+      ::testing::MatchesRegex(
+          "null \\[internally: derived from http://192.168.9.1\\]"));
 
   Origin data_origin = Origin::Create(GURL("data:"));
   EXPECT_STREQ(data_origin.GetDebugString().c_str(),
@@ -858,6 +866,9 @@ TEST_F(OriginTest, GetDebugString) {
   EXPECT_THAT(
       data_derived_origin.GetDebugString().c_str(),
       ::testing::MatchesRegex("null \\[internally: \\(\\w*\\) anonymous\\]"));
+  EXPECT_THAT(
+      data_derived_origin.GetDebugString(false /* include_nonce */).c_str(),
+      ::testing::MatchesRegex("null \\[internally: anonymous\\]"));
 
   Origin file_origin = Origin::Create(GURL("file:///etc/passwd"));
   EXPECT_STREQ(file_origin.GetDebugString().c_str(),
@@ -927,6 +938,19 @@ TEST_F(OriginTest, SerializeTBDNonce) {
   // Can't use DoEqualityComparisons here since empty nonces are never == unless
   // they are the same object.
   EXPECT_EQ(opaque.GetDebugString(), deserialized.value().GetDebugString());
+
+  // Now force initialization of the nonce prior to serialization.
+  for (const GURL& url : invalid_urls) {
+    SCOPED_TRACE(url.spec());
+    Origin origin = Origin::Create(url);
+    base::Optional<std::string> serialized =
+        SerializeWithNonceAndInitIfNeeded(origin);
+    base::Optional<Origin> deserialized = Deserialize(std::move(*serialized));
+    ASSERT_TRUE(deserialized.has_value());
+
+    // The nonce should have been initialized prior to Serialization().
+    EXPECT_EQ(origin, deserialized.value());
+  }
 }
 
 TEST_F(OriginTest, DeserializeValidNonce) {

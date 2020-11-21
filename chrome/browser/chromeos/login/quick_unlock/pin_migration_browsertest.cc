@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "chrome/browser/chromeos/login/login_manager_test.h"
 #include "chrome/browser/chromeos/login/quick_unlock/pin_backend.h"
 #include "chrome/browser/chromeos/login/quick_unlock/pin_storage_prefs.h"
@@ -13,6 +13,7 @@
 #include "chromeos/dbus/cryptohome/fake_cryptohome_client.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "components/account_id/account_id.h"
+#include "content/public/test/browser_test.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace chromeos {
@@ -55,7 +56,7 @@ IN_PROC_BROWSER_TEST_F(PinMigrationTest, PRE_Migrate) {
   // Register PIN.
   QuickUnlockStorage* storage =
       QuickUnlockFactory::GetForAccountId(test_account);
-  ASSERT_TRUE(!!storage);
+  ASSERT_TRUE(storage);
   storage->pin_storage_prefs()->SetPin("111111");
 
   // Validate PIN is set.

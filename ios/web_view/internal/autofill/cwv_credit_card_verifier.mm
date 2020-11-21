@@ -107,8 +107,7 @@ class WebViewCardUnmaskPromptView : public autofill::CardUnmaskPromptView {
     _unmaskingView =
         std::make_unique<ios_web_view::WebViewCardUnmaskPromptView>(self);
     _unmaskingController =
-        std::make_unique<autofill::CardUnmaskPromptControllerImpl>(
-            prefs, isOffTheRecord);
+        std::make_unique<autofill::CardUnmaskPromptControllerImpl>(prefs);
     _unmaskingController->ShowPrompt(
         base::BindOnce(^autofill::CardUnmaskPromptView*() {
           return _unmaskingView.get();
@@ -128,14 +127,6 @@ class WebViewCardUnmaskPromptView : public autofill::CardUnmaskPromptView {
 }
 
 #pragma mark - Public Methods
-
-- (BOOL)canStoreLocally {
-  return _unmaskingController->CanStoreLocally();
-}
-
-- (BOOL)lastStoreLocallyValue {
-  return _unmaskingController->GetStoreLocallyStartState();
-}
 
 - (NSString*)navigationTitle {
   return base::SysUTF16ToNSString(_unmaskingController->GetWindowTitle());
@@ -168,7 +159,6 @@ class WebViewCardUnmaskPromptView : public autofill::CardUnmaskPromptView {
 - (void)verifyWithCVC:(NSString*)CVC
       expirationMonth:(nullable NSString*)expirationMonth
        expirationYear:(nullable NSString*)expirationYear
-         storeLocally:(BOOL)storeLocally
              riskData:(NSString*)riskData
     completionHandler:(void (^)(NSError* _Nullable error))completionHandler {
   _verificationAttempted = YES;
@@ -182,7 +172,7 @@ class WebViewCardUnmaskPromptView : public autofill::CardUnmaskPromptView {
 
   _unmaskingController->OnUnmaskPromptAccepted(
       base::SysNSStringToUTF16(CVC), base::SysNSStringToUTF16(expirationMonth),
-      base::SysNSStringToUTF16(expirationYear), storeLocally,
+      base::SysNSStringToUTF16(expirationYear), /*should_store_pan=*/false,
       /*enable_fido_auth=*/false);
 }
 

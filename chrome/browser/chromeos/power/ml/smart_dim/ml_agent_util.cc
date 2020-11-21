@@ -4,6 +4,7 @@
 
 #include "chrome/browser/chromeos/power/ml/smart_dim/ml_agent_util.h"
 
+#include "base/logging.h"
 #include "base/optional.h"
 
 namespace chromeos {
@@ -81,18 +82,6 @@ bool ParseMetaInfoFromJsonObject(const base::Value& root,
   }
 
   return true;
-}
-
-void LoadModelCallback(LoadModelResult result) {
-  if (result != LoadModelResult::OK) {
-    DVLOG(1) << "Failed to load Smart Dim flatbuffer model.";
-  }
-}
-
-void CreateGraphExecutorCallback(CreateGraphExecutorResult result) {
-  if (result != CreateGraphExecutorResult::OK) {
-    DVLOG(1) << "Failed to create a Smart Dim graph executor.";
-  }
 }
 
 }  // namespace ml

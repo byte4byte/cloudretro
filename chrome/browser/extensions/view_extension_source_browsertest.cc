@@ -11,6 +11,7 @@
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "extensions/common/constants.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
@@ -58,7 +59,7 @@ IN_PROC_BROWSER_TEST_F(ViewExtensionSourceTest, ViewSourceTabRestore) {
   chrome::RestoreTab(browser());
   wait_for_new_tab.Wait();
   view_source_tab = browser()->tab_strip_model()->GetActiveWebContents();
-  WaitForLoadStop(view_source_tab);
+  EXPECT_TRUE(WaitForLoadStop(view_source_tab));
 
   // Verify the browser-side URLs.  Note that without view-source, the
   // bookmarks extension visible URL would be rewritten to chrome://bookmarks,

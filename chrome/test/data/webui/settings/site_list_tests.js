@@ -5,13 +5,17 @@
 /** @fileoverview Suite of tests for site-list. */
 
 // clang-format off
-import {ContentSetting,ContentSettingsTypes,kControlledByLookup,SiteSettingSource,SiteSettingsPrefsBrowserProxyImpl,SITE_EXCEPTION_WILDCARD} from 'chrome://settings/lazy_load.js';
-import {createContentSettingTypeToValuePair,createRawSiteException,createSiteSettingsPrefs} from 'chrome://test/settings/test_util.js';
-import {CrSettingsPrefs,Router} from 'chrome://settings/settings.js';
-import {eventToPromise,waitBeforeNextRender} from 'chrome://test/test_util.m.js';
-import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
-import {TestSiteSettingsPrefsBrowserProxy} from 'chrome://test/settings/test_site_settings_prefs_browser_proxy.js';
 import {webUIListenerCallback} from 'chrome://resources/js/cr.m.js';
+import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
+import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+import {ContentSetting, ContentSettingsTypes, kControlledByLookup, SITE_EXCEPTION_WILDCARD, SiteException, SiteSettingSource, SiteSettingsPrefsBrowserProxyImpl} from 'chrome://settings/lazy_load.js';
+import {CrSettingsPrefs,Router} from 'chrome://settings/settings.js';
+
+import {assertEquals, assertFalse, assertNotEquals, assertTrue} from '../chai_assert.js';
+import {eventToPromise, waitBeforeNextRender} from '../test_util.m.js';
+
+import {TestSiteSettingsPrefsBrowserProxy} from './test_site_settings_prefs_browser_proxy.js';
+import {createContentSettingTypeToValuePair, createRawSiteException, createSiteSettingsPrefs, SiteSettingsPref} from './test_util.js';
 // clang-format on
 
 /**
@@ -27,12 +31,6 @@ let prefsGeolocation;
  * @type {SiteSettingsPref}
  */
 let prefsGeolocationEmpty;
-
-/**
- * An example of prefs controlledBy policy.
- * @type {SiteSettingsPref}
- */
-let prefsControlled;
 
 /**
  * An example pref with mixed schemes (present and absent).
@@ -54,10 +52,10 @@ let prefsMixedProvider;
 let prefsMixedEmbeddingOrigin;
 
 /**
- * An example pref with native file system write
+ * An example pref with file system write
  * @type {SiteSettingsPref}
  */
-let prefsNativeFileSystemWrite;
+let prefsFileSystemWrite;
 
 /**
  * An example pref with multiple categories and multiple allow/block
@@ -97,6 +95,13 @@ let prefsIncognito;
 let prefsChromeExtension;
 
 /**
+ * An example pref with 1 embargoed location item.
+ * @type {SiteSettingsPref}
+ */
+let prefsEmbargo;
+
+
+/**
  * Creates all the test |SiteSettingsPref|s that are needed for the tests in
  * this file. They are populated after test setup in order to access the
  * |settings| constants required.
@@ -117,14 +122,6 @@ function populateTestExceptions() {
         ]),
   ]);
 
-  prefsControlled = createSiteSettingsPrefs(
-      [], [createContentSettingTypeToValuePair(
-              ContentSettingsTypes.PLUGINS,
-              [createRawSiteException('http://foo-block.com', {
-                embeddingOrigin: '',
-                setting: ContentSetting.BLOCK,
-                source: SiteSettingSource.POLICY,
-              })])]);
 
   prefsMixedSchemes = createSiteSettingsPrefs([], [
     createContentSettingTypeToValuePair(
@@ -264,26 +261,120 @@ function populateTestExceptions() {
 
   prefsGeolocationEmpty = createSiteSettingsPrefs([], []);
 
-  prefsNativeFileSystemWrite = createSiteSettingsPrefs(
+  prefsFileSystemWrite = createSiteSettingsPrefs(
       [], [createContentSettingTypeToValuePair(
-              ContentSettingsTypes.NATIVE_FILE_SYSTEM_WRITE,
+              ContentSettingsTypes.FILE_SYSTEM_WRITE,
               [createRawSiteException('http://foo.com', {
                 setting: ContentSetting.BLOCK,
               })])]);
+
+  prefsEmbargo = createSiteSettingsPrefs([], [
+    createContentSettingTypeToValuePair(
+        ContentSettingsTypes.GEOLOCATION,
+        [createRawSiteException('https://foo-block.com:443', {
+          embeddingOrigin: '',
+          setting: ContentSetting.BLOCK,
+          isEmbargoed: true,
+        })]),
+  ]);
 }
 
-suite('SiteList', function() {
+suite('SiteListProperties', function() {
   /**
    * A site list element created before each test.
-   * @type {SiteList}
+   * @type {!SiteListElement}
    */
   let testElement;
 
   /**
    * The mock proxy object to use during test.
-   * @type {TestSiteSettingsPrefsBrowserProxy}
+   * @type {!TestSiteSettingsPrefsBrowserProxy}
    */
-  let browserProxy = null;
+  let browserProxy;
+
+  suiteSetup(function() {
+    CrSettingsPrefs.setInitialized();
+  });
+
+  suiteTeardown(function() {
+    CrSettingsPrefs.resetForTesting();
+  });
+
+  // Initialize a site-list before each test.
+  setup(function() {
+    populateTestExceptions();
+
+    browserProxy = new TestSiteSettingsPrefsBrowserProxy();
+    SiteSettingsPrefsBrowserProxyImpl.instance_ = browserProxy;
+    document.body.innerHTML = '';
+    testElement =
+        /** @type {!SiteListElement} */ (document.createElement('site-list'));
+    testElement.searchFilter = '';
+    document.body.appendChild(testElement);
+  });
+
+  teardown(function() {
+    // The code being tested changes the Route. Reset so that state is not
+    // leaked across tests.
+    Router.getInstance().resetRouteForTesting();
+  });
+
+  /**
+   * Configures the test element for a particular category.
+   * @param {ContentSettingsTypes} category The category to set up.
+   * @param {ContentSetting} subtype Type of list to use.
+   * @param {!SiteSettingsPref} prefs The prefs to use.
+   */
+  function setUpCategory(category, subtype, prefs) {
+    browserProxy.setPrefs(prefs);
+    testElement.categorySubtype = subtype;
+    // Some route is needed, but the actual route doesn't matter.
+    testElement.currentRoute = {
+      page: 'dummy',
+      section: 'privacy',
+      subpage: ['site-settings', 'site-settings-category-location'],
+    };
+    testElement.category = category;
+  }
+
+  test('embaroed origin site description', async function() {
+    const contentType = ContentSettingsTypes.GEOLOCATION;
+    setUpCategory(contentType, ContentSetting.BLOCK, prefsEmbargo);
+    const result = await browserProxy.whenCalled('getExceptionList');
+    flush();
+
+    assertEquals(contentType, result);
+
+    // Validate that the sites gets populated from pre-canned prefs.
+    assertEquals(1, testElement.sites.length);
+    assertEquals(
+        prefsEmbargo.exceptions[contentType][0].origin,
+        testElement.sites[0].origin);
+    assertTrue(testElement.sites[0].isEmbargoed);
+    // Validate that embargoed site has correct subtitle.
+    assertEquals(
+        loadTimeData.getString('siteSettingsSourceEmbargo'),
+        testElement.$$('#listContainer')
+            .querySelectorAll('site-list-entry')[0]
+            .$$('#siteDescription')
+            .innerHTML);
+  });
+});
+
+
+
+suite('SiteList', function() {
+  /**
+   * A site list element created before each test.
+   * @type {!SiteListElement}
+   */
+  let testElement;
+
+  /**
+   * The mock proxy object to use during test.
+   * @type {!TestSiteSettingsPrefsBrowserProxy}
+   */
+  let browserProxy;
 
   suiteSetup(function() {
     // clang-format off
@@ -301,8 +392,9 @@ suite('SiteList', function() {
 
     browserProxy = new TestSiteSettingsPrefsBrowserProxy();
     SiteSettingsPrefsBrowserProxyImpl.instance_ = browserProxy;
-    PolymerTest.clearBody();
-    testElement = document.createElement('site-list');
+    document.body.innerHTML = '';
+    testElement =
+        /** @type {!SiteListElement} */ (document.createElement('site-list'));
     testElement.searchFilter = '';
     document.body.appendChild(testElement);
   });
@@ -320,9 +412,9 @@ suite('SiteList', function() {
    *     open the action menu for.
    */
   function openActionMenu(index) {
-    const actionMenuButton =
-        testElement.$.listContainer.querySelectorAll('site-list-entry')[index]
-            .$.actionMenuButton;
+    const actionMenuButton = testElement.$$('#listContainer')
+                                 .querySelectorAll('site-list-entry')[index]
+                                 .$$('#actionMenuButton');
     actionMenuButton.click();
     flush();
   }
@@ -337,7 +429,7 @@ suite('SiteList', function() {
 
   /**
    * Asserts the menu looks as expected.
-   * @param {Array<string>} items The items expected to show in the menu.
+   * @param {!Array<string>} items The items expected to show in the menu.
    */
   function assertMenu(items) {
     const menu = testElement.$$('cr-action-menu');
@@ -350,7 +442,7 @@ suite('SiteList', function() {
   }
 
   /**
-   * @param {HTMLElement} listContainer Node with the exceptions listed.
+   * @param {!Element} listContainer Node with the exceptions listed.
    * @return {boolean} Whether the entry is incognito only.
    */
   function hasAnIncognito(listContainer) {
@@ -362,7 +454,7 @@ suite('SiteList', function() {
    * Configures the test element for a particular category.
    * @param {ContentSettingsTypes} category The category to set up.
    * @param {ContentSetting} subtype Type of list to use.
-   * @param {Array<dictionary>} prefs The prefs to use.
+   * @param {!SiteSettingsPref} prefs The prefs to use.
    */
   function setUpCategory(category, subtype, prefs) {
     browserProxy.setPrefs(prefs);
@@ -378,8 +470,7 @@ suite('SiteList', function() {
 
   test('read-only attribute', function() {
     setUpCategory(
-        ContentSettingsTypes.GEOLOCATION,
-        ContentSetting.ALLOW, prefsVarious);
+        ContentSettingsTypes.GEOLOCATION, ContentSetting.ALLOW, prefsVarious);
     return browserProxy.whenCalled('getExceptionList')
         .then(function(contentType) {
           // Flush to be sure list container is populated.
@@ -398,8 +489,8 @@ suite('SiteList', function() {
 
   test('getExceptionList API used', function() {
     setUpCategory(
-        ContentSettingsTypes.GEOLOCATION,
-        ContentSetting.ALLOW, prefsGeolocationEmpty);
+        ContentSettingsTypes.GEOLOCATION, ContentSetting.ALLOW,
+        prefsGeolocationEmpty);
     return browserProxy.whenCalled('getExceptionList')
         .then(function(contentType) {
           assertEquals(ContentSettingsTypes.GEOLOCATION, contentType);
@@ -408,25 +499,24 @@ suite('SiteList', function() {
 
   test('Empty list', function() {
     setUpCategory(
-        ContentSettingsTypes.GEOLOCATION,
-        ContentSetting.ALLOW, prefsGeolocationEmpty);
+        ContentSettingsTypes.GEOLOCATION, ContentSetting.ALLOW,
+        prefsGeolocationEmpty);
     return browserProxy.whenCalled('getExceptionList')
         .then(function(contentType) {
           assertEquals(ContentSettingsTypes.GEOLOCATION, contentType);
 
           assertEquals(0, testElement.sites.length);
 
-          assertEquals(
-              ContentSetting.ALLOW, testElement.categorySubtype);
+          assertEquals(ContentSetting.ALLOW, testElement.categorySubtype);
 
-          assertFalse(testElement.$.category.hidden);
+          assertFalse(testElement.$$('#category').hidden);
         });
   });
 
   test('initial ALLOW state is correct', function() {
     setUpCategory(
-        ContentSettingsTypes.GEOLOCATION,
-        ContentSetting.ALLOW, prefsGeolocation);
+        ContentSettingsTypes.GEOLOCATION, ContentSetting.ALLOW,
+        prefsGeolocation);
     return browserProxy.whenCalled('getExceptionList')
         .then(function(contentType) {
           assertEquals(ContentSettingsTypes.GEOLOCATION, contentType);
@@ -438,20 +528,19 @@ suite('SiteList', function() {
           assertEquals(
               prefsGeolocation.exceptions[contentType][1].origin,
               testElement.sites[1].origin);
-          assertEquals(
-              ContentSetting.ALLOW, testElement.categorySubtype);
+          assertEquals(ContentSetting.ALLOW, testElement.categorySubtype);
           flush();  // Populates action menu.
           openActionMenu(0);
-          assertMenu(['Block', 'Edit', 'Remove'], testElement);
+          assertMenu(['Block', 'Edit', 'Remove']);
 
-          assertFalse(testElement.$.category.hidden);
+          assertFalse(testElement.$$('#category').hidden);
         });
   });
 
   test('action menu closes when list changes', function() {
     setUpCategory(
-        ContentSettingsTypes.GEOLOCATION,
-        ContentSetting.ALLOW, prefsGeolocation);
+        ContentSettingsTypes.GEOLOCATION, ContentSetting.ALLOW,
+        prefsGeolocation);
     const actionMenu = testElement.$$('cr-action-menu');
     return browserProxy.whenCalled('getExceptionList')
         .then(function(contentType) {
@@ -474,8 +563,8 @@ suite('SiteList', function() {
 
   test('exceptions are not reordered in non-ALL_SITES', function() {
     setUpCategory(
-        ContentSettingsTypes.GEOLOCATION,
-        ContentSetting.BLOCK, prefsMixedProvider);
+        ContentSettingsTypes.GEOLOCATION, ContentSetting.BLOCK,
+        prefsMixedProvider);
     return browserProxy.whenCalled('getExceptionList')
         .then(function(contentType) {
           assertEquals(ContentSettingsTypes.GEOLOCATION, contentType);
@@ -512,9 +601,9 @@ suite('SiteList', function() {
               testElement.sites[1].origin);
           flush();  // Populates action menu.
           openActionMenu(0);
-          assertMenu(['Allow', 'Edit', 'Remove'], testElement);
+          assertMenu(['Allow', 'Edit', 'Remove']);
 
-          assertFalse(testElement.$.category.hidden);
+          assertFalse(testElement.$$('#category').hidden);
         });
   });
 
@@ -534,46 +623,9 @@ suite('SiteList', function() {
 
           flush();  // Populates action menu.
           openActionMenu(0);
-          assertMenu(['Allow', 'Block', 'Edit', 'Remove'], testElement);
+          assertMenu(['Allow', 'Block', 'Edit', 'Remove']);
 
-          assertFalse(testElement.$.category.hidden);
-        });
-  });
-
-  test('update lists for incognito', function() {
-    const contentType = ContentSettingsTypes.PLUGINS;
-    const categorySubtype = ContentSetting.BLOCK;
-    setUpCategory(contentType, categorySubtype, prefsControlled);
-    const list = testElement.$.listContainer;
-    return browserProxy.whenCalled('getExceptionList')
-        .then(function(actualContentType) {
-          flush();
-          assertEquals(1, list.querySelector('iron-list').items.length);
-          assertFalse(hasAnIncognito(list));
-          browserProxy.resetResolver('getExceptionList');
-          browserProxy.setIncognito(true);
-          return browserProxy.whenCalled('getExceptionList');
-        })
-        .then(function() {
-          flush();
-          assertEquals(2, list.querySelector('iron-list').items.length);
-          assertTrue(hasAnIncognito(list));
-          browserProxy.resetResolver('getExceptionList');
-          browserProxy.setIncognito(false);
-          return browserProxy.whenCalled('getExceptionList');
-        })
-        .then(function() {
-          flush();
-          assertEquals(1, list.querySelector('iron-list').items.length);
-          assertFalse(hasAnIncognito(list));
-          browserProxy.resetResolver('getExceptionList');
-          browserProxy.setIncognito(true);
-          return browserProxy.whenCalled('getExceptionList');
-        })
-        .then(function() {
-          flush();
-          assertEquals(2, list.querySelector('iron-list').items.length);
-          assertTrue(hasAnIncognito(list));
+          assertFalse(testElement.$$('#category').hidden);
         });
   });
 
@@ -594,10 +646,10 @@ suite('SiteList', function() {
           flush();  // Populates action menu.
           openActionMenu(0);
           // 'Clear on exit' is visible as this is not an incognito item.
-          assertMenu(['Allow', 'Clear on exit', 'Edit', 'Remove'], testElement);
+          assertMenu(['Allow', 'Clear on exit', 'Edit', 'Remove']);
 
           // Select 'Remove' from menu.
-          const remove = testElement.$.reset;
+          const remove = testElement.$$('#reset');
           assertTrue(!!remove);
           remove.click();
           return browserProxy.whenCalled('resetCategoryPermissionForPattern');
@@ -630,12 +682,12 @@ suite('SiteList', function() {
           flush();  // Populates action menu.
           openActionMenu(0);
           // 'Clear on exit' is hidden for incognito items.
-          assertMenu(['Block', 'Edit', 'Remove'], testElement);
+          assertMenu(['Block', 'Edit', 'Remove']);
           closeActionMenu();
 
           // Select 'Remove' from menu on 'foo.com'.
           openActionMenu(1);
-          const remove = testElement.$.reset;
+          const remove = testElement.$$('#reset');
           assertTrue(!!remove);
           remove.click();
           return browserProxy.whenCalled('resetCategoryPermissionForPattern');
@@ -670,12 +722,12 @@ suite('SiteList', function() {
           const item = testElement.$$('site-list-entry');
 
           // Assert action button is hidden.
-          const dots = item.$.actionMenuButton;
+          const dots = item.$$('#actionMenuButton');
           assertTrue(!!dots);
           assertTrue(dots.hidden);
 
           // Assert reset button is visible.
-          const resetButton = item.$.resetSite;
+          const resetButton = item.$$('#resetSite');
           assertTrue(!!resetButton);
           assertFalse(resetButton.hidden);
 
@@ -691,17 +743,17 @@ suite('SiteList', function() {
 
   test('edit action menu opens edit exception dialog', function() {
     setUpCategory(
-        ContentSettingsTypes.COOKIES,
-        ContentSetting.SESSION_ONLY, prefsSessionOnly);
+        ContentSettingsTypes.COOKIES, ContentSetting.SESSION_ONLY,
+        prefsSessionOnly);
 
     return browserProxy.whenCalled('getExceptionList').then(function() {
       flush();  // Populates action menu.
 
       openActionMenu(0);
-      assertMenu(['Allow', 'Block', 'Edit', 'Remove'], testElement);
+      assertMenu(['Allow', 'Block', 'Edit', 'Remove']);
       const menu = testElement.$$('cr-action-menu');
       assertTrue(menu.open);
-      const edit = testElement.$.edit;
+      const edit = testElement.$$('#edit');
       assertTrue(!!edit);
       edit.click();
       flush();
@@ -713,18 +765,18 @@ suite('SiteList', function() {
 
   test('edit dialog closes when incognito status changes', function() {
     setUpCategory(
-        ContentSettingsTypes.COOKIES, ContentSetting.BLOCK,
-        prefsSessionOnly);
+        ContentSettingsTypes.COOKIES, ContentSetting.BLOCK, prefsSessionOnly);
 
     return browserProxy.whenCalled('getExceptionList')
         .then(function() {
           flush();  // Populates action menu.
 
           openActionMenu(0);
-          testElement.$.edit.click();
+          testElement.$$('#edit').click();
           flush();
 
-          const dialog = testElement.$$('settings-edit-exception-dialog');
+          const dialog = /** @type {!HTMLElement} */ (
+              testElement.$$('settings-edit-exception-dialog'));
           assertTrue(!!dialog);
           const closeEventPromise = eventToPromise('close', dialog);
           browserProxy.setIncognito(true);
@@ -753,7 +805,6 @@ suite('SiteList', function() {
           assertEquals(
               prefsGeolocation.exceptions[contentType][1].origin,
               testElement.sites[1].origin);
-          assertFalse(!!testElement.selectedOrigin);
 
           // Validate that the sites are shown in UI and can be selected.
           const clickable = testElement.$$('site-list-entry').$$('.middle');
@@ -775,8 +826,8 @@ suite('SiteList', function() {
           return waitBeforeNextRender(testElement);
         })
         .then(function() {
-          assertFalse(testElement.$.category.hidden);
-          assertNotEquals(0, testElement.$.listContainer.offsetHeight);
+          assertFalse(testElement.$$('#category').hidden);
+          assertNotEquals(0, testElement.$$('#listContainer').offsetHeight);
         });
   });
 
@@ -790,8 +841,8 @@ suite('SiteList', function() {
           return waitBeforeNextRender(testElement);
         })
         .then(function() {
-          assertFalse(testElement.$.category.hidden);
-          assertNotEquals(0, testElement.$.listContainer.offsetHeight);
+          assertFalse(testElement.$$('#category').hidden);
+          assertNotEquals(0, testElement.$$('#listContainer').offsetHeight);
         });
   });
 
@@ -805,8 +856,8 @@ suite('SiteList', function() {
           return waitBeforeNextRender(testElement);
         })
         .then(function() {
-          assertFalse(testElement.$.category.hidden);
-          assertNotEquals(0, testElement.$.listContainer.offsetHeight);
+          assertFalse(testElement.$$('#category').hidden);
+          assertNotEquals(0, testElement.$$('#listContainer').offsetHeight);
         });
   });
 
@@ -820,8 +871,8 @@ suite('SiteList', function() {
           return waitBeforeNextRender(testElement);
         })
         .then(function() {
-          assertFalse(testElement.$.category.hidden);
-          assertNotEquals(0, testElement.$.listContainer.offsetHeight);
+          assertFalse(testElement.$$('#category').hidden);
+          assertNotEquals(0, testElement.$$('#listContainer').offsetHeight);
         });
   });
 
@@ -832,7 +883,7 @@ suite('SiteList', function() {
     return browserProxy.whenCalled('getExceptionList')
         .then(function(actualContentType) {
           assertEquals(contentType, actualContentType);
-          assertFalse(testElement.$.category.hidden);
+          assertFalse(testElement.$$('#category').hidden);
         });
   });
 
@@ -843,7 +894,7 @@ suite('SiteList', function() {
     return browserProxy.whenCalled('getExceptionList')
         .then(function(actualContentType) {
           assertEquals(contentType, actualContentType);
-          assertFalse(testElement.$.category.hidden);
+          assertFalse(testElement.$$('#category').hidden);
         });
   });
 
@@ -858,20 +909,20 @@ suite('SiteList', function() {
           // Validate that embeddingOrigin sites cannot be edited.
           const entries = testElement.root.querySelectorAll('site-list-entry');
           const firstItem = entries[0];
-          assertTrue(firstItem.$.actionMenuButton.hidden);
-          assertFalse(firstItem.$.resetSite.hidden);
+          assertTrue(firstItem.$$('#actionMenuButton').hidden);
+          assertFalse(firstItem.$$('#resetSite').hidden);
           // Validate that non-embeddingOrigin sites can be edited.
           const secondItem = entries[1];
-          assertFalse(secondItem.$.actionMenuButton.hidden);
-          assertTrue(secondItem.$.resetSite.hidden);
+          assertFalse(secondItem.$$('#actionMenuButton').hidden);
+          assertTrue(secondItem.$$('#resetSite').hidden);
         });
   });
 
   test('Mixed schemes (present and absent)', function() {
     // Prefs: One item with scheme and one without.
     setUpCategory(
-        ContentSettingsTypes.GEOLOCATION,
-        ContentSetting.ALLOW, prefsMixedSchemes);
+        ContentSettingsTypes.GEOLOCATION, ContentSetting.ALLOW,
+        prefsMixedSchemes);
     return browserProxy.whenCalled('getExceptionList')
         .then(function(contentType) {
           // No further checks needed. If this fails, it will hang the test.
@@ -881,13 +932,13 @@ suite('SiteList', function() {
   test('Select menu item', function() {
     // Test for error: "Cannot read property 'origin' of undefined".
     setUpCategory(
-        ContentSettingsTypes.GEOLOCATION,
-        ContentSetting.ALLOW, prefsGeolocation);
+        ContentSettingsTypes.GEOLOCATION, ContentSetting.ALLOW,
+        prefsGeolocation);
     return browserProxy.whenCalled('getExceptionList')
         .then(function(contentType) {
           flush();
           openActionMenu(0);
-          const allow = testElement.$.allow;
+          const allow = testElement.$$('#allow');
           assertTrue(!!allow);
           allow.click();
           return browserProxy.whenCalled('setCategoryPermissionForPattern');
@@ -902,9 +953,9 @@ suite('SiteList', function() {
         .then(function(contentType) {
           flush();
           openActionMenu(0);
-          assertMenu(['Allow', 'Edit', 'Remove'], testElement);
+          assertMenu(['Allow', 'Edit', 'Remove']);
 
-          const allow = testElement.$.allow;
+          const allow = testElement.$$('#allow');
           assertTrue(!!allow);
           allow.click();
           return browserProxy.whenCalled('setCategoryPermissionForPattern');
@@ -920,17 +971,17 @@ suite('SiteList', function() {
 
   test('show-tooltip event fires on entry shows common tooltip', function() {
     setUpCategory(
-        ContentSettingsTypes.GEOLOCATION,
-        ContentSetting.ALLOW, prefsGeolocation);
+        ContentSettingsTypes.GEOLOCATION, ContentSetting.ALLOW,
+        prefsGeolocation);
     return browserProxy.whenCalled('getExceptionList').then(() => {
       flush();
       const entry =
-          testElement.$.listContainer.querySelector('site-list-entry');
-      const tooltip = testElement.$.tooltip;
+          testElement.$$('#listContainer').querySelector('site-list-entry');
+      const tooltip = testElement.$$('#tooltip');
 
       const testsParams = [
         ['a', testElement, new MouseEvent('mouseleave')],
-        ['b', testElement, new MouseEvent('tap')],
+        ['b', testElement, new MouseEvent('click')],
         ['c', testElement, new Event('blur')],
         ['d', tooltip, new MouseEvent('mouseenter')],
       ];
@@ -951,20 +1002,18 @@ suite('SiteList', function() {
       'Add site button is hidden for content settings that don\'t allow it',
       function() {
         setUpCategory(
-            ContentSettingsTypes.NATIVE_FILE_SYSTEM_WRITE,
-            ContentSetting.ALLOW, prefsNativeFileSystemWrite);
+            ContentSettingsTypes.FILE_SYSTEM_WRITE, ContentSetting.ALLOW,
+            prefsFileSystemWrite);
         return browserProxy.whenCalled('getExceptionList').then(() => {
           flush();
-          assertFalse(testElement.showAddSiteButton_);
-
-          const addSiteButton = testElement.$$('#addSite');
-          assertTrue(addSiteButton.hidden);
+          assertTrue(testElement.$$('#addSite').hidden);
         });
       });
 });
 
 suite('EditExceptionDialog', function() {
-  /** @type {SettingsEditExceptionDialogElement} */ let dialog;
+  /** @type {!SettingsEditExceptionDialogElement} */
+  let dialog;
 
   /**
    * The dialog tests don't call |getExceptionList| so the exception needs to
@@ -973,23 +1022,28 @@ suite('EditExceptionDialog', function() {
    */
   let cookieException;
 
-  /** @type {SiteSettingsPrefsBrowserProxy} */
+  /** @type {!TestSiteSettingsPrefsBrowserProxy} */
   let browserProxy;
 
   setup(function() {
     cookieException = {
       category: ContentSettingsTypes.COOKIES,
       embeddingOrigin: SITE_EXCEPTION_WILDCARD,
+      isEmbargoed: false,
       incognito: false,
+      isDiscarded: false,
       setting: ContentSetting.BLOCK,
-      enforcement: '',
-      controlledBy: 'USER_POLICY',
+      enforcement: null,
+      controlledBy: chrome.settingsPrivate.ControlledBy.USER_POLICY,
+      displayName: 'foo.com',
+      origin: 'foo.com',
     };
 
     browserProxy = new TestSiteSettingsPrefsBrowserProxy();
     SiteSettingsPrefsBrowserProxyImpl.instance_ = browserProxy;
-    PolymerTest.clearBody();
-    dialog = document.createElement('settings-edit-exception-dialog');
+    document.body.innerHTML = '';
+    dialog = /** @type {!SettingsEditExceptionDialogElement} */ (
+        document.createElement('settings-edit-exception-dialog'));
     dialog.model = cookieException;
     document.body.appendChild(dialog);
   });
@@ -999,11 +1053,11 @@ suite('EditExceptionDialog', function() {
   });
 
   test('invalid input', function() {
-    const input = dialog.$$('cr-input');
+    const input = /** @type {!CrInputElement} */ (dialog.$$('cr-input'));
     assertTrue(!!input);
     assertFalse(input.invalid);
 
-    const actionButton = dialog.$.actionButton;
+    const actionButton = dialog.$$('#actionButton');
     assertTrue(!!actionButton);
     assertFalse(actionButton.disabled);
 
@@ -1020,12 +1074,13 @@ suite('EditExceptionDialog', function() {
     input.value = expectedPattern;
     input.fire('input');
 
-    return browserProxy.whenCalled('isPatternValidForType')
-        .then(function(pattern, category) {
-          assertEquals(expectedPattern, pattern);
-          assertTrue(actionButton.disabled);
-          assertTrue(input.invalid);
-        });
+    return browserProxy.whenCalled('isPatternValidForType').then(function([
+      pattern, category
+    ]) {
+      assertEquals(expectedPattern, pattern);
+      assertTrue(actionButton.disabled);
+      assertTrue(input.invalid);
+    });
   });
 
   test('action button calls proxy', function() {
@@ -1035,7 +1090,7 @@ suite('EditExceptionDialog', function() {
     const newValue = input.value + ':1234';
     input.value = newValue;
 
-    const actionButton = dialog.$.actionButton;
+    const actionButton = dialog.$$('#actionButton');
     assertTrue(!!actionButton);
     assertFalse(actionButton.disabled);
 
@@ -1056,15 +1111,16 @@ suite('EditExceptionDialog', function() {
           assertEquals(cookieException.setting, args[3]);
           assertEquals(cookieException.incognito, args[4]);
 
-          assertFalse(dialog.$.dialog.open);
+          assertFalse(dialog.$$('#dialog').open);
         });
   });
 });
 
 suite('AddExceptionDialog', function() {
-  /** @type {AddSiteDialogElement} */ let dialog;
+  /** @type {!AddSiteDialogElement} */
+  let dialog;
 
-  /** @type {SiteSettingsPrefsBrowserProxy} */
+  /** @type {!TestSiteSettingsPrefsBrowserProxy} */
   let browserProxy;
 
   setup(function() {
@@ -1072,8 +1128,9 @@ suite('AddExceptionDialog', function() {
 
     browserProxy = new TestSiteSettingsPrefsBrowserProxy();
     SiteSettingsPrefsBrowserProxyImpl.instance_ = browserProxy;
-    PolymerTest.clearBody();
-    dialog = document.createElement('add-site-dialog');
+    document.body.innerHTML = '';
+    dialog = /** @type {!AddSiteDialogElement} */ (
+        document.createElement('add-site-dialog'));
     dialog.category = ContentSettingsTypes.GEOLOCATION;
     dialog.contentSetting = ContentSetting.ALLOW;
     dialog.hasIncognito = false;
@@ -1087,12 +1144,12 @@ suite('AddExceptionDialog', function() {
   test('incognito', function() {
     dialog.set('hasIncognito', true);
     flush();
-    assertFalse(dialog.$.incognito.checked);
-    dialog.$.incognito.checked = true;
+    assertFalse(dialog.$$('#incognito').checked);
+    dialog.$$('#incognito').checked = true;
     // Changing the incognito status will reset the checkbox.
     dialog.set('hasIncognito', false);
     flush();
-    assertFalse(dialog.$.incognito.checked);
+    assertFalse(dialog.$$('#incognito').checked);
   });
 
   test('invalid input', function() {
@@ -1102,7 +1159,7 @@ suite('AddExceptionDialog', function() {
     assertTrue(!!input);
     assertFalse(input.invalid);
 
-    const actionButton = dialog.$.add;
+    const actionButton = dialog.$$('#add');
     assertTrue(!!actionButton);
     assertTrue(actionButton.disabled);
 
@@ -1112,11 +1169,12 @@ suite('AddExceptionDialog', function() {
     input.value = expectedPattern;
     input.fire('input');
 
-    return browserProxy.whenCalled('isPatternValidForType')
-        .then(function(pattern) {
-          assertEquals(expectedPattern, pattern);
-          assertTrue(actionButton.disabled);
-          assertTrue(input.invalid);
-        });
+    return browserProxy.whenCalled('isPatternValidForType').then(function([
+      pattern, category
+    ]) {
+      assertEquals(expectedPattern, pattern);
+      assertTrue(actionButton.disabled);
+      assertTrue(input.invalid);
+    });
   });
 });

@@ -43,7 +43,6 @@ constexpr base::TimeDelta kUiHideDelay = base::TimeDelta::FromSeconds(3);
 
 MediaOverlayImpl::MediaOverlayImpl(CastWindowManager* window_manager)
     : window_manager_(window_manager),
-      layout_provider_(std::make_unique<views::LayoutProvider>()),
       ui_task_runner_(base::ThreadTaskRunnerHandle::Get()),
       controller_(nullptr),
       volume_icon_image_(ui::ResourceBundle::GetSharedInstance().GetImageNamed(
@@ -185,7 +184,7 @@ std::unique_ptr<views::Widget> MediaOverlayImpl::CreateOverlayWidget(
   params.accept_events = false;
 
   widget->Init(std::move(params));
-  widget->SetContentsView(content_view.release());
+  widget->SetContentsView(std::move(content_view));
   window_manager_->SetZOrder(widget->GetNativeView(), mojom::ZOrder::VOLUME);
 
   return widget;

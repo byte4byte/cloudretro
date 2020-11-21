@@ -9,6 +9,7 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -20,7 +21,6 @@
 #include "chrome/common/net/safe_search_util.h"
 #include "chrome/common/pref_names.h"
 #include "components/feed/core/shared_prefs/pref_names.h"
-#include "components/ntp_snippets/pref_names.h"
 #include "components/prefs/pref_value_map.h"
 #include "components/signin/public/base/signin_pref_names.h"
 #include "extensions/buildflags/buildflags.h"
@@ -33,12 +33,6 @@ struct SupervisedUserSettingsPrefMappingEntry {
 };
 
 SupervisedUserSettingsPrefMappingEntry kSupervisedUserSettingsPrefMapping[] = {
-#if defined(OS_CHROMEOS)
-    {
-        supervised_users::kAccountConsistencyMirrorRequired,
-        prefs::kAccountConsistencyMirrorRequired,
-    },
-#endif
     {
         supervised_users::kContentPackDefaultFilteringBehavior,
         prefs::kDefaultSupervisedUserFilteringBehavior,
@@ -123,9 +117,6 @@ void SupervisedUserPrefStore::OnNewSettingsAvailable(
   prefs_.reset(new PrefValueMap);
   if (settings) {
     // Set hardcoded prefs and defaults.
-#if defined(OS_CHROMEOS)
-    prefs_->SetBoolean(prefs::kAccountConsistencyMirrorRequired, false);
-#endif
     prefs_->SetInteger(prefs::kDefaultSupervisedUserFilteringBehavior,
                        SupervisedUserURLFilter::ALLOW);
     prefs_->SetBoolean(prefs::kForceGoogleSafeSearch, true);
@@ -176,6 +167,9 @@ void SupervisedUserPrefStore::OnNewSettingsAvailable(
                            &permissions_disallowed);
       prefs_->SetBoolean(prefs::kSupervisedUserExtensionsMayRequestPermissions,
                          !permissions_disallowed);
+      base::UmaHistogramBoolean(
+          "SupervisedUsers.ExtensionsMayRequestPermissions",
+          !permissions_disallowed);
     }
 #endif
   }

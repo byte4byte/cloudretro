@@ -16,7 +16,6 @@
 #include "chrome/browser/engagement/site_engagement_observer.h"
 #include "chrome/browser/installable/installable_logging.h"
 #include "chrome/browser/installable/installable_manager.h"
-#include "chrome/browser/web_applications/components/web_app_id.h"
 #include "content/public/browser/media_player_id.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "mojo/public/cpp/bindings/receiver.h"
@@ -104,6 +103,7 @@ class AppBannerManager : public content::WebContentsObserver,
   enum class InstallableWebAppCheckResult {
     kUnknown,
     kNo,
+    kNoAlreadyInstalled,
     kByUserRequest,
     kPromotable,
   };
@@ -137,8 +137,22 @@ class AppBannerManager : public content::WebContentsObserver,
 
   // Returns whether installability checks satisfy promotion requirements
   // (e.g. having a service worker fetch event) or have passed previously within
-  // the current manifest scope.
-  bool IsProbablyPromotableWebApp() const;
+  // the current manifest scope. Already-installed apps are non-promotable by
+  // default but can be checked with |ignore_existing_installations|.
+  bool IsProbablyPromotableWebApp(
+      bool ignore_existing_installations = false) const;
+
+  // Returns whether installability checks satisfy promotion requirements
+  // (e.g. having a service worker fetch event).
+  bool IsPromotableWebApp() const;
+
+  // Returns the page's web app start URL if available, otherwise return an
+  // empty or invalid GURL.
+  const GURL& GetManifestStartUrl() const;
+
+  // Returns the page's web app |DisplayMode| if available, otherwise it will be
+  // DisplayMode::kUndefined.
+  blink::mojom::DisplayMode GetManifestDisplayMode() const;
 
   // Each successful installability check gets to show one animation prompt,
   // this returns and consumes the animation prompt if it is available.
@@ -180,9 +194,9 @@ class AppBannerManager : public content::WebContentsObserver,
   // GetAppIdentifier() must return a valid value for this method to work.
   bool CheckIfShouldShowBanner();
 
-  // Returns whether the site would prefer a related application be installed
-  // instead of the PWA or a related application is already installed.
-  bool ShouldDeferToRelatedApplication() const;
+  // Returns whether the site would prefer a related non-web app be installed
+  // instead of the PWA or a related non-web app is already installed.
+  bool ShouldDeferToRelatedNonWebApp() const;
 
   // Return a string identifying this app for metrics.
   virtual std::string GetAppIdentifier();
@@ -204,21 +218,32 @@ class AppBannerManager : public content::WebContentsObserver,
   bool ShouldBypassEngagementChecks() const;
 
   // Returns whether installation of apps from |platform| is supported on the
-  // current device.
-  virtual bool IsSupportedAppPlatform(const base::string16& platform) const = 0;
+  // current device and the platform delivers apps considered replacements for
+  // web apps.
+  virtual bool IsSupportedNonWebAppPlatform(
+      const base::string16& platform) const = 0;
 
-  // Returns whether |related_app| is already installed.
-  virtual bool IsRelatedAppInstalled(
+  // Returns whether |related_app| is already installed and considered a
+  // replacement for the manifest's web app.
+  virtual bool IsRelatedNonWebAppInstalled(
       const blink::Manifest::RelatedApplication& related_app) const = 0;
 
   // Returns whether the current page is already installed as a web app, or
-  // should be considered installed. On Android, we rely on a heuristic that
-  // may yield false negatives or false positives (crbug.com/786268).
-  virtual bool IsWebAppConsideredInstalled();
+  // should be considered as installed. Returns true if there is an installed
+  // web app within the BrowserContext of |web_contents()| that contains |url|
+  // within its scope, and false otherwise. For example, the URL
+  // https://example.com/a/b/c/d.html is contained within a web app with scope
+  // https://example.com/a/b/.
+  virtual bool IsWebAppConsideredInstalled() const = 0;
 
   // Returns whether the installed web app at the current page can be
   // overwritten with a new app install for the current page.
   virtual bool ShouldAllowWebAppReplacementInstall();
+
+  // Possibly retries the installable manager request given the current state
+  // and the result. Returns |true| if the request was restarted.
+  // Currently only called during requests to InstallationManager
+  bool DidRetryInstallableManagerRequest(const InstallableData& result);
 
   // Callback invoked by the InstallableManager once it has fetched the page's
   // manifest.
@@ -279,6 +304,11 @@ class AppBannerManager : public content::WebContentsObserver,
   void DidFinishNavigation(content::NavigationHandle* handle) override;
   void DidFinishLoad(content::RenderFrameHost* render_frame_host,
                      const GURL& validated_url) override;
+  void DidActivatePortal(content::WebContents* predecessor_contents,
+                         base::TimeTicks activation_time) override;
+  void DidUpdateWebManifestURL(
+      content::RenderFrameHost* target_frame,
+      const base::Optional<GURL>& manifest_url) override;
   void MediaStartedPlaying(const MediaPlayerInfo& media_info,
                            const content::MediaPlayerId& id) override;
   void MediaStoppedPlaying(
@@ -378,6 +408,9 @@ class AppBannerManager : public content::WebContentsObserver,
   // The scope of the most recent installability check that passes promotability
   // requirements, otherwise invalid.
   GURL last_promotable_web_app_scope_;
+  // The scope of the most recent installability check that was non-promotable
+  // due to being already installed, otherwise invalid.
+  GURL last_already_installed_web_app_scope_;
 
   base::ObserverList<Observer, true> observer_list_;
 

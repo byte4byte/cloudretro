@@ -4,7 +4,6 @@
 
 #import "ios/chrome/browser/ui/text_zoom/text_zoom_view_controller.h"
 
-#include "base/logging.h"
 #include "components/strings/grit/components_strings.h"
 #import "ios/chrome/browser/ui/commands/text_zoom_commands.h"
 #import "ios/chrome/browser/ui/text_zoom/text_zoom_constants.h"
@@ -69,7 +68,7 @@ const CGFloat kDividerWidth = 1;
   [self.view addSubview:self.closeButton];
 
   const CGFloat buttonEdgeSpacing =
-      ShouldShowCompactToolbar() ? kPadding : kIPadButtonEdgeSpacing;
+      ShouldShowCompactToolbar(self) ? kPadding : kIPadButtonEdgeSpacing;
 
   [NSLayoutConstraint activateConstraints:@[
     // Reset button.

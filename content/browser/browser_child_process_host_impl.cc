@@ -23,11 +23,11 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/synchronization/waitable_event.h"
-#include "base/task/post_task.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/token.h"
 #include "base/trace_event/memory_dump_manager.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "components/tracing/common/trace_startup_config.h"
 #include "components/tracing/common/tracing_switches.h"
 #include "content/browser/browser_main_loop.h"
@@ -42,7 +42,6 @@
 #include "content/public/browser/child_process_data.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/resource_coordinator_service.h"
-#include "content/public/browser/system_connector.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
@@ -51,12 +50,9 @@
 #include "content/public/common/sandboxed_process_launcher_delegate.h"
 #include "mojo/public/cpp/bindings/scoped_message_error_crash_key.h"
 #include "mojo/public/cpp/system/platform_handle.h"
-#include "net/websockets/websocket_basic_stream.h"
-#include "net/websockets/websocket_channel.h"
-#include "services/service_manager/embedder/switches.h"
 #include "services/tracing/public/cpp/trace_startup.h"
 
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
 #include "content/browser/child_process_task_port_provider_mac.h"
 #include "content/browser/sandbox_support_mac_impl.h"
 #include "content/common/sandbox_support_mac.mojom.h"
@@ -138,8 +134,8 @@ void BindTracedProcessOnIOThread(
 void BindTracedProcessFromUIThread(
     base::WeakPtr<BrowserChildProcessHostImpl> weak_host,
     mojo::PendingReceiver<tracing::mojom::TracedProcess> receiver) {
-  base::PostTask(FROM_HERE, {BrowserThread::IO},
-                 base::BindOnce(&BindTracedProcessOnIOThread,
+  GetIOThreadTaskRunner({})->PostTask(
+      FROM_HERE, base::BindOnce(&BindTracedProcessOnIOThread,
                                 std::move(weak_host), std::move(receiver)));
 }
 
@@ -165,7 +161,7 @@ BrowserChildProcessHost* BrowserChildProcessHost::FromID(int child_process_id) {
   return nullptr;
 }
 
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
 base::PortProvider* BrowserChildProcessHost::GetPortProvider() {
   return ChildProcessTaskPortProvider::GetInstance();
 }
@@ -217,8 +213,8 @@ BrowserChildProcessHostImpl::~BrowserChildProcessHostImpl() {
   g_child_process_list.Get().remove(this);
 
   if (notify_child_disconnected_) {
-    base::PostTask(
-        FROM_HERE, {BrowserThread::UI},
+    GetUIThreadTaskRunner({})->PostTask(
+        FROM_HERE,
         base::BindOnce(&NotifyProcessHostDisconnected, data_.Duplicate()));
   }
 }
@@ -329,9 +325,7 @@ void BrowserChildProcessHostImpl::LaunchWithoutExtraCommandLineSwitches(
   const base::CommandLine& browser_command_line =
       *base::CommandLine::ForCurrentProcess();
   static const char* const kForwardSwitches[] = {
-      net::kWebSocketReadBufferSize,
-      net::kWebSocketReceiveQuotaThreshold,
-      service_manager::switches::kDisableInProcessStackTraces,
+      switches::kDisableInProcessStackTraces,
       switches::kDisableBestEffortTasks,
       switches::kDisableLogging,
       switches::kEnableLogging,
@@ -339,6 +333,7 @@ void BrowserChildProcessHostImpl::LaunchWithoutExtraCommandLineSwitches(
       switches::kLogBestEffortTasks,
       switches::kLogFile,
       switches::kLoggingLevel,
+      switches::kMojoCoreLibraryPath,
       switches::kPerfettoDisableInterning,
       switches::kTraceToConsole,
       switches::kV,
@@ -375,6 +370,12 @@ void BrowserChildProcessHostImpl::HistogramBadMessageTerminated(
 void BrowserChildProcessHostImpl::EnableWarmUpConnection() {
   can_use_warm_up_connection_ = true;
 }
+
+void BrowserChildProcessHostImpl::DumpProcessStack() {
+  if (!child_process_)
+    return;
+  child_process_->DumpProcessStack();
+}
 #endif
 
 ChildProcessTerminationInfo BrowserChildProcessHostImpl::GetTerminationInfo(
@@ -401,7 +402,7 @@ void BrowserChildProcessHostImpl::OnChannelConnected(int32_t peer_pid) {
   is_channel_connected_ = true;
   notify_child_disconnected_ = true;
 
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
   ChildProcessTaskPortProvider::GetInstance()->OnChildProcessLaunched(
       peer_pid, static_cast<ChildProcessHostImpl*>(child_process_host_.get())
                     ->child_process());
@@ -413,15 +414,15 @@ void BrowserChildProcessHostImpl::OnChannelConnected(int32_t peer_pid) {
   early_exit_watcher_.StopWatching();
 #endif
 
-  base::PostTask(
-      FROM_HERE, {BrowserThread::UI},
+  GetUIThreadTaskRunner({})->PostTask(
+      FROM_HERE,
       base::BindOnce(&NotifyProcessHostConnected, data_.Duplicate()));
 
   delegate_->OnChannelConnected(peer_pid);
 
   if (IsProcessLaunched()) {
-    base::PostTask(
-        FROM_HERE, {BrowserThread::UI},
+    GetUIThreadTaskRunner({})->PostTask(
+        FROM_HERE,
         base::BindOnce(&NotifyProcessLaunchedAndConnected, data_.Duplicate()));
   }
 }
@@ -475,29 +476,29 @@ void BrowserChildProcessHostImpl::OnChildDisconnected() {
     if (!info.clean_exit) {
       delegate_->OnProcessCrashed(info.exit_code);
     }
-    base::PostTask(
-        FROM_HERE, {BrowserThread::UI},
+    GetUIThreadTaskRunner({})->PostTask(
+        FROM_HERE,
         base::BindOnce(&NotifyProcessKilled, data_.Duplicate(), info));
 #else  // OS_ANDROID
     switch (info.status) {
       case base::TERMINATION_STATUS_PROCESS_CRASHED:
       case base::TERMINATION_STATUS_ABNORMAL_TERMINATION: {
         delegate_->OnProcessCrashed(info.exit_code);
-        base::PostTask(
-            FROM_HERE, {BrowserThread::UI},
+        GetUIThreadTaskRunner({})->PostTask(
+            FROM_HERE,
             base::BindOnce(&NotifyProcessCrashed, data_.Duplicate(), info));
         UMA_HISTOGRAM_ENUMERATION("ChildProcess.Crashed2",
                                   static_cast<ProcessType>(data_.process_type),
                                   PROCESS_TYPE_MAX);
         break;
       }
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
       case base::TERMINATION_STATUS_PROCESS_WAS_KILLED_BY_OOM:
 #endif
       case base::TERMINATION_STATUS_PROCESS_WAS_KILLED: {
         delegate_->OnProcessCrashed(info.exit_code);
-        base::PostTask(
-            FROM_HERE, {BrowserThread::UI},
+        GetUIThreadTaskRunner({})->PostTask(
+            FROM_HERE,
             base::BindOnce(&NotifyProcessKilled, data_.Duplicate(), info));
         // Report that this child process was killed.
         UMA_HISTOGRAM_ENUMERATION("ChildProcess.Killed2",
@@ -518,7 +519,7 @@ void BrowserChildProcessHostImpl::OnChildDisconnected() {
     UMA_HISTOGRAM_ENUMERATION("ChildProcess.Disconnected2",
                               static_cast<ProcessType>(data_.process_type),
                               PROCESS_TYPE_MAX);
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
     if (info.status == base::TERMINATION_STATUS_PROCESS_WAS_KILLED_BY_OOM) {
       UMA_HISTOGRAM_ENUMERATION("ChildProcess.Killed2.OOM",
                                 static_cast<ProcessType>(data_.process_type),
@@ -637,14 +638,25 @@ void BrowserChildProcessHostImpl::OnProcessLaunched() {
   delegate_->OnProcessLaunched();
 
   if (is_channel_connected_) {
-    base::PostTask(
-        FROM_HERE, {BrowserThread::UI},
+    GetUIThreadTaskRunner({})->PostTask(
+        FROM_HERE,
         base::BindOnce(&NotifyProcessLaunchedAndConnected, data_.Duplicate()));
   }
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  // In ChromeOS, there are still child processes of NaCl modules, and they
+  // don't contribute to tracing actually. So do not register those clients
+  // to the tracing service. See https://crbug.com/1101468.
+  if (data_.process_type >= PROCESS_TYPE_CONTENT_END)
+    return;
+#endif
 
   tracing_registration_ = TracingServiceController::Get().RegisterClient(
       process.Pid(), base::BindRepeating(&BindTracedProcessFromUIThread,
                                          weak_factory_.GetWeakPtr()));
+  BackgroundTracingManagerImpl::ActivateForProcess(
+      GetData().id,
+      static_cast<ChildProcessHostImpl*>(GetHost())->child_process());
 }
 
 void BrowserChildProcessHostImpl::RegisterCoordinatorClient(

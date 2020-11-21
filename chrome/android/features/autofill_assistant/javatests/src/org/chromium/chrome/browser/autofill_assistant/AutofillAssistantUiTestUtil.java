@@ -4,33 +4,27 @@
 
 package org.chromium.chrome.browser.autofill_assistant;
 
-import static android.support.test.espresso.Espresso.onView;
-import static android.support.test.espresso.assertion.ViewAssertions.matches;
+import static androidx.test.espresso.Espresso.onView;
+import static androidx.test.espresso.assertion.ViewAssertions.matches;
 
-import static org.hamcrest.MatcherAssert.assertThat;
-
-import static org.chromium.content_public.browser.test.util.CriteriaHelper.DEFAULT_MAX_TIME_TO_POLL;
-import static org.chromium.content_public.browser.test.util.CriteriaHelper.DEFAULT_POLLING_INTERVAL;
+import static org.chromium.base.test.util.CriteriaHelper.DEFAULT_MAX_TIME_TO_POLL;
+import static org.chromium.base.test.util.CriteriaHelper.DEFAULT_POLLING_INTERVAL;
 
 import android.content.Context;
 import android.graphics.Bitmap;
+import android.graphics.Canvas;
 import android.graphics.Rect;
 import android.graphics.Typeface;
+import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.Drawable;
 import android.os.Build.VERSION;
 import android.support.test.InstrumentationRegistry;
-import android.support.test.espresso.NoMatchingViewException;
-import android.support.test.espresso.UiController;
-import android.support.test.espresso.ViewAction;
-import android.support.test.espresso.ViewAssertion;
-import android.support.test.espresso.core.deps.guava.base.Preconditions;
-import android.support.test.espresso.matcher.BoundedMatcher;
 import android.text.Spanned;
 import android.text.SpannedString;
 import android.text.style.ClickableSpan;
 import android.text.style.StyleSpan;
 import android.util.DisplayMetrics;
 import android.view.Gravity;
-import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewParent;
@@ -39,6 +33,13 @@ import android.widget.TextView;
 
 import androidx.annotation.Nullable;
 import androidx.coordinatorlayout.widget.CoordinatorLayout;
+import androidx.test.espresso.NoMatchingViewException;
+import androidx.test.espresso.Root;
+import androidx.test.espresso.UiController;
+import androidx.test.espresso.ViewAction;
+import androidx.test.espresso.ViewAssertion;
+import androidx.test.espresso.matcher.BoundedMatcher;
+import androidx.test.espresso.matcher.ViewMatchers;
 
 import org.hamcrest.Description;
 import org.hamcrest.Matcher;
@@ -49,21 +50,18 @@ import org.json.JSONArray;
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.Callback;
 import org.chromium.base.ThreadUtils;
-import org.chromium.base.supplier.Supplier;
-import org.chromium.chrome.autofill_assistant.R;
-import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.compositor.bottombar.OverlayPanelManager;
+import org.chromium.base.test.util.Criteria;
+import org.chromium.base.test.util.CriteriaHelper;
+import org.chromium.base.test.util.CriteriaNotSatisfiedException;
+import org.chromium.chrome.browser.app.ChromeActivity;
 import org.chromium.chrome.browser.customtabs.CustomTabActivity;
 import org.chromium.chrome.browser.customtabs.CustomTabActivityTestRule;
 import org.chromium.chrome.browser.customtabs.CustomTabsTestUtils;
 import org.chromium.chrome.browser.image_fetcher.ImageFetcher;
 import org.chromium.chrome.browser.image_fetcher.ImageFetcherConfig;
-import org.chromium.chrome.browser.ui.RootUiCoordinator;
-import org.chromium.chrome.browser.widget.bottomsheet.BottomSheetController;
 import org.chromium.chrome.test.ChromeActivityTestRule;
+import org.chromium.components.browser_ui.bottomsheet.BottomSheetController;
 import org.chromium.content_public.browser.WebContents;
-import org.chromium.content_public.browser.test.util.Criteria;
-import org.chromium.content_public.browser.test.util.CriteriaHelper;
 import org.chromium.content_public.browser.test.util.TestCallbackHelperContainer;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 import org.chromium.content_public.browser.test.util.TestTouchUtils;
@@ -90,13 +88,12 @@ class AutofillAssistantUiTestUtil {
         }
 
         @Override
-        public void fetchGif(String url, String clientName, Callback<BaseGifImage> callback) {
+        public void fetchGif(final ImageFetcher.Params params, Callback<BaseGifImage> callback) {
             callback.onResult(mGifToFetch);
         }
 
         @Override
-        public void fetchImage(
-                String url, String clientName, int width, int height, Callback<Bitmap> callback) {
+        public void fetchImage(Params params, Callback<Bitmap> callback) {
             callback.onResult(mBitmapToFetch);
         }
 
@@ -243,8 +240,34 @@ class AutofillAssistantUiTestUtil {
         };
     }
 
+    static Matcher<View> hasBackgroundColor(final int colorResId) {
+        return new BoundedMatcher<View, View>(View.class) {
+            private Context mContext;
+
+            @Override
+            protected boolean matchesSafely(View imageView) {
+                this.mContext = imageView.getContext();
+                Drawable background = imageView.getBackground();
+                if (!(background instanceof ColorDrawable)) return false;
+                int expectedColor =
+                        ApiCompatibilityUtils.getColor(mContext.getResources(), colorResId);
+                return ((ColorDrawable) background).getColor() == expectedColor;
+            }
+
+            @Override
+            public void describeTo(Description description) {
+                String colorId = String.valueOf(colorResId);
+                if (this.mContext != null) {
+                    colorId = this.mContext.getResources().getResourceName(colorResId);
+                }
+
+                description.appendText("has background color with ID " + colorId);
+            }
+        };
+    }
+
     static Matcher<View> isNextAfterSibling(final Matcher<View> siblingMatcher) {
-        Preconditions.checkNotNull(siblingMatcher);
+        assert siblingMatcher != null;
         return new TypeSafeMatcher<View>() {
             @Override
             public void describeTo(Description description) {
@@ -309,6 +332,44 @@ class AutofillAssistantUiTestUtil {
         };
     }
 
+    static Matcher<View> fullyCovers(Rect rect) {
+        return new TypeSafeMatcher<View>() {
+            @Override
+            protected boolean matchesSafely(View view) {
+                Rect viewRect = new Rect();
+                if (!view.getGlobalVisibleRect(viewRect)) {
+                    throw new AssertionError("Expected view to be visible.");
+                }
+
+                return rect.left >= viewRect.left && rect.right <= viewRect.right
+                        && rect.top >= viewRect.top && rect.bottom <= viewRect.bottom;
+            }
+
+            @Override
+            public void describeTo(Description description) {
+                description.appendText("fully covering [" + rect.left + ", " + rect.top + ", "
+                        + rect.right + ", " + rect.bottom + "]");
+            }
+        };
+    }
+
+    static Matcher<View> withTextGravity(int gravity) {
+        return new TypeSafeMatcher<View>() {
+            @Override
+            protected boolean matchesSafely(View view) {
+                if (!(view instanceof TextView)) {
+                    return false;
+                }
+                return ((TextView) view).getGravity() == gravity;
+            }
+
+            @Override
+            public void describeTo(Description description) {
+                description.appendText("withTextGravity " + gravity);
+            }
+        };
+    }
+
     static ViewAction openTextLink(String textLink) {
         return new ViewAction() {
             @Override
@@ -358,6 +419,11 @@ class AutofillAssistantUiTestUtil {
         return viewsWithTag;
     }
 
+    static Matcher<View> withTextId(int id) {
+        return ViewMatchers.withText(
+                InstrumentationRegistry.getTargetContext().getResources().getString(id));
+    }
+
     /**
      * Waits until {@code matcher} matches {@code condition}. Will automatically fail after a
      * default timeout.
@@ -367,24 +433,37 @@ class AutofillAssistantUiTestUtil {
         waitUntilViewMatchesCondition(matcher, condition, DEFAULT_MAX_TIME_TO_POLL);
     }
 
+    /**
+     * Same as {@link #waitUntilViewMatchesCondition(Matcher, Matcher)} but also uses {@code
+     * rootMatcher} to select the correct window.
+     */
+    public static void waitUntilViewInRootMatchesCondition(
+            Matcher<View> matcher, Matcher<Root> rootMatcher, Matcher<View> condition) {
+        CriteriaHelper.pollInstrumentationThread(() -> {
+            try {
+                onView(matcher).inRoot(rootMatcher).check(matches(condition));
+            } catch (NoMatchingViewException | AssertionError e) {
+                // Note: all other exceptions are let through, in particular
+                // AmbiguousViewMatcherException.
+                throw new CriteriaNotSatisfiedException(
+                        "Timeout while waiting for " + matcher + " to satisfy " + condition);
+            }
+        }, DEFAULT_MAX_TIME_TO_POLL, DEFAULT_POLLING_INTERVAL);
+    }
+
     /** @see {@link #waitUntilViewMatchesCondition(Matcher, Matcher)} */
     public static void waitUntilViewMatchesCondition(
             Matcher<View> matcher, Matcher<View> condition, long maxTimeoutMs) {
-        CriteriaHelper.pollInstrumentationThread(
-                new Criteria("Timeout while waiting for " + matcher + " to satisfy " + condition) {
-                    @Override
-                    public boolean isSatisfied() {
-                        try {
-                            onView(matcher).check(matches(condition));
-                            return true;
-                        } catch (NoMatchingViewException | AssertionError e) {
-                            // Note: all other exceptions are let through, in particular
-                            // AmbiguousViewMatcherException.
-                            return false;
-                        }
-                    }
-                },
-                maxTimeoutMs, DEFAULT_POLLING_INTERVAL);
+        CriteriaHelper.pollInstrumentationThread(() -> {
+            try {
+                onView(matcher).check(matches(condition));
+            } catch (NoMatchingViewException | AssertionError e) {
+                // Note: all other exceptions are let through, in particular
+                // AmbiguousViewMatcherException.
+                throw new CriteriaNotSatisfiedException(
+                        "Timeout while waiting for " + matcher + " to satisfy " + condition);
+            }
+        }, maxTimeoutMs, DEFAULT_POLLING_INTERVAL);
     }
 
     /**
@@ -393,22 +472,16 @@ class AutofillAssistantUiTestUtil {
      */
     public static void waitUntilViewAssertionTrue(
             Matcher<View> matcher, ViewAssertion viewAssertion, long maxTimeoutMs) {
-        CriteriaHelper.pollInstrumentationThread(
-                new Criteria(
-                        "Timeout while waiting for " + matcher + " to satisfy " + viewAssertion) {
-                    @Override
-                    public boolean isSatisfied() {
-                        try {
-                            onView(matcher).check(viewAssertion);
-                            return true;
-                        } catch (NoMatchingViewException | AssertionError e) {
-                            // Note: all other exceptions are let through, in particular
-                            // AmbiguousViewMatcherException.
-                            return false;
-                        }
-                    }
-                },
-                maxTimeoutMs, DEFAULT_POLLING_INTERVAL);
+        CriteriaHelper.pollInstrumentationThread(() -> {
+            try {
+                onView(matcher).check(viewAssertion);
+            } catch (NoMatchingViewException | AssertionError e) {
+                // Note: all other exceptions are let through, in particular
+                // AmbiguousViewMatcherException.
+                throw new CriteriaNotSatisfiedException(
+                        "Timeout while waiting for " + matcher + " to satisfy " + viewAssertion);
+            }
+        }, maxTimeoutMs, DEFAULT_POLLING_INTERVAL);
     }
 
     /**
@@ -417,67 +490,34 @@ class AutofillAssistantUiTestUtil {
      */
     public static void waitUntilKeyboardMatchesCondition(
             ChromeActivityTestRule testRule, boolean isShowing) {
-        CriteriaHelper.pollInstrumentationThread(new Criteria(
-                "Timeout while waiting for the keyboard to be "
-                + (isShowing ? "visible" : "hidden")) {
-            @Override
-            public boolean isSatisfied() {
-                try {
-                    boolean isKeyboardShowing =
-                            testRule.getActivity()
-                                    .getWindowAndroid()
-                                    .getKeyboardDelegate()
-                                    .isKeyboardShowing(testRule.getActivity(),
-                                            testRule.getActivity().getCompositorViewHolder());
-                    assertThat("", isKeyboardShowing == isShowing);
-                    return true;
-                } catch (AssertionError e) {
-                    return false;
-                }
-            }
+        CriteriaHelper.pollInstrumentationThread(() -> {
+            boolean isKeyboardShowing =
+                    testRule.getActivity()
+                            .getWindowAndroid()
+                            .getKeyboardDelegate()
+                            .isKeyboardShowing(testRule.getActivity(),
+                                    testRule.getActivity().getCompositorViewHolder());
+            String errorMsg = "Timeout while waiting for the keyboard to be "
+                    + (isShowing ? "visible" : "hidden");
+            Criteria.checkThat(errorMsg, isKeyboardShowing, Matchers.is(isShowing));
         });
     }
 
     public static void waitUntil(Callable<Boolean> condition) {
-        CriteriaHelper.pollInstrumentationThread(
-                new Criteria("Timeout while waiting for condition") {
-                    @Override
-                    public boolean isSatisfied() {
-                        try {
-                            return condition.call();
-                        } catch (Exception e) {
-                            return false;
-                        }
-                    }
-                },
-                DEFAULT_MAX_TIME_TO_POLL, DEFAULT_POLLING_INTERVAL);
+        CriteriaHelper.pollInstrumentationThread(() -> {
+            try {
+                Criteria.checkThat(condition.call(), Matchers.is(true));
+            } catch (Exception e) {
+                throw new CriteriaNotSatisfiedException(e);
+            }
+        }, DEFAULT_MAX_TIME_TO_POLL, DEFAULT_POLLING_INTERVAL);
     }
 
     /**
-     * Creates a {@link BottomSheetController} for the activity, suitable for testing.
-     *
-     * <p>The returned controller is different from the one returned by {@link
-     * ChromeActivity#getBottomSheetController}.
+     * Get a {@link BottomSheetController} to run the tests with.
      */
-    static BottomSheetController createBottomSheetController(ChromeActivity activity) {
-        // Copied from {@link ChromeActivity#initializeBottomSheet}.
-
-        Supplier<View> sheetSupplier = () -> {
-            ViewGroup coordinator = activity.findViewById(R.id.coordinator);
-            LayoutInflater.from(activity).inflate(R.layout.bottom_sheet, coordinator);
-            View bottomSheet = coordinator.findViewById(R.id.bottom_sheet);
-            return bottomSheet;
-        };
-
-        Supplier<OverlayPanelManager> panelManagerProvider = () -> {
-            return activity.getCompositorViewHolder().getLayoutManager().getOverlayPanelManager();
-        };
-
-        RootUiCoordinator rootCoordinator = activity.getRootUiCoordinatorForTesting();
-        return new BottomSheetController(activity.getLifecycleDispatcher(),
-                activity.getActivityTabProvider(), rootCoordinator::getScrimCoordinatorForTesting,
-                sheetSupplier, panelManagerProvider, activity.getFullscreenManager(),
-                activity.getWindow(), activity.getWindowAndroid().getKeyboardDelegate());
+    static BottomSheetController getBottomSheetController(ChromeActivity activity) {
+        return activity.getRootUiCoordinatorForTesting().getBottomSheetController();
     }
 
     /**
@@ -520,11 +560,17 @@ class AutofillAssistantUiTestUtil {
 
         // Sanity check, can only click on coordinates on screen.
         DisplayMetrics displayMetrics = testRule.getActivity().getResources().getDisplayMetrics();
-        if (x < 0 || x > displayMetrics.widthPixels || y < 0 || y > displayMetrics.heightPixels) {
+        BottomSheetController bottomSheetController =
+                testRule.getActivity().getRootUiCoordinatorForTesting().getBottomSheetController();
+        int totalBottomSheetHeight = bottomSheetController.getCurrentOffset()
+                + bottomSheetController.getTopShadowHeight();
+        if (x < 0 || x > displayMetrics.widthPixels || y < 0
+                || y > displayMetrics.heightPixels - totalBottomSheetHeight) {
             throw new IllegalArgumentException(Arrays.toString(elementIds)
                     + " not on screen: tried to tap x=" + x + ", y=" + y
                     + ", which is outside of display with w=" + displayMetrics.widthPixels
-                    + ", h=" + displayMetrics.heightPixels);
+                    + ", h=" + displayMetrics.heightPixels
+                    + ", or obstructed by the BottomSheet with height=" + totalBottomSheetHeight);
         }
         TestTouchUtils.singleClick(InstrumentationRegistry.getInstrumentation(), x, y);
     }
@@ -548,7 +594,7 @@ class AutofillAssistantUiTestUtil {
         int[] compositorLocation = new int[2];
         testRule.getActivity().getCompositorViewHolder().getLocationOnScreen(compositorLocation);
         int offsetY = compositorLocation[1]
-                + testRule.getActivity().getFullscreenManager().getContentOffset();
+                + testRule.getActivity().getBrowserControlsManager().getContentOffset();
         return new Rect((int) ((elementRect.left - viewport.left) * cssToPysicalPixels),
                 (int) ((elementRect.top - viewport.top) * cssToPysicalPixels + offsetY),
                 (int) ((elementRect.right - viewport.left) * cssToPysicalPixels),
@@ -613,6 +659,16 @@ class AutofillAssistantUiTestUtil {
         return result.getBoolean(0);
     }
 
+    /**
+     * Wait for an element to be removed from the web page shown by the given {@link WebContents}.
+     * @param webContents The web content to check.
+     * @param id The ID of the element to look for.
+     */
+    public static void waitForElementRemoved(WebContents webContents, String id) {
+        CriteriaHelper.pollInstrumentationThread(
+                () -> !checkElementExists(webContents, id), "Element is still on the page!");
+    }
+
     /** Checks whether the specified element is displayed in the DOM tree. */
     public static boolean checkElementIsDisplayed(WebContents webContents, String... elementIds)
             throws Exception {
@@ -637,7 +693,10 @@ class AutofillAssistantUiTestUtil {
         javascriptHelper.evaluateJavaScriptForTests(webContents,
                 "(function() {"
                         + " const v = window.visualViewport;"
-                        + " return [v.pageLeft, v.pageTop, v.width, v.height]"
+                        + " return ["
+                        + "   v.pageLeft, v.pageTop,"
+                        + "   v.pageLeft + v.width, v.pageTop + v.height"
+                        + " ];"
                         + "})()");
         javascriptHelper.waitUntilHasValue();
         JSONArray values = new JSONArray(javascriptHelper.getJsonResultAndClear());
@@ -661,6 +720,22 @@ class AutofillAssistantUiTestUtil {
         javascriptHelper.waitUntilHasValue();
         JSONArray result = new JSONArray(javascriptHelper.getJsonResultAndClear());
         return result.getString(0);
+    }
+
+    /**
+     * Converts a view into a bitmap.
+     */
+    public static Bitmap getBitmapFromView(View view) {
+        Bitmap resultBitmap =
+                Bitmap.createBitmap(view.getWidth(), view.getHeight(), Bitmap.Config.ARGB_8888);
+        Drawable backgroundDrawable = view.getBackground();
+        if (backgroundDrawable == null) {
+            return resultBitmap;
+        }
+        Canvas canvas = new Canvas(resultBitmap);
+        backgroundDrawable.draw(canvas);
+        view.draw(canvas);
+        return resultBitmap;
     }
 
     private static String getElementSelectorString(String[] elementIds) {

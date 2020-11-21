@@ -4,7 +4,7 @@
 
 #import "ios/chrome/browser/ui/authentication/unified_consent/unified_consent_view_controller.h"
 
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "components/google/core/common/google_util.h"
 #include "ios/chrome/browser/application_context.h"
 #import "ios/chrome/browser/ui/authentication/authentication_constants.h"
@@ -355,6 +355,7 @@ const char* const kSettingsSyncURL = "internal://settings-sync";
   DCHECK(stringId);
   DCHECK(parentView);
   UILabel* label = [[UILabel alloc] initWithFrame:CGRectZero];
+  label.adjustsFontForContentSizeCategory = YES;
   label.translatesAutoresizingMaskIntoConstraints = NO;
   label.font = [UIFont preferredFontForTextStyle:fontStyle];
   label.textColor = textColor;

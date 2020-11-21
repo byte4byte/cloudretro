@@ -13,6 +13,8 @@
 #include "ash/shell_observer.h"
 #include "ash/wm/overview/overview_controller.h"
 #include "ash/wm/overview/overview_observer.h"
+#include "ash/wm/splitview/split_view_controller.h"
+#include "ash/wm/splitview/split_view_observer.h"
 #include "base/memory/weak_ptr.h"
 #include "base/scoped_observer.h"
 #include "base/timer/timer.h"
@@ -26,15 +28,14 @@ class ASH_EXPORT DragHandle : public views::View,
                               public views::ViewTargeterDelegate,
                               public OverviewObserver,
                               public ShellObserver,
-                              public ui::ImplicitAnimationObserver {
+                              public ui::ImplicitAnimationObserver,
+                              public SplitViewObserver {
  public:
   DragHandle(int drag_handle_corner_radius, Shelf* shelf);
   DragHandle(const DragHandle&) = delete;
   ~DragHandle() override;
 
   DragHandle& operator=(const DragHandle&) = delete;
-
-  void SetColorAndOpacity(SkColor color, float opacity);
 
   // views::ViewTargeterDelegate:
   bool DoesIntersectRect(const views::View* target,
@@ -55,11 +56,13 @@ class ASH_EXPORT DragHandle : public views::View,
 
   // Immediately begins the animation to return the drag handle back to its
   // original position and hide the tooltip.
-  void HideDragHandleNudge(contextual_tooltip::DismissNudgeReason context);
+  void HideDragHandleNudge(contextual_tooltip::DismissNudgeReason reason);
 
   // Called when the window drag from shelf starts or ends. The drag handle
   // contextual nudge will remain visible while the gesture is in progress.
   void SetWindowDragFromShelfInProgress(bool gesture_in_progress);
+
+  void UpdateColor();
 
   // views::View:
   void OnGestureEvent(ui::GestureEvent* event) override;
@@ -70,6 +73,12 @@ class ASH_EXPORT DragHandle : public views::View,
 
   // ShellObserver:
   void OnShellDestroying() override;
+
+  // SplitViewObserver:
+  void OnSplitViewStateChanged(SplitViewController::State previous_state,
+                               SplitViewController::State state) override;
+
+  ContextualNudge* drag_handle_nudge() { return drag_handle_nudge_; }
 
   bool gesture_nudge_target_visibility() const {
     return gesture_nudge_target_visibility_;
@@ -93,10 +102,6 @@ class ASH_EXPORT DragHandle : public views::View,
 
   void fire_hide_drag_handle_timer_for_testing() {
     hide_drag_handle_nudge_timer_.FireNow();
-  }
-
-  ContextualNudge* drag_handle_nudge_for_testing() {
-    return drag_handle_nudge_;
   }
 
  private:
@@ -155,6 +160,9 @@ class ASH_EXPORT DragHandle : public views::View,
   ContextualNudge* drag_handle_nudge_ = nullptr;
 
   std::unique_ptr<Shelf::ScopedAutoHideLock> auto_hide_lock_;
+
+  ScopedObserver<SplitViewController, SplitViewObserver> split_view_observer_{
+      this};
 
   ScopedObserver<OverviewController, OverviewObserver> overview_observer_{this};
 

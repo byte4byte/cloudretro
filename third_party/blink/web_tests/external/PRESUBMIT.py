@@ -17,9 +17,8 @@ def _LintWPT(input_api, output_api):
     information about the lint tool.
     """
     wpt_path = input_api.os_path.join(input_api.PresubmitLocalPath(), 'wpt')
-    linter_path = input_api.os_path.join(
-        input_api.PresubmitLocalPath(), '..', '..', '..', 'blink', 'tools',
-        'blinkpy', 'third_party', 'wpt', 'wpt', 'wpt')
+    linter_path = input_api.os_path.join(input_api.PresubmitLocalPath(), '..', '..', 'tools', 'blinkpy', 'third_party', 'wpt',
+                                         'wpt', 'wpt')
 
     paths_in_wpt = []
     for abs_path in input_api.AbsoluteLocalPaths():
@@ -38,6 +37,8 @@ def _LintWPT(input_api, output_api):
         'lint',
         '--repo-root=%s' % wpt_path,
         '--ignore-glob=*-expected.txt',
+        '--ignore-glob=*DIR_METADATA',
+        '--ignore-glob=*OWNERS',
     ] + paths_in_wpt
 
     proc = input_api.subprocess.Popen(
@@ -47,8 +48,7 @@ def _LintWPT(input_api, output_api):
     stdout, stderr = proc.communicate()
 
     if proc.returncode != 0:
-        return [output_api.PresubmitError('wpt lint failed:',
-                                          long_text=stdout+stderr)]
+        return [output_api.PresubmitError('wpt lint failed:', long_text=stdout + stderr)]
     return []
 
 
@@ -66,15 +66,17 @@ def _DontModifyIDLFiles(input_api, output_api):
     def is_idl_file(f):
         abs_path = f.AbsoluteLocalPath()
         return abs_path.endswith(input_api.os_path.relpath(abs_path, interfaces_path))
-    idl_files = [f.LocalPath for f in input_api.AffectedSourceFiles(is_idl_file)]
+
+    idl_files = [f.LocalPath() for f in input_api.AffectedSourceFiles(is_idl_file)]
 
     if not idl_files:
         return []
     return [
-        output_api.PresubmitError(
+        output_api.PresubmitPromptWarning(
             'This CL touches generated IDL files. Manual modifications to these files will\n'
             'likely be overwritten upstream; please contact ecosystem-infra@chromium.org if\n'
-            'you wish to change them. Files:', items=idl_files)
+            'you wish to change them. Files:',
+            items=idl_files)
     ]
 
 

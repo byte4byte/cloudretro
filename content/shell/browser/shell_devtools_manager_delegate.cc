@@ -29,7 +29,6 @@
 #include "content/public/common/url_constants.h"
 #include "content/public/common/user_agent.h"
 #include "content/shell/browser/shell.h"
-#include "content/shell/browser/web_test/secondary_test_window_observer.h"
 #include "content/shell/common/shell_content_client.h"
 #include "content/shell/common/shell_switches.h"
 #include "content/shell/grit/shell_resources.h"
@@ -166,7 +165,7 @@ void ShellDevToolsManagerDelegate::StartHttpHandler(
   const base::CommandLine& command_line =
       *base::CommandLine::ForCurrentProcess();
   if (command_line.HasSwitch(switches::kRemoteDebuggingPipe))
-    DevToolsAgentHost::StartRemoteDebuggingPipeHandler();
+    DevToolsAgentHost::StartRemoteDebuggingPipeHandler(base::OnceClosure());
 }
 
 // static
@@ -200,12 +199,8 @@ void ShellDevToolsManagerDelegate::ClientDetached(
 
 scoped_refptr<DevToolsAgentHost>
 ShellDevToolsManagerDelegate::CreateNewTarget(const GURL& url) {
-  Shell* shell = Shell::CreateNewWindow(browser_context_,
-                                        url,
-                                        nullptr,
-                                        gfx::Size());
-  if (switches::IsRunWebTestsSwitchPresent())
-    SecondaryTestWindowObserver::CreateForWebContents(shell->web_contents());
+  Shell* shell = Shell::CreateNewWindow(browser_context_, url, nullptr,
+                                        Shell::GetShellDefaultSize());
   return DevToolsAgentHost::GetOrCreateFor(shell->web_contents());
 }
 
@@ -213,9 +208,8 @@ std::string ShellDevToolsManagerDelegate::GetDiscoveryPageHTML() {
 #if defined(OS_ANDROID)
   return std::string();
 #else
-  return ui::ResourceBundle::GetSharedInstance()
-      .GetRawDataResource(IDR_CONTENT_SHELL_DEVTOOLS_DISCOVERY_PAGE)
-      .as_string();
+  return ui::ResourceBundle::GetSharedInstance().LoadDataResourceString(
+      IDR_CONTENT_SHELL_DEVTOOLS_DISCOVERY_PAGE);
 #endif
 }
 

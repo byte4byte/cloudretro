@@ -6,8 +6,10 @@
 
 #include <stddef.h>
 
+#include <map>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "base/files/file_path.h"
@@ -16,18 +18,22 @@
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/stl_util.h"
+#include "base/strings/string16.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/scoped_feature_list.h"
 #include "base/time/time.h"
 #include "base/version.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_service_test_base.h"
+#include "chrome/browser/web_applications/components/web_application_info.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
 #include "chrome/common/extensions/manifest_handlers/linked_app_icons.h"
-#include "chrome/common/web_application_info.h"
 #include "components/services/app_service/public/cpp/file_handler.h"
 #include "components/services/app_service/public/cpp/file_handler_info.h"
+#include "extensions/browser/extension_system.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_icon_set.h"
 #include "extensions/common/extension_resource.h"
@@ -35,6 +41,8 @@
 #include "extensions/common/manifest_handlers/file_handler_info.h"
 #include "extensions/common/manifest_handlers/icons_handler.h"
 #include "extensions/common/manifest_handlers/web_app_file_handler.h"
+#include "extensions/common/manifest_handlers/web_app_linked_shortcut_items.h"
+#include "extensions/common/manifest_handlers/web_app_shortcut_icons_handler.h"
 #include "extensions/common/permissions/permission_set.h"
 #include "extensions/common/permissions/permissions_data.h"
 #include "extensions/common/url_pattern.h"
@@ -107,7 +115,7 @@ class ExtensionFromWebApp : public extensions::ExtensionServiceTestBase {
     InitializeEmptyExtensionService();
     service()->Init();
     base::RunLoop().RunUntilIdle();
-    ASSERT_TRUE(service()->is_ready());
+    ASSERT_TRUE(ExtensionSystem::Get(service()->profile())->is_ready());
   }
 
   const base::FilePath& ExtensionPath() const {
@@ -116,6 +124,17 @@ class ExtensionFromWebApp : public extensions::ExtensionServiceTestBase {
 
  private:
   base::ScopedTempDir extensions_dir_;
+};
+
+class ExtensionFromWebAppWithShortcutsMenu : public ExtensionFromWebApp {
+ public:
+  ExtensionFromWebAppWithShortcutsMenu() {
+    scoped_feature_list.InitAndEnableFeature(
+        features::kDesktopPWAsAppIconShortcutsMenu);
+  }
+
+ private:
+  base::test::ScopedFeatureList scoped_feature_list;
 };
 
 TEST_F(ExtensionFromWebApp, GetScopeURLFromBookmarkApp) {
@@ -264,17 +283,17 @@ TEST_F(ExtensionFromWebApp, Basic) {
   web_app.title = base::ASCIIToUTF16("Gearpad");
   web_app.description =
       base::ASCIIToUTF16("The best text editor in the universe!");
-  web_app.app_url = GURL("http://aaronboodman.com/gearpad/");
+  web_app.start_url = GURL("http://aaronboodman.com/gearpad/");
   web_app.scope = GURL("http://aaronboodman.com/gearpad/");
 
   const int sizes[] = {16, 48, 128};
   for (size_t i = 0; i < base::size(sizes); ++i) {
     WebApplicationIconInfo icon_info;
     icon_info.url =
-        web_app.app_url.Resolve(base::StringPrintf("%i.png", sizes[i]));
+        web_app.start_url.Resolve(base::StringPrintf("%i.png", sizes[i]));
     icon_info.square_size_px = sizes[i];
     web_app.icon_infos.push_back(std::move(icon_info));
-    web_app.icon_bitmaps[sizes[i]] = GetIconBitmap(sizes[i]);
+    web_app.icon_bitmaps_any[sizes[i]] = GetIconBitmap(sizes[i]);
   }
 
   scoped_refptr<Extension> extension = ConvertWebAppToExtension(
@@ -301,7 +320,8 @@ TEST_F(ExtensionFromWebApp, Basic) {
   EXPECT_EQ("1978.12.11.0", extension->version().GetString());
   EXPECT_EQ(base::UTF16ToUTF8(web_app.title), extension->name());
   EXPECT_EQ(base::UTF16ToUTF8(web_app.description), extension->description());
-  EXPECT_EQ(web_app.app_url, AppLaunchInfo::GetFullLaunchURL(extension.get()));
+  EXPECT_EQ(web_app.start_url,
+            AppLaunchInfo::GetFullLaunchURL(extension.get()));
   EXPECT_EQ(web_app.scope, GetScopeURLFromBookmarkApp(extension.get()));
   EXPECT_EQ(0u,
             extension->permissions_data()->active_permissions().apis().size());
@@ -315,10 +335,10 @@ TEST_F(ExtensionFromWebApp, Basic) {
     EXPECT_EQ(web_app.icon_infos[i].square_size_px, linked_icons.icons[i].size);
   }
 
-  EXPECT_EQ(web_app.icon_bitmaps.size(),
+  EXPECT_EQ(web_app.icon_bitmaps_any.size(),
             IconsInfo::GetIcons(extension.get()).map().size());
   for (const std::pair<const SquareSizePx, SkBitmap>& icon :
-       web_app.icon_bitmaps) {
+       web_app.icon_bitmaps_any) {
     int size = icon.first;
     EXPECT_EQ(base::StringPrintf("icons/%i.png", size),
               IconsInfo::GetIcons(extension.get())
@@ -334,7 +354,7 @@ TEST_F(ExtensionFromWebApp, Minimal) {
   StartExtensionService();
   WebApplicationInfo web_app;
   web_app.title = base::ASCIIToUTF16("Gearpad");
-  web_app.app_url = GURL("http://aaronboodman.com/gearpad/");
+  web_app.start_url = GURL("http://aaronboodman.com/gearpad/");
 
   scoped_refptr<Extension> extension = ConvertWebAppToExtension(
       web_app, GetTestTime(1978, 12, 11, 0, 0, 0, 0), ExtensionPath(),
@@ -360,7 +380,8 @@ TEST_F(ExtensionFromWebApp, Minimal) {
   EXPECT_EQ("1978.12.11.0", extension->version().GetString());
   EXPECT_EQ(base::UTF16ToUTF8(web_app.title), extension->name());
   EXPECT_EQ("", extension->description());
-  EXPECT_EQ(web_app.app_url, AppLaunchInfo::GetFullLaunchURL(extension.get()));
+  EXPECT_EQ(web_app.start_url,
+            AppLaunchInfo::GetFullLaunchURL(extension.get()));
   EXPECT_TRUE(GetScopeURLFromBookmarkApp(extension.get()).is_empty());
   EXPECT_EQ(0u, IconsInfo::GetIcons(extension.get()).map().size());
   EXPECT_EQ(0u,
@@ -372,7 +393,7 @@ TEST_F(ExtensionFromWebApp, ExtraInstallationFlags) {
   StartExtensionService();
   WebApplicationInfo web_app;
   web_app.title = base::ASCIIToUTF16("Gearpad");
-  web_app.app_url = GURL("http://aaronboodman.com/gearpad/");
+  web_app.start_url = GURL("http://aaronboodman.com/gearpad/");
 
   scoped_refptr<Extension> extension = ConvertWebAppToExtension(
       web_app, GetTestTime(1978, 12, 11, 0, 0, 0, 0), ExtensionPath(),
@@ -395,7 +416,7 @@ TEST_F(ExtensionFromWebApp, ExternalPolicyLocation) {
   StartExtensionService();
   WebApplicationInfo web_app;
   web_app.title = base::ASCIIToUTF16("Gearpad");
-  web_app.app_url = GURL("http://aaronboodman.com/gearpad/");
+  web_app.start_url = GURL("http://aaronboodman.com/gearpad/");
 
   scoped_refptr<Extension> extension = ConvertWebAppToExtension(
       web_app, GetTestTime(1978, 12, 11, 0, 0, 0, 0), ExtensionPath(),
@@ -419,7 +440,7 @@ TEST_F(ExtensionFromWebApp, ScopeDoesNotEndInSlash) {
   web_app.title = base::ASCIIToUTF16("Gearpad");
   web_app.description =
       base::ASCIIToUTF16("The best text editor in the universe!");
-  web_app.app_url = GURL("http://aaronboodman.com/gearpad/");
+  web_app.start_url = GURL("http://aaronboodman.com/gearpad/");
   web_app.scope = GURL("http://aaronboodman.com/gear");
 
   scoped_refptr<Extension> extension = ConvertWebAppToExtension(
@@ -436,7 +457,7 @@ TEST_F(ExtensionFromWebApp, FileHandlersAreCorrectlyConverted) {
   WebApplicationInfo web_app;
   web_app.title = base::ASCIIToUTF16("Graphr");
   web_app.description = base::ASCIIToUTF16("A magical graphy thing");
-  web_app.app_url = GURL("https://graphr.n/");
+  web_app.start_url = GURL("https://graphr.n/");
   web_app.scope = GURL("https://graphr.n/");
 
   {
@@ -498,7 +519,7 @@ TEST_F(ExtensionFromWebApp, WebAppFileHandlersAreCorrectlyConverted) {
   WebApplicationInfo web_app;
   web_app.title = base::ASCIIToUTF16("Graphr");
   web_app.description = base::ASCIIToUTF16("A magical graphy thing.");
-  web_app.app_url = GURL("https://graphr.n/");
+  web_app.start_url = GURL("https://graphr.n/");
   web_app.scope = GURL("https://graphr.n");
 
   {
@@ -547,6 +568,96 @@ TEST_F(ExtensionFromWebApp, WebAppFileHandlersAreCorrectlyConverted) {
     EXPECT_EQ("text/csv", file_handler.accept[0].mime_type);
     EXPECT_THAT(file_handler.accept[0].file_extensions,
                 testing::UnorderedElementsAre(".csv"));
+  }
+}
+
+// Tests that |shortcuts_menu_item_infos| on the WebAppManifest is correctly
+// converted to |web_app_shortcut_icons| and |web_app_linked_shortcut_items| on
+// an extension manifest.
+TEST_F(ExtensionFromWebAppWithShortcutsMenu,
+       WebAppShortcutIconsAreCorrectlyConverted) {
+  StartExtensionService();
+  WebApplicationInfo web_app;
+  WebApplicationShortcutsMenuItemInfo shortcut_item;
+  std::map<SquareSizePx, SkBitmap> shortcut_icon_bitmaps;
+  web_app.title = base::ASCIIToUTF16("Shortcut App");
+  web_app.description = base::ASCIIToUTF16("We have shortcuts.");
+  web_app.start_url = GURL("https://shortcut-app.io/");
+  web_app.scope = GURL("https://shortcut-app.io");
+
+  shortcut_item.name = base::ASCIIToUTF16("Shortcut 1");
+  shortcut_item.url = GURL("https://shortcut-app.io/shortcuts/shortcut1");
+  {
+    const int sizes[] = {16, 128};
+    for (const auto& size : sizes) {
+      WebApplicationShortcutsMenuItemInfo::Icon icon_info;
+      icon_info.url = web_app.start_url.Resolve(
+          base::StringPrintf("shortcut1/%i.png", size));
+      icon_info.square_size_px = size;
+      shortcut_item.shortcut_icon_infos.push_back(std::move(icon_info));
+      shortcut_icon_bitmaps[size] = GetIconBitmap(size);
+    }
+    web_app.shortcuts_menu_icons_bitmaps.emplace_back(
+        std::move(shortcut_icon_bitmaps));
+  }
+  web_app.shortcuts_menu_item_infos.push_back(std::move(shortcut_item));
+
+  shortcut_item.name = base::ASCIIToUTF16("Shortcut 2");
+  shortcut_item.url = GURL("https://shortcut-app.io/shortcuts/shortcut2");
+  {
+    const int sizes[] = {16, 48};
+    for (const auto& size : sizes) {
+      WebApplicationShortcutsMenuItemInfo::Icon icon_info;
+      icon_info.url =
+          web_app.start_url.Resolve(base::StringPrintf("0/%i.png", size));
+      icon_info.square_size_px = size;
+      shortcut_item.shortcut_icon_infos.push_back(std::move(icon_info));
+      shortcut_icon_bitmaps[size] = GetIconBitmap(size);
+    }
+    web_app.shortcuts_menu_icons_bitmaps.emplace_back(
+        std::move(shortcut_icon_bitmaps));
+  }
+  web_app.shortcuts_menu_item_infos.push_back(std::move(shortcut_item));
+
+  scoped_refptr<Extension> extension = ConvertWebAppToExtension(
+      web_app, GetTestTime(1978, 12, 11, 0, 0, 0, 0), ExtensionPath(),
+      Extension::FROM_BOOKMARK, Manifest::INTERNAL);
+
+  ASSERT_TRUE(extension.get());
+
+  const WebAppLinkedShortcutItems& linked_shortcut_items =
+      WebAppLinkedShortcutItems::GetWebAppLinkedShortcutItems(extension.get());
+  const std::map<int, ExtensionIconSet>& shortcut_icons =
+      WebAppShortcutIconsInfo::GetShortcutIcons(extension.get());
+  for (size_t i = 0; i < web_app.shortcuts_menu_item_infos.size(); ++i) {
+    const std::vector<WebApplicationShortcutsMenuItemInfo::Icon>& icon_infos =
+        web_app.shortcuts_menu_item_infos[i].shortcut_icon_infos;
+    const std::vector<WebAppLinkedShortcutItems::ShortcutItemInfo::IconInfo>&
+        linked_shortcut_icons_info =
+            linked_shortcut_items.shortcut_item_infos[i]
+                .shortcut_item_icon_infos;
+    ASSERT_EQ(icon_infos.size(), linked_shortcut_icons_info.size());
+    for (size_t j = 0; j < icon_infos.size(); ++j) {
+      EXPECT_EQ(linked_shortcut_icons_info[j].url, icon_infos[j].url);
+      EXPECT_EQ(linked_shortcut_icons_info[j].size,
+                icon_infos[j].square_size_px);
+    }
+
+    const std::map<SquareSizePx, SkBitmap>& icon_bitmaps =
+        web_app.shortcuts_menu_icons_bitmaps[i];
+    EXPECT_EQ(icon_bitmaps.size(), shortcut_icons.at(i).map().size());
+    for (const std::pair<const SquareSizePx, SkBitmap>& icon : icon_bitmaps) {
+      int size = icon.first;
+      EXPECT_EQ(
+          base::StringPrintf("shortcut_icons/%i/%i.png", static_cast<int>(i),
+                             size),
+          shortcut_icons.at(i).Get(size, ExtensionIconSet::MATCH_EXACTLY));
+
+      ExtensionResource resource = WebAppShortcutIconsInfo::GetIconResource(
+          extension.get(), i, size, ExtensionIconSet::MATCH_EXACTLY);
+      EXPECT_TRUE(base::PathExists(resource.GetFilePath()));
+      ASSERT_TRUE(!resource.empty());
+    }
   }
 }
 

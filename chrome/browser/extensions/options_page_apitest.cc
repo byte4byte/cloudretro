@@ -11,6 +11,7 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/common/extension.h"
@@ -59,8 +60,10 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, OptionsPage) {
                                      kScriptClickOptionButton));
   tab_add.Wait();
   ASSERT_EQ(2, tab_strip->count());
+  content::WebContents* tab = tab_strip->GetWebContentsAt(1);
+  EXPECT_TRUE(content::WaitForLoadStop(tab));
   EXPECT_EQ(extension->GetResourceURL("options.html"),
-            tab_strip->GetWebContentsAt(1)->GetURL());
+            tab->GetLastCommittedURL());
 }
 
 // Tests that navigating directly to chrome://extensions?options=<id> to an

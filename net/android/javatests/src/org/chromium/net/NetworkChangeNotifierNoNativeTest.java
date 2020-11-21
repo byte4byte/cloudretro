@@ -11,7 +11,8 @@ import android.net.ConnectivityManager.NetworkCallback;
 import android.os.Build;
 import android.os.Looper;
 import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.MediumTest;
+
+import androidx.test.filters.MediumTest;
 
 import org.junit.After;
 import org.junit.Assert;
@@ -19,6 +20,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.test.BaseJUnit4ClassRunner;
+import org.chromium.base.test.util.Batch;
 import org.chromium.base.test.util.MinAndroidSdkLevel;
 
 /**
@@ -26,6 +28,7 @@ import org.chromium.base.test.util.MinAndroidSdkLevel;
  * does not have a setUp() method that loads native libraries.
  */
 @RunWith(BaseJUnit4ClassRunner.class)
+@Batch(Batch.PER_CLASS)
 @SuppressLint("NewApi")
 public class NetworkChangeNotifierNoNativeTest {
     @After

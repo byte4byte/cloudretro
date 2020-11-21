@@ -17,16 +17,16 @@
 <h2 id="manifest">Manifest</h2>
 
 <p>
-You must declare the <code>"declarativeNetRequest"</code> permission in the
-extension <a href="manifest">manifest</a> to use this API. The
+Extensions must declare the <code>"declarativeNetRequest"</code> permission in
+the extension <a href="manifest">manifest</a> to use this API. The
 <code>"declarativeNetRequestFeedback"</code> permission is required to access
 functions and events which return information on declarative rules matched.
 <a href="declare_permissions">Host permissions</a> are required if the extension
-wants to redirect requests. You must also declare the
+wants to redirect requests or modify headers. To specify static
+<a href="#type-Ruleset">Rulesets</a>, extensions must also declare the
 <code>"declarative_net_request"</code> manifest key, which should be a
 dictionary with a single key called <code>"rule_resources"</code>. It should be
-a list containing a single dictionary of type
-<a href="#type-Ruleset">Ruleset</a>, as shown below.
+a list containing dictionaries of type $(ref:Ruleset), as shown below.
 </p>
 
 <pre data-filename="manifest.json">
@@ -38,7 +38,11 @@ a list containing a single dictionary of type
     "rule_resources" : [{
       "id": "ruleset_1",
       "enabled": true,
-      "path": "rules.json"
+      "path": "rules_1.json"
+    }, {
+      "id": "ruleset_2",
+      "enabled": false,
+      "path": "rules_2.json"
     }]
   },
   "permissions": [
@@ -53,18 +57,18 @@ a list containing a single dictionary of type
 <h2 id="rule-resources">Rule Resources</h2>
 
 <p>
-The JSON file specified as part of <code>"rule_resources"</code> in the manifest
-contains a list of rules. The number of rules that an extension can specify is
-bound by the <a href="#property-MAX_NUMBER_OF_RULES">
-chrome.declarativeNetRequest.MAX_NUMBER_OF_RULES</a> constant.
+An extension can specify up to $(ref:MAX_NUMBER_OF_STATIC_RULESETS)
+<a href="#type-Ruleset">rulesets</a> as part of the
+<code>"rule_resources"</code> manifest key. The number of rules
+across <b>enabled</b> static rulesets must be less than the
+$(ref:MAX_NUMBER_OF_RULES) constant.
 </p>
 
 <h2 id="rules">Rules</h2>
 
 <p>
-A single declarative rule consists of four fields: <code>id</code>,
-<code>priority</code>, <code>condition</code> and <code>action</code>. See the
-<a href="#type-Rule">Rule</a> section below for more information on the format.
+A single declarative $(ref:Rule) consists of four fields: <code>id</code>,
+<code>priority</code>, <code>condition</code> and <code>action</code>.
 There are the following kinds of rules:
 </p>
 
@@ -80,7 +84,7 @@ There are the following kinds of rules:
     Rules that redirect a network request.
   </li>
   <li>
-    Rules that remove headers from a network request.
+    Rules that modify headers from a network request.
   </li>
 </ul>
 
@@ -168,25 +172,39 @@ pattern which is matched against the request URL. Some examples of URL filters:
 
 <p>
 To add or remove rules dynamically, extensions can use the
-<a href="#method-updateDynamicRules">
-chrome.declarativeNetRequest.updateDynamicRules</a> API method.
+$(ref:updateDynamicRules) API method.
 
 <ul>
 <li>
   The number of dynamic rules that an an extension can add is bounded by the
-  <a href="#property-MAX_NUMBER_OF_DYNAMIC_RULES">chrome.declarativeNetRequest.MAX_NUMBER_OF_DYNAMIC_RULES</a>
-  constant.
+  $(ref:MAX_NUMBER_OF_DYNAMIC_RULES) constant.
 </li>
 <li>
-  An extension's dynamic ruleset is maintained separately from its static
-  ruleset (the ruleset specified as part of the extension package). For example,
-  it's possible to have the same rule ID across static and dynamic rulesets.
-</li>
-<li>
-  For conflicting actions, dynamic rules are given priority over static rules.
+  The dynamic rules for an extension are persisted across both sessions and
+  extension updates.
 </li>
 </ul>
 
+</p>
+
+<h2 id="updating-enabled-rulesets">Updating enabled rulesets</h2>
+
+<p>
+An extension can update the set of enabled static rulesets using the
+$(ref:updateEnabledRulesets) API method.
+
+<ul>
+  <li>
+    The number of rules across enabled static rulesets must be less than the
+    $(ref:MAX_NUMBER_OF_RULES) constant.
+  </li>
+  <li>
+    The set of enabled static rulesets is persisted across sessions but not
+    across extension updates. The <code>rule_resources</code> manifest key will
+    determine the set of enabled static rulesets on initial extension install
+    and on each subsequent extension update.
+  </li>
+</ul>
 </p>
 
 <h2 id="implementation-details">Implementation details</h2>
@@ -227,11 +245,29 @@ following order of decreasing precedence:
 </ul>
 
 <p>
-If the request was not blocked or redirected, <code>removeHeaders</code> rules
-are evaluated on the request and response headers. All matching
-<code>removeHeaders</code> rules from extensions that did not have a matching
-<code>allow</code> or <code>allowAllRequests</code> action are evaluated.
+If the request was not blocked or redirected, the matching
+<code>modifyHeaders</code> rules are evaluated with the most recently installed
+extensions getting priority. Within each extension, all
+<code>modifyHeaders</code> rules with a priority lower than matching
+<code>allow</code> or <code>allowAllRequests</code> rules are ignored.
 </p>
+
+<p>
+If multiple <code>modifyHeaders</code> rules specify the same header, the
+resulting modification for the header is determined based on the priority of
+each rule and the operations specified.
+</p>
+
+<ul>
+  <li>If a rule has appended to a header, then lower priority rules can only
+  append to that header. <code>set</code> and <code>remove</code> operations are
+  not permitted.</li>
+  <li>If a rule has set a header, then lower priority rules cannot further
+  modify the header, except for <code>append</code> rules from the same
+  extension.</li>
+  <li>If a rule has removed a header, then lower priority rules cannot further
+  modify the header.</li>
+</ul>
 
 <h3 id="web-request-comparison">
   Comparison with the <a href="webRequest">webRequest</a> API
@@ -249,8 +285,8 @@ are evaluated on the request and response headers. All matching
     page; resulting in less memory consumption.
   </li>
   <li>
-    Unlike the webRequest API, blocking requests or removing headers using the
-    declarativeNetRequest API requires no host permissions.
+    Unlike the webRequest API, blocking requests using the declarativeNetRequest
+    API requires no host permissions.
   </li>
   <li>
     The declarativeNetRequest API provides better privacy to users because
@@ -293,6 +329,7 @@ are evaluated on the request and response headers. All matching
     "*://*.abcd.com/*",
     "*://*.example.com/*",
     "http://*.xyz.com/*",
+    "*://*.headers.com/*",
     "declarativeNetRequest"
   ],
   "manifest_version": 2
@@ -380,7 +417,33 @@ are evaluated on the request and response headers. All matching
       "urlFilter" : "script.js",
       "resourceTypes" : ["script"]
     }
-  }
+  },
+  {
+    "id": 10,
+    "priority": 2,
+    "action": {
+      "type": "modifyHeaders",
+      "responseHeaders": [
+        { "header": "h1", "operation": "remove" },
+        { "header": "h2", "operation": "set", "value": "v2" },
+        { "header": "h3", "operation": "append", "value": "v3" }
+      ]
+    },
+    "condition": { "urlFilter": "headers.com/123", "resourceTypes": ["main_frame"] }
+  },
+  {
+    "id": 11,
+    "priority": 1,
+    "action": {
+      "type": "modifyHeaders",
+      "responseHeaders": [
+        { "header": "h1", "operation": "set", "value": "v4" },
+        { "header": "h2", "operation": "append", "value": "v5" },
+        { "header": "h3", "operation": "append", "value": "v6" }
+      ]
+    },
+    "condition": { "urlFilter": "headers.com/12345", "resourceTypes": ["main_frame"] }
+  },
 ]
 </pre>
 
@@ -445,4 +508,11 @@ are evaluated on the request and response headers. All matching
     be evaluated by the extensions’ ruleset. Requests in red will be blocked due
     to rule with id (9).
   </li>
+  <li>
+    Consider a navigation to <code>"http://headers.com/12345"</code> with
+    response headers <code>{ "h1": "initial_1", "h2": "initial_2" }</code>.
+    Rules with id (10) and (11) match. The request will have its response
+    headers modified to <code>{ "h2": "v2", "h2": "v5", "h3": "v3", "h3": "v6" }</code>.
+    Header <code>h1</code> was removed by (10), <code>h2</code> was set by (10)
+    then appended by (11), and <code>h3</code> was appended by (10) and (11).</li>
 </ul>

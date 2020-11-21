@@ -7,10 +7,11 @@
 #include <utility>
 
 #include "ash/public/cpp/network_config_service.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/time/default_clock.h"
 #include "chromeos/components/sync_wifi/local_network_collector_impl.h"
 #include "chromeos/components/sync_wifi/pending_network_configuration_tracker_impl.h"
+#include "chromeos/components/sync_wifi/synced_network_metrics_logger.h"
 #include "chromeos/components/sync_wifi/synced_network_updater_impl.h"
 #include "chromeos/components/sync_wifi/timer_factory.h"
 #include "chromeos/components/sync_wifi/wifi_configuration_bridge.h"
@@ -29,21 +30,31 @@ WifiConfigurationSyncService::WifiConfigurationSyncService(
     version_info::Channel channel,
     PrefService* pref_service,
     syncer::OnceModelTypeStoreFactory create_store_callback) {
+  NetworkHandler* network_handler = NetworkHandler::Get();
   ash::GetNetworkConfigService(
       remote_cros_network_config_.BindNewPipeAndPassReceiver());
+  metrics_logger_ = std::make_unique<SyncedNetworkMetricsLogger>(
+      network_handler->network_state_handler(),
+      network_handler->network_connection_handler());
+  timer_factory_ = std::make_unique<TimerFactory>();
   updater_ = std::make_unique<SyncedNetworkUpdaterImpl>(
       std::make_unique<PendingNetworkConfigurationTrackerImpl>(pref_service),
-      remote_cros_network_config_.get(), std::make_unique<TimerFactory>());
+      remote_cros_network_config_.get(), timer_factory_.get(),
+      metrics_logger_.get());
   collector_ = std::make_unique<LocalNetworkCollectorImpl>(
       remote_cros_network_config_.get());
-  NetworkHandler* network_handler = NetworkHandler::Get();
   bridge_ = std::make_unique<sync_wifi::WifiConfigurationBridge>(
       updater_.get(), collector_.get(),
-      network_handler->network_configuration_handler(),
+      network_handler->network_configuration_handler(), metrics_logger_.get(),
+      timer_factory_.get(), pref_service,
       std::make_unique<syncer::ClientTagBasedModelTypeProcessor>(
           syncer::WIFI_CONFIGURATIONS,
           base::BindRepeating(&syncer::ReportUnrecoverableError, channel)),
       std::move(create_store_callback));
+  NetworkMetadataStore* metadata_store =
+      network_handler->network_metadata_store();
+  if (metadata_store)
+    SetNetworkMetadataStore(metadata_store->GetWeakPtr());
 }
 
 WifiConfigurationSyncService::~WifiConfigurationSyncService() = default;

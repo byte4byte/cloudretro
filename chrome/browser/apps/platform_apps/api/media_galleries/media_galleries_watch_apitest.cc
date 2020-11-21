@@ -4,7 +4,7 @@
 //
 // MediaGalleries gallery watch API browser tests.
 
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/files/file_path.h"
 #include "base/files/file_path_watcher.h"
 #include "base/files/file_util.h"
@@ -21,6 +21,7 @@
 #include "chrome/common/chrome_paths.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_view_host.h"
+#include "content/public/test/browser_test.h"
 #include "extensions/browser/process_manager.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/switches.h"
@@ -73,7 +74,7 @@ const char kGalleryChangedEventReceived[] = "gallery_changed_event_received";
 class MediaGalleriesGalleryWatchApiTest : public extensions::ExtensionApiTest {
  public:
   MediaGalleriesGalleryWatchApiTest()
-      : extension_(NULL), background_host_(NULL) {}
+      : extension_(nullptr), background_host_(nullptr) {}
   ~MediaGalleriesGalleryWatchApiTest() override {}
 
  protected:
@@ -81,7 +82,7 @@ class MediaGalleriesGalleryWatchApiTest : public extensions::ExtensionApiTest {
   void SetUpCommandLine(base::CommandLine* command_line) override {
     extensions::ExtensionApiTest::SetUpCommandLine(command_line);
     command_line->AppendSwitchASCII(
-        extensions::switches::kWhitelistedExtensionID, kTestExtensionId);
+        extensions::switches::kAllowlistedExtensionID, kTestExtensionId);
   }
   void SetUpOnMainThread() override {
     extensions::ExtensionApiTest::SetUpOnMainThread();
@@ -92,8 +93,8 @@ class MediaGalleriesGalleryWatchApiTest : public extensions::ExtensionApiTest {
     FetchMediaGalleriesList();
   }
   void TearDownOnMainThread() override {
-    extension_ = NULL;
-    background_host_ = NULL;
+    extension_ = nullptr;
+    background_host_ = nullptr;
     ensure_media_directories_exists_.reset();
     extensions::ExtensionApiTest::TearDownOnMainThread();
   }
@@ -114,10 +115,7 @@ class MediaGalleriesGalleryWatchApiTest : public extensions::ExtensionApiTest {
     base::ScopedAllowBlockingForTesting allow_blocking;
     base::FilePath gallery_file =
         test_gallery_.GetPath().Append(FILE_PATH_LITERAL("test1.txt"));
-    std::string content("new content");
-    int write_size =
-        base::WriteFile(gallery_file, content.c_str(), content.length());
-    return (write_size == static_cast<int>(content.length()));
+    return base::WriteFile(gallery_file, "new content");
   }
 
   void SetupGalleryWatches() {

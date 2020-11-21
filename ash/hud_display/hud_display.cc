@@ -4,38 +4,86 @@
 
 #include "ash/hud_display/hud_display.h"
 
-#include <unistd.h>
-#include <cmath>
-#include <numeric>
-
-#include "ash/hud_display/data_source.h"
+#include "ash/fast_ink/view_tree_host_root_view.h"
+#include "ash/fast_ink/view_tree_host_widget.h"
+#include "ash/hud_display/graphs_container_view.h"
+#include "ash/hud_display/hud_constants.h"
+#include "ash/hud_display/hud_header_view.h"
+#include "ash/hud_display/hud_properties.h"
+#include "ash/hud_display/hud_settings_view.h"
+#include "ash/hud_display/tab_strip.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/root_window_controller.h"
 #include "ash/shell.h"
-#include "base/bind.h"
-#include "base/task/post_task.h"
-#include "third_party/skia/include/core/SkTypeface.h"
+#include "base/strings/utf_string_conversions.h"
+#include "components/vector_icons/vector_icons.h"
 #include "ui/aura/window.h"
+#include "ui/base/hit_test.h"
 #include "ui/events/base_event_utils.h"
-#include "ui/gfx/canvas.h"
-#include "ui/gfx/presentation_feedback.h"
-#include "ui/gfx/skia_util.h"
+#include "ui/views/background.h"
+#include "ui/views/border.h"
+#include "ui/views/layout/box_layout.h"
+#include "ui/views/layout/fill_layout.h"
+#include "ui/views/metadata/metadata_impl_macros.h"
 #include "ui/views/widget/widget.h"
+#include "ui/views/widget/widget_delegate.h"
 
 namespace ash {
 namespace hud_display {
 namespace {
 
-std::unique_ptr<HUDDisplayView> g_hud_display_view;
+constexpr size_t kHUDGraphsInset = 5;
 
-// UI refresh interval.
-constexpr base::TimeDelta kHUDRefreshInterval =
-    base::TimeDelta::FromMilliseconds(500);
+// Default HUDDisplayView height.
+constexpr size_t kDefaultHUDGraphHeight = 300;
 
-constexpr SkColor kBackground = SkColorSetARGB(208, 17, 17, 17);
+// Top border + Header height + margin + graph height + bottom border..
+constexpr int kHUDViewDefaultHeight =
+    kHUDInset + (kHUDSettingsIconSize + 2 * kSettingsIconBorder) +
+    kHUDGraphsInset + kDefaultHUDGraphHeight + kHUDInset;
 
-void DrawGraphBackground(gfx::Canvas& canvas, const gfx::Rect& rect) {
-  canvas.FillRect(rect, kBackground);
+views::Widget* g_hud_widget = nullptr;
+
+// ClientView that return HTNOWHERE by default. A child view can receive event
+// by setting kHitTestComponentKey property to HTCLIENT.
+class HTClientView : public views::ClientView {
+ public:
+  METADATA_HEADER(HTClientView);
+
+  HTClientView(HUDDisplayView* hud_display,
+               views::Widget* widget,
+               views::View* contents_view)
+      : views::ClientView(widget, contents_view), hud_display_(hud_display) {}
+  HTClientView(const HTClientView&) = delete;
+  HTClientView& operator=(const HTClientView&) = delete;
+
+  ~HTClientView() override = default;
+
+  // views::ClientView
+  int NonClientHitTest(const gfx::Point& point) override {
+    return hud_display_->NonClientHitTest(point);
+  }
+
+ private:
+  HUDDisplayView* hud_display_;
+};
+
+BEGIN_METADATA(HTClientView, views::ClientView)
+END_METADATA
+
+std::unique_ptr<views::ClientView> MakeClientView(views::Widget* widget) {
+  auto view = std::make_unique<HUDDisplayView>();
+  auto* weak_view = view.get();
+  return std::make_unique<HTClientView>(weak_view, widget, view.release());
+}
+
+void InitializeFrameView(views::WidgetDelegate* delegate) {
+  auto* frame_view = delegate->GetWidget()->non_client_view()->frame_view();
+  // TODO(oshima): support component type with TYPE_WINDOW_FLAMELESS widget.
+  if (frame_view) {
+    frame_view->SetEnabled(false);
+    frame_view->SetVisible(false);
+  }
 }
 
 }  // namespace
@@ -43,157 +91,117 @@ void DrawGraphBackground(gfx::Canvas& canvas, const gfx::Rect& rect) {
 ////////////////////////////////////////////////////////////////////////////////
 // HUDDisplayView, public:
 
+BEGIN_METADATA(HUDDisplayView, views::View)
+END_METADATA
+
 // static
 void HUDDisplayView::Destroy() {
-  g_hud_display_view.reset();
+  delete g_hud_widget;
+  g_hud_widget = nullptr;
 }
 
+// static
 void HUDDisplayView::Toggle() {
-  if (g_hud_display_view) {
+  if (g_hud_widget) {
     Destroy();
     return;
   }
 
-  aura::Window* root_window = Shell::GetRootWindowForDisplayId(
-      display::Screen::GetScreen()->GetPrimaryDisplay().id());
-  aura::Window* container = RootWindowController::ForWindow(root_window)
-                                ->GetContainer(kShellWindowId_OverlayContainer);
+  auto delegate = std::make_unique<views::WidgetDelegate>();
+  delegate->SetClientViewFactory(base::BindOnce(&MakeClientView));
+  delegate->RegisterWidgetInitializedCallback(
+      base::BindOnce(&InitializeFrameView, base::Unretained(delegate.get())));
+  delegate->SetOwnedByWidget(true);
 
-  g_hud_display_view = std::make_unique<HUDDisplayView>(container);
+  views::Widget::InitParams params(views::Widget::InitParams::TYPE_WINDOW);
+  params.delegate = delegate.release();
+  params.parent = Shell::GetContainer(Shell::GetPrimaryRootWindow(),
+                                      kShellWindowId_OverlayContainer);
+  params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
+  // Adjust for 1px grid width around the graph.
+  params.bounds =
+      gfx::Rect(kDefaultGraphWidth + 2 * kHUDInset + 2 * kGridLineWidth,
+                kHUDViewDefaultHeight + 2 * kGridLineWidth);
+  auto* widget = CreateViewTreeHostWidget(std::move(params));
+  widget->GetLayer()->SetName("HUDDisplayView");
+  widget->Show();
+
+  g_hud_widget = widget;
 }
 
-HUDDisplayView::HUDDisplayView(aura::Window* container)
-    : fast_ink::FastInkView(
-          container,
-          base::BindRepeating([](const gfx::PresentationFeedback&) {})),
-      canvas_rect_(
-          gfx::Point(0, 0),
-          gfx::Size(Graph::kDefaultWidth + 2 * kHUDInset, kDefaultHUDHeight)),
-      memory_stats_rect_(canvas_rect_),
-      graph_chrome_rss_private_(Graph::Baseline::BASELINE_BOTTOM,
-                                Graph::Fill::SOLID,
-                                SK_ColorRED),
-      graph_mem_free_(Graph::Baseline::BASELINE_BOTTOM,
-                      Graph::Fill::NONE,
-                      SK_ColorDKGRAY),
-      graph_mem_used_unknown_(Graph::Baseline::BASELINE_BOTTOM,
-                              Graph::Fill::SOLID,
-                              SK_ColorLTGRAY),
-      graph_renderers_rss_private_(Graph::Baseline::BASELINE_BOTTOM,
-                                   Graph::Fill::SOLID,
-                                   SK_ColorCYAN),
-      graph_arc_rss_private_(Graph::Baseline::BASELINE_BOTTOM,
-                             Graph::Fill::SOLID,
-                             SK_ColorMAGENTA),
-      graph_gpu_rss_private_(Graph::Baseline::BASELINE_BOTTOM,
-                             Graph::Fill::SOLID,
-                             SK_ColorRED),
-      graph_gpu_kernel_(Graph::Baseline::BASELINE_BOTTOM,
-                        Graph::Fill::SOLID,
-                        SK_ColorYELLOW),
-      graph_chrome_rss_shared_(Graph::Baseline::BASELINE_BOTTOM,
-                               Graph::Fill::NONE,
-                               SK_ColorBLUE) {
-  memory_stats_rect_.Inset(kHUDInset, kHUDInset);
+HUDDisplayView::HUDDisplayView() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(ui_sequence_checker_);
 
-  // Create transform used to convert hud_display controller coordinates to
-  // screen coordinates.
-  bool inversible = host()->window_to_buffer_transform().GetInverse(
-      &buffer_to_screen_transform_);
-  DCHECK(inversible);
+  // Layout:
+  // ----------------------
+  // |      Header        | // Buttons, tabs, controls
+  // ----------------------
+  // |                    | // Data views full-size, z-stacked.
+  // |      Data          |
+  // |                    |
+  // ----------------------
 
-  UpdateAndPaint();
-  refresh_timer_.Start(FROM_HERE, kHUDRefreshInterval, this,
-                       &HUDDisplayView::UpdateAndPaint);
+  // Create two child views for header and data. Vertically stacked.
+  views::BoxLayout* layout_manager =
+      SetLayoutManager(std::make_unique<views::BoxLayout>(
+          views::BoxLayout::Orientation::kVertical));
+  layout_manager->set_cross_axis_alignment(
+      views::BoxLayout::CrossAxisAlignment::kStretch);
+
+  header_view_ = AddChildView(std::make_unique<HUDHeaderView>(this));
+  views::View* data = AddChildView(std::make_unique<views::View>());
+
+  // Data view takes the rest of the host view.
+  layout_manager->SetFlexForView(data, 1, /*use_min_size=*/false);
+
+  // Setup header.
+
+  header_view_->tab_strip()->AddTabButton(DisplayMode::CPU_DISPLAY,
+                                          base::ASCIIToUTF16("CPU"));
+  header_view_->tab_strip()->AddTabButton(DisplayMode::MEMORY_DISPLAY,
+                                          base::ASCIIToUTF16("RAM"));
+  header_view_->tab_strip()->AddTabButton(DisplayMode::FPS_DISPLAY,
+                                          base::ASCIIToUTF16("FPS"));
+
+  // Setup data.
+  data->SetBackground(views::CreateSolidBackground(kHUDBackground));
+  data->SetBorder(views::CreateEmptyBorder(
+      gfx::Insets(kHUDGraphsInset, kHUDInset, kHUDInset, kHUDInset)));
+
+  // We have two child views z-stacked.
+  // The bottom one is GraphsContainerView with all the graph lines.
+  // The top one is settings UI overlay.
+  data->SetLayoutManager(std::make_unique<views::FillLayout>());
+  graphs_container_ =
+      data->AddChildView(std::make_unique<GraphsContainerView>());
+  settings_view_ = data->AddChildView(std::make_unique<HUDSettingsView>());
+  settings_view_->SetVisible(false);
+
+  // CPU display is active by default.
+  SetDisplayMode(DisplayMode::CPU_DISPLAY);
 }
 
 HUDDisplayView::~HUDDisplayView() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(ui_sequence_checker_);
 }
 
-////////////////////////////////////////////////////////////////////////////////
+// There is only one button.
+void HUDDisplayView::OnSettingsToggle() {
+  settings_view_->ToggleVisibility();
+  graphs_container_->SetVisible(!settings_view_->GetVisible());
+}
 
-void HUDDisplayView::UpdateAndPaint() {
-  // TODO: Should probably update last graph point more often than shift graph.
-  const DataSource::Snapshot snapshot = data_source_.GetSnapshotAndReset();
+int HUDDisplayView::NonClientHitTest(const gfx::Point& point) {
+  const View* view = GetEventHandlerForPoint(point);
+  if (!view)
+    return HTNOWHERE;
 
-  const double total = snapshot.total_ram;
-  // Nothing to do if data is not available yet.
-  if (total < 1)
-    return;
+  return view->GetProperty(kHUDClickHandler);
+}
 
-  const float chrome_rss_private =
-      (snapshot.browser_rss - snapshot.browser_rss_shared) / total;
-  const float mem_free = snapshot.free_ram / total;
-  // mem_used_unknown is calculated below.
-  const float renderers_rss_private =
-      (snapshot.renderers_rss - snapshot.renderers_rss_shared) / total;
-  const float arc_rss_private =
-      (snapshot.arc_rss - snapshot.arc_rss_shared) / total;
-  const float gpu_rss_private =
-      (snapshot.gpu_rss - snapshot.gpu_rss_shared) / total;
-  const float gpu_kernel = snapshot.gpu_kernel / total;
-
-  // not stacked.
-  const float chrome_rss_shared = snapshot.browser_rss_shared / total;
-
-  std::vector<float> used_buckets;
-  used_buckets.push_back(chrome_rss_private);
-  used_buckets.push_back(mem_free);
-  used_buckets.push_back(renderers_rss_private);
-  used_buckets.push_back(arc_rss_private);
-  used_buckets.push_back(gpu_rss_private);
-  used_buckets.push_back(gpu_kernel);
-
-  float mem_used_unknown =
-      1 - std::accumulate(used_buckets.begin(), used_buckets.end(), 0.0f);
-
-  if (mem_used_unknown < 0)
-    LOG(WARNING) << "mem_used_unknown=" << mem_used_unknown << " < 0 !";
-
-  // Update graph data.
-  graph_chrome_rss_private_.AddValue(chrome_rss_private);
-  graph_mem_free_.AddValue(mem_free);
-  graph_mem_used_unknown_.AddValue(std::max(mem_used_unknown, 0.0f));
-  graph_renderers_rss_private_.AddValue(renderers_rss_private);
-  graph_arc_rss_private_.AddValue(arc_rss_private);
-  graph_gpu_rss_private_.AddValue(gpu_rss_private);
-  graph_gpu_kernel_.AddValue(gpu_kernel);
-  // Not stacked.
-  graph_chrome_rss_shared_.AddValue(chrome_rss_shared);
-
-  // Layout graphs.
-  graph_chrome_rss_private_.Layout(memory_stats_rect_, nullptr /* base*/);
-  graph_mem_free_.Layout(memory_stats_rect_, &graph_chrome_rss_private_);
-  graph_mem_used_unknown_.Layout(memory_stats_rect_, &graph_mem_free_);
-  graph_renderers_rss_private_.Layout(memory_stats_rect_,
-                                      &graph_mem_used_unknown_);
-  graph_arc_rss_private_.Layout(memory_stats_rect_,
-                                &graph_renderers_rss_private_);
-  graph_gpu_rss_private_.Layout(memory_stats_rect_, &graph_arc_rss_private_);
-  graph_gpu_kernel_.Layout(memory_stats_rect_, &graph_gpu_rss_private_);
-  // Not stacked.
-  graph_chrome_rss_shared_.Layout(memory_stats_rect_, nullptr /* base*/);
-
-  // Paint damaged area now that all parameters have been determined.
-  {
-    ScopedPaint paint(this, canvas_rect_);
-    DrawGraphBackground(paint.canvas(), canvas_rect_);
-    graph_chrome_rss_private_.Draw(&paint.canvas());
-    graph_mem_free_.Draw(&paint.canvas());
-    graph_mem_used_unknown_.Draw(&paint.canvas());
-    graph_renderers_rss_private_.Draw(&paint.canvas());
-    graph_arc_rss_private_.Draw(&paint.canvas());
-    graph_gpu_rss_private_.Draw(&paint.canvas());
-    graph_gpu_kernel_.Draw(&paint.canvas());
-
-    graph_chrome_rss_shared_.Draw(&paint.canvas());
-  }
-
-  UpdateSurface(/*content_rect=*/canvas_rect_,
-                /*damage_rect=*/canvas_rect_,
-                /*auto_refresh=*/false);
+void HUDDisplayView::SetDisplayMode(DisplayMode display_mode) {
+  graphs_container_->SetMode(display_mode);
+  header_view_->tab_strip()->ActivateTab(display_mode);
 }
 
 }  // namespace hud_display

@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "base/memory/singleton.h"
+#include "base/scoped_observer.h"
 #include "base/stl_util.h"
 #include "ui/accessibility/ax_action_data.h"
 #include "ui/accessibility/ax_enums.mojom.h"
@@ -86,12 +87,11 @@ class AuraLinuxApplication : public ui::AXPlatformNodeDelegateBase,
       return;
 
     widgets_.push_back(widget);
-    widget->AddObserver(this);
+    widget_observer_.Add(widget);
 
     aura::Window* window = widget->GetNativeWindow();
-    if (!window)
-      return;
-    window->AddObserver(this);
+    if (window)
+      window_observer_.Add(window);
   }
 
   gfx::NativeViewAccessible GetNativeViewAccessible() override {
@@ -103,9 +103,13 @@ class AuraLinuxApplication : public ui::AXPlatformNodeDelegateBase,
   // WidgetObserver:
 
   void OnWidgetDestroying(Widget* widget) override {
+    widget_observer_.Remove(widget);
+
+    aura::Window* window = widget->GetNativeWindow();
+    if (window && window_observer_.IsObserving(window))
+      window_observer_.Remove(window);
+
     auto iter = std::find(widgets_.begin(), widgets_.end(), widget);
-    // Since |widget| is about to be destroyed, there is no point in removing
-    // |this| from its list of observers.
     if (iter != widgets_.end())
       widgets_.erase(iter);
   }
@@ -163,6 +167,8 @@ class AuraLinuxApplication : public ui::AXPlatformNodeDelegateBase,
   ui::AXNodeData data_;
   ui::AXUniqueId unique_id_;
   std::vector<Widget*> widgets_;
+  ScopedObserver<views::Widget, views::WidgetObserver> widget_observer_{this};
+  ScopedObserver<aura::Window, aura::WindowObserver> window_observer_{this};
 };
 
 }  // namespace
@@ -181,8 +187,9 @@ ViewAXPlatformNodeDelegateAuraLinux::ViewAXPlatformNodeDelegateAuraLinux(
 
 gfx::NativeViewAccessible ViewAXPlatformNodeDelegateAuraLinux::GetParent() {
   if (gfx::NativeViewAccessible parent =
-          ViewAXPlatformNodeDelegate::GetParent())
+          ViewAXPlatformNodeDelegate::GetParent()) {
     return parent;
+  }
 
   Widget* parent_widget =
       GetWidgetOfParentWindowIncludingTransient(view()->GetWidget());

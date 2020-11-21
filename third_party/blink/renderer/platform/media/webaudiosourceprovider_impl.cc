@@ -8,10 +8,12 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/logging.h"
+#include "base/callback_forward.h"
+#include "base/check_op.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/notreached.h"
 #include "base/thread_annotations.h"
 #include "media/base/audio_timestamp_helper.h"
 #include "media/base/bind_to_current_loop.h"
@@ -74,8 +76,39 @@ class WebAudioSourceProviderImpl::TeeFilter
   int Render(base::TimeDelta delay,
              base::TimeTicks delay_timestamp,
              int prior_frames_skipped,
-             media::AudioBus* dest) override;
-  void OnRenderError() override;
+             media::AudioBus* audio_bus) override {
+    DCHECK(initialized());
+    DCHECK_EQ(audio_bus->channels(), channels_);
+
+    const int num_rendered_frames = renderer_->Render(
+        delay, delay_timestamp, prior_frames_skipped, audio_bus);
+
+    // Avoid taking the copy lock for the vast majority of cases.
+    if (copy_required_) {
+      base::AutoLock auto_lock(copy_lock_);
+      if (!copy_audio_bus_callback_.is_null()) {
+        const int64_t frames_delayed =
+            media::AudioTimestampHelper::TimeToFrames(delay, sample_rate_);
+        std::unique_ptr<media::AudioBus> bus_copy =
+            media::AudioBus::Create(audio_bus->channels(), audio_bus->frames());
+        // Disable copying when origin is tainted.
+        if (origin_tainted_.IsSet())
+          bus_copy->Zero();
+        else
+          audio_bus->CopyTo(bus_copy.get());
+        copy_audio_bus_callback_.Run(std::move(bus_copy),
+                                     static_cast<uint32_t>(frames_delayed),
+                                     sample_rate_);
+      }
+    }
+
+    return num_rendered_frames;
+  }
+
+  void OnRenderError() override {
+    DCHECK(initialized());
+    renderer_->OnRenderError();
+  }
 
   bool initialized() const { return !!renderer_; }
   int channels() const { return channels_; }
@@ -87,10 +120,18 @@ class WebAudioSourceProviderImpl::TeeFilter
     copy_audio_bus_callback_ = std::move(callback);
   }
 
+  void TaintOrigin() { origin_tainted_.Set(); }
+  bool is_tainted() const { return origin_tainted_.IsSet(); }
+
  private:
   AudioRendererSink::RenderCallback* renderer_ = nullptr;
   int channels_ = 0;
   int sample_rate_ = 0;
+
+  // Indicates whether the audio source is tainted, and output should be muted.
+  // This can happen if the media element source is a cross-origin source which
+  // the page is not allowed to access due to CORS restrictions.
+  base::AtomicFlag origin_tainted_;
 
   // The vast majority of the time we're operating in passthrough mode. So only
   // acquire a lock to read |copy_audio_bus_callback_| when necessary.
@@ -103,13 +144,15 @@ class WebAudioSourceProviderImpl::TeeFilter
 
 WebAudioSourceProviderImpl::WebAudioSourceProviderImpl(
     scoped_refptr<media::SwitchableAudioRendererSink> sink,
-    media::MediaLog* media_log)
+    media::MediaLog* media_log,
+    base::OnceClosure on_set_client_callback /* = base::OnceClosure()*/)
     : volume_(1.0),
       state_(kStopped),
       client_(nullptr),
       sink_(std::move(sink)),
       tee_filter_(new TeeFilter()),
-      media_log_(media_log) {}
+      media_log_(media_log),
+      on_set_client_callback_(std::move(on_set_client_callback)) {}
 
 WebAudioSourceProviderImpl::~WebAudioSourceProviderImpl() = default;
 
@@ -134,7 +177,7 @@ void WebAudioSourceProviderImpl::SetClient(
     // The client will now take control by calling provideInput() periodically.
     client_ = client;
 
-    set_format_cb_ = media::BindToCurrentLoop(WTF::Bind(
+    set_format_cb_ = media::BindToCurrentLoop(WTF::BindRepeating(
         &WebAudioSourceProviderImpl::OnSetFormat, weak_factory_.GetWeakPtr()));
 
     // If |tee_filter_| is Initialize()d - then run |set_format_cb_| to send
@@ -142,13 +185,21 @@ void WebAudioSourceProviderImpl::SetClient(
     // called when Initialize() is called. Note: Always using |set_format_cb_|
     // ensures we have the same locking order when calling into |client_|.
     if (tee_filter_->initialized())
-      std::move(set_format_cb_).Run();
+      set_format_cb_.Run();
+
+    if (on_set_client_callback_)
+      std::move(on_set_client_callback_).Run();
+
     return;
   }
 
   // Drop client, but normal playback can't be restored. This is okay, the only
   // way to disconnect a client is internally at time of destruction.
   client_ = nullptr;
+
+  // We need to invalidate WeakPtr references on the renderer thread.
+  set_format_cb_.Reset();
+  weak_factory_.InvalidateWeakPtrs();
 }
 
 void WebAudioSourceProviderImpl::ProvideInput(
@@ -175,9 +226,25 @@ void WebAudioSourceProviderImpl::ProvideInput(
   }
 
   DCHECK(client_);
-  DCHECK_EQ(tee_filter_->channels(), bus_wrapper_->channels());
+
+  // It may be the case that the given |audio_data| doesn't have the same number
+  // of channels as we were expecting, due to a race condition. In that case,
+  // simply output silence.
+  if (tee_filter_->channels() != bus_wrapper_->channels()) {
+    DVLOG(2) << "Outputting silence due to mismatched channel count";
+    bus_wrapper_->Zero();
+    return;
+  }
+
   const int frames = tee_filter_->Render(
       base::TimeDelta(), base::TimeTicks::Now(), 0, bus_wrapper_.get());
+
+  // Zero out frames after rendering for tainted origins.
+  if (tee_filter_->is_tainted()) {
+    bus_wrapper_->Zero();
+    return;
+  }
+
   if (frames < incoming_number_of_frames)
     bus_wrapper_->ZeroFramesPartial(frames, incoming_number_of_frames - frames);
 
@@ -196,7 +263,7 @@ void WebAudioSourceProviderImpl::Initialize(
     sink_->Initialize(params, tee_filter_.get());
 
   if (set_format_cb_)
-    std::move(set_format_cb_).Run();
+    set_format_cb_.Run();
 }
 
 void WebAudioSourceProviderImpl::Start() {
@@ -287,6 +354,10 @@ void WebAudioSourceProviderImpl::SwitchOutputDevice(
     sink_->SwitchOutputDevice(device_id, std::move(callback));
 }
 
+void WebAudioSourceProviderImpl::TaintOrigin() {
+  tee_filter_->TaintOrigin();
+}
+
 void WebAudioSourceProviderImpl::SetCopyAudioCallback(CopyAudioCB callback) {
   DCHECK(!callback.is_null());
   tee_filter_->SetCopyAudioCallback(std::move(callback));
@@ -308,39 +379,6 @@ void WebAudioSourceProviderImpl::OnSetFormat() {
 
   // Inform Blink about the audio stream format.
   client_->SetFormat(tee_filter_->channels(), tee_filter_->sample_rate());
-}
-
-int WebAudioSourceProviderImpl::TeeFilter::Render(
-    base::TimeDelta delay,
-    base::TimeTicks delay_timestamp,
-    int prior_frames_skipped,
-    media::AudioBus* audio_bus) {
-  DCHECK(initialized());
-
-  const int num_rendered_frames = renderer_->Render(
-      delay, delay_timestamp, prior_frames_skipped, audio_bus);
-
-  // Avoid taking the copy lock for the vast majority of cases.
-  if (copy_required_) {
-    base::AutoLock auto_lock(copy_lock_);
-    if (!copy_audio_bus_callback_.is_null()) {
-      const int64_t frames_delayed =
-          media::AudioTimestampHelper::TimeToFrames(delay, sample_rate_);
-      std::unique_ptr<media::AudioBus> bus_copy =
-          media::AudioBus::Create(audio_bus->channels(), audio_bus->frames());
-      audio_bus->CopyTo(bus_copy.get());
-      copy_audio_bus_callback_.Run(std::move(bus_copy),
-                                   static_cast<uint32_t>(frames_delayed),
-                                   sample_rate_);
-    }
-  }
-
-  return num_rendered_frames;
-}
-
-void WebAudioSourceProviderImpl::TeeFilter::OnRenderError() {
-  DCHECK(initialized());
-  renderer_->OnRenderError();
 }
 
 }  // namespace blink

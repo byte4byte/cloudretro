@@ -27,8 +27,6 @@ class COMPONENT_EXPORT(CHROMEOS_LOGIN_AUTH) ExtendedAuthenticatorImpl
     : public ExtendedAuthenticator {
  public:
   static scoped_refptr<ExtendedAuthenticatorImpl> Create(
-      NewAuthStatusConsumer* consumer);
-  static scoped_refptr<ExtendedAuthenticatorImpl> Create(
       AuthStatusConsumer* consumer);
 
   // ExtendedAuthenticator:
@@ -37,6 +35,14 @@ class COMPONENT_EXPORT(CHROMEOS_LOGIN_AUTH) ExtendedAuthenticatorImpl
                            ResultCallback success_callback) override;
   void AuthenticateToCheck(const UserContext& context,
                            base::OnceClosure success_callback) override;
+  void StartFingerprintAuthSession(
+      const AccountId& account_id,
+      base::OnceCallback<void(bool)> callback) override;
+  void EndFingerprintAuthSession() override;
+  void AuthenticateWithFingerprint(
+      const UserContext& context,
+      base::OnceCallback<void(cryptohome::CryptohomeErrorCode)> callback)
+      override;
   void AddKey(const UserContext& context,
               const cryptohome::KeyDefinition& key,
               bool clobber_if_exists,
@@ -52,7 +58,6 @@ class COMPONENT_EXPORT(CHROMEOS_LOGIN_AUTH) ExtendedAuthenticatorImpl
                             ContextCallback callback) override;
 
  private:
-  explicit ExtendedAuthenticatorImpl(NewAuthStatusConsumer* consumer);
   explicit ExtendedAuthenticatorImpl(AuthStatusConsumer* consumer);
   ~ExtendedAuthenticatorImpl() override;
 
@@ -86,13 +91,18 @@ class COMPONENT_EXPORT(CHROMEOS_LOGIN_AUTH) ExtendedAuthenticatorImpl
                            base::OnceClosure success_callback,
                            bool success,
                            cryptohome::MountError return_code);
+  void OnStartFingerprintAuthSessionComplete(
+      base::OnceCallback<void(bool)> callback,
+      base::Optional<cryptohome::BaseReply> reply);
+  void OnFingerprintScanComplete(
+      base::OnceCallback<void(cryptohome::CryptohomeErrorCode)> callback,
+      base::Optional<cryptohome::BaseReply> reply);
 
   bool salt_obtained_;
   std::string system_salt_;
   std::vector<base::OnceClosure> system_salt_callbacks_;
 
-  NewAuthStatusConsumer* consumer_;
-  AuthStatusConsumer* old_consumer_;
+  AuthStatusConsumer* consumer_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtendedAuthenticatorImpl);
 };

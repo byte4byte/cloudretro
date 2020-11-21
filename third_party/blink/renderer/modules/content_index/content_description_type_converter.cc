@@ -57,7 +57,8 @@ blink::mojom::blink::ContentDescriptionPtr TypeConverter<
   result->category = GetContentCategory(description->category());
   for (const auto& icon : description->icons()) {
     result->icons.push_back(blink::mojom::blink::ContentIconDefinition::New(
-        icon->src(), icon->sizes(), icon->type()));
+        icon->src(), icon->hasSizes() ? icon->sizes() : String(),
+        icon->hasType() ? icon->type() : String()));
   }
   result->launch_url = description->url();
 
@@ -76,11 +77,12 @@ TypeConverter<blink::ContentDescription*,
 
   blink::HeapVector<blink::Member<blink::ContentIconDefinition>> blink_icons;
   for (const auto& icon : description->icons) {
-    auto* blink_icon =
-        blink::MakeGarbageCollected<blink::ContentIconDefinition>();
+    auto* blink_icon = blink::ContentIconDefinition::Create();
     blink_icon->setSrc(icon->src);
-    blink_icon->setSizes(icon->sizes);
-    blink_icon->setType(icon->type);
+    if (!icon->sizes.IsNull())
+      blink_icon->setSizes(icon->sizes);
+    if (!icon->type.IsNull())
+      blink_icon->setType(icon->type);
     blink_icons.push_back(blink_icon);
   }
   result->setIcons(blink_icons);

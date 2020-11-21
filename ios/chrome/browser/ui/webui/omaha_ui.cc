@@ -70,8 +70,8 @@ void OmahaDOMHandler::RegisterMessages() {
 void OmahaDOMHandler::HandleRequestDebugInformation(
     const base::ListValue* args) {
   OmahaService::GetDebugInformation(
-      base::Bind(&OmahaDOMHandler::OnDebugInformationAvailable,
-                 weak_ptr_factory_.GetWeakPtr()));
+      base::BindOnce(&OmahaDOMHandler::OnDebugInformationAvailable,
+                     weak_ptr_factory_.GetWeakPtr()));
 }
 
 void OmahaDOMHandler::OnDebugInformationAvailable(
@@ -83,7 +83,8 @@ void OmahaDOMHandler::OnDebugInformationAvailable(
 }  // namespace
 
 // OmahaUI
-OmahaUI::OmahaUI(web::WebUIIOS* web_ui) : WebUIIOSController(web_ui) {
+OmahaUI::OmahaUI(web::WebUIIOS* web_ui, const std::string& host)
+    : WebUIIOSController(web_ui, host) {
   web_ui->AddMessageHandler(std::make_unique<OmahaDOMHandler>());
 
   // Set up the chrome://omaha/ source.

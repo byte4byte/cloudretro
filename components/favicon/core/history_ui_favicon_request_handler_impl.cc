@@ -84,8 +84,7 @@ void HistoryUiFaviconRequestHandlerImpl::GetRawFaviconForPageURL(
     const GURL& page_url,
     int desired_size_in_pixel,
     favicon_base::FaviconRawBitmapCallback callback,
-    HistoryUiFaviconRequestOrigin request_origin_for_uma,
-    const GURL& icon_url_for_uma) {
+    HistoryUiFaviconRequestOrigin request_origin_for_uma) {
   // First attempt to find the icon locally.
   favicon_service_->GetRawFaviconForPageURL(
       page_url, GetIconTypesForLocalQuery(), desired_size_in_pixel,
@@ -101,8 +100,7 @@ void HistoryUiFaviconRequestHandlerImpl::GetRawFaviconForPageURL(
 void HistoryUiFaviconRequestHandlerImpl::GetFaviconImageForPageURL(
     const GURL& page_url,
     favicon_base::FaviconImageCallback callback,
-    HistoryUiFaviconRequestOrigin request_origin_for_uma,
-    const GURL& icon_url_for_uma) {
+    HistoryUiFaviconRequestOrigin request_origin_for_uma) {
   // First attempt to find the icon locally.
   favicon_service_->GetFaviconImageForPageURL(
       page_url,
@@ -133,7 +131,9 @@ void HistoryUiFaviconRequestHandlerImpl::OnBitmapLocalDataAvailable(
   }
 
   if (can_send_history_data_getter_.Run()) {
-    // TODO(victorvianna): Avoid using AdaptCallbackForRepeating.
+    // base::AdaptCallbackForRepeating() is necessary here because
+    // |response_callback| is needed to build both the empty response and local
+    // lookup callbacks. This is safe because only one of the two is called.
     base::RepeatingCallback<void(const favicon_base::FaviconRawBitmapResult&)>
         repeating_response_callback =
             base::AdaptCallbackForRepeating(std::move(response_callback));
@@ -179,12 +179,12 @@ void HistoryUiFaviconRequestHandlerImpl::OnImageLocalDataAvailable(
   }
 
   if (can_send_history_data_getter_.Run()) {
-    // TODO(victorvianna): Avoid using AdaptCallbackForRepeating.
+    // base::AdaptCallbackForRepeating() is necessary here because
+    // |response_callback| is needed to build both the empty response and local
+    // lookup callbacks. This is safe because only one of the two is called.
     base::RepeatingCallback<void(const favicon_base::FaviconImageResult&)>
         repeating_response_callback =
             base::AdaptCallbackForRepeating(std::move(response_callback));
-    // We use CreateForDesktop because GetFaviconImageForPageURL is only called
-    // by desktop.
     RequestFromGoogleServer(
         page_url,
         /*empty_response_callback=*/

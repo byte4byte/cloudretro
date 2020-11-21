@@ -6,6 +6,7 @@
 
 #include <utility>
 
+#include "base/logging.h"
 #include "base/strings/string_util.h"
 #include "jingle/glue/thread_wrapper.h"
 #include "remoting/base/constants.h"
@@ -130,6 +131,8 @@ void WebrtcConnectionToHost::OnWebrtcTransportError(ErrorCode error) {
   SetState(FAILED, error);
 }
 
+void WebrtcConnectionToHost::OnWebrtcTransportProtocolChanged() {}
+
 void WebrtcConnectionToHost::OnWebrtcTransportIncomingDataChannel(
     const std::string& name,
     std::unique_ptr<MessagePipe> pipe) {
@@ -168,6 +171,9 @@ void WebrtcConnectionToHost::OnWebrtcTransportMediaStreamRemoved(
   if (video_adapter_ && video_adapter_->label() == stream->id())
     video_adapter_.reset();
 }
+
+void WebrtcConnectionToHost::OnWebrtcTransportRouteChanged(
+    const TransportRoute& route) {}
 
 void WebrtcConnectionToHost::OnChannelInitialized(
     ChannelDispatcherBase* channel_dispatcher) {

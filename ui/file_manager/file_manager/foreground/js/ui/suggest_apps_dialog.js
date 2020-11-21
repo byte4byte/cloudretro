@@ -196,6 +196,11 @@ class SuggestAppsDialog extends FileManagerDialogBase {
        *     token (null on error).
        */
       requestWebstoreAccessToken: function(callback) {
+        if (window.isSWA) {
+          callback('42');
+          return;
+        }
+
         chrome.fileManagerPrivate.requestWebStoreAccessToken(token => {
           if (chrome.runtime.lastError) {
             console.error(chrome.runtime.lastError.message);
@@ -223,6 +228,8 @@ class SuggestAppsDialog extends FileManagerDialogBase {
   showInternal_(options, title, webStoreUrl, onDialogClosed) {
     this.text.hidden = true;
     this.dialogText_ = '';
+
+    this.frame.classList.toggle('no-title', !title);
 
     if (!this.widget_.isInInitialState()) {
       onDialogClosed(SuggestAppsDialog.Result.CANCELLED, null);

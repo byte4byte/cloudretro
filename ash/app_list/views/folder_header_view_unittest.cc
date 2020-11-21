@@ -74,15 +74,15 @@ class FolderHeaderViewTest : public views::ViewsTestBase {
     widget_->Init(std::move(params));
     widget_->Show();
 
-    folder_header_view_ = std::make_unique<FolderHeaderView>(delegate_.get());
     textfield_ = std::make_unique<views::Textfield>();
-    widget_->SetContentsView(folder_header_view_.get());
+    folder_header_view_ = widget_->SetContentsView(
+        std::make_unique<FolderHeaderView>(delegate_.get()));
   }
 
   void TearDown() override {
     widget_->Close();
+    widget_.reset();
     textfield_.reset();
-    folder_header_view_.reset();  // Release apps grid view before models.
     delegate_.reset();
     views::ViewsTestBase::TearDown();
   }
@@ -112,7 +112,7 @@ class FolderHeaderViewTest : public views::ViewsTestBase {
   }
 
   std::unique_ptr<AppListTestModel> model_;
-  std::unique_ptr<FolderHeaderView> folder_header_view_;
+  FolderHeaderView* folder_header_view_ = nullptr;  // owned by |widget_|.
   std::unique_ptr<TestFolderHeaderViewDelegate> delegate_;
   std::unique_ptr<views::Textfield> textfield_;
   std::unique_ptr<views::Widget> widget_;
@@ -147,7 +147,7 @@ TEST_F(FolderHeaderViewTest, WhitespaceCollapsedWhenFolderNameViewLosesFocus) {
   EXPECT_EQ("N A", delegate_->folder_name());
 }
 
-TEST_F(FolderHeaderViewTest, MaxFoldernNameLength) {
+TEST_F(FolderHeaderViewTest, MaxFolderNameLength) {
   // Creating a folder with empty folder name.
   AppListFolderItem* folder_item = model_->CreateAndPopulateFolderWithApps(2);
   folder_header_view_->SetFolderItem(folder_item);
@@ -188,40 +188,74 @@ TEST_F(FolderHeaderViewTest, OemFolderNameNotEditable) {
   EXPECT_FALSE(CanEditFolderName());
 }
 
-// Tests that folder name textfield is triggered when user touches on or near
-// the folder name. (see https://crbug.com/997364)
+namespace {
+
+// Sends a tap gesture with events corresponding to touch-down and touch-up.
+// This is a template to support a |handler| with an OnGestureEvent() method
+// that isn't a ui::EventHandler implementation.
+template <typename GestureHandler>
+void SendTap(GestureHandler* handler, const gfx::Point& location) {
+  ui::GestureEvent tap_down(
+      location.x(), location.y(), 0, base::TimeTicks::Now(),
+      ui::GestureEventDetails(ui::EventType::ET_GESTURE_TAP_DOWN));
+  handler->OnGestureEvent(&tap_down);
+  ui::GestureEvent tap_up(
+      location.x(), location.y(), 0, base::TimeTicks::Now(),
+      ui::GestureEventDetails(ui::EventType::ET_GESTURE_TAP));
+  handler->OnGestureEvent(&tap_up);
+}
+
+template <typename EventHandler>
+void SendPress(EventHandler* handler, const gfx::Point& location) {
+  ui::MouseEvent press_down(ui::ET_MOUSE_PRESSED,
+                            gfx::PointF(location.x(), location.y()),
+                            gfx::PointF(0, 0), base::TimeTicks::Now(), 0, 0);
+  handler->OnMouseEvent(&press_down);
+  ui::MouseEvent press_up(ui::ET_MOUSE_RELEASED,
+                          gfx::PointF(location.x(), location.y()),
+                          gfx::PointF(0, 0), base::TimeTicks::Now(), 0, 0);
+  handler->OnMouseEvent(&press_up);
+}
+
+}  // namespace
+
+// Tests that when folder name is small, the folder name textfield is triggered
+// by only tap when on the textfieldd or near it to the left/right.
 TEST_F(FolderHeaderViewTest, TriggerFolderRenameAfterTappingNearFolderName) {
-  // Creating a folder with empty folder name.
+  // Create a folder with a small name.
   AppListFolderItem* folder_item = model_->CreateAndPopulateFolderWithApps(2);
   folder_header_view_->SetFolderItem(folder_item);
+  UpdateFolderName("ab");
 
   // Get in screen bounds of folder name
-  const gfx::Rect name_view_bounds =
-      folder_header_view_->GetFolderNameViewForTest()->GetBoundsInScreen();
+  views::View* name_view = folder_header_view_->GetFolderNameViewForTest();
+  const gfx::Rect name_view_bounds = name_view->GetBoundsInScreen();
 
   // Tap folder name and check that folder renaming is triggered.
-  gfx::Point name_center_point = name_view_bounds.CenterPoint();
-  ui::GestureEvent tap_center(
-      name_center_point.x(), name_center_point.y(), 0, base::TimeTicks::Now(),
-      ui::GestureEventDetails(ui::EventType::ET_GESTURE_TAP_DOWN));
-  folder_header_view_->GetFolderNameViewForTest()->OnGestureEvent(&tap_center);
+  SendTap(name_view, name_view_bounds.CenterPoint());
   base::RunLoop().RunUntilIdle();
-  EXPECT_TRUE(folder_header_view_->GetFolderNameViewForTest()->HasFocus());
+  EXPECT_TRUE(name_view->HasFocus());
 
   // Clear focus from the folder name.
   widget_->GetFocusManager()->ClearFocus();
-  ASSERT_FALSE(folder_header_view_->GetFolderNameViewForTest()->HasFocus());
+  ASSERT_FALSE(name_view->HasFocus());
 
   // Test that tapping near (but not directly on) the folder name still
   // triggers folder rename.
   // Tap folder name and check that folder renaming is triggered.
-  ui::GestureEvent tap_near(
-      name_view_bounds.top_right().x(), name_view_bounds.top_right().y(), 0,
-      base::TimeTicks::Now(),
-      ui::GestureEventDetails(ui::EventType::ET_GESTURE_TAP_DOWN));
-  widget_->OnGestureEvent(&tap_near);
+  gfx::Point right_of_name_view = name_view_bounds.right_center();
+  right_of_name_view.Offset(2, 0);
+  SendTap(widget_.get(), right_of_name_view);
+  base::RunLoop().RunUntilIdle();
+  EXPECT_TRUE(name_view->HasFocus());
 
-  EXPECT_TRUE(folder_header_view_->GetFolderNameViewForTest()->HasFocus());
+  // Clear focus from the folder name.
+  widget_->GetFocusManager()->ClearFocus();
+  ASSERT_FALSE(name_view->HasFocus());
+
+  // Test that clicking in the same spot won't trigger folder rename.
+  SendPress(widget_.get(), right_of_name_view);
+  EXPECT_FALSE(name_view->HasFocus());
 }
 
 }  // namespace test

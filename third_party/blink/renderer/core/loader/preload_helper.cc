@@ -6,6 +6,7 @@
 
 #include "services/network/public/cpp/features.h"
 #include "third_party/blink/public/common/features.h"
+#include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_prescient_networking.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
@@ -30,7 +31,7 @@
 #include "third_party/blink/renderer/core/loader/resource/css_style_sheet_resource.h"
 #include "third_party/blink/renderer/core/loader/resource/font_resource.h"
 #include "third_party/blink/renderer/core/loader/resource/image_resource.h"
-#include "third_party/blink/renderer/core/loader/resource/link_fetch_resource.h"
+#include "third_party/blink/renderer/core/loader/resource/link_prefetch_resource.h"
 #include "third_party/blink/renderer/core/loader/resource/script_resource.h"
 #include "third_party/blink/renderer/core/loader/subresource_integrity_helper.h"
 #include "third_party/blink/renderer/core/page/viewport_description.h"
@@ -316,15 +317,18 @@ Resource* PreloadHelper::PreloadIfNeeded(
   resource_request.SetFetchImportanceMode(
       GetFetchImportanceAttributeValue(params.importance));
 
-  ResourceLoaderOptions options;
+  ResourceLoaderOptions options(
+      document.GetExecutionContext()->GetCurrentWorld());
+
   options.initiator_info.name = fetch_initiator_type_names::kLink;
   options.parser_disposition = parser_disposition;
   FetchParameters link_fetch_params(std::move(resource_request), options);
   link_fetch_params.SetCharset(document.Encoding());
 
   if (params.cross_origin != kCrossOriginAttributeNotSet) {
-    link_fetch_params.SetCrossOriginAccessControl(document.GetSecurityOrigin(),
-                                                  params.cross_origin);
+    link_fetch_params.SetCrossOriginAccessControl(
+        document.GetExecutionContext()->GetSecurityOrigin(),
+        params.cross_origin);
   }
 
   const String& integrity_attr = params.integrity;
@@ -395,9 +399,9 @@ void PreloadHelper::ModulePreloadIfNeeded(
   // settings object." [spec text]
   // |document| is the node document here, and its context document is the
   // relevant settings object.
-  Document* context_document = document.ContextDocument();
+  LocalDOMWindow* window = To<LocalDOMWindow>(document.GetExecutionContext());
   Modulator* modulator =
-      Modulator::From(ToScriptStateForMainWorld(context_document->GetFrame()));
+      Modulator::From(ToScriptStateForMainWorld(window->GetFrame()));
   DCHECK(modulator);
   if (!modulator)
     return;
@@ -423,7 +427,8 @@ void PreloadHelper::ModulePreloadIfNeeded(
     }
     return;
   }
-  mojom::RequestContextType context_type = mojom::RequestContextType::SCRIPT;
+  mojom::blink::RequestContextType context_type =
+      mojom::blink::RequestContextType::SCRIPT;
   network::mojom::RequestDestination destination =
       network::mojom::RequestDestination::kScript;
 
@@ -492,7 +497,7 @@ void PreloadHelper::ModulePreloadIfNeeded(
   // destination, options, settings object, "client", and with the top-level
   // module fetch flag set. Wait until algorithm asynchronously completes with
   // result." [spec text]
-  modulator->FetchSingle(request, context_document->Fetcher(),
+  modulator->FetchSingle(request, window->Fetcher(),
                          ModuleGraphLevel::kDependentModuleFetch,
                          ModuleScriptCustomFetchType::kNone, client);
 
@@ -517,8 +522,15 @@ Resource* PreloadHelper::PrefetchIfNeeded(const LinkLoadParameters& params,
 
     ResourceRequest resource_request(params.href);
 
-    if (EqualIgnoringASCIICase(params.as, "document"))
+    // Later a security check is done asserting that the initiator of a
+    // cross-origin prefetch request is same-origin with the origin that the
+    // browser process is aware of. However, since opaque request initiators are
+    // always cross-origin with every other origin, we must not request
+    // cross-origin prefetches from opaque requestors.
+    if (EqualIgnoringASCIICase(params.as, "document") &&
+        !document.GetExecutionContext()->GetSecurityOrigin()->IsOpaque()) {
       resource_request.SetPrefetchMaybeForTopLevelNavigation(true);
+    }
 
     // This request could have originally been a preload header on a prefetch
     // response, that was promoted to a prefetch request by LoadLinksFromHeader.
@@ -538,21 +550,22 @@ Resource* PreloadHelper::PrefetchIfNeeded(const LinkLoadParameters& params,
       // See crbug.com/988956.
     }
 
-    ResourceLoaderOptions options;
+    ResourceLoaderOptions options(
+        document.GetExecutionContext()->GetCurrentWorld());
     options.initiator_info.name = fetch_initiator_type_names::kLink;
 
     FetchParameters link_fetch_params(std::move(resource_request), options);
     if (params.cross_origin != kCrossOriginAttributeNotSet) {
       link_fetch_params.SetCrossOriginAccessControl(
-          document.GetSecurityOrigin(), params.cross_origin);
+          document.GetExecutionContext()->GetSecurityOrigin(),
+          params.cross_origin);
     }
     link_fetch_params.SetSignedExchangePrefetchCacheEnabled(
         RuntimeEnabledFeatures::
             SignedExchangePrefetchCacheForNavigationsEnabled() ||
         RuntimeEnabledFeatures::SignedExchangeSubresourcePrefetchEnabled(
-            &document));
-    return LinkFetchResource::Fetch(ResourceType::kLinkPrefetch,
-                                    link_fetch_params, document.Fetcher());
+            document.GetExecutionContext()));
+    return LinkPrefetchResource::Fetch(link_fetch_params, document.Fetcher());
   }
   return nullptr;
 }
@@ -594,7 +607,7 @@ void PreloadHelper::LoadLinksFromHeader(
     if (alternate_resource_info && params.rel.IsLinkPreload()) {
       DCHECK(document);
       DCHECK(RuntimeEnabledFeatures::SignedExchangeSubresourcePrefetchEnabled(
-          document));
+          document->GetExecutionContext()));
       KURL url = params.href;
       base::Optional<ResourceType> resource_type =
           PreloadHelper::GetResourceTypeFromAsAttribute(params.as);
@@ -670,7 +683,7 @@ Resource* PreloadHelper::StartPreload(ResourceType type,
       resource = ImageResource::Fetch(params, resource_fetcher);
       break;
     case ResourceType::kScript:
-      params.SetRequestContext(mojom::RequestContextType::SCRIPT);
+      params.SetRequestContext(mojom::blink::RequestContextType::SCRIPT);
       params.SetRequestDestination(network::mojom::RequestDestination::kScript);
       resource = ScriptResource::Fetch(params, resource_fetcher, nullptr,
                                        ScriptResource::kAllowStreaming);
@@ -682,7 +695,7 @@ Resource* PreloadHelper::StartPreload(ResourceType type,
     case ResourceType::kFont:
       resource = FontResource::Fetch(params, resource_fetcher, nullptr);
       document.GetFontPreloadManager().FontPreloadingStarted(
-          ToFontResource(resource));
+          To<FontResource>(resource));
       break;
     case ResourceType::kAudio:
     case ResourceType::kVideo:

@@ -14,7 +14,6 @@
 
 #include "base/callback_forward.h"
 #include "base/containers/span.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
@@ -92,7 +91,7 @@ class CertificateProviderService : public KeyedService {
         int sign_request_id,
         uint16_t algorithm,
         const scoped_refptr<net::X509Certificate>& certificate,
-        base::span<const uint8_t> digest) = 0;
+        base::span<const uint8_t> input) = 0;
 
    private:
     DISALLOW_COPY_AND_ASSIGN(Delegate);
@@ -100,6 +99,11 @@ class CertificateProviderService : public KeyedService {
 
   class Observer : public base::CheckedObserver {
    public:
+    // Called when an extension updates the certificates it provides.
+    virtual void OnCertificatesUpdated(
+        const std::string& extension_id,
+        const CertificateInfoList& certificate_infos) {}
+
     // Called when a sign request gets successfully completed.
     virtual void OnSignCompleted(
         const scoped_refptr<net::X509Certificate>& certificate,
@@ -108,6 +112,9 @@ class CertificateProviderService : public KeyedService {
 
   // |SetDelegate| must be called exactly once directly after construction.
   CertificateProviderService();
+  CertificateProviderService(const CertificateProviderService&) = delete;
+  CertificateProviderService& operator=(const CertificateProviderService&) =
+      delete;
   ~CertificateProviderService() override;
 
   // Must be called exactly once after construction and before other methods are
@@ -119,17 +126,22 @@ class CertificateProviderService : public KeyedService {
   void AddObserver(Observer* observer);
   void RemoveObserver(Observer* observer);
 
-  // Must be called with the reply of an extension to a previous certificate
-  // request. For each request, it is expected that every registered extension
-  // replies exactly once with the latest list of certificates.
-  // |cert_request_id| must refer to a previously broadcast certificate request.
-  // Returns false and ignores the call if the request id is unknown or it was
-  // called before with the same combination of request id and extension id.
-  // E.g. the request could have timed out before an extension replies.
-  bool SetCertificatesProvidedByExtension(
+  // Updates the certificates provided by the extension with |extension_id| to
+  // be |certificates_infos|.
+  void SetCertificatesProvidedByExtension(
       const std::string& extension_id,
-      int cert_request_id,
       const CertificateInfoList& certificate_infos);
+
+  // Must be called when an extension replied to a previous certificate
+  // request, after the new certificates were registered with
+  // SetCertificatesProvidedByExtension(). For each request, it is expected that
+  // every registered extension replies exactly once. |cert_request_id| must
+  // refer to a previously broadcast certificate request. Returns false if the
+  // request id is unknown or it was called before with the same combination of
+  // request id and extension id. E.g. the request could have timed out before
+  // an extension replies.
+  bool SetExtensionCertificateReplyReceived(const std::string& extension_id,
+                                            int cert_request_id);
 
   // Must be called with the reply of an extension to a previous sign request.
   // |sign_request_id| is provided in the reply of the extension and must refer
@@ -137,11 +149,10 @@ class CertificateProviderService : public KeyedService {
   // not the sign request id alone but only the pair (extension id, sign request
   // id) is unambiguous.
   // If the signature could be calculated by the extension, |signature| is
-  // provided in the reply and should be the signature of the digest sent in the
+  // provided in the reply and should be the signature of the data sent in the
   // sign request. Otherwise, in case of a failure, |signature| must be empty.
-  // The call is ignored if |sign_request_id| is not referring to a pending
-  // request.
-  void ReplyToSignRequest(const std::string& extension_id,
+  // Returns false if |sign_request_id| is not referring to a pending request.
+  bool ReplyToSignRequest(const std::string& extension_id,
                           int sign_request_id,
                           const std::vector<uint8_t>& signature);
 
@@ -162,20 +173,25 @@ class CertificateProviderService : public KeyedService {
   // destruction of this service.
   std::unique_ptr<CertificateProvider> CreateCertificateProvider();
 
+  // Called whenever the extension with id |extension_id| unregisters from
+  // receiving future certificate requests. This will clear certificates
+  // currently provided by the extension.
+  void OnExtensionUnregistered(const std::string& extension_id);
+
   // Must be called if extension with id |extension_id| is unloaded and cannot
   // serve certificates anymore. This should be called everytime the
   // corresponding notification of the ExtensionRegistry is triggered.
   void OnExtensionUnloaded(const std::string& extension_id);
 
   // Requests the extension which provided the certificate identified by
-  // |subject_public_key_info| to sign |digest| with the corresponding private
-  // key. |algorithm| is a TLS 1.3 SignatureScheme value. See net::SSLPrivateKey
-  // for details. |callback| will be run with the reply of the extension or an
-  // error.
+  // |subject_public_key_info| to sign the unhashed |input| with the
+  // corresponding private key. |algorithm| is a TLS 1.3 SignatureScheme value.
+  // See net::SSLPrivateKey for details. |callback| will be run with the reply
+  // of the extension or an error.
   void RequestSignatureBySpki(
       const std::string& subject_public_key_info,
       uint16_t algorithm,
-      base::span<const uint8_t> digest,
+      base::span<const uint8_t> input,
       const base::Optional<AccountId>& authenticating_user_account_id,
       net::SSLPrivateKey::SignCallback callback);
 
@@ -208,12 +224,9 @@ class CertificateProviderService : public KeyedService {
   void GetCertificatesFromExtensions(
       base::OnceCallback<void(net::ClientCertIdentityList)> callback);
 
-  // Copies the given certificates into the internal
-  // |extension_to_certificates_|. Any previously stored certificates are
-  // dropped. Afterwards, passes the list of given certificates to |callback|.
-  void UpdateCertificatesAndRun(
-      const std::map<std::string, CertificateInfoList>&
-          extension_to_certificates,
+  // Collects all currently available certificates and passes them to
+  // |callback|.
+  void CollectCertificatesAndRun(
       base::OnceCallback<void(net::ClientCertIdentityList)> callback);
 
   // Terminates the certificate request with id |cert_request_id| by ignoring
@@ -221,16 +234,15 @@ class CertificateProviderService : public KeyedService {
   // are processed.
   void TerminateCertificateRequest(int cert_request_id);
 
-  // Requests extension with |extension_id| to sign |digest| with the private
-  // key certified by |certificate|. |algorithm| is a TLS 1.3 SignatureScheme
-  // value. See net::SSLPrivateKey for details. |digest| was created by
-  // |algorithm|'s prehash.  |callback| will be run with the reply of the
-  // extension or an error.
+  // Requests extension with |extension_id| to sign the unhashed |input| with
+  // the private key certified by |certificate|. |algorithm| is a TLS 1.3
+  // SignatureScheme value. See net::SSLPrivateKey for details. |callback| will
+  // be run with the reply of the extension or an error.
   void RequestSignatureFromExtension(
       const std::string& extension_id,
       const scoped_refptr<net::X509Certificate>& certificate,
       uint16_t algorithm,
-      base::span<const uint8_t> digest,
+      base::span<const uint8_t> input,
       const base::Optional<AccountId>& authenticating_user_account_id,
       net::SSLPrivateKey::SignCallback callback);
 
@@ -260,8 +272,6 @@ class CertificateProviderService : public KeyedService {
 
   SEQUENCE_CHECKER(sequence_checker_);
   base::WeakPtrFactory<CertificateProviderService> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(CertificateProviderService);
 };
 
 }  // namespace chromeos

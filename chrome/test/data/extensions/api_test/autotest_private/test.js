@@ -146,6 +146,27 @@ var defaultTests = [
     chrome.autotestPrivate.getVisibleNotifications(function(){});
     chrome.test.succeed();
   },
+  function removeAllNotifications() {
+    // Image data URL of a small red dot to use for the notification icon.
+    var red_dot = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUA' +
+        'AAAFCAYAAACNbyblAAAAHElEQVQI12P4//8/w38GIAXDIBKE0DHxgljNBAAO' +
+        '9TXL0Y4OHwAAAABJRU5ErkJggg=='
+    var opts =
+        {type: 'basic', title: 'test', message: 'test', iconUrl: red_dot};
+
+    chrome.notifications.create('test', opts, function() {
+      chrome.autotestPrivate.getVisibleNotifications(function(notifications) {
+        chrome.test.assertTrue(notifications.length > 0);
+        chrome.autotestPrivate.removeAllNotifications(function() {
+          chrome.autotestPrivate.getVisibleNotifications(function(
+              notifications) {
+            chrome.test.assertEq(notifications.length, 0);
+            chrome.test.succeed();
+          });
+        });
+      });
+    });
+  },
   // In this test, ARC is available but not managed and not enabled by default.
   function getPlayStoreState() {
     chrome.autotestPrivate.getPlayStoreState(function(state) {
@@ -163,6 +184,8 @@ var defaultTests = [
         chrome.test.assertTrue(state.allowed);
         chrome.test.assertTrue(state.enabled);
         chrome.test.assertFalse(state.managed);
+        // Revert to disable state as default in this test set.
+        chrome.autotestPrivate.setPlayStoreEnabled(false, function() {});
         chrome.test.succeed();
       });
     });
@@ -183,6 +206,11 @@ var defaultTests = [
                  chrome.test.succeed();
             });
         });
+  },
+  function waitForSystemWebAppsInstall() {
+    chrome.autotestPrivate.waitForSystemWebAppsInstall(
+      chrome.test.callbackPass()
+    );
   },
   // This launches and closes Chrome.
   function launchCloseApp() {
@@ -247,7 +275,7 @@ var defaultTests = [
     });
   },
   // The state dumped in Assistant API error message is AssistantAllowedState
-  // defined in ash/public/mojom/assistant_state_controller.mojom.
+  // defined in ash/public/cpp/assistant/assistant_state_base.h
   // 3 is DISALLOWED_BY_NONPRIMARY_USER from IsAssistantAllowedForProfile when
   // running under test without setting up a primary account.
   function setAssistantEnabled() {
@@ -267,21 +295,34 @@ var defaultTests = [
         chrome.test.callbackFail(
             'Assistant not allowed - state: 3'));
   },
+  // This test verifies the error message when trying to set Assistant-related
+  // preferences without enabling Assistant service first.
   function setWhitelistedPref() {
     chrome.autotestPrivate.setWhitelistedPref(
         'settings.voice_interaction.hotword.enabled' /* pref_name */,
         true /* value */,
         chrome.test.callbackFail(
-            'Assistant not allowed - state: 3'));
+            'Unable to set the pref because Assistant has not been enabled.'));
+    chrome.autotestPrivate.setWhitelistedPref(
+        'settings.voice_interaction.context.enabled' /* pref_name */,
+        true /* value */,
+        chrome.test.callbackFail(
+            'Unable to set the pref because Assistant has not been enabled.'));
+    // Note that onboarding pref is a counter that can be set without
+    // enabling Assistant at the same time.
+    chrome.autotestPrivate.setWhitelistedPref(
+        'ash.assistant.num_sessions_where_onboarding_shown' /* pref_name */,
+        3 /* value */, chrome.test.callbackPass());
   },
   // This test verifies that getArcState returns provisioned False in case ARC
   // is not provisioned by default.
   function arcNotProvisioned() {
-    chrome.autotestPrivate.getArcState(function(state) {
-      chrome.test.assertFalse(state.provisioned);
-      chrome.test.assertNoLastError();
-      chrome.test.succeed();
-    });
+    chrome.autotestPrivate.getArcState(
+        chrome.test.callbackPass(function(state) {
+          chrome.test.assertFalse(state.provisioned);
+          chrome.test.assertEq(0, state.preStartTime);
+          chrome.test.assertEq(0, state.startTime);
+        }));
   },
   // This test verifies that ARC Terms of Service are needed by default.
   function arcTosNeeded() {
@@ -464,6 +505,7 @@ var defaultTests = [
         chrome.test.assertEq(chromium.showInLauncher, true);
         chrome.test.assertEq(chromium.showInSearch, true);
         chrome.test.assertEq(chromium.type, 'Extension');
+        chrome.test.assertEq(chromium.installSource, 'System');
     }));
   },
   // This test verifies that only Chromium is available by default.
@@ -739,38 +781,63 @@ var defaultTests = [
       });
     });
   },
-
   // This test verifies that api to activate accelrator works as expected.
   function acceleratorTest() {
     // Ash level accelerator.
     var newBrowser = newAccelerator('n', false /* shift */, true /* control */);
-    chrome.autotestPrivate.activateAccelerator(
-        newBrowser,
-        function() {
-          chrome.autotestPrivate.getAppWindowList(function(list) {
-            chrome.test.assertEq(2, list.length);
-            var closeWindow =
-                newAccelerator('w', false /* shift */, true /* control */);
-            chrome.autotestPrivate.activateAccelerator(
-                closeWindow,
-                function(success) {
-                  chrome.test.assertTrue(success);
-                  // Actual window close might happen sometime later after the
-                  // accelerator. So keep trying until window count drops to 1.
-                  var timer = window.setInterval(() => {
-                    chrome.autotestPrivate.getAppWindowList(function(list) {
+    chrome.autotestPrivate.activateAccelerator(newBrowser, function() {
+      newBrowser.pressed = false;
+      chrome.autotestPrivate.activateAccelerator(newBrowser, function() {
+        chrome.autotestPrivate.getAppWindowList(function(list) {
+          chrome.test.assertEq(2, list.length);
+          var closeWindow =
+              newAccelerator('w', false /* shift */, true /* control */);
+          chrome.autotestPrivate.activateAccelerator(
+              closeWindow, function(success) {
+                chrome.test.assertTrue(success);
+                closeWindow.pressed = false;
+                chrome.autotestPrivate.activateAccelerator(
+                    closeWindow, async function(success) {
                       chrome.test.assertNoLastError();
+                      // Actual window close might happen sometime later after
+                      // the accelerator. So keep trying until window count
+                      // drops to 1.
+                      await new Promise(resolve => {
+                        function check() {
+                          chrome.autotestPrivate.getAppWindowList(function(
+                              list) {
+                            chrome.test.assertNoLastError();
 
-                      if (list.length != 1)
-                        return;
+                            if (list.length == 1) {
+                              resolve();
+                              return;
+                            }
 
-                      window.clearInterval(timer);
+                            window.setTimeout(check, 100);
+                          });
+                        };
+
+                        check();
+                      });
                       chrome.test.succeed();
                     });
-                  }, 100);
-                });
-          });
+              });
         });
+      });
+    });
+  },
+  // This test verifies that api to activate accelrator with number works as
+  // expected.
+  function acceleratorWithNumberTest() {
+    // An ash accelerator with number to reset UI scale.
+    var accelerator = newAccelerator('0', true /* shift */, true /* control */);
+    chrome.autotestPrivate.activateAccelerator(
+        accelerator, chrome.test.callbackPass((success) => {
+          chrome.test.assertTrue(success);
+          accelerator.pressed = false;
+          chrome.autotestPrivate.activateAccelerator(
+              accelerator, chrome.test.callbackPass());
+        }));
   },
   function setMetricsEnabled() {
     chrome.autotestPrivate.setMetricsEnabled(true, chrome.test.callbackPass());
@@ -831,9 +898,11 @@ var defaultTests = [
       // Wait for a few frames.
       await raf();
 
-      chrome.autotestPrivate.stopSmoothnessTracking(function(smoothness) {
+      chrome.autotestPrivate.stopSmoothnessTracking(function(data) {
         chrome.test.assertNoLastError();
-        chrome.test.assertTrue(smoothness >= 0 && smoothness <= 100);
+        chrome.test.assertTrue(data.hasOwnProperty('framesExpected') ||
+                               data.hasOwnProperty('framesProduced') ||
+                               data.hasOwnProperty('jankCount'));
         chrome.test.succeed();
       });
     });
@@ -853,19 +922,73 @@ var defaultTests = [
           await raf();
 
           chrome.autotestPrivate.stopSmoothnessTracking(badDisplay,
-                                                        function(smoothness) {
+                                                        function(data) {
             chrome.test.assertEq(chrome.runtime.lastError.message,
                 'Smoothness is not tracked for display: -1');
 
             chrome.autotestPrivate.stopSmoothnessTracking(displayId,
-                                                          function(smoothness) {
+                                                          function(data) {
               chrome.test.assertNoLastError();
-              chrome.test.assertTrue(smoothness >= 0 && smoothness <= 100);
+              chrome.test.assertTrue(data.hasOwnProperty('framesExpected') ||
+                                     data.hasOwnProperty('framesProduced') ||
+                                     data.hasOwnProperty('jankCount'));
               chrome.test.succeed();
             });
           });
         });
       });
+    });
+  },
+
+  function collectThoughputTrackerData() {
+    chrome.autotestPrivate.startThroughputTrackerDataCollection(function() {
+      chrome.test.assertNoLastError();
+
+      var stopAndCollectData = function() {
+        chrome.autotestPrivate.stopThroughputTrackerDataCollection(
+            function(data){
+          chrome.test.assertNoLastError();
+          chrome.test.assertTrue(data.length > 0);
+          chrome.test.succeed();
+        });
+      };
+
+      // Triggers a tracked animation, e.g. toggling the launcher.
+      var togglePeeking = newAccelerator('search', false /* shift */);
+      function closeLauncher() {
+        togglePeeking.pressed = true;
+        chrome.autotestPrivate.activateAccelerator(
+            togglePeeking,
+            function(success) {
+              chrome.test.assertFalse(success);
+              togglePeeking.pressed = false;
+              chrome.autotestPrivate.activateAccelerator(
+                  togglePeeking,
+                  function(success) {
+                    chrome.test.assertTrue(success);
+                    chrome.autotestPrivate.waitForLauncherState(
+                        'Closed',
+                        function() {
+                          chrome.test.assertNoLastError();
+                          stopAndCollectData();
+                        });
+                  });
+            });
+      }
+      chrome.autotestPrivate.activateAccelerator(
+          togglePeeking,
+          function(success) {
+            chrome.test.assertFalse(success);
+            togglePeeking.pressed = false;
+            chrome.autotestPrivate.activateAccelerator(
+                togglePeeking,
+                function(success) {
+                  chrome.test.assertTrue(success);
+                  chrome.autotestPrivate.waitForLauncherState(
+                      'Peeking',
+                      closeLauncher);
+                });
+          });
     });
   },
 
@@ -882,11 +1005,14 @@ var arcEnabledTests = [
   // This test verifies that getArcState returns provisioned True in case ARC
   // provisioning is done.
   function arcProvisioned() {
-    chrome.autotestPrivate.getArcState(function(state) {
-        chrome.test.assertTrue(state.provisioned);
-        chrome.test.assertNoLastError();
-        chrome.test.succeed();
-      });
+    chrome.autotestPrivate.getArcState(
+        chrome.test.callbackPass(function(state) {
+          chrome.test.assertTrue(state.provisioned);
+          chrome.test.assertTrue(state.preStartTime > 0);
+          chrome.test.assertTrue(state.startTime > 0);
+          chrome.test.assertTrue(state.startTime >= state.preStartTime);
+          chrome.test.assertTrue((new Date()).getTime() >= state.startTime);
+        }));
   },
   // This test verifies that ARC Terms of Service are not needed in case ARC is
   // provisioned and Terms of Service are accepted.
@@ -1170,6 +1296,19 @@ var shelfTests = [function fetchShelfUIInfo() {
       }));
 }];
 
+// Tests that requires a concrete system web app installation.
+var systemWebAppsTests = [
+  function getRegisteredSystemWebApps() {
+    chrome.autotestPrivate.getRegisteredSystemWebApps(
+      chrome.test.callbackPass(apps => {
+        chrome.test.assertEq(1, apps.length)
+        chrome.test.assertEq('OSSettings', apps[0].internalName);
+        chrome.test.assertEq('chrome://test-system-app/', apps[0].url);
+      })
+    );
+  },
+]
+
 var test_suites = {
   'default': defaultTests,
   'arcEnabled': arcEnabledTests,
@@ -1181,6 +1320,7 @@ var test_suites = {
   'startStopTracing': startStopTracingTests,
   'scrollableShelf': scrollableShelfTests,
   'shelf': shelfTests,
+  'systemWebApps': systemWebAppsTests,
 };
 
 chrome.test.getConfig(function(config) {

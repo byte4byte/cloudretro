@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import '../mojo_webui_test_support.js';
+
 import {BrowserProxy, DangerType, States} from 'chrome://downloads/downloads.js';
 import {isMac} from 'chrome://resources/js/cr.m.js';
 import {keyDownOn} from 'chrome://resources/polymer/v3_0/iron-test-helpers/mock-interactions.js';
@@ -25,7 +27,7 @@ suite('manager tests', function() {
   let toastManager;
 
   setup(function() {
-    PolymerTest.clearBody();
+    document.body.innerHTML = '';
 
     testBrowserProxy = new TestDownloadsProxy();
     callbackRouterRemote = testBrowserProxy.callbackRouterRemote;
@@ -181,5 +183,29 @@ suite('manager tests', function() {
     assertTrue(toastManager.isToastOpen);
     manager.$$('cr-toast-manager cr-button').click();
     assertFalse(toastManager.isToastOpen);
+  });
+
+  test('undo is not shown when removing only dangerous items', async () => {
+    callbackRouterRemote.insertItems(0, [
+      createDownload({isDangerous: true}),
+      createDownload({isMixedContent: true})
+    ]);
+    await callbackRouterRemote.$.flushForTesting();
+    toastManager.show('', /* hideSlotted= */ false);
+    assertFalse(toastManager.slottedHidden);
+    keyDownOn(document, null, 'alt', isMac ? 'ç' : 'c');
+    assertTrue(toastManager.slottedHidden);
+  });
+
+  test('undo is shown when removing items', async () => {
+    callbackRouterRemote.insertItems(0, [
+      createDownload(), createDownload({isDangerous: true}),
+      createDownload({isMixedContent: true})
+    ]);
+    await callbackRouterRemote.$.flushForTesting();
+    toastManager.show('', /* hideSlotted= */ true);
+    assertTrue(toastManager.slottedHidden);
+    keyDownOn(document, null, 'alt', isMac ? 'ç' : 'c');
+    assertFalse(toastManager.slottedHidden);
   });
 });

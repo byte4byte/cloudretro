@@ -4,6 +4,7 @@
 
 #include "components/autofill_assistant/browser/user_model.h"
 
+#include "base/logging.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "third_party/re2/src/re2/re2.h"
@@ -59,7 +60,9 @@ void UserModel::SetValue(const std::string& identifier,
                          const ValueProto& value,
                          bool force_notification) {
   auto result = values_.emplace(identifier, value);
-  if (!force_notification && !result.second && result.first->second == value) {
+  if (!force_notification && !result.second && result.first->second == value &&
+      value.is_client_side_only() ==
+          result.first->second.is_client_side_only()) {
     return;
   } else if (!result.second) {
     result.first->second = value;
@@ -141,6 +144,50 @@ void UserModel::AddObserver(Observer* observer) {
 
 void UserModel::RemoveObserver(Observer* observer) {
   observers_.RemoveObserver(observer);
+}
+
+void UserModel::SetAutofillCreditCards(
+    std::unique_ptr<std::vector<std::unique_ptr<autofill::CreditCard>>>
+        credit_cards) {
+  credit_cards_.clear();
+  for (auto& credit_card : *credit_cards) {
+    credit_cards_[credit_card->guid()] = std::move(credit_card);
+  }
+}
+
+void UserModel::SetAutofillProfiles(
+    std::unique_ptr<std::vector<std::unique_ptr<autofill::AutofillProfile>>>
+        profiles) {
+  profiles_.clear();
+  for (auto& profile : *profiles) {
+    profiles_[profile->guid()] = std::move(profile);
+  }
+}
+
+void UserModel::SetCurrentURL(GURL current_url) {
+  current_url_ = current_url;
+}
+
+const autofill::CreditCard* UserModel::GetCreditCard(
+    const std::string& guid) const {
+  auto it = credit_cards_.find(guid);
+  if (it == credit_cards_.end()) {
+    return nullptr;
+  }
+  return it->second.get();
+}
+
+const autofill::AutofillProfile* UserModel::GetProfile(
+    const std::string& guid) const {
+  auto it = profiles_.find(guid);
+  if (it == profiles_.end()) {
+    return nullptr;
+  }
+  return it->second.get();
+}
+
+GURL UserModel::GetCurrentURL() const {
+  return current_url_;
 }
 
 }  // namespace autofill_assistant

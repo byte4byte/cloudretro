@@ -6,7 +6,6 @@
 #include "base/files/file_path.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
-#include "base/task/post_task.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/common/chrome_content_client.h"
 #include "chrome/common/chrome_paths.h"
@@ -15,6 +14,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/plugin_service.h"
+#include "content/public/test/browser_test.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "services/network/public/cpp/features.h"
@@ -50,8 +50,8 @@ class PluginResponseInterceptorURLLoaderThrottleBrowserTest
   int CountPDFProcesses() {
     int result = -1;
     base::RunLoop run_loop;
-    base::PostTaskAndReply(
-        FROM_HERE, {content::BrowserThread::IO},
+    content::GetIOThreadTaskRunner({})->PostTaskAndReply(
+        FROM_HERE,
         base::BindOnce(&PluginResponseInterceptorURLLoaderThrottleBrowserTest::
                            CountPDFProcessesOnIOThread,
                        base::Unretained(this), base::Unretained(&result)),

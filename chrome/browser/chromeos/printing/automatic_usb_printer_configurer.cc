@@ -4,11 +4,13 @@
 
 #include "chrome/browser/chromeos/printing/automatic_usb_printer_configurer.h"
 
+#include <string>
+#include <utility>
+
 #include "base/bind.h"
-#include "base/feature_list.h"
+#include "base/logging.h"
 #include "base/stl_util.h"
 #include "chrome/browser/chromeos/printing/usb_printer_notification_controller.h"
-#include "chrome/common/chrome_features.h"
 
 namespace chromeos {
 namespace {
@@ -41,10 +43,6 @@ void AutomaticUsbPrinterConfigurer::OnPrintersChanged(
     PrinterClass printer_class,
     const std::vector<Printer>& printers) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_);
-
-  if (!base::FeatureList::IsEnabled(features::kStreamlinedUsbPrinterSetup)) {
-    return;
-  }
 
   if (printer_class == PrinterClass::kAutomatic) {
     // Remove any notifications for printers that are no longer in the automatic
@@ -95,8 +93,7 @@ void AutomaticUsbPrinterConfigurer::OnSetupComplete(const Printer& printer,
     LOG(ERROR) << "Unable to autoconfigure usb printer " << printer.id();
     return;
   }
-  installation_manager_->PrinterInstalled(
-      printer, /*is_automatic=*/true, PrinterSetupSource::kAutoUsbConfigurer);
+  installation_manager_->PrinterInstalled(printer, /*is_automatic=*/true);
   PrinterConfigurer::RecordUsbPrinterSetupSource(
       UsbPrinterSetupSource::kAutoconfigured);
   CompleteConfiguration(printer);

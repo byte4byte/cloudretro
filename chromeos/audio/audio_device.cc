@@ -42,6 +42,7 @@ uint8_t GetDevicePriority(AudioDeviceType type, bool is_input) {
     case AUDIO_TYPE_HOTWORD:
     case AUDIO_TYPE_POST_MIX_LOOPBACK:
     case AUDIO_TYPE_POST_DSP_LOOPBACK:
+    case AUDIO_TYPE_ALSA_LOOPBACK:
     case AUDIO_TYPE_OTHER:
     default:
       return 0;
@@ -83,6 +84,8 @@ std::string AudioDevice::GetTypeString(AudioDeviceType type) {
       return "POST_MIX_LOOPBACK";
     case AUDIO_TYPE_POST_DSP_LOOPBACK:
       return "POST_DSP_LOOPBACK";
+    case AUDIO_TYPE_ALSA_LOOPBACK:
+      return "ALSA_LOOPBACK";
     case AUDIO_TYPE_OTHER:
     default:
       return "OTHER";
@@ -126,6 +129,8 @@ AudioDeviceType AudioDevice::GetAudioType(
     return AUDIO_TYPE_POST_MIX_LOOPBACK;
   else if (node_type.find("POST_DSP_LOOPBACK") != std::string::npos)
     return AUDIO_TYPE_POST_DSP_LOOPBACK;
+  else if (node_type.find("ALSA_LOOPBACK") != std::string::npos)
+    return AUDIO_TYPE_ALSA_LOOPBACK;
   else
     return AUDIO_TYPE_OTHER;
 }
@@ -145,10 +150,10 @@ AudioDevice::AudioDevice(const AudioNode& node) {
   else
     display_name = node.device_name;
   device_name = node.device_name;
-  mic_positions = node.mic_positions;
   priority = GetDevicePriority(type, node.is_input);
   active = node.active;
   plugged_time = node.plugged_time;
+  max_supported_channels = node.max_supported_channels;
 }
 
 AudioDevice::AudioDevice(const AudioDevice& other) = default;
@@ -183,7 +188,6 @@ std::string AudioDevice::ToString() const {
                       active ? "true" : "false");
   base::StringAppendF(&result, "plugged_time= %s ",
                       base::NumberToString(plugged_time).c_str());
-  base::StringAppendF(&result, "mic_positions = %s ", mic_positions.c_str());
 
   return result;
 }

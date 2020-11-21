@@ -72,27 +72,6 @@ enum class OptimizationTargetDecision {
   kMaxValue = kDeciderNotInitialized,
 };
 
-// The statuses for why the main frame of a navigation was covered by a hint or
-// fetch from the remote Optimization Guide Service.
-//
-// Keep in sync with OptimizationGuideNavigationHostCoveredStatus in enums.xml.
-enum class NavigationHostCoveredStatus {
-  kUnknown,
-  // The main frame host of the navigation was covered by a hint or was
-  // attempted to be fetched from the remote Optimization Guide Service in the
-  // last 7 days.
-  kCovered,
-  // A fetch for information from the remote Optimization Guide Service about
-  // the main frame host of the navigation was not attempted.
-  kFetchNotAttempted,
-  // A fetch for information from the remote Optimization Guide Service about
-  // the main frame host of the navigation was attempted but not successful.
-  kFetchNotSuccessful,
-
-  // Add new values above this line.
-  kMaxValue = kFetchNotSuccessful,
-};
-
 // The statuses for racing a hints fetch with the current navigation based
 // on the availability of hints for both the current host and URL.
 //
@@ -142,6 +121,34 @@ enum class PredictionManagerModelStatus {
 
   // Add new values above this line.
   kMaxValue = kStoreUnavailableModelUnknown,
+};
+
+// The statuses for a download file containing a prediction model when verified
+// and processed.
+//
+// Keep in sync with OptimizationGuidePredictionModelDownloadStatus
+// in enums.xml.
+enum class PredictionModelDownloadStatus {
+  kUnknown,
+  // The downloaded file was successfully verified and processed.
+  kSuccess,
+  // The downloaded file was not a valid CRX file.
+  kFailedCrxVerification,
+  // A temporary directory for unzipping the CRX file failed to be created.
+  kFailedUnzipDirectoryCreation,
+  // The CRX file failed to be unzipped.
+  kFailedCrxUnzip,
+  // The model info failed to be read from disk.
+  kFailedModelInfoFileRead,
+  // The model info failed to be parsed.
+  kFailedModelInfoParsing,
+  // The model file was not found in the CRX file.
+  kFailedModelFileNotFound,
+  // The model file failed to be moved to a more permanent directory.
+  kFailedModelFileOtherError,
+
+  // Add new values above this line.
+  kMaxValue = kFailedModelFileOtherError,
 };
 
 }  // namespace optimization_guide

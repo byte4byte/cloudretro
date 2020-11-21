@@ -73,7 +73,8 @@ class SafeBrowsingUIManager : public BaseUIManager {
 
   // Called on the IO thread by the ThreatDetails with the serialized
   // protocol buffer, so the service can send it over.
-  void SendSerializedThreatDetails(const std::string& serialized) override;
+  void SendSerializedThreatDetails(content::BrowserContext* browser_context,
+                                   const std::string& serialized) override;
 
   // Calls |BaseUIManager::OnBlockingPageDone()| and triggers
   // |OnSecurityInterstitialProceeded| event if |proceed| is true.
@@ -111,9 +112,6 @@ class SafeBrowsingUIManager : public BaseUIManager {
   // MaybeReportSafeBrowsingHit. This also notifies all observers in
   // |observer_list_|.
   void CreateAndSendHitReport(const UnsafeResource& resource) override;
-
-  // Calls SafeBrowsingBlockingPage::ShowBlockingPage().
-  void ShowBlockingPageForResource(const UnsafeResource& resource) override;
 
   // Helper method to ensure hit reports are only sent when the user has
   // opted in to extended reporting and is not currently in incognito mode.

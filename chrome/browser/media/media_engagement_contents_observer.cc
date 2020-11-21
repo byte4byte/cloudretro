@@ -260,6 +260,13 @@ void MediaEngagementContentsObserver::MediaResized(
   UpdatePlayerTimer(id);
 }
 
+void MediaEngagementContentsObserver::MediaDestroyed(
+    const content::MediaPlayerId& id) {
+  player_states_.erase(id);
+  audible_players_.erase(id);
+  significant_players_.erase(id);
+}
+
 void MediaEngagementContentsObserver::MediaStoppedPlaying(
     const MediaPlayerInfo& media_player_info,
     const content::MediaPlayerId& media_player_id,
@@ -605,7 +612,7 @@ void MediaEngagementContentsObserver::ReadyToCommitNavigation(
 content::WebContents* MediaEngagementContentsObserver::GetOpener() const {
 #if !defined(OS_ANDROID)
   for (auto* browser : *BrowserList::GetInstance()) {
-    if (!browser->profile()->IsSameProfileAndType(service_->profile()))
+    if (browser->profile() != service_->profile())
       continue;
 
     int index =

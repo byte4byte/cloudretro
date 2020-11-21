@@ -4,8 +4,10 @@
 
 #include "chrome/credential_provider/gaiacp/gcp_crash_reporter_client.h"
 
+#include "base/check.h"
 #include "base/file_version_info.h"
 #include "base/files/file_path.h"
+#include "base/notreached.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/win/registry.h"
 #include "build/branding_buildflags.h"
@@ -66,11 +68,6 @@ bool GcpCrashReporterClient::ShouldShowRestartDialog(base::string16* title,
 
 bool GcpCrashReporterClient::AboutToRestart() {
   // GCPW should never be restarted after a crash.
-  return false;
-}
-
-bool GcpCrashReporterClient::GetDeferredUploadsSupported(
-    bool is_per_user_install) {
   return false;
 }
 

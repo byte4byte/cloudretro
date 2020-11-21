@@ -5,10 +5,18 @@
 #ifndef CHROMEOS_SERVICES_ASSISTANT_PUBLIC_CPP_ASSISTANT_CLIENT_H_
 #define CHROMEOS_SERVICES_ASSISTANT_PUBLIC_CPP_ASSISTANT_CLIENT_H_
 
-#include "ash/public/mojom/assistant_state_controller.mojom.h"
+#include "ash/public/mojom/assistant_volume_control.mojom.h"
 #include "base/component_export.h"
-#include "chromeos/services/assistant/public/mojom/assistant.mojom.h"
+#include "chromeos/services/assistant/public/cpp/assistant_enums.h"
+#include "chromeos/services/assistant/public/cpp/assistant_notification.h"
+#include "chromeos/services/assistant/public/mojom/assistant_audio_decoder.mojom.h"
+#include "chromeos/services/network_config/public/mojom/cros_network_config.mojom.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "services/audio/public/mojom/stream_factory.mojom.h"
+#include "services/device/public/mojom/battery_monitor.mojom.h"
+#include "services/device/public/mojom/wake_lock_provider.mojom.h"
+#include "services/media_session/public/mojom/audio_focus.mojom.h"
+#include "services/media_session/public/mojom/media_controller.mojom.h"
 
 namespace chromeos {
 namespace assistant {
@@ -25,35 +33,11 @@ class COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC) AssistantClient {
   static AssistantClient* Get();
 
   // Notifies assistant client that assistant running status has changed.
-  virtual void OnAssistantStatusChanged(
-      ash::mojom::AssistantState new_state) = 0;
-
-  // Requests an AssistantController implementation from Ash, via the browser.
-  virtual void RequestAssistantController(
-      mojo::PendingReceiver<mojom::AssistantController> receiver) = 0;
-
-  // Requests Ash's AssistantAlarmTimerController interface from the browser.
-  virtual void RequestAssistantAlarmTimerController(
-      mojo::PendingReceiver<ash::mojom::AssistantAlarmTimerController>
-          receiver) = 0;
-
-  // Requests Ash's AssistantNotificationController interface from the browser.
-  virtual void RequestAssistantNotificationController(
-      mojo::PendingReceiver<ash::mojom::AssistantNotificationController>
-          receiver) = 0;
-
-  // Requests Ash's AssistantScreenContextController interface from the browser.
-  virtual void RequestAssistantScreenContextController(
-      mojo::PendingReceiver<ash::mojom::AssistantScreenContextController>
-          receiver) = 0;
+  virtual void OnAssistantStatusChanged(AssistantStatus new_status) = 0;
 
   // Requests Ash's AssistantVolumeControl interface from the browser.
   virtual void RequestAssistantVolumeControl(
       mojo::PendingReceiver<ash::mojom::AssistantVolumeControl> receiver) = 0;
-
-  // Requests Ash's AssistantStateController interface from the browser.
-  virtual void RequestAssistantStateController(
-      mojo::PendingReceiver<ash::mojom::AssistantStateController> receiver) = 0;
 
   // Requests a BatteryMonitor from the browser.
   virtual void RequestBatteryMonitor(

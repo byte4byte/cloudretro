@@ -11,6 +11,7 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_features.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
@@ -100,7 +101,7 @@ IN_PROC_BROWSER_TEST_F(ClipboardApiTest, Extension) {
 }
 
 // Flaky on Mac. See https://crbug.com/900301.
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
 #define MAYBE_ExtensionNoPermission DISABLED_ExtensionNoPermission
 #else
 #define MAYBE_ExtensionNoPermission ExtensionNoPermission

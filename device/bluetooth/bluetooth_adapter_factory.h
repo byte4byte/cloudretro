@@ -6,17 +6,17 @@
 #define DEVICE_BLUETOOTH_BLUETOOTH_ADAPTER_FACTORY_H_
 
 #include "base/callback.h"
-#include "base/lazy_instance.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "device/bluetooth/bluetooth_adapter.h"
 #include "device/bluetooth/bluetooth_export.h"
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_ASH)
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "services/data_decoder/public/mojom/ble_scan_parser.mojom-forward.h"
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_ASH)
 
 namespace device {
 
@@ -35,11 +35,12 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterFactory {
   using AdapterCallback =
       base::OnceCallback<void(scoped_refptr<BluetoothAdapter> adapter)>;
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_ASH)
   using BleScanParserCallback = base::RepeatingCallback<
       mojo::PendingRemote<data_decoder::mojom::BleScanParser>()>;
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_ASH)
 
+  BluetoothAdapterFactory();
   ~BluetoothAdapterFactory();
 
   static BluetoothAdapterFactory* Get();
@@ -70,7 +71,7 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterFactory {
   // GetAdapter(), as the default adapter already supports Bluetooth classic.
   void GetClassicAdapter(AdapterCallback callback);
 
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
   // Calls |BluetoothAdapter::Shutdown| on the adapter if
   // present.
   static void Shutdown();
@@ -85,13 +86,13 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterFactory {
   // adapter. Exposed for testing.
   static bool HasSharedInstanceForTesting();
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_ASH)
   // Sets the mojo::Remote<BleScanParser> callback used in Get*() below.
   static void SetBleScanParserCallback(BleScanParserCallback callback);
   // Returns a reference to a parser for BLE advertisement packets.
   // This will be an empty callback until something calls Set*() above.
   static BleScanParserCallback GetBleScanParserCallback();
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_ASH)
 
   // ValuestForTesting holds the return values for BluetoothAdapterFactory's
   // functions that have been set for testing.
@@ -128,16 +129,32 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterFactory {
   std::unique_ptr<GlobalValuesForTesting> InitGlobalValuesForTesting();
 
  private:
-  // Friend LazyInstance to permit access to private constructor.
-  friend base::LazyInstanceTraitsBase<BluetoothAdapterFactory>;
-
-  BluetoothAdapterFactory();
+  void AdapterInitialized();
+#if defined(OS_WIN)
+  void ClassicAdapterInitialized();
+#endif
 
   base::WeakPtr<GlobalValuesForTesting> values_for_testing_;
 
-#if defined(OS_CHROMEOS)
+  // While a new BluetoothAdapter is being initialized the factory retains a
+  // reference to it. After initialization is complete |adapter_callbacks_|
+  // are run and, to allow the class to be destroyed if nobody is using it,
+  // that reference is dropped and |adapter_| is used instead.
+  scoped_refptr<BluetoothAdapter> adapter_under_initialization_;
+  std::vector<AdapterCallback> adapter_callbacks_;
+  base::WeakPtr<BluetoothAdapter> adapter_;
+
+#if defined(OS_WIN)
+  // On Windows different implementations of BluetoothAdapter are used for
+  // supporting Classic and Low Energy devices. The factory logic is duplicated.
+  scoped_refptr<BluetoothAdapter> classic_adapter_under_initialization_;
+  std::vector<AdapterCallback> classic_adapter_callbacks_;
+  base::WeakPtr<BluetoothAdapter> classic_adapter_;
+#endif
+
+#if BUILDFLAG(IS_ASH)
   BleScanParserCallback ble_scan_parser_;
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_ASH)
 };
 
 }  // namespace device

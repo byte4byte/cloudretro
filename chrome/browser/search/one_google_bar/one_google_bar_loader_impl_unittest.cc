@@ -9,7 +9,7 @@
 #include "base/optional.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "base/test/mock_callback.h"
 #include "base/test/test_simple_task_runner.h"
 #include "base/time/time.h"
@@ -126,6 +126,21 @@ TEST_F(OneGoogleBarLoaderImplTest, RequestUrlContainsLanguage) {
   std::string expected_query =
       base::StringPrintf("hl=%s&async=fixed:0", kApplicationLocale);
   EXPECT_EQ(expected_query, last_request_url().query());
+}
+
+TEST_F(OneGoogleBarLoaderImplTest, RequestUrlWithAdditionalQueryParams) {
+  one_google_bar_loader()->SetAdditionalQueryParams("&test&hl=&async=");
+  EXPECT_EQ("test&hl=&async=",
+            one_google_bar_loader()->GetLoadURLForTesting().query());
+  one_google_bar_loader()->SetAdditionalQueryParams("&test&hl=");
+  EXPECT_EQ("test&hl=&async=fixed:0",
+            one_google_bar_loader()->GetLoadURLForTesting().query());
+  one_google_bar_loader()->SetAdditionalQueryParams("&test&async=");
+  EXPECT_EQ(base::StringPrintf("hl=%s&test&async=", kApplicationLocale),
+            one_google_bar_loader()->GetLoadURLForTesting().query());
+  one_google_bar_loader()->SetAdditionalQueryParams("&test");
+  EXPECT_EQ(base::StringPrintf("hl=%s&test&async=fixed:0", kApplicationLocale),
+            one_google_bar_loader()->GetLoadURLForTesting().query());
 }
 
 TEST_F(OneGoogleBarLoaderImplTest, RequestReturns) {
@@ -293,7 +308,7 @@ TEST_F(OneGoogleBarLoaderImplTest, MirrorAccountConsistencyNotRequired) {
                                                &header_value));
   // mode = PROFILE_MODE_DEFAULT
   EXPECT_EQ(
-      "mode=0,enable_account_consistency=false,"
+      "source=Chrome,mode=0,enable_account_consistency=false,"
       "consistency_enabled_by_default=false",
       header_value);
 #else
@@ -331,7 +346,7 @@ TEST_F(OneGoogleBarLoaderImplWithMirrorAccountConsistencyTest,
                                                &header_value));
   // mode = PROFILE_MODE_INCOGNITO_DISABLED | PROFILE_MODE_ADD_ACCOUNT_DISABLED
   EXPECT_EQ(
-      "mode=3,enable_account_consistency=true,"
+      "source=Chrome,mode=3,enable_account_consistency=true,"
       "consistency_enabled_by_default=false",
       header_value);
 #else

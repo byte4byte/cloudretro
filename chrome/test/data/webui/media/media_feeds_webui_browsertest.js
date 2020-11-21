@@ -9,8 +9,13 @@
 const EXAMPLE_URL_1 = 'https://example.com/feed.json';
 
 GEN('#include "base/run_loop.h"');
+GEN('#include "base/strings/utf_string_conversions.h"');
+GEN('#include "chrome/browser/media/feeds/media_feeds_service.h"');
+GEN('#include "chrome/browser/media/feeds/media_feeds_service_factory.h"');
 GEN('#include "chrome/browser/media/history/media_history_keyed_service.h"');
+GEN('#include "chrome/browser/media/history/media_history_test_utils.h"');
 GEN('#include "chrome/browser/ui/browser.h"');
+GEN('#include "content/public/test/browser_test.h"');
 GEN('#include "media/base/media_switches.h"');
 
 function MediaFeedsWebUIBrowserTest() {}
@@ -28,14 +33,17 @@ MediaFeedsWebUIBrowserTest.prototype = {
     GEN('auto* service =');
     GEN('  media_history::MediaHistoryKeyedService::Get(');
     GEN('    browser()->profile());');
-    GEN('service->DiscoverMediaFeed(GURL("' + EXAMPLE_URL_1 + '"));');
+    GEN('auto* feeds_service =');
+    GEN('  media_feeds::MediaFeedsService::Get(browser()->profile());');
+    GEN('feeds_service->DiscoverMediaFeed(GURL("' + EXAMPLE_URL_1 + '"));');
     GEN('auto items = std::vector<media_feeds::mojom::MediaFeedItemPtr>();');
     GEN('auto item = media_feeds::mojom::MediaFeedItem::New();');
     GEN('item->name = base::ASCIIToUTF16("The Movie");');
     GEN('item->type = media_feeds::mojom::MediaFeedItemType::kMovie;');
     GEN('item->date_published = base::Time::FromDeltaSinceWindowsEpoch(');
     GEN('  base::TimeDelta::FromMinutes(10));');
-    GEN('item->is_family_friendly = true;');
+    GEN('item->is_family_friendly = ');
+    GEN('  media_feeds::mojom::IsFamilyFriendly::kYes;');
     GEN('item->action_status =');
     GEN('  media_feeds::mojom::MediaFeedItemActionStatus::kPotential;');
     GEN('item->genre.push_back("test");');
@@ -101,23 +109,51 @@ MediaFeedsWebUIBrowserTest.prototype = {
     GEN('    media_feeds::mojom::Identifier::Type::kPartnerId, "TEST4"));');
     GEN('item->safe_search_result =');
     GEN('  media_feeds::mojom::SafeSearchResult::kSafe;');
-    GEN('media_session::MediaImage image1;');
-    GEN('image1.src = GURL("https://www.example.org/image1.png");');
-    GEN('item->images.push_back(image1);');
-    GEN('media_session::MediaImage image2;');
-    GEN('image2.src = GURL("https://www.example.org/image2.png");');
-    GEN('item->images.push_back(image2);');
+    GEN('media_feeds::mojom::MediaImagePtr image1 = ');
+    GEN('  media_feeds::mojom::MediaImage::New();');
+    GEN('image1->src = GURL("https://www.example.org/image1.png");');
+    GEN('image1->content_attributes = {');
+    GEN('  media_feeds::mojom::ContentAttribute::kIconic };');
+    GEN('item->images.push_back(std::move(image1));');
+    GEN('media_feeds::mojom::MediaImagePtr image2 = ');
+    GEN('  media_feeds::mojom::MediaImage::New();');
+    GEN('image2->src = GURL("https://www.example.org/image2.png");');
+    GEN('item->images.push_back(std::move(image2));');
     GEN('items.push_back(std::move(item));');
-    GEN('std::vector<media_session::MediaImage> logos;');
-    GEN('media_session::MediaImage logo1;');
-    GEN('logo1.src = GURL("https://www.example.org/logo1.png");');
-    GEN('logos.push_back(logo1);');
-    GEN('media_session::MediaImage logo2;');
-    GEN('logo2.src = GURL("https://www.example.org/logo2.png");');
-    GEN('logos.push_back(logo2);');
-    GEN('service->StoreMediaFeedFetchResult(');
-    GEN('  1, std::move(items), media_feeds::mojom::FetchResult::kSuccess,');
-    GEN('  false, logos, "Test Feed", base::DoNothing());');
+    GEN('std::vector<media_feeds::mojom::MediaImagePtr> logos;');
+    GEN('media_feeds::mojom::MediaImagePtr logo1 = ');
+    GEN('  media_feeds::mojom::MediaImage::New();');
+    GEN('logo1->src = GURL("https://www.example.org/logo1.png");');
+    GEN('logo1->content_attributes = {');
+    GEN('  media_feeds::mojom::ContentAttribute::kHasTitle,');
+    GEN('  media_feeds::mojom::ContentAttribute::kForLightBackground};');
+    GEN('logos.push_back(std::move(logo1));');
+    GEN('media_feeds::mojom::MediaImagePtr logo2 = ');
+    GEN('  media_feeds::mojom::MediaImage::New();');
+    GEN('logo2->src = GURL("https://www.example.org/logo2.png");');
+    GEN('logo2->content_attributes = {');
+    GEN('  media_feeds::mojom::ContentAttribute::kNoTitle,');
+    GEN('  media_feeds::mojom::ContentAttribute::kForDarkBackground};');
+    GEN('logos.push_back(std::move(logo2));');
+    GEN('media_history::MediaHistoryKeyedService::MediaFeedFetchResult');
+    GEN('  result;');
+    GEN('result.feed_id = 1;');
+    GEN('result.items = std::move(items);');
+    GEN('result.status = media_feeds::mojom::FetchResult::kSuccess;');
+    GEN('result.logos = std::move(logos);');
+    GEN('result.display_name = "Test Feed";');
+    GEN('result.cookie_name_filter = "TEST";');
+    GEN('result.reset_token = ');
+    GEN('  media_history::test::GetResetTokenSync(service, 1);');
+    GEN('auto user_identifier = media_feeds::mojom::UserIdentifier::New();');
+    GEN('user_identifier->name = "Becca Hughes";');
+    GEN('user_identifier->email = "beccahughes@chromium.org";');
+    GEN('user_identifier->image = media_feeds::mojom::MediaImage::New();');
+    GEN('user_identifier->image->src = ');
+    GEN('  GURL("http://www.example.org/user.png");');
+    GEN('result.user_identifier = std::move(user_identifier);');
+    GEN('service->StoreMediaFeedFetchResult(std::move(result),');
+    GEN('  base::DoNothing());');
     GEN('service->UpdateMediaFeedDisplayTime(1);');
     GEN('base::RunLoop run_loop;');
     GEN('service->PostTaskToDBForTest(run_loop.QuitClosure());');
@@ -142,10 +178,11 @@ TEST_F('MediaFeedsWebUIBrowserTest', 'All', function() {
     assertDeepEquals(
         [
           'ID', 'Url', 'Display Name', 'Last Discovery Time', 'Last Fetch Time',
-          'User Status', 'Last Fetch Result', 'Fetch Failed Count',
+          'User Status', 'User ID', 'Last Fetch Result', 'Fetch Failed Count',
           'Last Fetch Time (not cache hit)', 'Last Fetch Item Count',
           'Last Fetch Play Next Count', 'Last Fetch Content Types',
-          'Last Display Time', 'Logos', 'Actions'
+          'Last Display Time', 'Reset Reason', 'Cookie Name Filter',
+          'Safe Search Result', 'Logos', 'Actions'
         ],
         feedsHeaders.map(x => x.textContent.trim()));
 
@@ -156,24 +193,30 @@ TEST_F('MediaFeedsWebUIBrowserTest', 'All', function() {
     assertEquals(EXAMPLE_URL_1, feedsContents.childNodes[1].textContent.trim());
     assertEquals('Test Feed', feedsContents.childNodes[2].textContent.trim());
     assertEquals('Auto', feedsContents.childNodes[5].textContent.trim());
-    assertEquals('Success', feedsContents.childNodes[6].textContent.trim());
-    assertEquals('0', feedsContents.childNodes[7].textContent.trim());
-    assertNotEquals('', feedsContents.childNodes[8].textContent.trim());
+    assertEquals(
+        'Name=Becca Hughes Email=beccahughes@chromium.org Image=http://www.example.org/user.png',
+        feedsContents.childNodes[6].textContent.trim());
+    assertEquals('Success', feedsContents.childNodes[7].textContent.trim());
+    assertEquals('0', feedsContents.childNodes[8].textContent.trim());
+    assertNotEquals('', feedsContents.childNodes[9].textContent.trim());
     assertEquals(
         '1 (1 confirmed as safe)',
-        feedsContents.childNodes[9].textContent.trim());
-    assertEquals('1', feedsContents.childNodes[10].textContent.trim());
-    assertEquals('Movie', feedsContents.childNodes[11].textContent.trim());
-    assertNotEquals('', feedsContents.childNodes[12].textContent.trim());
+        feedsContents.childNodes[10].textContent.trim());
+    assertEquals('1', feedsContents.childNodes[11].textContent.trim());
+    assertEquals('Movie', feedsContents.childNodes[12].textContent.trim());
+    assertNotEquals('', feedsContents.childNodes[13].textContent.trim());
+    assertEquals('None', feedsContents.childNodes[14].textContent.trim());
+    assertEquals('TEST', feedsContents.childNodes[15].textContent.trim());
+    assertEquals('Unknown', feedsContents.childNodes[16].textContent.trim());
     assertEquals(
-        'https://www.example.org/logo1.pnghttps://www.example.org/logo2.png',
-        feedsContents.childNodes[13].textContent.trim());
+        'https://www.example.org/logo1.pngContentAttributes=HasTitle, ForLightBackgroundhttps://www.example.org/logo2.pngContentAttributes=NoTitle, ForDarkBackground',
+        feedsContents.childNodes[17].textContent.trim());
     assertEquals(
         'Show ContentsFetch Feed',
-        feedsContents.childNodes[14].textContent.trim());
+        feedsContents.childNodes[18].textContent.trim());
 
     // Click on the show contents button.
-    feedsContents.childNodes[14].firstChild.click();
+    feedsContents.childNodes[18].firstChild.click();
 
     return whenFeedTableIsPopulatedForTest().then(() => {
       assertEquals(
@@ -184,11 +227,26 @@ TEST_F('MediaFeedsWebUIBrowserTest', 'All', function() {
 
       assertDeepEquals(
           [
-            'Type', 'Name', 'Author', 'Date Published', 'Family Friendly',
-            'Action Status', 'Action URL', 'Action Start Time (secs)',
-            'Interaction Counters', 'Content Ratings', 'Genre', 'Live Details',
-            'TV Episode', 'Play Next Candidate', 'Identifiers', 'Shown Count',
-            'Clicked', 'Images', 'Safe Search Result'
+            'Type',
+            'Name',
+            'Author',
+            'Date Published',
+            'Family Friendly',
+            'Action Status',
+            'Action URL',
+            'Action Start Time (secs)',
+            'Interaction Counters',
+            'Content Ratings',
+            'Genre',
+            'Live Details',
+            'TV Episode',
+            'Play Next Candidate',
+            'Identifiers',
+            'Shown Count',
+            'Clicked',
+            'Images',
+            'Safe Search Result',
+            'Duration (secs)'
           ],
           feedItemsHeaders.map(x => x.textContent.trim()));
 
@@ -230,11 +288,87 @@ TEST_F('MediaFeedsWebUIBrowserTest', 'All', function() {
       assertEquals('3', feedItemsContents.childNodes[15].textContent.trim());
       assertEquals('Yes', feedItemsContents.childNodes[16].textContent.trim());
       assertEquals(
-          'https://www.example.org/image1.pnghttps://www.example.org/image2.png',
+          'https://www.example.org/image1.pngContentAttributes=Iconichttps://www.example.org/image2.png',
           feedItemsContents.childNodes[17].textContent.trim());
       assertEquals('Safe', feedItemsContents.childNodes[18].textContent.trim());
+      assertEquals('30', feedItemsContents.childNodes[19].textContent.trim());
     });
   });
+
+  mocha.run();
+});
+
+TEST_F('MediaFeedsWebUIBrowserTest', 'ConfigTable', function() {
+  suiteSetup(function() {
+    return whenConfigTableIsPopulatedForTest();
+  });
+
+  test('check safe search toggle sets safe search pref', function() {
+    const configRows =
+        Array.from(document.querySelectorAll('#config-table-body td'));
+
+    assertDeepEquals(
+        [
+          'Safe Search Enabled (value)',
+          'Enabled',
+          'Safe Search Enabled (pref)',
+          'Disabled (Toggle)',
+        ],
+        configRows.slice(0, 4).map(x => x.textContent.trim()));
+
+    const toggle =
+        Array.from(document.querySelectorAll('#config-table-body a'));
+    toggle[0].click();
+
+    return whenConfigTableSafeSearchPrefIsUpdatedForTest().then(() => {
+      const configRows =
+          Array.from(document.querySelectorAll('#config-table-body td'));
+
+      assertDeepEquals(
+          [
+            'Safe Search Enabled (value)',
+            'Enabled',
+            'Safe Search Enabled (pref)',
+            'Enabled (Toggle)',
+          ],
+          configRows.slice(0, 4).map(x => x.textContent.trim()));
+    });
+  });
+
+  test(
+      'check background fetching toggle sets background fetch pref',
+      function() {
+        const configRows =
+            Array.from(document.querySelectorAll('#config-table-body td'));
+
+        assertDeepEquals(
+            [
+              'Background Fetching Enabled (value)',
+              'Enabled',
+              'Background Fetching Enabled (pref)',
+              'Disabled (Toggle)',
+            ],
+            configRows.slice(4, 8).map(x => x.textContent.trim()));
+
+        const toggle =
+            Array.from(document.querySelectorAll('#config-table-body a'));
+        toggle[1].click();
+
+        return whenConfigTableBackgroundFetchingPrefIsUpdatedForTest().then(
+            () => {
+              const configRows = Array.from(
+                  document.querySelectorAll('#config-table-body td'));
+
+              assertDeepEquals(
+                  [
+                    'Background Fetching Enabled (value)',
+                    'Enabled',
+                    'Background Fetching Enabled (pref)',
+                    'Enabled (Toggle)',
+                  ],
+                  configRows.slice(4, 8).map(x => x.textContent.trim()));
+            });
+      });
 
   mocha.run();
 });

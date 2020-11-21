@@ -12,6 +12,7 @@
 #include "ash/accessibility/accessibility_panel_layout_manager.h"
 #include "ash/accessibility/touch_exploration_controller.h"
 #include "ash/accessibility/touch_exploration_manager.h"
+#include "ash/ambient/ambient_controller.h"
 #include "ash/app_menu/app_menu_model_adapter.h"
 #include "ash/focus_cycler.h"
 #include "ash/high_contrast/high_contrast_controller.h"
@@ -77,6 +78,7 @@
 #include "base/numerics/ranges.h"
 #include "base/stl_util.h"
 #include "base/time/time.h"
+#include "chromeos/constants/chromeos_features.h"
 #include "chromeos/constants/chromeos_switches.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/client/drag_drop_client.h"
@@ -95,6 +97,7 @@
 #include "ui/views/controls/menu/menu_runner.h"
 #include "ui/views/view_model.h"
 #include "ui/views/view_model_utils.h"
+#include "ui/views/widget/widget.h"
 #include "ui/wm/core/capture_controller.h"
 #include "ui/wm/core/coordinate_conversion.h"
 #include "ui/wm/core/visibility_controller.h"
@@ -232,6 +235,7 @@ void ReparentAllWindows(aura::Window* src, aura::Window* dst) {
       kShellWindowId_UnparentedControlContainer,
       kShellWindowId_OverlayContainer,
       kShellWindowId_LockActionHandlerContainer,
+      kShellWindowId_MenuContainer,
   };
   constexpr int kExtraContainerIdsToMoveInUnifiedMode[] = {
       kShellWindowId_LockScreenContainer,
@@ -452,9 +456,7 @@ class FillLayoutManager : public aura::LayoutManager {
   void OnChildWindowVisibilityChanged(aura::Window* child,
                                       bool visible) override {}
   void SetChildBounds(aura::Window* child,
-                      const gfx::Rect& requested_bounds) override {
-    SetChildBoundsDirect(child, requested_bounds);
-  }
+                      const gfx::Rect& requested_bounds) override {}
 
  private:
   void Relayout() {
@@ -464,7 +466,7 @@ class FillLayoutManager : public aura::LayoutManager {
       const int resize_behavior =
           child->GetProperty(aura::client::kResizeBehaviorKey);
       if (resize_behavior & aura::client::kResizeBehaviorCanMaximize)
-        child->SetBounds(fullscreen);
+        SetChildBoundsDirect(child, fullscreen);
     }
   }
 
@@ -482,7 +484,6 @@ RootWindowController::~RootWindowController() {
   DCHECK(!wallpaper_widget_controller_.get());
   work_area_insets_.reset();
   ash_host_.reset();
-  mus_window_tree_host_.reset();
   // The CaptureClient needs to be around for as long as the RootWindow is
   // valid.
   capture_client_.reset();
@@ -493,14 +494,14 @@ RootWindowController::~RootWindowController() {
 
 RootWindowController* RootWindowController::CreateForPrimaryDisplay(
     AshWindowTreeHost* host) {
-  RootWindowController* controller = new RootWindowController(host, nullptr);
+  RootWindowController* controller = new RootWindowController(host);
   controller->Init(RootWindowType::PRIMARY);
   return controller;
 }
 
 RootWindowController* RootWindowController::CreateForSecondaryDisplay(
     AshWindowTreeHost* host) {
-  RootWindowController* controller = new RootWindowController(host, nullptr);
+  RootWindowController* controller = new RootWindowController(host);
   controller->Init(RootWindowType::SECONDARY);
   return controller;
 }
@@ -650,6 +651,7 @@ void RootWindowController::Shutdown() {
 
   touch_exploration_manager_.reset();
   wallpaper_widget_controller_.reset();
+  CloseAmbientWidget(/*immediately=*/true);
 
   CloseChildWindows();
   aura::Window* root_window = GetRootWindow();
@@ -766,6 +768,11 @@ aura::Window* RootWindowController::GetWindowForFullscreenMode() {
   return GetWindowForFullscreenModeInRoot(GetRootWindow());
 }
 
+bool RootWindowController::IsInFullscreenMode() {
+  auto* window = GetWindowForFullscreenMode();
+  return window && WindowState::Get(window)->GetHideShelfWhenFullscreen();
+}
+
 void RootWindowController::SetTouchAccessibilityAnchorPoint(
     const gfx::Point& anchor_point) {
   if (touch_exploration_manager_)
@@ -811,6 +818,27 @@ void RootWindowController::UpdateAfterLoginStatusChange(LoginStatus status) {
     status_area_widget->UpdateAfterLoginStatusChange(status);
 }
 
+void RootWindowController::CreateAmbientWidget() {
+  DCHECK(!ambient_widget_);
+
+  auto* ambient_controller = Shell::Get()->ambient_controller();
+  if (ambient_controller && ambient_controller->IsShown()) {
+    ambient_widget_ = ambient_controller->CreateWidget(
+        GetRootWindow()->GetChildById(kShellWindowId_AmbientModeContainer));
+  }
+}
+
+void RootWindowController::CloseAmbientWidget(bool immediately) {
+  if (ambient_widget_) {
+    if (immediately)
+      ambient_widget_->CloseNow();
+    else
+      ambient_widget_->CloseWithReason(views::Widget::ClosedReason::kLostFocus);
+  }
+
+  ambient_widget_.reset();
+}
+
 AccessibilityPanelLayoutManager*
 RootWindowController::GetAccessibilityPanelLayoutManagerForTest() {
   return GetAccessibilityPanelLayoutManager();
@@ -819,18 +847,15 @@ RootWindowController::GetAccessibilityPanelLayoutManagerForTest() {
 ////////////////////////////////////////////////////////////////////////////////
 // RootWindowController, private:
 
-RootWindowController::RootWindowController(
-    AshWindowTreeHost* ash_host,
-    aura::WindowTreeHost* window_tree_host)
+RootWindowController::RootWindowController(AshWindowTreeHost* ash_host)
     : ash_host_(ash_host),
-      mus_window_tree_host_(window_tree_host),
-      window_tree_host_(ash_host ? ash_host->AsWindowTreeHost()
-                                 : window_tree_host),
+      window_tree_host_(ash_host->AsWindowTreeHost()),
       shelf_(std::make_unique<Shelf>()),
       lock_screen_action_background_controller_(
           LockScreenActionBackgroundController::Create()),
       work_area_insets_(std::make_unique<WorkAreaInsets>(this)) {
-  DCHECK((ash_host && !window_tree_host) || (!ash_host && window_tree_host));
+  DCHECK(ash_host_);
+  DCHECK(window_tree_host_);
 
   if (!root_window_controllers_)
     root_window_controllers_ = new std::vector<RootWindowController*>;
@@ -875,17 +900,14 @@ void RootWindowController::Init(RootWindowType root_window_type) {
     GetSystemModalLayoutManager(nullptr)->CreateModalBackground();
   }
 
-  wallpaper_widget_controller_ = std::make_unique<WallpaperWidgetController>(
-      root_window,
-      base::BindOnce(&RootWindowController::OnFirstWallpaperWidgetSet,
-                     base::Unretained(this)));
+  wallpaper_widget_controller_ =
+      std::make_unique<WallpaperWidgetController>(root_window);
 
-  int container = Shell::Get()->session_controller()->IsUserSessionBlocked()
-                      ? kShellWindowId_LockScreenWallpaperContainer
-                      : kShellWindowId_WallpaperContainer;
-  wallpaper_widget_controller_->Init(container);
-
+  wallpaper_widget_controller_->Init(
+      Shell::Get()->session_controller()->IsUserSessionBlocked());
   root_window_layout_manager_->OnWindowResized();
+
+  CreateAmbientWidget();
 
   // Explicitly update the desks controller before notifying the ShellObservers.
   // This is to make sure the desks' states are correct before clients are
@@ -901,8 +923,6 @@ void RootWindowController::Init(RootWindowType root_window_type) {
     shell->OnRootWindowAdded(root_window);
   }
 
-  // TODO: TouchExplorationManager doesn't work with mash.
-  // http://crbug.com/679782
   if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kAshDisableTouchExplorationMode)) {
     touch_exploration_manager_ =
@@ -970,12 +990,15 @@ void RootWindowController::CreateContainers() {
   aura::Window* root = GetRootWindow();
   root_window_layout_manager_ = new RootWindowLayoutManager(root);
 
-  // For screen rotation animation: add a NOT_DRAWN layer in between the
-  // root_window's layer and its current children so that we only need to
-  // initiate two LayerAnimationSequences. One for the new layers and one for
-  // the old layers.
-  aura::Window* screen_rotation_container = CreateContainer(
-      kShellWindowId_ScreenRotationContainer, "ScreenRotationContainer", root);
+  // Add a NOT_DRAWN layer in between the root_window's layer and its current
+  // children so that we only need to initiate two LayerAnimationSequences for
+  // fullscreen animations such as the screen rotation animation and the desk
+  // switch animation. Those animations take a screenshot of this container,
+  // stack it ontop and animate the screenshot instead of the individual
+  // elements.
+  aura::Window* screen_rotation_container =
+      CreateContainer(kShellWindowId_ScreenAnimationContainer,
+                      "ScreenAnimationContainer", root);
 
   // Everything that needs to be included in the docked magnifier, when enabled,
   // should be a descendant of MagnifiedContainer. The DockedMagnifierContainer
@@ -1157,10 +1180,11 @@ void RootWindowController::CreateContainers() {
   ::wm::SetChildWindowVisibilityChangesAnimated(menu_container);
   menu_container->SetProperty(::wm::kUsesScreenCoordinatesKey, true);
 
-  aura::Window* autoclick_container = CreateContainer(
-      kShellWindowId_AutoclickContainer, "AutoclickBubbleContainer",
-      lock_screen_related_containers);
-  autoclick_container->SetProperty(::wm::kUsesScreenCoordinatesKey, true);
+  aura::Window* accessibility_bubble_container = CreateContainer(
+      kShellWindowId_AccessibilityBubbleContainer,
+      "AccessibilityBubbleContainer", lock_screen_related_containers);
+  accessibility_bubble_container->SetProperty(::wm::kUsesScreenCoordinatesKey,
+                                              true);
 
   aura::Window* drag_drop_container = CreateContainer(
       kShellWindowId_DragImageAndTooltipContainer,
@@ -1174,6 +1198,16 @@ void RootWindowController::CreateContainers() {
   overlay_container->SetProperty(::wm::kUsesScreenCoordinatesKey, true);
   overlay_container->SetLayoutManager(
       new OverlayLayoutManager(overlay_container));  // Takes ownership.
+
+  if (chromeos::features::IsAmbientModeEnabled()) {
+    aura::Window* ambient_container =
+        CreateContainer(kShellWindowId_AmbientModeContainer,
+                        "AmbientModeContainer", lock_screen_related_containers);
+    ::wm::SetChildWindowVisibilityChangesAnimated(ambient_container);
+    ambient_container->SetProperty(::wm::kUsesScreenCoordinatesKey, true);
+    ambient_container->SetLayoutManager(
+        new FillLayoutManager(ambient_container));  // Takes ownership.
+  }
 
   aura::Window* mouse_cursor_container =
       CreateContainer(kShellWindowId_MouseCursorContainer,
@@ -1234,15 +1268,6 @@ RootWindowController::GetAccessibilityPanelLayoutManager() const {
 void RootWindowController::OnMenuClosed() {
   root_window_menu_model_adapter_.reset();
   shelf_->UpdateVisibilityState();
-}
-
-void RootWindowController::OnFirstWallpaperWidgetSet() {
-  DCHECK(system_wallpaper_.get());
-
-  // Set the system wallpaper color once a wallpaper has been set to ensure the
-  // wallpaper color that might have been set for the Chrome OS boot splash
-  // screen is overriden.
-  system_wallpaper_->SetColor(SK_ColorBLACK);
 }
 
 }  // namespace ash

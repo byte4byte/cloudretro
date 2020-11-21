@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <iterator>
 #include <utility>
+#include "build/chromeos_buildflags.h"
 
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
@@ -53,11 +54,11 @@ const char kInterfaceStateChangeInProgress[] =
     "An operation that changes interface state is in progress.";
 const char kOpenRequired[] = "The device must be opened first.";
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_ASH)
 const char kExtensionProtocol[] = "chrome-extension";
 
-// These whitelisted Imprivata extensions can claim the protected HID interface
-// class (used as badge readers), see crbug.com/1065112 and crbug.com/995294.
+// These Imprivata extensions can claim the protected HID interface class (used
+// as badge readers), see crbug.com/1065112 and crbug.com/995294.
 // This list needs to be alphabetically sorted for quick access via binary
 // search.
 const char* kImprivataExtensionIds[] = {
@@ -80,7 +81,7 @@ bool IsCStrBefore(const char* first, const char* second) {
   return strcmp(first, second) < 0;
 }
 
-bool IsClassWhitelistedForExtension(uint8_t class_code, const KURL& url) {
+bool IsClassAllowedForExtension(uint8_t class_code, const KURL& url) {
   if (url.Protocol() != kExtensionProtocol)
     return false;
 
@@ -95,7 +96,7 @@ bool IsClassWhitelistedForExtension(uint8_t class_code, const KURL& url) {
       return false;
   }
 }
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_ASH)
 
 DOMException* ConvertFatalTransferStatus(const UsbTransferStatus& status) {
   switch (status) {
@@ -151,15 +152,14 @@ bool ConvertBufferSource(const ArrayBufferOrArrayBufferView& buffer_source,
           DOMExceptionCode::kInvalidStateError, kDetachedBuffer));
       return false;
     }
-    if (array_buffer->ByteLengthAsSizeT() >
-        std::numeric_limits<wtf_size_t>::max()) {
+    if (array_buffer->ByteLength() > std::numeric_limits<wtf_size_t>::max()) {
       resolver->Reject(MakeGarbageCollected<DOMException>(
           DOMExceptionCode::kDataError, kBufferTooBig));
       return false;
     }
 
     vector->Append(static_cast<uint8_t*>(array_buffer->Data()),
-                   static_cast<wtf_size_t>(array_buffer->ByteLengthAsSizeT()));
+                   static_cast<wtf_size_t>(array_buffer->ByteLength()));
   } else {
     DOMArrayBufferView* view = buffer_source.GetAsArrayBufferView().View();
     if (!view->buffer() || view->buffer()->IsDetached()) {
@@ -167,14 +167,14 @@ bool ConvertBufferSource(const ArrayBufferOrArrayBufferView& buffer_source,
           DOMExceptionCode::kInvalidStateError, kDetachedBuffer));
       return false;
     }
-    if (view->byteLengthAsSizeT() > std::numeric_limits<wtf_size_t>::max()) {
+    if (view->byteLength() > std::numeric_limits<wtf_size_t>::max()) {
       resolver->Reject(MakeGarbageCollected<DOMException>(
           DOMExceptionCode::kDataError, kBufferTooBig));
       return false;
     }
 
     vector->Append(static_cast<uint8_t*>(view->BaseAddress()),
-                   static_cast<wtf_size_t>(view->byteLengthAsSizeT()));
+                   static_cast<wtf_size_t>(view->byteLength()));
   }
   return true;
 }
@@ -491,13 +491,18 @@ ScriptPromise USBDevice::controlTransferOut(
 ScriptPromise USBDevice::clearHalt(ScriptState* script_state,
                                    String direction,
                                    uint8_t endpoint_number) {
+  UsbTransferDirection mojo_direction = direction == "in"
+                                            ? UsbTransferDirection::INBOUND
+                                            : UsbTransferDirection::OUTBOUND;
+
   auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
   ScriptPromise promise = resolver->Promise();
   if (EnsureEndpointAvailable(direction == "in", endpoint_number, resolver)) {
     device_requests_.insert(resolver);
-    device_->ClearHalt(endpoint_number, WTF::Bind(&USBDevice::AsyncClearHalt,
-                                                  WrapPersistent(this),
-                                                  WrapPersistent(resolver)));
+    device_->ClearHalt(
+        mojo_direction, endpoint_number,
+        WTF::Bind(&USBDevice::AsyncClearHalt, WrapPersistent(this),
+                  WrapPersistent(resolver)));
   }
   return promise;
 }
@@ -596,7 +601,7 @@ void USBDevice::ContextDestroyed() {
   device_requests_.clear();
 }
 
-void USBDevice::Trace(Visitor* visitor) {
+void USBDevice::Trace(Visitor* visitor) const {
   visitor->Trace(device_);
   visitor->Trace(device_requests_);
   ScriptWrappable::Trace(visitor);
@@ -664,9 +669,9 @@ bool USBDevice::IsProtectedInterfaceClass(wtf_size_t interface_index) const {
     if (std::binary_search(std::begin(kProtectedClasses),
                            std::end(kProtectedClasses),
                            alternate->class_code)) {
-#if defined(OS_CHROMEOS)
-      return !IsClassWhitelistedForExtension(alternate->class_code,
-                                             GetExecutionContext()->Url());
+#if BUILDFLAG(IS_ASH)
+      return !IsClassAllowedForExtension(alternate->class_code,
+                                         GetExecutionContext()->Url());
 #else
       return true;
 #endif
@@ -1127,11 +1132,15 @@ void USBDevice::AsyncReset(ScriptPromiseResolver* resolver, bool success) {
 void USBDevice::OnConnectionError() {
   device_.reset();
   opened_ = false;
-  for (ScriptPromiseResolver* resolver : device_requests_) {
+
+  // Move the set to a local variable to prevent script execution in Reject()
+  // from invalidating the iterator used by the loop.
+  HeapHashSet<Member<ScriptPromiseResolver>> device_requests;
+  device_requests.swap(device_requests_);
+  for (auto& resolver : device_requests) {
     resolver->Reject(MakeGarbageCollected<DOMException>(
         DOMExceptionCode::kNotFoundError, kDeviceDisconnected));
   }
-  device_requests_.clear();
 }
 
 bool USBDevice::MarkRequestComplete(ScriptPromiseResolver* resolver) {

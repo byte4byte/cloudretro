@@ -5,7 +5,8 @@
 #ifndef CHROME_BROWSER_APPS_APP_SERVICE_APP_ICON_SOURCE_H_
 #define CHROME_BROWSER_APPS_APP_SERVICE_APP_ICON_SOURCE_H_
 
-#include "base/macros.h"
+#include <string>
+
 #include "content/public/browser/url_data_source.h"
 
 class Profile;
@@ -32,7 +33,11 @@ namespace apps {
 class AppIconSource : public content::URLDataSource {
  public:
   explicit AppIconSource(Profile* profile);
+  AppIconSource(const AppIconSource&) = delete;
+  AppIconSource& operator=(const AppIconSource&) = delete;
   ~AppIconSource() override;
+
+  static GURL GetIconURL(const std::string& app_id, int icon_size);
 
   // content::URLDataSource implementation.
   std::string GetSource() override;
@@ -46,8 +51,6 @@ class AppIconSource : public content::URLDataSource {
 
  private:
   Profile* const profile_;
-
-  DISALLOW_COPY_AND_ASSIGN(AppIconSource);
 };
 
 }  // namespace apps

@@ -9,7 +9,7 @@
 
 #include <memory>
 
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "base/metrics/histogram_macros.h"
 #include "ios/web/public/thread/web_thread.h"
 #include "net/base/backoff_entry.h"
@@ -150,6 +150,13 @@ const net::BackoffEntry::Policy kPollingBackoffPolicy = {
   // Reset the back off polling.
   _backoffEntry->Reset();
   [self pollForTheInstallationOfApps];
+}
+
+- (void)stopPolling {
+  // Increment the queued block ID, making it higher than the block ID of any
+  // currently queued block, which will prevent them from running (and from
+  // queueing any new blocks).
+  ++_lastCreatedBlockId;
 }
 
 - (void)dispatchInstallationNotifierBlock {

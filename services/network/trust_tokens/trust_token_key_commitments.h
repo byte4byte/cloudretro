@@ -19,7 +19,9 @@ namespace network {
 // Class TrustTokenKeyCommitments is a singleton owned by NetworkService; it
 // stores all known information about issuers' Trust Tokens key state. This
 // state is provided through offline updates via |Set|.
-class TrustTokenKeyCommitments : public TrustTokenKeyCommitmentGetter {
+class TrustTokenKeyCommitments
+    : public TrustTokenKeyCommitmentGetter,
+      public SynchronousTrustTokenKeyCommitmentGetter {
  public:
   TrustTokenKeyCommitments();
   ~TrustTokenKeyCommitments() override;
@@ -48,16 +50,23 @@ class TrustTokenKeyCommitments : public TrustTokenKeyCommitmentGetter {
   //
   // If |origin| is not suitable, or if no commitment result is found, returns
   // nullptr. Otherwise, returns the key commitment result stored for |origin|,
-  // with its verification keys filtered to contain at most
-  // |kMaximumConcurrentlyValidTrustTokenVerificationKeys| keys, none of
-  // which has yet expired.
+  // with its verification keys filtered to contain at most the maximum number
+  // of keys allowed for the protocol version, none of which has yet expired.
   //
   // If commitments for |origin| were passed both through a prior call to |Set|
   // and through the --additional-trust-token-key-commitments command-line
   // switch, the commitments passed through the switch take precedence.
+  //
+  // Implementation note: this is a thin wrapper around GetSync.
   void Get(const url::Origin& origin,
            base::OnceCallback<void(mojom::TrustTokenKeyCommitmentResultPtr)>
                done) const override;
+
+  // SynchronousTrustTokenKeyCommitmentResultGetter implementation:
+  //
+  // Implementation note: This is where the guts of |Get| live.
+  mojom::TrustTokenKeyCommitmentResultPtr GetSync(
+      const url::Origin& origin) const override;
 
  private:
   base::flat_map<SuitableTrustTokenOrigin,

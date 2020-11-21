@@ -11,8 +11,8 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
 #include "base/callback.h"
+#include "base/callback_helpers.h"
 #include "base/debug/alias.h"
 #include "base/feature_list.h"
 #include "base/lazy_instance.h"
@@ -42,6 +42,7 @@
 #include "extensions/common/features/feature.h"
 #include "extensions/common/features/feature_channel.h"
 #include "extensions/common/features/feature_provider.h"
+#include "extensions/common/features/feature_session_type.h"
 #include "extensions/common/manifest.h"
 #include "extensions/common/manifest_constants.h"
 #include "extensions/common/manifest_handlers/background_info.h"
@@ -99,6 +100,8 @@
 #include "gin/converter.h"
 #include "mojo/public/js/grit/mojo_bindings_resources.h"
 #include "services/network/public/mojom/cors.mojom.h"
+#include "third_party/blink/public/common/associated_interfaces/associated_interface_registry.h"
+#include "third_party/blink/public/mojom/frame/user_activation_notification_type.mojom.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/public/platform/web_url_request.h"
 #include "third_party/blink/public/web/modules/service_worker/web_service_worker_context_proxy.h"
@@ -225,7 +228,8 @@ Dispatcher::Dispatcher(std::unique_ptr<DispatcherDelegate> delegate)
       source_map_(&ui::ResourceBundle::GetSharedInstance()),
       v8_schema_registry_(new V8SchemaRegistry),
       user_script_set_manager_observer_(this),
-      activity_logging_enabled_(false) {
+      activity_logging_enabled_(false),
+      receiver_(this) {
   bindings_system_ = CreateBindingsSystem(
       IPCMessageSender::CreateMainThreadIPCMessageSender());
 
@@ -305,7 +309,7 @@ void Dispatcher::DidCreateScriptContext(
       script_context_set_->Register(frame, v8_context, world_id);
 
   // Initialize origin permissions for content scripts, which can't be
-  // initialized in |OnActivateExtension|.
+  // initialized in |ActivateExtension|.
   if (context->context_type() == Feature::CONTENT_SCRIPT_CONTEXT)
     InitOriginPermissions(context->extension());
 
@@ -604,11 +608,16 @@ void Dispatcher::WillDestroyServiceWorkerContextOnWorkerThread(
 }
 
 void Dispatcher::DidCreateDocumentElement(blink::WebLocalFrame* frame) {
-  // Note: use GetEffectiveDocumentURL not just frame->document()->url()
-  // so that this also injects the stylesheet on about:blank frames that
-  // are hosted in the extension process.
-  GURL effective_document_url = ScriptContext::GetEffectiveDocumentURL(
-      frame, frame->GetDocument().Url(), true /* match_about_blank */);
+  // Note: use GetEffectiveDocumentURLForContext() and not just
+  // frame->document()->url() so that this also injects the stylesheet on
+  // about:blank frames that are hosted in the extension process. (Even though
+  // this is used to determine whether to inject a stylesheet, we don't use
+  // GetEffectiveDocumentURLForInjection() because we inject based on whether
+  // it is an extension context, rather than based on the extension's injection
+  // permissions.)
+  GURL effective_document_url =
+      ScriptContext::GetEffectiveDocumentURLForContext(
+          frame, frame->GetDocument().Url(), true /* match_about_blank */);
 
   const Extension* extension =
       RendererExtensionRegistry::Get()->GetExtensionOrAppByURL(
@@ -746,6 +755,7 @@ std::vector<Dispatcher::JsResourceInfo> Dispatcher::GetJsResources() {
 
       {"keep_alive", IDR_KEEP_ALIVE_JS},
       {"mojo_bindings", IDR_MOJO_MOJO_BINDINGS_JS},
+      {"mojo_bindings_lite", IDR_MOJO_MOJO_BINDINGS_LITE_JS},
       {"extensions/common/mojom/keep_alive.mojom", IDR_KEEP_ALIVE_MOJOM_JS},
 
       // Custom bindings.
@@ -855,7 +865,6 @@ bool Dispatcher::OnControlMessageReceived(const IPC::Message& message) {
 
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(Dispatcher, message)
-  IPC_MESSAGE_HANDLER(ExtensionMsg_ActivateExtension, OnActivateExtension)
   IPC_MESSAGE_HANDLER(ExtensionMsg_CancelSuspend, OnCancelSuspend)
   IPC_MESSAGE_HANDLER(ExtensionMsg_DeliverMessage, OnDeliverMessage)
   IPC_MESSAGE_HANDLER(ExtensionMsg_DispatchOnConnect, OnDispatchOnConnect)
@@ -863,16 +872,14 @@ bool Dispatcher::OnControlMessageReceived(const IPC::Message& message) {
   IPC_MESSAGE_HANDLER(ExtensionMsg_Loaded, OnLoaded)
   IPC_MESSAGE_HANDLER(ExtensionMsg_MessageInvoke, OnMessageInvoke)
   IPC_MESSAGE_HANDLER(ExtensionMsg_DispatchEvent, OnDispatchEvent)
-  IPC_MESSAGE_HANDLER(ExtensionMsg_SetSessionInfo, OnSetSessionInfo)
-  IPC_MESSAGE_HANDLER(ExtensionMsg_SetScriptingWhitelist,
-                      OnSetScriptingWhitelist)
+  IPC_MESSAGE_HANDLER(ExtensionMsg_SetScriptingAllowlist,
+                      OnSetScriptingAllowlist)
   IPC_MESSAGE_HANDLER(ExtensionMsg_SetSystemFont, OnSetSystemFont)
   IPC_MESSAGE_HANDLER(ExtensionMsg_SetWebViewPartitionID,
                       OnSetWebViewPartitionID)
   IPC_MESSAGE_HANDLER(ExtensionMsg_ShouldSuspend, OnShouldSuspend)
   IPC_MESSAGE_HANDLER(ExtensionMsg_Suspend, OnSuspend)
   IPC_MESSAGE_HANDLER(ExtensionMsg_TransferBlobs, OnTransferBlobs)
-  IPC_MESSAGE_HANDLER(ExtensionMsg_Unloaded, OnUnloaded)
   IPC_MESSAGE_HANDLER(ExtensionMsg_UpdatePermissions, OnUpdatePermissions)
   IPC_MESSAGE_HANDLER(ExtensionMsg_UpdateDefaultPolicyHostRestrictions,
                       OnUpdateDefaultPolicyHostRestrictions)
@@ -880,8 +887,6 @@ bool Dispatcher::OnControlMessageReceived(const IPC::Message& message) {
                       OnUpdateTabSpecificPermissions)
   IPC_MESSAGE_HANDLER(ExtensionMsg_ClearTabSpecificPermissions,
                       OnClearTabSpecificPermissions)
-  IPC_MESSAGE_HANDLER(ExtensionMsg_SetActivityLoggingEnabled,
-                      OnSetActivityLoggingEnabled)
   IPC_MESSAGE_FORWARD(ExtensionMsg_WatchPages,
                       content_watcher_.get(),
                       ContentWatcher::OnWatchPages)
@@ -891,7 +896,29 @@ bool Dispatcher::OnControlMessageReceived(const IPC::Message& message) {
   return handled;
 }
 
-void Dispatcher::OnActivateExtension(const std::string& extension_id) {
+void Dispatcher::RegisterMojoInterfaces(
+    blink::AssociatedInterfaceRegistry* associated_interfaces) {
+  // This base::Unretained() is safe, because:
+  // 1) the Dispatcher is a RenderThreadObserver and outlives the RenderThread.
+  // 2) |asscoiated_interfaces| is owned by the RenderThread.
+  // As well the Dispatcher is owned by the
+  // ExtensionsRendererClient, which in turn is a leaky LazyInstance (and thus
+  // never deleted).
+  associated_interfaces->AddInterface(base::BindRepeating(
+      &Dispatcher::OnRendererAssociatedRequest, base::Unretained(this)));
+}
+
+void Dispatcher::UnregisterMojoInterfaces(
+    blink::AssociatedInterfaceRegistry* associated_interfaces) {
+  associated_interfaces->RemoveInterface(mojom::Renderer::Name_);
+}
+
+void Dispatcher::OnRendererAssociatedRequest(
+    mojo::PendingAssociatedReceiver<mojom::Renderer> receiver) {
+  receiver_.Bind(std::move(receiver));
+}
+
+void Dispatcher::ActivateExtension(const std::string& extension_id) {
   const Extension* extension =
       RendererExtensionRegistry::Get()->GetByID(extension_id);
   if (!extension) {
@@ -926,6 +953,57 @@ void Dispatcher::OnActivateExtension(const std::string& extension_id) {
   InitOriginPermissions(extension);
 
   UpdateActiveExtensions();
+}
+
+void Dispatcher::UnloadExtension(const std::string& extension_id) {
+  // See comment in OnLoaded for why it would be nice, but perhaps incorrect,
+  // to CHECK here rather than guarding.
+  // TODO(devlin): This may be fixed by crbug.com/528026. Monitor, and
+  // consider making this a release CHECK.
+  if (!RendererExtensionRegistry::Get()->Remove(extension_id)) {
+    NOTREACHED();
+    return;
+  }
+
+  ExtensionsRendererClient::Get()->OnExtensionUnloaded(extension_id);
+
+  bindings_system_->OnExtensionRemoved(extension_id);
+
+  active_extension_ids_.erase(extension_id);
+
+  script_injection_manager_->OnExtensionUnloaded(extension_id);
+
+  // If the extension is later reloaded with a different set of permissions,
+  // we'd like it to get a new isolated world ID, so that it can pick up the
+  // changed origin whitelist.
+  ScriptInjection::RemoveIsolatedWorld(extension_id);
+
+  // Inform the bindings system that the contexts will be removed to allow time
+  // to clear out context-specific data, and then remove the contexts
+  // themselves.
+  script_context_set_->ForEach(
+      extension_id, nullptr,
+      base::Bind(&NativeExtensionBindingsSystem::WillReleaseScriptContext,
+                 base::Unretained(bindings_system_.get())));
+  script_context_set_->OnExtensionUnloaded(extension_id);
+
+  // Update the available bindings for the remaining contexts. These may have
+  // changed if an externally_connectable extension is unloaded and a webpage
+  // is no longer accessible.
+  UpdateAllBindings();
+
+  // Invalidates the messages map for the extension in case the extension is
+  // reloaded with a new messages map.
+  EraseL10nMessagesMap(extension_id);
+
+  // Update the origin access map so that any content scripts injected no longer
+  // have dedicated allow/block lists for extra origins.
+  WebSecurityPolicy::ClearOriginAccessListForOrigin(
+      Extension::GetBaseURLFromExtensionId(extension_id));
+
+  // We don't do anything with existing platform-app stylesheets. They will
+  // stay resident, but the URL pattern corresponding to the unloaded
+  // extension's URL just won't match anything anymore.
 }
 
 void Dispatcher::OnCancelSuspend(const std::string& extension_id) {
@@ -1059,7 +1137,8 @@ void Dispatcher::OnDispatchEvent(
         ScriptContextSet::GetMainWorldContextForFrame(background_frame);
     if (background_context && bindings_system_->HasEventListenerInContext(
                                   params.event_name, background_context)) {
-      background_frame->GetWebFrame()->NotifyUserActivation();
+      background_frame->GetWebFrame()->NotifyUserActivation(
+          blink::mojom::UserActivationNotificationType::kExtensionEvent);
     }
   }
 
@@ -1078,9 +1157,9 @@ void Dispatcher::OnDispatchEvent(
   }
 }
 
-void Dispatcher::OnSetSessionInfo(version_info::Channel channel,
-                                  FeatureSessionType session_type,
-                                  bool is_lock_screen_context) {
+void Dispatcher::SetSessionInfo(version_info::Channel channel,
+                                mojom::FeatureSessionType session_type,
+                                bool is_lock_screen_context) {
   SetCurrentChannel(channel);
   SetCurrentFeatureSessionType(session_type);
   script_context_set_->set_is_lock_screen_context(is_lock_screen_context);
@@ -1093,9 +1172,9 @@ void Dispatcher::OnSetSessionInfo(version_info::Channel channel,
       blink::WebString::FromUTF8(extensions::kExtensionScheme));
 }
 
-void Dispatcher::OnSetScriptingWhitelist(
-    const ExtensionsClient::ScriptingWhitelist& extension_ids) {
-  ExtensionsClient::Get()->SetScriptingWhitelist(extension_ids);
+void Dispatcher::OnSetScriptingAllowlist(
+    const ExtensionsClient::ScriptingAllowlist& extension_ids) {
+  ExtensionsClient::Get()->SetScriptingAllowlist(extension_ids);
 }
 
 void Dispatcher::OnSetSystemFont(const std::string& font_family,
@@ -1128,57 +1207,6 @@ void Dispatcher::OnSuspend(const std::string& extension_id) {
 
 void Dispatcher::OnTransferBlobs(const std::vector<std::string>& blob_uuids) {
   RenderThread::Get()->Send(new ExtensionHostMsg_TransferBlobsAck(blob_uuids));
-}
-
-void Dispatcher::OnUnloaded(const std::string& id) {
-  // See comment in OnLoaded for why it would be nice, but perhaps incorrect,
-  // to CHECK here rather than guarding.
-  // TODO(devlin): This may be fixed by crbug.com/528026. Monitor, and
-  // consider making this a release CHECK.
-  if (!RendererExtensionRegistry::Get()->Remove(id)) {
-    NOTREACHED();
-    return;
-  }
-
-  ExtensionsRendererClient::Get()->OnExtensionUnloaded(id);
-
-  bindings_system_->OnExtensionRemoved(id);
-
-  active_extension_ids_.erase(id);
-
-  script_injection_manager_->OnExtensionUnloaded(id);
-
-  // If the extension is later reloaded with a different set of permissions,
-  // we'd like it to get a new isolated world ID, so that it can pick up the
-  // changed origin whitelist.
-  ScriptInjection::RemoveIsolatedWorld(id);
-
-  // Inform the bindings system that the contexts will be removed to allow time
-  // to clear out context-specific data, and then remove the contexts
-  // themselves.
-  script_context_set_->ForEach(
-      id, nullptr,
-      base::Bind(&NativeExtensionBindingsSystem::WillReleaseScriptContext,
-                 base::Unretained(bindings_system_.get())));
-  script_context_set_->OnExtensionUnloaded(id);
-
-  // Update the available bindings for the remaining contexts. These may have
-  // changed if an externally_connectable extension is unloaded and a webpage
-  // is no longer accessible.
-  UpdateAllBindings();
-
-  // Invalidates the messages map for the extension in case the extension is
-  // reloaded with a new messages map.
-  EraseL10nMessagesMap(id);
-
-  // Update the origin access map so that any content scripts injected no longer
-  // have dedicated allow/block lists for extra origins.
-  WebSecurityPolicy::ClearOriginAccessListForOrigin(
-      Extension::GetBaseURLFromExtensionId(id));
-
-  // We don't do anything with existing platform-app stylesheets. They will
-  // stay resident, but the URL pattern corresponding to the unloaded
-  // extension's URL just won't match anything anymore.
 }
 
 void Dispatcher::OnUpdateDefaultPolicyHostRestrictions(
@@ -1259,7 +1287,7 @@ void Dispatcher::OnClearTabSpecificPermissions(
   }
 }
 
-void Dispatcher::OnSetActivityLoggingEnabled(bool enabled) {
+void Dispatcher::SetActivityLoggingEnabled(bool enabled) {
   activity_logging_enabled_ = enabled;
   if (enabled) {
     for (const std::string& id : active_extension_ids_)

@@ -10,7 +10,6 @@
 #include "third_party/blink/renderer/bindings/core/v8/local_window_proxy.h"
 #include "third_party/blink/renderer/bindings/core/v8/remote_window_proxy.h"
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/remote_frame.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "v8/include/v8.h"
@@ -18,11 +17,12 @@
 namespace blink {
 
 class DOMWrapperWorld;
+class LocalFrame;
 class SecurityOrigin;
 
 class WindowProxyManager : public GarbageCollected<WindowProxyManager> {
  public:
-  void Trace(Visitor*);
+  void Trace(Visitor*) const;
 
   v8::Isolate* GetIsolate() const { return isolate_; }
 
@@ -38,11 +38,6 @@ class WindowProxyManager : public GarbageCollected<WindowProxyManager> {
       Vector<std::pair<DOMWrapperWorld*, v8::Local<v8::Object>>>;
   void CORE_EXPORT ReleaseGlobalProxies(GlobalProxyVector&);
   void CORE_EXPORT SetGlobalProxies(const GlobalProxyVector&);
-
-  WindowProxy* MainWorldProxy() {
-    window_proxy_->InitializeIfNeeded();
-    return window_proxy_;
-  }
 
   WindowProxy* GetWindowProxy(DOMWrapperWorld& world) {
     WindowProxy* window_proxy = WindowProxyMaybeUninitialized(world);
@@ -76,9 +71,6 @@ class WindowProxyManagerImplHelper : public WindowProxyManager {
   using Base = WindowProxyManager;
 
  public:
-  ProxyType* MainWorldProxy() {
-    return static_cast<ProxyType*>(Base::MainWorldProxy());
-  }
   ProxyType* WindowProxy(DOMWrapperWorld& world) {
     return static_cast<ProxyType*>(Base::GetWindowProxy(world));
   }
@@ -104,6 +96,9 @@ class LocalWindowProxyManager
   // Sets the given security origin to the main world's context.  Also updates
   // the security origin of the context for each isolated world.
   void UpdateSecurityOrigin(const SecurityOrigin*);
+
+  void SetAbortScriptExecution(
+      v8::Context::AbortScriptExecutionCallback callback);
 };
 
 class RemoteWindowProxyManager

@@ -13,8 +13,15 @@
 #include "ui/views/controls/webview/unhandled_keyboard_event_handler.h"
 #include "ui/views/window/dialog_delegate.h"
 
+class GURL;
+
 namespace content {
+class WebContents;
 class WebContentsDelegate;
+}
+
+namespace signin_metrics {
+enum class ReauthAccessPoint;
 }
 
 namespace views {
@@ -37,9 +44,9 @@ class SigninViewControllerDelegateViews
   static std::unique_ptr<views::WebView> CreateSigninErrorWebView(
       Browser* browser);
 
-  static std::unique_ptr<views::WebView> CreateReauthWebView(
+  static std::unique_ptr<views::WebView> CreateReauthConfirmationWebView(
       Browser* browser,
-      base::OnceCallback<void(signin::ReauthResult)> reauth_callback);
+      signin_metrics::ReauthAccessPoint);
 
   // views::DialogDelegateView:
   views::View* GetContentsView() override;
@@ -53,6 +60,7 @@ class SigninViewControllerDelegateViews
   void CloseModalSignin() override;
   void ResizeNativeView(int height) override;
   content::WebContents* GetWebContents() override;
+  void SetWebContents(content::WebContents* web_contents) override;
 
   // content::WebContentsDelegate:
   bool HandleContextMenu(content::RenderFrameHost* render_frame_host,
@@ -60,6 +68,13 @@ class SigninViewControllerDelegateViews
   bool HandleKeyboardEvent(
       content::WebContents* source,
       const content::NativeWebKeyboardEvent& event) override;
+  void AddNewContents(content::WebContents* source,
+                      std::unique_ptr<content::WebContents> new_contents,
+                      const GURL& target_url,
+                      WindowOpenDisposition disposition,
+                      const gfx::Rect& initial_rect,
+                      bool user_gesture,
+                      bool* was_blocked) override;
 
   // ChromeWebModalDialogManagerDelegate:
   web_modal::WebContentsModalDialogHost* GetWebContentsModalDialogHost()
@@ -72,7 +87,6 @@ class SigninViewControllerDelegateViews
   // |wait_for_size| is true, the delegate will wait for ResizeNativeView() to
   // be called by the base class before displaying the constrained window.
   SigninViewControllerDelegateViews(
-      SigninViewController* signin_view_controller,
       std::unique_ptr<views::WebView> content_view,
       Browser* browser,
       ui::ModalType dialog_modal_type,
@@ -83,21 +97,17 @@ class SigninViewControllerDelegateViews
   // Creates a WebView for a dialog with the specified URL.
   static std::unique_ptr<views::WebView> CreateDialogWebView(
       Browser* browser,
-      const std::string& url,
+      const GURL& url,
       int dialog_height,
       base::Optional<int> dialog_width);
-
-  // Notifies the SigninViewController that this instance is being deleted.
-  void ResetSigninViewControllerDelegate();
 
   // Displays the modal dialog.
   void DisplayModal();
 
   Browser* browser() { return browser_; }
 
-  SigninViewController* signin_view_controller_;  // Not owned.
-  content::WebContents* const web_contents_;      // Not owned.
-  Browser* const browser_;                        // Not owned.
+  content::WebContents* web_contents_;  // Not owned.
+  Browser* const browser_;              // Not owned.
   views::WebView* content_view_;
   views::Widget* modal_signin_widget_;  // Not owned.
   ui::ModalType dialog_modal_type_;

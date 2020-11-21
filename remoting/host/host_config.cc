@@ -8,6 +8,7 @@
 #include "base/files/important_file_writer.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
+#include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/values.h"
 
@@ -26,7 +27,6 @@ const char kUsageStatsConsentConfigPath[] = "usage_stats_consent";
 const char kEnableVp9ConfigPath[] = "enable_vp9";
 const char kEnableH264ConfigPath[] = "enable_h264";
 const char kFrameRecorderBufferKbConfigPath[] = "frame-recorder-buffer-kb";
-const char kIsFtlTokenConfigPath[] = "is_ftl_token";
 
 std::unique_ptr<base::DictionaryValue> HostConfigFromJson(
     const std::string& json) {

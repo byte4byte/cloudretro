@@ -35,7 +35,6 @@
 #include "chrome/browser/chromeos/login/demo_mode/demo_setup_controller.h"
 #include "chrome/browser/chromeos/login/users/chrome_user_manager.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
-#include "chrome/browser/chromeos/web_applications/default_web_app_ids.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/ash/system_tray_client.h"
 #include "chrome/browser/ui/ash/wallpaper_controller_client.h"
@@ -121,7 +120,7 @@ std::string GetHighlightsAppId() {
   if (board == "nocturne")
     return extension_misc::kHighlightsNocturneAppId;
   if (board == "atlas")
-    return extension_misc::kHighlightsAltAppId;
+    return extension_misc::kHighlightsAtlasAppId;
   return extension_misc::kHighlightsAppId;
 }
 
@@ -344,9 +343,7 @@ bool DemoSession::ShouldDisplayInAppLauncher(const std::string& app_id) {
   if (!IsDeviceInDemoMode())
     return true;
   return app_id != GetScreensaverAppId() &&
-         app_id != extensions::kWebStoreAppId &&
-         app_id != extension_misc::kGeniusAppId &&
-         app_id != default_web_apps::kHelpAppId;
+         app_id != extensions::kWebStoreAppId;
 }
 
 // static
@@ -450,11 +447,13 @@ void DemoSession::InstallDemoResources() {
 
   Profile* const profile = ProfileManager::GetActiveUserProfile();
   DCHECK(profile);
-  const base::FilePath downloads =
-      file_manager::util::GetDownloadsFolderForProfile(profile);
+  // TODO(b/158057730): Revert this back to Downloads once the ARC++ Download
+  // folder bug in Managed Guest Sessions has been fixed.
+  const base::FilePath my_files =
+      file_manager::util::GetMyFilesFolderForProfile(profile);
   base::ThreadPool::PostTask(
       FROM_HERE, {base::TaskPriority::USER_VISIBLE, base::MayBlock()},
-      base::BindOnce(&InstallDemoMedia, demo_resources_->path(), downloads));
+      base::BindOnce(&InstallDemoMedia, demo_resources_->path(), my_files));
 }
 
 void DemoSession::LoadAndLaunchHighlightsApp() {
@@ -572,7 +571,7 @@ void DemoSession::OnExtensionInstalled(content::BrowserContext* browser_context,
   DCHECK(profile);
   apps::AppServiceProxyFactory::GetForProfile(profile)
       ->BrowserAppLauncher()
-      .LaunchAppWithParams(apps::AppLaunchParams(
+      ->LaunchAppWithParams(apps::AppLaunchParams(
           extension->id(), apps::mojom::LaunchContainer::kLaunchContainerWindow,
           WindowOpenDisposition::NEW_WINDOW,
           apps::mojom::AppLaunchSource::kSourceChromeInternal));

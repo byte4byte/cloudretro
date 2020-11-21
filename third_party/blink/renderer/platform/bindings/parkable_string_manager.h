@@ -27,8 +27,6 @@ namespace blink {
 class DiskDataAllocator;
 class ParkableString;
 
-PLATFORM_EXPORT extern const base::Feature kCompressParkableStrings;
-
 class PLATFORM_EXPORT ParkableStringManagerDumpProvider
     : public base::trace_event::MemoryDumpProvider {
   USING_FAST_MALLOC(ParkableStringManagerDumpProvider);
@@ -58,8 +56,6 @@ class PLATFORM_EXPORT ParkableStringManager {
   static ParkableStringManager& Instance();
   ~ParkableStringManager();
 
-  void SetRendererBackgrounded(bool backgrounded);
-  bool IsRendererBackgrounded() const;
   void PurgeMemory();
   // Number of parked and unparked strings. Public for testing.
   size_t Size() const;
@@ -96,10 +92,20 @@ class PLATFORM_EXPORT ParkableStringManager {
   void RecordStatisticsAfter5Minutes() const;
   void AgeStringsAndPark();
   void ScheduleAgingTaskIfNeeded();
-  void RecordUnparkingTime(base::TimeDelta);
+
+  void RecordUnparkingTime(base::TimeDelta unparking_time) {
+    total_unparking_time_ += unparking_time;
+  }
   void RecordParkingThreadTime(base::TimeDelta parking_thread_time) {
     total_parking_thread_time_ += parking_thread_time;
   }
+  void RecordDiskWriteTime(base::TimeDelta write_time) {
+    total_disk_write_time_ += write_time;
+  }
+  void RecordDiskReadTime(base::TimeDelta read_time) {
+    total_disk_read_time_ += read_time;
+  }
+
   Statistics ComputeStatistics() const;
 
   DiskDataAllocator& data_allocator() const {
@@ -117,12 +123,13 @@ class PLATFORM_EXPORT ParkableStringManager {
   void ResetForTesting();
   ParkableStringManager();
 
-  bool backgrounded_;
   bool has_pending_aging_task_;
   bool has_posted_unparking_time_accounting_task_;
   bool did_register_memory_pressure_listener_;
   base::TimeDelta total_unparking_time_;
   base::TimeDelta total_parking_thread_time_;
+  base::TimeDelta total_disk_read_time_;
+  base::TimeDelta total_disk_write_time_;
 
   StringMap unparked_strings_;
   StringMap parked_strings_;

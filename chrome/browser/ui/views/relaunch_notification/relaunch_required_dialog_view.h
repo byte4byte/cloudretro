@@ -38,15 +38,8 @@ class RelaunchRequiredDialogView : views::DialogDelegateView {
   void SetDeadline(base::Time deadline);
 
   // views::DialogDelegateView:
-  ui::ModalType GetModalType() const override;
   base::string16 GetWindowTitle() const override;
-  bool ShouldShowCloseButton() const override;
   gfx::ImageSkia GetWindowIcon() override;
-  bool ShouldShowWindowIcon() const override;
-
- protected:
-  // views::DialogDelegateView:
-  gfx::Size CalculatePreferredSize() const override;
 
  private:
   RelaunchRequiredDialogView(base::Time deadline,
@@ -54,8 +47,6 @@ class RelaunchRequiredDialogView : views::DialogDelegateView {
 
   // Invoked when the timer fires to refresh the title text.
   void UpdateWindowTitle();
-
-  static constexpr int kTitleIconSize = 20;
 
   // Timer that schedules title refreshes.
   RelaunchRequiredTimer relaunch_required_timer_;

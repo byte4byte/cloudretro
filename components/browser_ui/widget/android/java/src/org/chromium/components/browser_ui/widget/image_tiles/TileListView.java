@@ -8,6 +8,10 @@ import android.content.Context;
 import android.content.res.Configuration;
 import android.graphics.Rect;
 import android.view.View;
+import android.view.animation.Animation;
+import android.view.animation.Animation.AnimationListener;
+import android.view.animation.AnimationUtils;
+import android.view.animation.LayoutAnimationController;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -30,6 +34,7 @@ class TileListView {
     private final RecyclerView mView;
     private final RecyclerViewAdapter<TileViewHolder, Void> mAdapter;
     private final LinearLayoutManager mLayoutManager;
+    private final LayoutAnimationController mLayoutAnimationController;
     private final TileSizeSupplier mTileSizeSupplier;
 
     /** Constructor. */
@@ -52,6 +57,10 @@ class TileListView {
         mLayoutManager = new LinearLayoutManager(context, LinearLayoutManager.HORIZONTAL, false);
         mView.setLayoutManager(mLayoutManager);
         mView.addItemDecoration(new ItemDecorationImpl(context));
+        mView.setItemAnimator(null);
+        mLayoutAnimationController =
+                AnimationUtils.loadLayoutAnimation(context, R.anim.image_grid_enter);
+        configureAnimationListener();
         mTileSizeSupplier = new TileSizeSupplier(context);
 
         PropertyModelChangeProcessor.create(
@@ -68,9 +77,36 @@ class TileListView {
         return mView;
     }
 
-    /** Scrolls the recycler view to the given {@code position}. */
-    public void scrollToPosition(int position) {
-        mView.getLayoutManager().scrollToPosition(0);
+    /** Scrolls to the beginning of the list if possible. */
+    void scrollToBeginning() {
+        if (mView.computeHorizontalScrollOffset() != 0) {
+            mView.getLayoutManager().scrollToPosition(0);
+        }
+    }
+
+    /**
+     * Called to show enter animation for the list items.
+     */
+    void showAnimation(boolean animate) {
+        if (animate) {
+            mView.setLayoutAnimation(mLayoutAnimationController);
+            mView.scheduleLayoutAnimation();
+        }
+    }
+
+    private void configureAnimationListener() {
+        mView.setLayoutAnimationListener(new AnimationListener() {
+            @Override
+            public void onAnimationStart(Animation animation) {}
+
+            @Override
+            public void onAnimationEnd(Animation animation) {
+                mView.setLayoutAnimation(null);
+            }
+
+            @Override
+            public void onAnimationRepeat(Animation animation) {}
+        });
     }
 
     private class ItemDecorationImpl extends ItemDecoration {

@@ -7,13 +7,14 @@
 const base::Feature kSharedClipboardUI{"SharedClipboardUI",
                                        base::FEATURE_DISABLED_BY_DEFAULT};
 
-#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_LINUX) || \
+#if defined(OS_WIN) || defined(OS_MAC) || defined(OS_LINUX) || \
     defined(OS_CHROMEOS)
 const base::Feature kRemoteCopyReceiver{"RemoteCopyReceiver",
-                                        base::FEATURE_DISABLED_BY_DEFAULT};
+                                        base::FEATURE_ENABLED_BY_DEFAULT};
 
 const base::FeatureParam<std::string> kRemoteCopyAllowedOrigins = {
-    &kRemoteCopyReceiver, "RemoteCopyAllowedOrigins", ""};
+    &kRemoteCopyReceiver, "RemoteCopyAllowedOrigins",
+    "https://googleusercontent.com"};
 
 const base::Feature kRemoteCopyImageNotification{
     "RemoteCopyImageNotification", base::FEATURE_DISABLED_BY_DEFAULT};
@@ -23,5 +24,5 @@ const base::Feature kRemoteCopyPersistentNotification{
 
 const base::Feature kRemoteCopyProgressNotification{
     "RemoteCopyProgressNotification", base::FEATURE_DISABLED_BY_DEFAULT};
-#endif  // defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_LINUX) ||
+#endif  // defined(OS_WIN) || defined(OS_MAC) || defined(OS_LINUX) ||
         // defined(OS_CHROMEOS)

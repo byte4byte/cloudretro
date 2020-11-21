@@ -28,13 +28,15 @@ class CryptoSyncPrefs;
 // handles things related to encryption, including holding lots of state and
 // encryption communications with the sync thread.
 class SyncServiceCrypto : public SyncEncryptionHandler::Observer,
-                          public DataTypeEncryptionHandler {
+                          public DataTypeEncryptionHandler,
+                          public TrustedVaultClient::Observer {
  public:
   // |sync_prefs| must not be null and must outlive this object.
   // |trusted_vault_client| may be null, but if non-null, the pointee must
   // outlive this object.
   SyncServiceCrypto(
       const base::RepeatingClosure& notify_observers,
+      const base::RepeatingClosure& notify_required_user_action_changed,
       const base::RepeatingCallback<void(ConfigureReason)>& reconfigure,
       CryptoSyncPrefs* sync_prefs,
       TrustedVaultClient* trusted_vault_client);
@@ -47,17 +49,27 @@ class SyncServiceCrypto : public SyncEncryptionHandler::Observer,
   bool IsPassphraseRequired() const;
   bool IsUsingSecondaryPassphrase() const;
   bool IsTrustedVaultKeyRequired() const;
-  void EnableEncryptEverything();
+  bool IsTrustedVaultRecoverabilityDegraded() const;
   bool IsEncryptEverythingEnabled() const;
   void SetEncryptionPassphrase(const std::string& passphrase);
   bool SetDecryptionPassphrase(const std::string& passphrase);
 
+  // Returns whether it's already possible to determine whether trusted vault
+  // key required (e.g. engine didn't start yet or silent fetch attempt is in
+  // progress).
+  bool IsTrustedVaultKeyRequiredStateKnown() const;
+
   // Returns the actual passphrase type being used for encryption.
   PassphraseType GetPassphraseType() const;
 
+  // Used to provide the engine when it is initialized.
+  void SetSyncEngine(const CoreAccountInfo& account_info, SyncEngine* engine);
+
+  // Creates a proxy observer object that will post calls to this thread.
+  std::unique_ptr<SyncEncryptionHandler::Observer> GetEncryptionObserverProxy();
+
   // SyncEncryptionHandler::Observer implementation.
   void OnPassphraseRequired(
-      PassphraseRequiredReason reason,
       const KeyDerivationParams& key_derivation_params,
       const sync_pb::EncryptedData& pending_keys) override;
   void OnPassphraseAccepted() override;
@@ -67,7 +79,6 @@ class SyncServiceCrypto : public SyncEncryptionHandler::Observer,
                                BootstrapTokenType type) override;
   void OnEncryptedTypesChanged(ModelTypeSet encrypted_types,
                                bool encrypt_everything) override;
-  void OnEncryptionComplete() override;
   void OnCryptographerStateChanged(Cryptographer* cryptographer,
                                    bool has_pending_keys) override;
   void OnPassphraseTypeChanged(PassphraseType type,
@@ -77,19 +88,17 @@ class SyncServiceCrypto : public SyncEncryptionHandler::Observer,
   bool HasCryptoError() const override;
   ModelTypeSet GetEncryptedDataTypes() const override;
 
-  // Used to provide the engine when it is initialized.
-  void SetSyncEngine(const CoreAccountInfo& account_info, SyncEngine* engine);
-
-  // Creates a proxy observer object that will post calls to this thread.
-  std::unique_ptr<SyncEncryptionHandler::Observer> GetEncryptionObserverProxy();
+  // TrustedVaultClient::Observer implementation.
+  void OnTrustedVaultKeysChanged() override;
+  void OnTrustedVaultRecoverabilityChanged() override;
 
   bool encryption_pending() const { return state_.encryption_pending; }
 
  private:
   enum class RequiredUserAction {
+    kUnknownDuringInitialization,
     kNone,
-    kPassphraseRequiredForDecryption,
-    kPassphraseRequiredForEncryption,
+    kPassphraseRequired,
     // Trusted vault keys are required but a silent attempt to fetch keys is in
     // progress before prompting the user.
     kFetchingTrustedVaultKeys,
@@ -100,13 +109,13 @@ class SyncServiceCrypto : public SyncEncryptionHandler::Observer,
     // via IsTrustedVaultKeyRequired() but there's an ongoing fetch that may
     // resolve the issue.
     kTrustedVaultKeyRequiredButFetching,
+    // No keys are required locally but user action is recommended to improve
+    // recoverability.
+    kTrustedVaultRecoverabilityDegraded,
   };
 
-  // Observer method invoked by TrustedVaultClient when its content changes.
-  void OnTrustedVaultClientKeysChanged();
-
   // Reads trusted vault keys from the client and feeds them to the sync engine.
-  void FetchTrustedVaultKeys();
+  void FetchTrustedVaultKeys(bool is_second_fetch_attempt);
 
   // Called at various stages of asynchronously fetching and processing trusted
   // vault encryption keys. |is_second_fetch_attempt| is useful for the case
@@ -119,8 +128,22 @@ class SyncServiceCrypto : public SyncEncryptionHandler::Observer,
   void TrustedVaultKeysMarkedAsStale(bool is_second_fetch_attempt, bool result);
   void FetchTrustedVaultKeysCompletedButInsufficient();
 
+  // Updates required user action and notifies observers via
+  // |notify_required_user_action_changed_|.
+  void UpdateRequiredUserActionAndNotify(
+      RequiredUserAction new_required_user_action);
+
+  // Invokes TrustedVaultClient::GetIsRecoverabilityDegraded() if needed.
+  void RefreshIsRecoverabilityDegraded();
+
+  // Completion callback function for
+  // TrustedVaultClient::GetIsRecoverabilityDegraded().
+  void GetIsRecoverabilityDegradedCompleted(bool is_recoverability_degraded);
+
   // Calls SyncServiceBase::NotifyObservers(). Never null.
   const base::RepeatingClosure notify_observers_;
+
+  const base::RepeatingClosure notify_required_user_action_changed_;
 
   const base::RepeatingCallback<void(ConfigureReason)> reconfigure_;
 
@@ -130,10 +153,6 @@ class SyncServiceCrypto : public SyncEncryptionHandler::Observer,
 
   // Never null and guaranteed to outlive us.
   TrustedVaultClient* const trusted_vault_client_;
-
-  // Subscription to observe changes in |*trusted_vault_client_|.
-  std::unique_ptr<TrustedVaultClient::Subscription>
-      trusted_vault_client_subscription_;
 
   // All the mutable state is wrapped in a struct so that it can be easily
   // reset to its default values.
@@ -149,7 +168,10 @@ class SyncServiceCrypto : public SyncEncryptionHandler::Observer,
     // Populated when the engine is initialized.
     CoreAccountInfo account_info;
 
-    RequiredUserAction required_user_action = RequiredUserAction::kNone;
+    // This field must be updated via UpdateRequiredUserAction() to ensure
+    // observers are notified.
+    RequiredUserAction required_user_action =
+        RequiredUserAction::kUnknownDuringInitialization;
 
     // The current set of encrypted types. Always a superset of
     // AlwaysEncryptedUserTypes().

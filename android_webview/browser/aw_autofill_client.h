@@ -23,7 +23,6 @@ class AutofillPopupDelegate;
 class CardUnmaskDelegate;
 class CreditCard;
 class FormStructure;
-class MigratableCreditCard;
 class PersonalDataManager;
 class StrikeDatabase;
 }  // namespace autofill
@@ -73,37 +72,25 @@ class AwAutofillClient : public autofill::AutofillClient,
   ukm::UkmRecorder* GetUkmRecorder() override;
   ukm::SourceId GetUkmSourceId() override;
   autofill::AddressNormalizer* GetAddressNormalizer() override;
+  const GURL& GetLastCommittedURL() override;
   security_state::SecurityLevel GetSecurityLevelForUmaHistograms() override;
+  const translate::LanguageState* GetLanguageState() override;
   void ShowAutofillSettings(bool show_credit_card_settings) override;
   void ShowUnmaskPrompt(
       const autofill::CreditCard& card,
       UnmaskCardReason reason,
       base::WeakPtr<autofill::CardUnmaskDelegate> delegate) override;
   void OnUnmaskVerificationResult(PaymentsRpcResult result) override;
-  void ShowLocalCardMigrationDialog(
-      base::OnceClosure show_migration_dialog_closure) override;
-  void ConfirmMigrateLocalCardToCloud(
-      const autofill::LegalMessageLines& legal_message_lines,
-      const std::string& user_email,
-      const std::vector<autofill::MigratableCreditCard>&
-          migratable_credit_cards,
-      LocalCardMigrationCallback start_migrating_cards_callback) override;
-  void ShowLocalCardMigrationResults(
-      const bool has_server_error,
-      const base::string16& tip_message,
-      const std::vector<autofill::MigratableCreditCard>&
-          migratable_credit_cards,
-      MigrationDeleteCardCallback delete_local_card_callback) override;
-  void ConfirmSaveCreditCardLocally(
-      const autofill::CreditCard& card,
-      SaveCreditCardOptions options,
-      LocalSaveCardPromptCallback callback) override;
   void ConfirmAccountNameFixFlow(
       base::OnceCallback<void(const base::string16&)> callback) override;
   void ConfirmExpirationDateFixFlow(
       const autofill::CreditCard& card,
       base::OnceCallback<void(const base::string16&, const base::string16&)>
           callback) override;
+  void ConfirmSaveCreditCardLocally(
+      const autofill::CreditCard& card,
+      SaveCreditCardOptions options,
+      LocalSaveCardPromptCallback callback) override;
   void ConfirmSaveCreditCardToCloud(
       const autofill::CreditCard& card,
       const autofill::LegalMessageLines& legal_message_lines,
@@ -115,17 +102,14 @@ class AwAutofillClient : public autofill::AutofillClient,
   bool HasCreditCardScanFeature() override;
   void ScanCreditCard(CreditCardScanCallback callback) override;
   void ShowAutofillPopup(
-      const gfx::RectF& element_bounds,
-      base::i18n::TextDirection text_direction,
-      const std::vector<autofill::Suggestion>& suggestions,
-      bool /*unused_autoselect_first_suggestion*/,
-      autofill::PopupType popup_type,
+      const autofill::AutofillClient::PopupOpenArgs& open_args,
       base::WeakPtr<autofill::AutofillPopupDelegate> delegate) override;
   void UpdateAutofillPopupDataListValues(
       const std::vector<base::string16>& values,
       const std::vector<base::string16>& labels) override;
   base::span<const autofill::Suggestion> GetPopupSuggestions() const override;
   void PinPopupView() override;
+  autofill::AutofillClient::PopupOpenArgs GetReopenPopupArgs() const override;
   void UpdatePopup(const std::vector<autofill::Suggestion>& suggestions,
                    autofill::PopupType popup_type) override;
   void HideAutofillPopup(autofill::PopupHidingReason reason) override;

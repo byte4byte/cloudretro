@@ -3,18 +3,48 @@
   <head>
     <style>
       html,
-      body {
+      body,
+      #image,
+      #gradient {
         height: 100%;
         width: 100%;
       }
 
+      #image,
+      #gradient {
+        position: fixed;
+        top: 0;
+      }
+
       body {
-        background-image: url($i18nRaw{url});
-        background-position: center;
-        background-size: cover;
-        margin: 0
+        margin: 0;
+        opacity: 0;
+        transition: opacity 700ms;
+      }
+
+      body[shown] {
+        opacity: 1;
+      }
+
+      #image {
+        background-image: $i18nRaw{backgroundUrl};
+        background-position: $i18nRaw{positionX} $i18nRaw{positionY};
+        background-repeat: $i18nRaw{repeatX} $i18nRaw{repeatY};
+        background-size: $i18nRaw{size};
+      }
+
+      #gradient {
+        background: radial-gradient(transparent 50%, black),
+            linear-gradient(transparent, black);
+        opacity: .2;
       }
     </style>
   </head>
-  <body></body>
+  <body>
+    <script src="background_image.js"></script>
+    <!-- The img tag purely exists to capture the load event. -->
+    <img src="$i18nRaw{url}" onload="onImageLoad()" hidden></img>
+    <div id="image"></div>
+    <div id="gradient"></div>
+  </body>
 </html>

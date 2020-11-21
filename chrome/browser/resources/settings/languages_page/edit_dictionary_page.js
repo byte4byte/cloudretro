@@ -7,21 +7,23 @@
  * the "dictionary" of custom words used for spell check.
  */
 
-import {Polymer, html, flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
-
 import 'chrome://resources/cr_elements/cr_button/cr_button.m.js';
 import 'chrome://resources/cr_elements/cr_icon_button/cr_icon_button.m.js';
 import 'chrome://resources/cr_elements/cr_input/cr_input.m.js';
 import 'chrome://resources/cr_elements/icons.m.js';
 import 'chrome://resources/polymer/v3_0/iron-a11y-keys/iron-a11y-keys.js';
 import 'chrome://resources/polymer/v3_0/iron-list/iron-list.js';
-import {GlobalScrollTargetBehavior} from '../global_scroll_target_behavior.m.js';
-import {loadTimeData} from '../i18n_setup.m.js';
 import '../prefs/prefs.m.js';
-import {PrefsBehavior} from '../prefs/prefs_behavior.m.js';
-import {routes} from '../route.m.js';
 import '../settings_shared_css.m.js';
 import '../settings_vars_css.m.js';
+
+import {flush, html, Polymer} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+
+import {GlobalScrollTargetBehavior} from '../global_scroll_target_behavior.m.js';
+import {loadTimeData} from '../i18n_setup.js';
+import {PrefsBehavior} from '../prefs/prefs_behavior.m.js';
+import {routes} from '../route.js';
+
 import {LanguagesBrowserProxyImpl} from './languages_browser_proxy.m.js';
 
 // Max valid word size defined in
@@ -105,7 +107,7 @@ Polymer({
    * @private
    */
   disableAddButton_() {
-    return this.getTrimmedNewWord_().length == 0 || this.isWordInvalid_();
+    return this.getTrimmedNewWord_().length === 0 || this.isWordInvalid_();
   },
 
   /**
@@ -171,7 +173,7 @@ Polymer({
    * @param {!Array<string>} removed
    */
   onCustomDictionaryChanged_(added, removed) {
-    const wasEmpty = this.words_.length == 0;
+    const wasEmpty = this.words_.length === 0;
 
     for (const word of removed) {
       this.arrayDelete('words_', word);
@@ -210,9 +212,9 @@ Polymer({
    * @param {!CustomEvent<!{key: string}>} e
    */
   onKeysPress_(e) {
-    if (e.detail.key == 'enter' && !this.disableAddButton_()) {
+    if (e.detail.key === 'enter' && !this.disableAddButton_()) {
       this.addWordFromInput_();
-    } else if (e.detail.key == 'esc') {
+    } else if (e.detail.key === 'esc') {
       e.detail.keyboardEvent.target.value = '';
     }
   },

@@ -6,8 +6,9 @@
 
 #include <utility>
 
+#include "base/check_op.h"
 #include "base/containers/span.h"
-#include "base/logging.h"
+#include "base/notreached.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "extensions/common/error_utils.h"
@@ -42,9 +43,6 @@ std::string GetError(ParseResult error_reason, const int* rule_id) {
       return ErrorUtils::FormatErrorMessage(
           kErrorInvalidRuleKey, base::NumberToString(*rule_id), kIDKey,
           base::NumberToString(kMinValidID));
-    case ParseResult::ERROR_EMPTY_RULE_PRIORITY:
-      return ErrorUtils::FormatErrorMessage(kErrorEmptyRulePriority,
-                                            base::NumberToString(*rule_id));
     case ParseResult::ERROR_INVALID_RULE_PRIORITY:
       return ErrorUtils::FormatErrorMessage(
           kErrorInvalidRuleKey, base::NumberToString(*rule_id), kPriorityKey,
@@ -83,10 +81,6 @@ std::string GetError(ParseResult error_reason, const int* rule_id) {
     case ParseResult::ERROR_INVALID_URL_FILTER:
       return ErrorUtils::FormatErrorMessage(
           kErrorInvalidKey, base::NumberToString(*rule_id), kUrlFilterKey);
-    case ParseResult::ERROR_EMPTY_REMOVE_HEADERS_LIST:
-      return ErrorUtils::FormatErrorMessage(kErrorEmptyRemoveHeadersList,
-                                            base::NumberToString(*rule_id),
-                                            kRemoveHeadersListKey);
     case ParseResult::ERROR_INVALID_REDIRECT:
       return ErrorUtils::FormatErrorMessage(
           kErrorInvalidKey, base::NumberToString(*rule_id), kRedirectPath);
@@ -140,6 +134,18 @@ std::string GetError(ParseResult error_reason, const int* rule_id) {
     case ParseResult::ERROR_INVALID_HEADER_NAME:
       return ErrorUtils::FormatErrorMessage(kErrorInvalidHeaderName,
                                             base::NumberToString(*rule_id));
+    case ParseResult::ERROR_INVALID_HEADER_VALUE:
+      return ErrorUtils::FormatErrorMessage(kErrorInvalidHeaderValue,
+                                            base::NumberToString(*rule_id));
+    case ParseResult::ERROR_HEADER_VALUE_NOT_SPECIFIED:
+      return ErrorUtils::FormatErrorMessage(kErrorNoHeaderValueSpecified,
+                                            base::NumberToString(*rule_id));
+    case ParseResult::ERROR_HEADER_VALUE_PRESENT:
+      return ErrorUtils::FormatErrorMessage(kErrorHeaderValuePresent,
+                                            base::NumberToString(*rule_id));
+    case ParseResult::ERROR_APPEND_REQUEST_HEADER_UNSUPPORTED:
+      return ErrorUtils::FormatErrorMessage(kErrorCannotAppendRequestHeader,
+                                            base::NumberToString(*rule_id));
     case ParseResult::ERROR_REGEX_TOO_LARGE:
       // These rules are ignored while indexing and so won't cause an error.
       break;
@@ -168,13 +174,15 @@ std::string GetError(ParseResult error_reason, const int* rule_id) {
 
 ParseInfo::ParseInfo(size_t rules_count,
                      size_t regex_rules_count,
-                     int ruleset_checksum,
-                     std::vector<int> regex_limit_exceeded_rules)
+                     std::vector<int> regex_limit_exceeded_rules,
+                     flatbuffers::DetachedBuffer buffer,
+                     int ruleset_checksum)
     : has_error_(false),
       rules_count_(rules_count),
       regex_rules_count_(regex_rules_count),
-      ruleset_checksum_(ruleset_checksum),
-      regex_limit_exceeded_rules_(std::move(regex_limit_exceeded_rules)) {}
+      regex_limit_exceeded_rules_(std::move(regex_limit_exceeded_rules)),
+      buffer_(std::move(buffer)),
+      ruleset_checksum_(ruleset_checksum) {}
 
 ParseInfo::ParseInfo(ParseResult error_reason, const int* rule_id)
     : has_error_(true),

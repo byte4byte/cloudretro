@@ -67,7 +67,7 @@ class APP_LIST_EXPORT SearchResultView
   void CreateDetailsRenderText();
 
   // Callback for query suggstion removal confirmation.
-  void OnQueryRemovalAccepted(bool accepted, int event_flags);
+  void OnQueryRemovalAccepted(bool accepted);
 
   // views::View overrides:
   const char* GetClassName() const override;
@@ -75,8 +75,6 @@ class APP_LIST_EXPORT SearchResultView
   void Layout() override;
   bool OnKeyPressed(const ui::KeyEvent& event) override;
   void PaintButtonContents(gfx::Canvas* canvas) override;
-  void OnFocus() override;
-  void OnBlur() override;
   void OnMouseEntered(const ui::MouseEvent& event) override;
   void OnMouseExited(const ui::MouseEvent& event) override;
   void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
@@ -84,9 +82,6 @@ class APP_LIST_EXPORT SearchResultView
 
   // ui::EventHandler overrides:
   void OnGestureEvent(ui::GestureEvent* event) override;
-
-  // views::ButtonListener overrides:
-  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
 
   // views::ContextMenuController overrides:
   void ShowContextMenuForViewImpl(views::View* source,
@@ -102,12 +97,14 @@ class APP_LIST_EXPORT SearchResultView
   // SearchResultObserver overrides:
   void OnMetadataChanged() override;
 
+  void OnButtonPressed(const ui::Event& event);
+
   void SetIconImage(const gfx::ImageSkia& source,
                     views::ImageView* const icon,
                     const int icon_dimension);
 
   // SearchResultActionsViewDelegate overrides:
-  void OnSearchResultActionActivated(size_t index, int event_flags) override;
+  void OnSearchResultActionActivated(size_t index) override;
   bool IsSearchResultHoveredOrSelected() override;
 
   // Invoked when the context menu closes.

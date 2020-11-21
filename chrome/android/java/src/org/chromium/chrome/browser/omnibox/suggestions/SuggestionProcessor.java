@@ -4,45 +4,20 @@
 
 package org.chromium.chrome.browser.omnibox.suggestions;
 
+import org.chromium.components.omnibox.AutocompleteMatch;
 import org.chromium.ui.modelutil.PropertyModel;
 
 /**
  * A processor of omnibox suggestions. Implementers are provided the opportunity to analyze a
  * suggestion and create a custom model.
  */
-public interface SuggestionProcessor {
+public interface SuggestionProcessor extends DropdownItemProcessor {
     /**
      * @param suggestion The suggestion to process.
-     * @return Whether this suggestion processor handles this type of suggestion.
+     * @param position The position of the suggestion in the list.
+     * @return Whether this suggestion processor handles this type of suggestion at this position.
      */
-    boolean doesProcessSuggestion(OmniboxSuggestion suggestion);
-
-    /**
-     * @return The type of view the models created by this processor represent.
-     */
-    int getViewTypeId();
-
-    /**
-     * @return The minimum possible height of the suggestion view for this suggestion.
-     */
-    int getMinimumSuggestionViewHeight();
-
-    /**
-     * @see org.chromium.chrome.browser.omnibox.UrlFocusChangeListener#onUrlFocusChange(boolean)
-     */
-    void onUrlFocusChange(boolean hasFocus);
-
-    /**
-     * Signals that native initialization has completed.
-     */
-    void onNativeInitialized();
-
-    /**
-     * Create a model for a suggestion at the specified position.
-     * @param suggestion The suggestion to create the model for.
-     * @return A model for the suggestion.
-     */
-    PropertyModel createModelForSuggestion(OmniboxSuggestion suggestion);
+    boolean doesProcessSuggestion(AutocompleteMatch suggestion, int position);
 
     /**
      * Populate a model for the given suggestion.
@@ -50,27 +25,5 @@ public interface SuggestionProcessor {
      * @param model The model to populate.
      * @param position The position of the suggestion in the list.
      */
-    void populateModel(OmniboxSuggestion suggestion, PropertyModel model, int position);
-
-    /**
-     * Record histograms for presented suggestion.
-     * Purpose of this function is bookkeeping of presented suggestions at the time user finishes
-     * interacting with omnibox (whether navigating somewhere, turning off screen, leaving omnibox
-     * or closing the app).
-     * This call is invoked only on Processor responsible for managing specific omnibox suggestion
-     * type.
-     */
-    void recordSuggestionPresented(OmniboxSuggestion suggestion, PropertyModel model);
-
-    /**
-     * Record histograms for used suggestion.
-     * Invoked whenever user uses particular suggestion to navigate somewhere.
-     * Only the processor responsible for managing specific suggestion receives this call.
-     */
-    void recordSuggestionUsed(OmniboxSuggestion suggestion, PropertyModel model);
-
-    /**
-     * Signals that the new suggestion list has been received.
-     */
-    void onSuggestionsReceived();
+    void populateModel(AutocompleteMatch suggestion, PropertyModel model, int position);
 }

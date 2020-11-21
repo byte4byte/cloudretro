@@ -31,6 +31,7 @@
 #include <memory>
 
 #include "base/macros.h"
+#include "third_party/blink/public/mojom/frame/color_scheme.mojom-blink-forward.h"
 #include "third_party/blink/renderer/platform/fonts/font.h"
 #include "third_party/blink/renderer/platform/graphics/dark_mode_filter.h"
 #include "third_party/blink/renderer/platform/graphics/dark_mode_settings.h"
@@ -70,11 +71,20 @@ class PLATFORM_EXPORT GraphicsContext {
   USING_FAST_MALLOC(GraphicsContext);
 
  public:
-  explicit GraphicsContext(PaintController&,
-                           printing::MetafileSkia* = nullptr,
-                           paint_preview::PaintPreviewTracker* = nullptr);
-
+  explicit GraphicsContext(PaintController&);
   ~GraphicsContext();
+
+  // Copy configs such as printing, dark mode, device scale factor etc. from
+  // another GraphicsContext.
+  void CopyConfigFrom(GraphicsContext&);
+
+  void SetPrintingMetafile(printing::MetafileSkia* metafile) {
+    printing_metafile_ = metafile;
+  }
+
+  void SetPaintPreviewTracker(paint_preview::PaintPreviewTracker* tracker) {
+    paint_preview_tracker_ = tracker;
+  }
 
   cc::PaintCanvas* Canvas() { return canvas_; }
   const cc::PaintCanvas* Canvas() const { return canvas_; }
@@ -84,9 +94,12 @@ class PLATFORM_EXPORT GraphicsContext {
     return paint_controller_;
   }
 
-  const DarkModeSettings& dark_mode_settings() const {
-    return dark_mode_filter_.settings();
-  }
+  bool IsDarkModeEnabled() const { return is_dark_mode_enabled_; }
+  void SetDarkModeEnabled(bool enabled) { is_dark_mode_enabled_ = enabled; }
+
+  DarkModeFilter* GetDarkModeFilter();
+
+  void UpdateDarkModeSettingsForTest(const DarkModeSettings&);
 
   // ---------- State management methods -----------------
   void Save();
@@ -95,8 +108,6 @@ class PLATFORM_EXPORT GraphicsContext {
 #if DCHECK_IS_ON()
   unsigned SaveCount() const;
 #endif
-
-  void SetDarkMode(const DarkModeSettings&);
 
   float StrokeThickness() const {
     return ImmutableState()->GetStrokeData().Thickness();
@@ -151,24 +162,9 @@ class PLATFORM_EXPORT GraphicsContext {
   void SetDeviceScaleFactor(float factor) { device_scale_factor_ = factor; }
   float DeviceScaleFactor() const { return device_scale_factor_; }
 
-  // Returns if the context is a printing context instead of a display
-  // context. Bitmap shouldn't be resampled when printing to keep the best
-  // possible quality.
-  bool Printing() const { return printing_; }
+  // Set to true if context is for printing. Bitmaps won't  be resampled when
+  // printing to keep the best possible quality.
   void SetPrinting(bool printing) { printing_ = printing; }
-
-  // Returns if the context is saving a paint preview instead of displaying.
-  // In such cases, clipping should not occur.
-  bool IsPaintingPreview() const { return is_painting_preview_; }
-  void SetIsPaintingPreview(bool is_painting_preview) {
-    is_painting_preview_ = is_painting_preview;
-  }
-
-  // Returns if the context is printing or painting a preview. Many of the
-  // behaviors required for printing and paint previews are shared.
-  bool IsPrintingOrPaintingPreview() const {
-    return Printing() || IsPaintingPreview();
-  }
 
   SkColorFilter* GetColorFilter() const;
   void SetColorFilter(ColorFilter);
@@ -183,7 +179,8 @@ class PLATFORM_EXPORT GraphicsContext {
   void DrawLine(const IntPoint&,
                 const IntPoint&,
                 const DarkModeFilter::ElementRole role =
-                    DarkModeFilter::ElementRole::kBackground);
+                    DarkModeFilter::ElementRole::kBackground,
+                bool is_text_line = false);
 
   void FillPath(const Path&);
 
@@ -364,7 +361,8 @@ class PLATFORM_EXPORT GraphicsContext {
                      int offset,
                      float border_radius,
                      float min_border_width,
-                     const Color&);
+                     const Color&,
+                     mojom::blink::ColorScheme color_scheme);
   void DrawFocusRing(const Path&, float width, int offset, const Color&);
 
   enum Edge {
@@ -420,6 +418,12 @@ class PLATFORM_EXPORT GraphicsContext {
                                           FloatPoint& p2,
                                           float stroke_width);
 
+  static Path GetPathForTextLine(const FloatPoint&,
+                                 float width,
+                                 float stroke_thickness,
+                                 StrokeStyle);
+  static bool ShouldUseStrokeForTextLine(StrokeStyle);
+
   static int FocusRingOutsetExtent(int offset, int width);
 
   void SetInDrawingRecorder(bool);
@@ -430,6 +434,7 @@ class PLATFORM_EXPORT GraphicsContext {
   // creating a tagged PDF. Callers are responsible for restoring it.
   void SetDOMNodeId(DOMNodeId);
   DOMNodeId GetDOMNodeId() const;
+  bool NeedsDOMNodeId() const { return printing_; }
 
   static sk_sp<SkColorFilter> WebCoreColorFilterToSkiaColorFilter(ColorFilter);
 
@@ -509,7 +514,7 @@ class PLATFORM_EXPORT GraphicsContext {
   // This is owned by paint_recorder_. Never delete this object.
   // Drawing operations are allowed only after the first BeginRecording() which
   // initializes this to not null.
-  cc::PaintCanvas* canvas_;
+  cc::PaintCanvas* canvas_ = nullptr;
 
   PaintController& paint_controller_;
 
@@ -519,29 +524,28 @@ class PLATFORM_EXPORT GraphicsContext {
   Vector<std::unique_ptr<GraphicsContextState>> paint_state_stack_;
 
   // Current index on the stack. May not be the last thing on the stack.
-  unsigned paint_state_index_;
+  wtf_size_t paint_state_index_ = 0;
 
   // Raw pointer to the current state.
-  GraphicsContextState* paint_state_;
+  GraphicsContextState* paint_state_ = nullptr;
 
   PaintRecorder paint_recorder_;
 
-  printing::MetafileSkia* metafile_;
-  paint_preview::PaintPreviewTracker* tracker_;
+  printing::MetafileSkia* printing_metafile_ = nullptr;
+  paint_preview::PaintPreviewTracker* paint_preview_tracker_ = nullptr;
 
 #if DCHECK_IS_ON()
-  int layer_count_;
-  bool disable_destruction_checks_;
+  int layer_count_ = 0;
+  bool disable_destruction_checks_ = false;
 #endif
 
-  float device_scale_factor_;
+  float device_scale_factor_ = 1.0f;
 
-  // TODO(gilmanmh): Investigate making this base::Optional<DarkModeFilter>
-  DarkModeFilter dark_mode_filter_;
+  std::unique_ptr<DarkModeFilter> dark_mode_filter_;
 
-  unsigned printing_ : 1;
-  unsigned is_painting_preview_ : 1;
-  unsigned in_drawing_recorder_ : 1;
+  bool printing_ = false;
+  bool in_drawing_recorder_ = false;
+  bool is_dark_mode_enabled_ = false;
 
   // The current node ID, which is used for marked content in a tagged PDF.
   DOMNodeId dom_node_id_ = kInvalidDOMNodeId;

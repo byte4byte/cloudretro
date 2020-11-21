@@ -29,6 +29,9 @@ PanelMenuItem = class {
     this.gesture = gesture;
     this.callback = callback;
 
+    /** @type {boolean} */
+    this.enabled_ = true;
+
     this.element = document.createElement('tr');
     this.element.className = 'menu-item';
     this.element.tabIndex = -1;
@@ -52,7 +55,7 @@ PanelMenuItem = class {
     this.element.appendChild(title);
 
     const backgroundWindow = chrome.extension.getBackgroundPage();
-    if (backgroundWindow['EventSourceState']['get']() ==
+    if (backgroundWindow['EventSourceState']['get']() ===
         EventSourceType.TOUCH_GESTURE) {
       const gestureNode = document.createElement('td');
       gestureNode.className = 'menu-item-shortcut';
@@ -74,8 +77,6 @@ PanelMenuItem = class {
       this.element.appendChild(braille);
     }
 
-    /** @type {boolean} */
-    this.enabled_ = true;
   }
 
   /**

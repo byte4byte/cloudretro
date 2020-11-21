@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/callback_helpers.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/autofill/core/browser/proto/autofill_sync.pb.h"
 #include "components/autofill/core/browser/webdata/autofill_table.h"
@@ -287,7 +288,7 @@ void AutocompleteSyncBridge::CreateForWebDataServiceAndBackend(
       std::make_unique<AutocompleteSyncBridge>(
           web_data_backend,
           std::make_unique<ClientTagBasedModelTypeProcessor>(
-              syncer::AUTOFILL, /*dump_stack=*/base::RepeatingClosure())));
+              syncer::AUTOFILL, /*dump_stack=*/base::DoNothing())));
 }
 
 // static
@@ -305,7 +306,7 @@ AutocompleteSyncBridge::AutocompleteSyncBridge(
       web_data_backend_(backend) {
   DCHECK(web_data_backend_);
 
-  scoped_observer_.Add(web_data_backend_);
+  scoped_observation_.Observe(web_data_backend_);
 
   LoadMetadata();
 }

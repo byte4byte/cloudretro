@@ -19,32 +19,19 @@ class CONTENT_EXPORT AccessibilityTreeFormatterBlink
   explicit AccessibilityTreeFormatterBlink();
   ~AccessibilityTreeFormatterBlink() override;
 
-  std::unique_ptr<base::DictionaryValue> BuildAccessibilityTree(
-      BrowserAccessibility* root) override;
-
-  std::unique_ptr<base::DictionaryValue> BuildAccessibilityTreeForProcess(
-      base::ProcessId pid) override;
-
-  std::unique_ptr<base::DictionaryValue> BuildAccessibilityTreeForWindow(
-      gfx::AcceleratedWidget widget) override;
-
-  std::unique_ptr<base::DictionaryValue> BuildAccessibilityTreeForPattern(
-      const base::StringPiece& pattern) override;
+  base::Value BuildTree(BrowserAccessibility* root) const override;
+  base::Value BuildTreeForWindow(gfx::AcceleratedWidget widget) const override;
+  base::Value BuildTreeForSelector(
+      const AXTreeSelector& selector) const override;
 
   void AddDefaultFilters(
-      std::vector<PropertyFilter>* property_filters) override;
+      std::vector<AXPropertyFilter>* property_filters) override;
 
-  static std::unique_ptr<AccessibilityTreeFormatter> CreateBlink();
+  static std::unique_ptr<ui::AXTreeFormatter> CreateBlink();
 
  private:
-  base::FilePath::StringType GetExpectedFileSuffix() override;
-  const std::string GetAllowEmptyString() override;
-  const std::string GetAllowString() override;
-  const std::string GetDenyString() override;
-  const std::string GetDenyNodeString() override;
-
-  void RecursiveBuildAccessibilityTree(const BrowserAccessibility& node,
-                                       base::DictionaryValue* dict) const;
+  void RecursiveBuildTree(const BrowserAccessibility& node,
+                          base::Value* dict) const;
 
   uint32_t ChildCount(const BrowserAccessibility& node) const;
   BrowserAccessibility* GetChild(const BrowserAccessibility& node,
@@ -53,9 +40,9 @@ class CONTENT_EXPORT AccessibilityTreeFormatterBlink
   void AddProperties(const BrowserAccessibility& node,
                      base::DictionaryValue* dict) const;
 
-  base::string16 ProcessTreeForOutput(
+  std::string ProcessTreeForOutput(
       const base::DictionaryValue& node,
-      base::DictionaryValue* filtered_dict_result = nullptr) override;
+      base::DictionaryValue* filtered_dict_result = nullptr) const override;
 };
 
 }  // namespace content

@@ -3,8 +3,11 @@
 // found in the LICENSE file.
 
 #include "ash/public/cpp/login_screen_test_api.h"
+#include "base/test/scoped_feature_list.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chromeos/login/lock/screen_locker_tester.h"
 #include "chrome/browser/chromeos/login/login_manager_test.h"
+#include "chrome/browser/chromeos/login/screens/user_selection_screen.h"
 #include "chrome/browser/chromeos/login/startup_utils.h"
 #include "chrome/browser/chromeos/login/test/device_state_mixin.h"
 #include "chrome/browser/chromeos/login/test/js_checker.h"
@@ -12,12 +15,23 @@
 #include "chrome/browser/chromeos/login/test/login_manager_mixin.h"
 #include "chrome/browser/chromeos/login/test/oobe_base_test.h"
 #include "chrome/browser/chromeos/login/test/oobe_screen_waiter.h"
+#include "chrome/browser/chromeos/login/test/scoped_policy_update.h"
+#include "chrome/browser/chromeos/login/test/user_policy_mixin.h"
+#include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/settings/scoped_testing_cros_settings.h"
 #include "chrome/browser/chromeos/settings/stub_cros_settings_provider.h"
+#include "chrome/browser/supervised_user/logged_in_user_mixin.h"
 #include "chrome/browser/ui/webui/chromeos/login/signin_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/welcome_screen_handler.h"
 #include "chrome/common/pref_names.h"
+#include "chromeos/constants/chromeos_features.h"
+#include "chromeos/constants/chromeos_pref_names.h"
 #include "components/prefs/pref_service.h"
+#include "components/user_manager/known_user.h"
+#include "content/public/test/browser_test.h"
+#include "ui/base/accelerators/accelerator.h"
+#include "ui/events/event_constants.h"
+#include "ui/events/keycodes/keyboard_codes.h"
 
 namespace chromeos {
 
@@ -30,8 +44,8 @@ class InterruptedAutoStartEnrollmentTest : public OobeBaseTest,
   void SetUpLocalState() override {
     StartupUtils::MarkOobeCompleted();
     PrefService* prefs = g_browser_process->local_state();
-    prefs->SetBoolean(prefs::kDeviceEnrollmentAutoStart, true);
-    prefs->SetBoolean(prefs::kDeviceEnrollmentCanExit, false);
+    prefs->SetBoolean(::prefs::kDeviceEnrollmentAutoStart, true);
+    prefs->SetBoolean(::prefs::kDeviceEnrollmentCanExit, false);
   }
 };
 
@@ -150,6 +164,266 @@ IN_PROC_BROWSER_TEST_F(LoginUIEnrolledTest, UserReverseRemoval) {
 
   // Gaia dialog should be shown again as there are no users anymore.
   EXPECT_TRUE(ash::LoginScreenTestApi::IsOobeDialogVisible());
+}
+
+class DisplayPasswordButtonTest : public LoginManagerTest {
+ public:
+  DisplayPasswordButtonTest() : LoginManagerTest() {
+    feature_list_.InitWithFeatures(
+        {chromeos::features::kLoginDisplayPasswordButton}, {});
+  }
+
+  void LoginAndLock(const LoginManagerMixin::TestUserInfo& test_user) {
+    chromeos::WizardController::SkipPostLoginScreensForTesting();
+
+    auto context = LoginManagerMixin::CreateDefaultUserContext(test_user);
+    login_manager_mixin_.LoginAndWaitForActiveSession(context);
+
+    ScreenLockerTester screen_locker_tester;
+    screen_locker_tester.Lock();
+
+    EXPECT_TRUE(ash::LoginScreenTestApi::FocusUser(test_user.account_id));
+  }
+
+  void SetDisplayPasswordButtonEnabledLoginAndLock(
+      bool display_password_button_enabled) {
+    // Sets the feature by user policy
+    {
+      std::unique_ptr<ScopedUserPolicyUpdate> scoped_user_policy_update =
+          user_policy_mixin_.RequestPolicyUpdate();
+      scoped_user_policy_update->policy_payload()
+          ->mutable_logindisplaypasswordbuttonenabled()
+          ->set_value(display_password_button_enabled);
+    }
+
+    LoginAndLock(managed_user_);
+  }
+
+  void SetUpInProcessBrowserTestFixture() override {
+    LoginManagerTest::SetUpInProcessBrowserTestFixture();
+    // Login as a managed user would save force-online-signin to true and
+    // invalidate the auth token into local state, which would prevent to focus
+    // during the second part of the test which happens in the login screen.
+    UserSelectionScreen::SetSkipForceOnlineSigninForTesting(true);
+  }
+
+  void TearDownInProcessBrowserTestFixture() override {
+    LoginManagerTest::TearDownInProcessBrowserTestFixture();
+    UserSelectionScreen::SetSkipForceOnlineSigninForTesting(false);
+  }
+
+ protected:
+  const LoginManagerMixin::TestUserInfo not_managed_user_{
+      AccountId::FromUserEmailGaiaId("user@gmail.com", "1111")};
+  const LoginManagerMixin::TestUserInfo managed_user_{
+      AccountId::FromUserEmailGaiaId("user@example.com", "22222")};
+  UserPolicyMixin user_policy_mixin_{&mixin_host_, managed_user_.account_id};
+  LoginManagerMixin login_manager_mixin_{&mixin_host_};
+
+ private:
+  base::test::ScopedFeatureList feature_list_;
+};
+
+// Check if the display password button is shown on the lock screen after having
+// logged into a session and having locked the screen for an unmanaged user.
+IN_PROC_BROWSER_TEST_F(DisplayPasswordButtonTest,
+                       PRE_DisplayPasswordButtonShownUnmanagedUser) {
+  LoginAndLock(not_managed_user_);
+  EXPECT_TRUE(ash::LoginScreenTestApi::IsDisplayPasswordButtonShown(
+      not_managed_user_.account_id));
+}
+
+// Check if the display password button is shown on the login screen for an
+// unmanaged user.
+IN_PROC_BROWSER_TEST_F(DisplayPasswordButtonTest,
+                       DisplayPasswordButtonShownUnmanagedUser) {
+  EXPECT_TRUE(ash::LoginScreenTestApi::FocusUser(not_managed_user_.account_id));
+  EXPECT_TRUE(ash::LoginScreenTestApi::IsDisplayPasswordButtonShown(
+      not_managed_user_.account_id));
+}
+
+// Check if the display password button is hidden on the lock screen after
+// having logged into a session and having locked the screen for a managed user.
+IN_PROC_BROWSER_TEST_F(DisplayPasswordButtonTest,
+                       PRE_DisplayPasswordButtonHiddenManagedUser) {
+  SetDisplayPasswordButtonEnabledLoginAndLock(false);
+  EXPECT_FALSE(ash::LoginScreenTestApi::IsDisplayPasswordButtonShown(
+      managed_user_.account_id));
+}
+
+// Check if the display password button is hidden on the login screen for a
+// managed user.
+IN_PROC_BROWSER_TEST_F(DisplayPasswordButtonTest,
+                       DisplayPasswordButtonHiddenManagedUser) {
+  EXPECT_TRUE(ash::LoginScreenTestApi::FocusUser(managed_user_.account_id));
+  EXPECT_FALSE(ash::LoginScreenTestApi::IsDisplayPasswordButtonShown(
+      managed_user_.account_id));
+}
+
+// Check if the display password button is shown on the lock screen after having
+// logged into a session and having locked the screen for a managed user.
+IN_PROC_BROWSER_TEST_F(DisplayPasswordButtonTest,
+                       PRE_DisplayPasswordButtonShownManagedUser) {
+  SetDisplayPasswordButtonEnabledLoginAndLock(true);
+  EXPECT_TRUE(ash::LoginScreenTestApi::IsDisplayPasswordButtonShown(
+      managed_user_.account_id));
+}
+
+// Check if the display password button is shown on the login screen for a
+// managed user.
+IN_PROC_BROWSER_TEST_F(DisplayPasswordButtonTest,
+                       DisplayPasswordButtonShownManagedUser) {
+  EXPECT_TRUE(ash::LoginScreenTestApi::FocusUser(managed_user_.account_id));
+  EXPECT_TRUE(ash::LoginScreenTestApi::IsDisplayPasswordButtonShown(
+      managed_user_.account_id));
+}
+
+// Checks that system info is visible independent of the Oobe dialog state.
+IN_PROC_BROWSER_TEST_F(LoginUITestBase, SystemInfoVisible) {
+  // No dialog due to existing users.
+  EXPECT_FALSE(ash::LoginScreenTestApi::IsOobeDialogVisible());
+  EXPECT_TRUE(ash::LoginScreenTestApi::IsSystemInfoShown());
+
+  // Open Oobe dialog.
+  EXPECT_TRUE(ash::LoginScreenTestApi::ClickAddUserButton());
+
+  EXPECT_TRUE(ash::LoginScreenTestApi::IsOobeDialogVisible());
+  EXPECT_TRUE(ash::LoginScreenTestApi::IsSystemInfoShown());
+}
+
+// Checks accelerator works for toggle system info
+IN_PROC_BROWSER_TEST_F(LoginUITestBase, ToggleSystemInfo) {
+  // System info is present in the beginning
+  EXPECT_TRUE(ash::LoginScreenTestApi::IsSystemInfoShown());
+
+  // System info is hidden when press alt + v
+  EXPECT_TRUE(ash::LoginScreenTestApi::PressAccelerator(
+      ui::Accelerator(ui::VKEY_V, ui::EF_ALT_DOWN)));
+  EXPECT_FALSE(ash::LoginScreenTestApi::IsSystemInfoShown());
+
+  // System info is shown when press alt + v again
+  EXPECT_TRUE(ash::LoginScreenTestApi::PressAccelerator(
+      ui::Accelerator(ui::VKEY_V, ui::EF_ALT_DOWN)));
+  EXPECT_TRUE(ash::LoginScreenTestApi::IsSystemInfoShown());
+}
+
+class UserManagementDisclosureTest : public LoginManagerTest {
+ public:
+  UserManagementDisclosureTest() : LoginManagerTest() {}
+
+  void LoginAndLock(const LoginManagerMixin::TestUserInfo& test_user,
+                    UserPolicyMixin* user_policy_mixin) {
+    if (user_policy_mixin)
+      user_policy_mixin->RequestPolicyUpdate();
+
+    chromeos::WizardController::SkipPostLoginScreensForTesting();
+
+    auto context = LoginManagerMixin::CreateDefaultUserContext(test_user);
+    login_manager_mixin_.LoginAndWaitForActiveSession(context);
+
+    ScreenLockerTester screen_locker_tester;
+    screen_locker_tester.Lock();
+  }
+
+  void SetUpInProcessBrowserTestFixture() override {
+    LoginManagerTest::SetUpInProcessBrowserTestFixture();
+    // Login as a managed user would save force-online-signin to true and
+    // invalidate the auth token into local state, which would prevent to focus
+    // during the second part of the test which happens in the login screen.
+    UserSelectionScreen::SetSkipForceOnlineSigninForTesting(true);
+  }
+
+  void TearDownInProcessBrowserTestFixture() override {
+    LoginManagerTest::TearDownInProcessBrowserTestFixture();
+    UserSelectionScreen::SetSkipForceOnlineSigninForTesting(false);
+  }
+
+ protected:
+  const LoginManagerMixin::TestUserInfo not_managed_user{
+      AccountId::FromUserEmailGaiaId("user@gmail.com", "1111")};
+  const LoginManagerMixin::TestUserInfo managed_user{
+      AccountId::FromUserEmailGaiaId("user@example.com", "11111")};
+  UserPolicyMixin managed_user_policy_mixin_{&mixin_host_,
+                                             managed_user.account_id};
+  LoginManagerMixin login_manager_mixin_{&mixin_host_};
+};
+
+// Check if the user management disclosure is hidden on the lock screen after
+// having logged an unmanaged user into a session and having locked the screen.
+IN_PROC_BROWSER_TEST_F(UserManagementDisclosureTest,
+                       PRE_EnterpriseIconInvisibleNotManagedUser) {
+  LoginAndLock(not_managed_user, nullptr);
+  EXPECT_FALSE(
+      ash::LoginScreenTestApi::IsManagedIconShown(not_managed_user.account_id));
+  EXPECT_FALSE(ash::LoginScreenTestApi::IsManagedMessageInMenuShown(
+      not_managed_user.account_id));
+}
+
+// Check if the user management disclosure is shown on the login screen for an
+// unmanaged user.
+IN_PROC_BROWSER_TEST_F(UserManagementDisclosureTest,
+                       EnterpriseIconInvisibleNotManagedUser) {
+  EXPECT_FALSE(
+      ash::LoginScreenTestApi::IsManagedIconShown(not_managed_user.account_id));
+  EXPECT_FALSE(ash::LoginScreenTestApi::IsManagedMessageInMenuShown(
+      not_managed_user.account_id));
+}
+
+// Check if the user management disclosure is shown on the lock screen after
+// having logged a managed user into a session and having locked the screen.
+IN_PROC_BROWSER_TEST_F(UserManagementDisclosureTest,
+                       PRE_EnterpriseIconVisibleManagedUser) {
+  LoginAndLock(managed_user, &managed_user_policy_mixin_);
+  EXPECT_TRUE(
+      ash::LoginScreenTestApi::IsManagedIconShown(managed_user.account_id));
+  EXPECT_TRUE(ash::LoginScreenTestApi::IsManagedMessageInMenuShown(
+      managed_user.account_id));
+}
+
+// Check if the user management disclosure is shown on the login screen for a
+// managed user.
+IN_PROC_BROWSER_TEST_F(UserManagementDisclosureTest,
+                       EnterpriseIconVisibleManagedUser) {
+  EXPECT_TRUE(
+      ash::LoginScreenTestApi::IsManagedIconShown(managed_user.account_id));
+  EXPECT_TRUE(ash::LoginScreenTestApi::IsManagedMessageInMenuShown(
+      managed_user.account_id));
+}
+
+class UserManagementDisclosureChildTest
+    : public MixinBasedInProcessBrowserTest {
+ public:
+  ~UserManagementDisclosureChildTest() override = default;
+
+ protected:
+  LoggedInUserMixin logged_in_user_mixin_{
+      &mixin_host_, LoggedInUserMixin::LogInType::kChild,
+      embedded_test_server(), this, false /*should_launch_browser*/};
+};
+
+// Check if the user management disclosure is hidden on the lock screen after
+// having logged a child account into a session and having locked the screen.
+IN_PROC_BROWSER_TEST_F(UserManagementDisclosureChildTest,
+                       PRE_EnterpriseIconVisibleChildUser) {
+  logged_in_user_mixin_.LogInUser(false /*issue_any_scope_token*/,
+                                  true /*wait_for_active_session*/,
+                                  true /*request_policy_update*/);
+  ScreenLockerTester screen_locker_tester;
+  screen_locker_tester.Lock();
+  EXPECT_FALSE(ash::LoginScreenTestApi::IsManagedIconShown(
+      logged_in_user_mixin_.GetAccountId()));
+  EXPECT_FALSE(ash::LoginScreenTestApi::IsManagedMessageInMenuShown(
+      logged_in_user_mixin_.GetAccountId()));
+}
+
+// Check if the user management disclosure is shown on the login screen for a
+// child account.
+IN_PROC_BROWSER_TEST_F(UserManagementDisclosureChildTest,
+                       EnterpriseIconVisibleChildUser) {
+  EXPECT_FALSE(ash::LoginScreenTestApi::IsManagedIconShown(
+      logged_in_user_mixin_.GetAccountId()));
+  EXPECT_FALSE(ash::LoginScreenTestApi::IsManagedMessageInMenuShown(
+      logged_in_user_mixin_.GetAccountId()));
 }
 
 }  // namespace chromeos

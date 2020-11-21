@@ -13,8 +13,10 @@
 #include "chrome/browser/ui/views/toolbar/browser_app_menu_button.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
 #include "chrome/test/base/in_process_browser_test.h"
+#include "content/public/test/browser_test.h"
 #include "ui/base/buildflags.h"
 #include "ui/views/focus/focus_manager.h"
+#include "ui/views/test/ax_event_counter.h"
 #include "ui/views/view.h"
 
 class SessionCrashedBubbleViewTest : public DialogBrowserTest {
@@ -23,29 +25,13 @@ class SessionCrashedBubbleViewTest : public DialogBrowserTest {
   ~SessionCrashedBubbleViewTest() override {}
 
   void ShowUi(const std::string& name) override {
-    views::View* anchor_view = BrowserView::GetBrowserViewForBrowser(browser())
-                                   ->toolbar_button_provider()
-                                   ->GetAppMenuButton();
-    crash_bubble_ = new SessionCrashedBubbleView(
-        anchor_view, browser(), name == "SessionCrashedBubbleOfferUma");
-    views::BubbleDialogDelegateView::CreateBubble(crash_bubble_)->Show();
-  }
-
-  void SimulateKeyPress(ui::KeyboardCode key, ui::EventFlags flags) {
-    BrowserView* browser_view =
-        BrowserView::GetBrowserViewForBrowser(browser());
-
-    ui::KeyEvent press_event(ui::ET_KEY_PRESSED, key, flags);
-    if (browser_view->GetFocusManager()->OnKeyEvent(press_event))
-      browser_view->OnKeyEvent(&press_event);
-
-    ui::KeyEvent release_event(ui::ET_KEY_RELEASED, key, flags);
-    if (browser_view->GetFocusManager()->OnKeyEvent(release_event))
-      browser_view->OnKeyEvent(&release_event);
+    // TODO(pbos): Set up UMA opt-in conditions instead of providing this bool.
+    crash_bubble_ = SessionCrashedBubbleView::ShowBubble(
+        browser(), false, name == "SessionCrashedBubbleOfferUma");
   }
 
  protected:
-  SessionCrashedBubbleView* crash_bubble_;
+  views::BubbleDialogDelegateView* crash_bubble_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(SessionCrashedBubbleViewTest);
@@ -61,43 +47,51 @@ IN_PROC_BROWSER_TEST_F(SessionCrashedBubbleViewTest,
   ShowAndVerifyUi();
 }
 
-// TODO(https://crbug.com/1068579): Fails on Windows because the simulated key
-// events don't trigger the accelerators.
-#if !defined(OS_WIN)
 // Regression test for https://crbug.com/1042010, it should be possible to focus
 // the bubble with the "focus dialog" hotkey combination (Alt+Shift+A).
-// Disabled due to flake: https://crbug.com/1068579
 IN_PROC_BROWSER_TEST_F(SessionCrashedBubbleViewTest,
-                       DISABLED_CanFocusBubbleWithFocusDialogHotkey) {
+                       CanFocusBubbleWithFocusDialogHotkey) {
   ShowUi("SessionCrashedBubble");
 
   views::FocusManager* focus_manager = crash_bubble_->GetFocusManager();
+  BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser());
   views::View* bubble_focused_view = crash_bubble_->GetInitiallyFocusedView();
 
   focus_manager->ClearFocus();
   EXPECT_FALSE(bubble_focused_view->HasFocus());
 
-  SimulateKeyPress(ui::VKEY_A, static_cast<ui::EventFlags>(ui::EF_ALT_DOWN |
-                                                           ui::EF_SHIFT_DOWN));
+  browser_view->FocusInactivePopupForAccessibility();
   EXPECT_TRUE(bubble_focused_view->HasFocus());
 }
 
 // Regression test for https://crbug.com/1042010, it should be possible to focus
 // the bubble with the "rotate pane focus" (F6) hotkey.
-// Disabled due to flake: https://crbug.com/1068579
 IN_PROC_BROWSER_TEST_F(SessionCrashedBubbleViewTest,
-                       DISABLED_CanFocusBubbleWithRotatePaneFocusHotkey) {
+                       CanFocusBubbleWithRotatePaneFocusHotkey) {
   ShowUi("SessionCrashedBubble");
   views::FocusManager* focus_manager = crash_bubble_->GetFocusManager();
+  BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser());
   views::View* bubble_focused_view = crash_bubble_->GetInitiallyFocusedView();
 
   focus_manager->ClearFocus();
   EXPECT_FALSE(bubble_focused_view->HasFocus());
 
-  SimulateKeyPress(ui::VKEY_F6, ui::EF_NONE);
+  browser_view->RotatePaneFocus(true);
   // Rotate pane focus is expected to keep the bubble focused until the user
   // deals with it, so a second call should have no effect.
-  SimulateKeyPress(ui::VKEY_F6, ui::EF_NONE);
+  browser_view->RotatePaneFocus(true);
   EXPECT_TRUE(bubble_focused_view->HasFocus());
 }
-#endif
+
+IN_PROC_BROWSER_TEST_F(SessionCrashedBubbleViewTest, AlertAccessibleEvent) {
+  views::test::AXEventCounter counter(views::AXEventManager::Get());
+  EXPECT_EQ(0, counter.GetCount(ax::mojom::Event::kAlert));
+  ShowUi("SessionCrashedBubble");
+  EXPECT_EQ(1, counter.GetCount(ax::mojom::Event::kAlert));
+}
+
+// Regression test for https://crbug.com/1081393.
+IN_PROC_BROWSER_TEST_F(SessionCrashedBubbleViewTest, HasCloseButton) {
+  ShowUi("SessionCrashedBubble");
+  EXPECT_TRUE(crash_bubble_->ShouldShowCloseButton());
+}

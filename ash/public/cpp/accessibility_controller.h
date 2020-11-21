@@ -7,6 +7,8 @@
 
 #include <vector>
 
+#include "ash/public/cpp/accelerators.h"
+#include "ash/public/cpp/accessibility_controller_enums.h"
 #include "ash/public/cpp/ash_public_export.h"
 #include "base/macros.h"
 #include "base/strings/string16.h"
@@ -22,7 +24,6 @@ enum class AccessibilityPanelState;
 enum class DictationToggleSource;
 class SelectToSpeakEventHandlerDelegate;
 enum class SelectToSpeakState;
-class SwitchAccessEventHandlerDelegate;
 
 // Interface for ash client (e.g. Chrome) to control and query accessibility
 // features.
@@ -66,9 +67,32 @@ class ASH_PUBLIC_EXPORT AccessibilityController {
   virtual void SetSelectToSpeakEventHandlerDelegate(
       SelectToSpeakEventHandlerDelegate* delegate) = 0;
 
-  // Set the delegate used by the Switch Access event handler.
-  virtual void SetSwitchAccessEventHandlerDelegate(
-      SwitchAccessEventHandlerDelegate* delegate) = 0;
+  // Displays the Select-to-Speak panel.
+  virtual void ShowSelectToSpeakPanel(const gfx::Rect& anchor,
+                                      bool is_paused) = 0;
+
+  // Hides the Select-to-Speak panel.
+  virtual void HideSelectToSpeakPanel() = 0;
+
+  // Dispatches event to notify Select-to-speak that a panel action occurred.
+  virtual void OnSelectToSpeakPanelAction(SelectToSpeakPanelAction action) = 0;
+
+  // Hides the Switch Access back button.
+  virtual void HideSwitchAccessBackButton() = 0;
+
+  // Hides the Switch Access menu.
+  virtual void HideSwitchAccessMenu() = 0;
+
+  // Show the Switch Access back button next to the specified rectangle.
+  virtual void ShowSwitchAccessBackButton(const gfx::Rect& bounds) = 0;
+
+  // Show the Switch Access menu with the specified actions.
+  virtual void ShowSwitchAccessMenu(
+      const gfx::Rect& bounds,
+      std::vector<std::string> actions_to_show) = 0;
+
+  // Activate point scanning in Switch Access.
+  virtual void ActivatePointScan() = 0;
 
   // Set whether dictation is active.
   virtual void SetDictationActive(bool is_active) = 0;
@@ -77,18 +101,18 @@ class ASH_PUBLIC_EXPORT AccessibilityController {
   virtual void ToggleDictationFromSource(DictationToggleSource source) = 0;
 
   // Called when the Automatic Clicks extension finds scrollable bounds.
-  virtual void OnAutoclickScrollableBoundsFound(
+  virtual void HandleAutoclickScrollableBoundsFound(
       gfx::Rect& bounds_in_screen) = 0;
-
-  // Tells the Switch Access Event Handler whether to forward all key events to
-  // the Switch Access extension.
-  virtual void ForwardKeyEventsToSwitchAccess(bool should_forward) = 0;
 
   // Retrieves a string description of the current battery status.
   virtual base::string16 GetBatteryDescription() const = 0;
 
   // Shows or hides the virtual keyboard.
   virtual void SetVirtualKeyboardVisible(bool is_visible) = 0;
+
+  // Performs the given accelerator action.
+  virtual void PerformAcceleratorAction(
+      AcceleratorAction accelerator_action) = 0;
 
   // Notify observers that the accessibility status has changed. This is part of
   // the public interface because a11y features like screen magnifier are
@@ -101,15 +125,18 @@ class ASH_PUBLIC_EXPORT AccessibilityController {
   virtual bool IsAccessibilityFeatureVisibleInTrayMenu(
       const std::string& path) = 0;
 
-  // Sets whether Switch Access ignores virtual key events.
-  virtual void SetSwitchAccessIgnoreVirtualKeyEventForTesting(
-      bool should_ignore) = 0;
-
   // Disables restoring of recommended policy values.
   virtual void DisablePolicyRecommendationRestorerForTesting() {}
 
+  // Set to true to disable the dialog.
+  // Used in tests.
+  virtual void DisableSwitchAccessDisableConfirmationDialogTesting() = 0;
+
   // Shows floating accessibility menu if it was enabled by policy.
   virtual void ShowFloatingMenuIfEnabled() {}
+
+  // Suspends (or resumes) key handling for Switch Access.
+  virtual void SuspendSwitchAccessKeyHandling(bool suspend) {}
 
  protected:
   AccessibilityController();

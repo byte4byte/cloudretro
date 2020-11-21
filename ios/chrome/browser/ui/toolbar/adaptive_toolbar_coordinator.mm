@@ -7,6 +7,7 @@
 #include "ios/chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #import "ios/chrome/browser/main/browser.h"
+#import "ios/chrome/browser/overlays/public/overlay_presenter.h"
 #import "ios/chrome/browser/ui/commands/command_dispatcher.h"
 #import "ios/chrome/browser/ui/ntp/ntp_util.h"
 #import "ios/chrome/browser/ui/toolbar/adaptive_toolbar_coordinator+subclassing.h"
@@ -17,6 +18,7 @@
 #import "ios/chrome/browser/ui/toolbar/buttons/toolbar_tools_menu_button.h"
 #import "ios/chrome/browser/ui/toolbar/toolbar_mediator.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
+#import "ios/chrome/browser/web/web_navigation_browser_agent.h"
 #import "ios/chrome/browser/web_state_list/web_state_list.h"
 #import "ios/public/provider/chrome/browser/chrome_browser_provider.h"
 
@@ -65,6 +67,8 @@
   self.mediator.bookmarkModel = ios::BookmarkModelFactory::GetForBrowserState(
       self.browser->GetBrowserState());
   self.mediator.prefService = self.browser->GetBrowserState()->GetPrefs();
+  self.mediator.webContentAreaOverlayPresenter = OverlayPresenter::FromBrowser(
+      self.browser, OverlayModality::kWebContentArea);
 }
 
 - (void)stop {
@@ -100,6 +104,11 @@
   [self.viewController setScrollProgressForTabletOmnibox:progress];
 }
 
+- (UIResponder<UITextInput>*)fakeboxScribbleForwardingTarget {
+  // Only works in primary toolbar.
+  return nil;
+}
+
 #pragma mark - ToolbarCommands
 
 - (void)triggerToolsMenuButtonAnimation {
@@ -126,6 +135,8 @@
                      OmniboxCommands>>(self.browser->GetCommandDispatcher());
   self.actionHandler.incognito =
       self.browser->GetBrowserState()->IsOffTheRecord();
+  self.actionHandler.navigationAgent =
+      WebNavigationBrowserAgent::FromBrowser(self.browser);
 
   ToolbarButtonFactory* buttonFactory =
       [[ToolbarButtonFactory alloc] initWithStyle:style];

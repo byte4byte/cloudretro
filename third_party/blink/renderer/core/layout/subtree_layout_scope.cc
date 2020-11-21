@@ -41,10 +41,8 @@ SubtreeLayoutScope::SubtreeLayoutScope(LayoutObject& root) : root_(root) {
 }
 
 SubtreeLayoutScope::~SubtreeLayoutScope() {
-  CHECK(!root_.SelfNeedsLayout() ||
-        root_.LayoutBlockedByDisplayLock(DisplayLockLifecycleTarget::kSelf));
-  CHECK(!root_.NeedsLayout() || root_.LayoutBlockedByDisplayLock(
-                                    DisplayLockLifecycleTarget::kChildren));
+  CHECK(!root_.SelfNeedsLayout());
+  CHECK(!root_.NeedsLayout() || root_.ChildLayoutBlockedByDisplayLock());
 
 #if DCHECK_IS_ON()
   for (auto* layout_object : layout_objects_to_layout_) {
@@ -55,19 +53,7 @@ SubtreeLayoutScope::~SubtreeLayoutScope() {
     // PercentHeightDescendants() list, which will not get cleared because
     // traversal is blocked by a display lock. This finds such cases and allows
     // these objects to be dirty.
-    bool object_allowed_to_be_dirty = false;
-    for (auto* ancestor = DisplayLockUtilities::NearestLockedExclusiveAncestor(
-             *layout_object);
-         ancestor;
-         ancestor =
-             DisplayLockUtilities::NearestLockedExclusiveAncestor(*ancestor)) {
-      if (!ancestor->GetDisplayLockContext()->ShouldLayout(
-              DisplayLockLifecycleTarget::kChildren)) {
-        object_allowed_to_be_dirty = true;
-        break;
-      }
-    }
-    if (!object_allowed_to_be_dirty)
+    if (!DisplayLockUtilities::LockedAncestorPreventingLayout(*layout_object))
       layout_object->AssertLaidOut();
   }
 #endif

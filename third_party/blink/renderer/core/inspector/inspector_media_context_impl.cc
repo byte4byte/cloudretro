@@ -8,9 +8,7 @@
 #include <utility>
 
 #include "base/unguessable_token.h"
-#include "third_party/blink/renderer/core/dom/document.h"
-#include "third_party/blink/renderer/core/html/media/html_media_element.h"
-#include "third_party/blink/renderer/core/inspector/inspected_frames.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
 
 namespace blink {
@@ -18,32 +16,24 @@ namespace blink {
 const char MediaInspectorContextImpl::kSupplementName[] =
     "MediaInspectorContextImpl";
 
-// static
-void MediaInspectorContextImpl::ProvideToLocalFrame(LocalFrame& frame) {
-  frame.ProvideSupplement(
-      MakeGarbageCollected<MediaInspectorContextImpl>(frame));
-}
 
 // static
-MediaInspectorContextImpl* MediaInspectorContextImpl::FromLocalFrame(
-    LocalFrame* frame) {
-  return Supplement<LocalFrame>::From<MediaInspectorContextImpl>(frame);
+MediaInspectorContextImpl* MediaInspectorContextImpl::From(
+    ExecutionContext& execution_context) {
+  auto* context = Supplement<ExecutionContext>::From<MediaInspectorContextImpl>(
+      execution_context);
+  if (!context) {
+    context =
+        MakeGarbageCollected<MediaInspectorContextImpl>(execution_context);
+    Supplement<ExecutionContext>::ProvideTo(execution_context, context);
+  }
+  return context;
 }
 
-// static
-MediaInspectorContextImpl* MediaInspectorContextImpl::FromDocument(
-    const Document& document) {
-  return MediaInspectorContextImpl::FromLocalFrame(document.GetFrame());
+MediaInspectorContextImpl::MediaInspectorContextImpl(ExecutionContext& context)
+    : Supplement<ExecutionContext>(context) {
+  DCHECK(context.IsWindow() || context.IsWorkerGlobalScope());
 }
-
-// static
-MediaInspectorContextImpl* MediaInspectorContextImpl::FromHtmlMediaElement(
-    const HTMLMediaElement& element) {
-  return MediaInspectorContextImpl::FromDocument(element.GetDocument());
-}
-
-MediaInspectorContextImpl::MediaInspectorContextImpl(LocalFrame& frame)
-    : Supplement<LocalFrame>(frame) {}
 
 // Local to cc file for converting
 template <typename T, typename Iterable>
@@ -54,8 +44,8 @@ static Vector<T> Iter2Vector(const Iterable& iterable) {
 }
 
 // Garbage collection method.
-void MediaInspectorContextImpl::Trace(Visitor* visitor) {
-  Supplement<LocalFrame>::Trace(visitor);
+void MediaInspectorContextImpl::Trace(Visitor* visitor) const {
+  Supplement<ExecutionContext>::Trace(visitor);
   visitor->Trace(players_);
 }
 

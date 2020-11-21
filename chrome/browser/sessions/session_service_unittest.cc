@@ -9,7 +9,7 @@
 #include <memory>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/location.h"
@@ -44,9 +44,9 @@
 #include "components/tab_groups/tab_group_visual_data.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/page_state.h"
 #include "content/public/test/web_contents_tester.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/common/page_state/page_state.h"
 #include "third_party/blink/public/common/user_agent/user_agent_metadata.h"
 #include "third_party/skia/include/core/SkColor.h"
 
@@ -872,9 +872,8 @@ TEST_F(SessionServiceTest, PersistUserAgentOverrides) {
       "AppleWebKit/535.19 (KHTML, like Gecko) Chrome/18.0.1025.45 "
       "Safari/535.19";
   blink::UserAgentMetadata client_hints_override;
-  client_hints_override.brand = "Chrome";
+  client_hints_override.brand_version_list.emplace_back("Chrome", "18");
   client_hints_override.full_version = "18.0.1025.45";
-  client_hints_override.major_version = "18";
   client_hints_override.platform = "Linux";
   client_hints_override.architecture = "x86_64";
 
@@ -976,8 +975,8 @@ TEST_F(SessionServiceTest, RemovePostDataWithPasswords) {
   ASSERT_NE(window_id, tab_id);
 
   // Create a page state representing a HTTP body with posted passwords.
-  content::PageState page_state =
-      content::PageState::CreateForTesting(GURL(), true, "data", nullptr);
+  blink::PageState page_state =
+      blink::PageState::CreateForTesting(GURL(), true, "data", nullptr);
 
   // Create a TabNavigation containing page_state and representing a POST
   // request with passwords.
@@ -1118,8 +1117,8 @@ TEST_F(SessionServiceTest, RestoreActivation2) {
   EXPECT_EQ(window2_id, active_window_id);
 }
 
-// Makes sure we don't track blacklisted URLs.
-TEST_F(SessionServiceTest, IgnoreBlacklistedUrls) {
+// Makes sure sessions doesn't track certain urls.
+TEST_F(SessionServiceTest, IgnoreBlockedUrls) {
   SessionID tab_id = SessionID::NewUnique();
 
   SerializedNavigationEntry nav1 =
@@ -1265,13 +1264,11 @@ void SimulateWaitForTesting(const base::AtomicFlag* flag) {
 // SessionService was destroyed before SessionService could process the results.
 TEST_F(SessionServiceTest, GetSessionsAndDestroy) {
   base::AtomicFlag flag;
-  base::CancelableTaskTracker cancelable_task_tracker;
   base::RunLoop run_loop;
   helper_.RunTaskOnBackendThread(
       FROM_HERE,
       base::BindOnce(&SimulateWaitForTesting, base::Unretained(&flag)));
-  service()->GetLastSession(base::BindOnce(&OnGotPreviousSession),
-                            &cancelable_task_tracker);
+  service()->GetLastSession(base::BindOnce(&OnGotPreviousSession));
   helper_.RunTaskOnBackendThread(FROM_HERE, run_loop.QuitClosure());
   delete helper_.ReleaseService();
   flag.Set();

@@ -14,9 +14,9 @@ import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
 import {WebUIListenerBehavior} from 'chrome://resources/js/web_ui_listener_behavior.m.js';
 import {html, Polymer} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
-import {routes} from '../route.m.js';
+import {routes} from '../route.js';
 import {Route, RouteObserverBehavior, Router} from '../router.m.js';
-import {AllSitesAction, ContentSetting, SiteSettingSource} from '../site_settings/constants.js';
+import {AllSitesAction2, ContentSetting, ContentSettingsTypes, SiteSettingSource} from '../site_settings/constants.js';
 import {SiteSettingsBehavior} from '../site_settings/site_settings_behavior.js';
 import {RawSiteException, RecentSitePermissions} from '../site_settings/site_settings_prefs_browser_proxy.js';
 
@@ -81,9 +81,12 @@ Polymer({
     // only fire once.
     assert(!oldConfig);
 
-    this.focusConfig.set(routes.SITE_SETTINGS_SITE_DETAILS.path, () => {
-      this.shouldFocusAfterPopulation_ = true;
-    });
+    this.focusConfig.set(
+        routes.SITE_SETTINGS_SITE_DETAILS.path + '_' +
+            routes.SITE_SETTINGS.path,
+        () => {
+          this.shouldFocusAfterPopulation_ = true;
+        });
   },
 
   /**
@@ -93,7 +96,7 @@ Polymer({
    * @protected
    */
   currentRouteChanged(currentRoute) {
-    if (currentRoute.path == routes.SITE_SETTINGS.path) {
+    if (currentRoute.path === routes.SITE_SETTINGS.path) {
       this.populateList_();
     }
   },
@@ -113,64 +116,68 @@ Polymer({
    */
   getI18nContentTypeString_(contentSettingsType) {
     switch (contentSettingsType) {
-      case 'cookies':
+      case ContentSettingsTypes.COOKIES:
         return this.i18n('siteSettingsCookies');
-      case 'images':
+      case ContentSettingsTypes.IMAGES:
         return this.i18n('siteSettingsImages');
-      case 'javascript':
+      case ContentSettingsTypes.JAVASCRIPT:
         return this.i18n('siteSettingsJavascript');
-      case 'sound':
+      case ContentSettingsTypes.SOUND:
         return this.i18n('siteSettingsSound');
-      case 'popups':
+      case ContentSettingsTypes.POPUPS:
         return this.i18n('siteSettingsPopups');
-      case 'location':
+      case ContentSettingsTypes.GEOLOCATION:
         return this.i18n('siteSettingsLocation');
-      case 'notifications':
+      case ContentSettingsTypes.NOTIFICATIONS:
         return this.i18n('siteSettingsNotifications');
-      case 'media-stream-mic':
+      case ContentSettingsTypes.MIC:
         return this.i18n('siteSettingsMic');
-      case 'media-stream-camera':
+      case ContentSettingsTypes.CAMERA:
         return this.i18n('siteSettingsCamera');
-      case 'register-protocol-handler':
+      case ContentSettingsTypes.PROTOCOL_HANDLERS:
         return this.i18n('siteSettingsHandlers');
-      case 'ppapi-broker':
-        return this.i18n('siteSettingsUnsandboxedPlugins');
-      case 'multiple-automatic-downloads':
+      case ContentSettingsTypes.AUTOMATIC_DOWNLOADS:
         return this.i18n('siteSettingsAutomaticDownloads');
-      case 'background-sync':
+      case ContentSettingsTypes.BACKGROUND_SYNC:
         return this.i18n('siteSettingsBackgroundSync');
-      case 'midi-sysex':
+      case ContentSettingsTypes.MIDI_DEVICES:
         return this.i18n('siteSettingsMidiDevices');
-      case 'usb-devices':
+      case ContentSettingsTypes.USB_DEVICES:
         return this.i18n('siteSettingsUsbDevices');
-      case 'serial-ports':
+      case ContentSettingsTypes.SERIAL_PORTS:
         return this.i18n('siteSettingsSerialPorts');
-      case 'bluetooth-devices':
+      case ContentSettingsTypes.BLUETOOTH_DEVICES:
         return this.i18n('siteSettingsBluetoothDevices');
-      case 'zoom-levels':
+      case ContentSettingsTypes.ZOOM_LEVELS:
         return this.i18n('siteSettingsZoomLevels');
-      case 'protected-content':
+      case ContentSettingsTypes.PROTECTED_CONTENT:
         return this.i18n('siteSettingsProtectedContent');
-      case 'ads':
+      case ContentSettingsTypes.ADS:
         return this.i18n('siteSettingsAds');
-      case 'clipboard':
+      case ContentSettingsTypes.CLIPBOARD:
         return this.i18n('siteSettingsClipboard');
-      case 'sensors':
+      case ContentSettingsTypes.SENSORS:
         return this.i18n('siteSettingsSensors');
-      case 'payment-handler':
+      case ContentSettingsTypes.PAYMENT_HANDLER:
         return this.i18n('siteSettingsPaymentHandler');
-      case 'mixed-script':
+      case ContentSettingsTypes.MIXEDSCRIPT:
         return this.i18n('siteSettingsInsecureContent');
-      case 'bluetooth-scanning':
+      case ContentSettingsTypes.BLUETOOTH_SCANNING:
         return this.i18n('siteSettingsBluetoothScanning');
-      case 'native-file-system-write':
-        return this.i18n('siteSettingsNativeFileSystemWrite');
-      case 'hid-devices':
+      case ContentSettingsTypes.FILE_SYSTEM_WRITE:
+        return this.i18n('siteSettingsFileSystemWrite');
+      case ContentSettingsTypes.HID_DEVICES:
         return this.i18n('siteSettingsHidDevices');
-      case 'ar':
+      case ContentSettingsTypes.AR:
         return this.i18n('siteSettingsAr');
-      case 'vr':
+      case ContentSettingsTypes.VR:
         return this.i18n('siteSettingsVr');
+      case ContentSettingsTypes.WINDOW_PLACEMENT:
+        return this.i18n('siteSettingsWindowPlacement');
+      case ContentSettingsTypes.FONT_ACCESS:
+        return this.i18n('fonts');
+      case ContentSettingsTypes.IDLE_DETECTION:
+        return this.i18n('siteSettingsIdleDetection');
       default:
         return '';
     }
@@ -297,7 +304,7 @@ Polymer({
     const origin = this.recentSitePermissionsList_[e.model.index].origin;
     Router.getInstance().navigateTo(
         routes.SITE_SETTINGS_SITE_DETAILS, new URLSearchParams({site: origin}));
-    this.browserProxy.recordAction(AllSitesAction.ENTER_SITE_DETAILS);
+    this.browserProxy.recordAction(AllSitesAction2.ENTER_SITE_DETAILS);
     this.lastSelected_ = {
       index: e.model.index,
       origin: e.model.item.origin,
@@ -320,12 +327,12 @@ Polymer({
       /** @type {{hide: Function}} */ (tooltip).hide();
       target.removeEventListener('mouseleave', hide);
       target.removeEventListener('blur', hide);
-      target.removeEventListener('tap', hide);
+      target.removeEventListener('click', hide);
       tooltip.removeEventListener('mouseenter', hide);
     };
     target.addEventListener('mouseleave', hide);
     target.addEventListener('blur', hide);
-    target.addEventListener('tap', hide);
+    target.addEventListener('click', hide);
     tooltip.addEventListener('mouseenter', hide);
 
     tooltip.show();

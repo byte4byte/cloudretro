@@ -7,11 +7,15 @@
 #include <oleacc.h>
 #include <wrl/client.h>
 
+#include <memory>
 #include <utility>
 
 #include "base/win/scoped_bstr.h"
 #include "base/win/scoped_variant.h"
 #include "third_party/iaccessible2/ia2_api_all.h"
+#include "ui/accessibility/ax_constants.mojom.h"
+#include "ui/accessibility/platform/ax_platform_node_win.h"
+#include "ui/views/accessibility/test_list_grid_view.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/controls/scroll_view.h"
 #include "ui/views/controls/textfield/textfield.h"
@@ -23,6 +27,16 @@ using Microsoft::WRL::ComPtr;
 
 namespace views {
 namespace test {
+
+#define EXPECT_UIA_BOOL_EQ(node, property_id, expected)               \
+  {                                                                   \
+    ScopedVariant expectedVariant(expected);                          \
+    ASSERT_EQ(VT_BOOL, expectedVariant.type());                       \
+    ScopedVariant actual;                                             \
+    ASSERT_HRESULT_SUCCEEDED(                                         \
+        node->GetPropertyValue(property_id, actual.Receive()));       \
+    EXPECT_EQ(expectedVariant.ptr()->boolVal, actual.ptr()->boolVal); \
+  }
 
 namespace {
 
@@ -58,6 +72,13 @@ class ViewAXPlatformNodeDelegateWinTest : public ViewsTestBase {
     ASSERT_EQ(S_OK, view_accessible.As(&service_provider));
     ASSERT_EQ(S_OK, service_provider->QueryService(IID_IAccessible2_2, result));
   }
+
+  ComPtr<IRawElementProviderSimple> GetIRawElementProviderSimple(View* view) {
+    ComPtr<IRawElementProviderSimple> result;
+    EXPECT_HRESULT_SUCCEEDED(view->GetNativeViewAccessible()->QueryInterface(
+        __uuidof(IRawElementProviderSimple), &result));
+    return result;
+  }
 };
 
 TEST_F(ViewAXPlatformNodeDelegateWinTest, TextfieldAccessibility) {
@@ -66,8 +87,7 @@ TEST_F(ViewAXPlatformNodeDelegateWinTest, TextfieldAccessibility) {
   init_params.ownership = Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   widget.Init(std::move(init_params));
 
-  View* content = new View;
-  widget.SetContentsView(content);
+  View* content = widget.SetContentsView(std::make_unique<View>());
 
   Textfield* textfield = new Textfield;
   textfield->SetAccessibleName(L"Name");
@@ -85,6 +105,11 @@ TEST_F(ViewAXPlatformNodeDelegateWinTest, TextfieldAccessibility) {
   ASSERT_EQ(S_OK,
             content_accessible->get_accChild(child_index, &textfield_dispatch));
   ASSERT_EQ(S_OK, textfield_dispatch.As(&textfield_accessible));
+
+  ASSERT_EQ(S_OK, textfield_accessible->get_accChildCount(&child_count));
+  EXPECT_EQ(0, child_count)
+      << "Text fields should be leaf nodes on this platform, otherwise no "
+         "descendants will be recognized by assistive software.";
 
   ScopedBstr name;
   ScopedVariant childid_self(CHILDID_SELF);
@@ -109,8 +134,7 @@ TEST_F(ViewAXPlatformNodeDelegateWinTest, TextfieldAssociatedLabel) {
   init_params.ownership = Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   widget.Init(std::move(init_params));
 
-  View* content = new View;
-  widget.SetContentsView(content);
+  View* content = widget.SetContentsView(std::make_unique<View>());
 
   Label* label = new Label(L"Label");
   content->AddChildView(label);
@@ -256,8 +280,7 @@ TEST_F(ViewAXPlatformNodeDelegateWinTest, DISABLED_RetrieveAllAlerts) {
   init_params.ownership = Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   widget.Init(std::move(init_params));
 
-  View* content = new View;
-  widget.SetContentsView(content);
+  View* content = widget.SetContentsView(std::make_unique<View>());
 
   View* infobar = new View;
   content->AddChildView(infobar);
@@ -355,8 +378,7 @@ TEST_F(ViewAXPlatformNodeDelegateWinTest, Overrides) {
   init_params.ownership = Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   widget.Init(std::move(init_params));
 
-  View* contents_view = new View;
-  widget.SetContentsView(contents_view);
+  View* contents_view = widget.SetContentsView(std::make_unique<View>());
 
   View* alert_view = new ScrollView;
   alert_view->GetViewAccessibility().OverrideRole(ax::mojom::Role::kAlert);
@@ -406,6 +428,107 @@ TEST_F(ViewAXPlatformNodeDelegateWinTest, Overrides) {
   ASSERT_EQ(E_INVALIDARG,
             alert_accessible->get_accChild(child_index, &child_dispatch));
   ASSERT_EQ(child_dispatch.Get(), nullptr);
+}
+
+TEST_F(ViewAXPlatformNodeDelegateWinTest, GridRowColumnCount) {
+  Widget widget;
+  Widget::InitParams init_params = CreateParams(Widget::InitParams::TYPE_POPUP);
+  init_params.ownership = Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
+  widget.Init(std::move(init_params));
+
+  View* content = widget.SetContentsView(std::make_unique<View>());
+  TestListGridView* grid = new TestListGridView();
+  content->AddChildView(grid);
+
+  Microsoft::WRL::ComPtr<IGridProvider> grid_provider;
+  EXPECT_HRESULT_SUCCEEDED(
+      grid->GetViewAccessibility().GetNativeObject()->QueryInterface(
+          __uuidof(IGridProvider), &grid_provider));
+
+  // If set, aria row/column count takes precedence over table row/column count.
+  // Expect E_UNEXPECTED if the result is kUnknownAriaColumnOrRowCount (-1) or
+  // if neither is set.
+  int row_count;
+  int column_count;
+
+  // aria row/column count = not set
+  // table row/column count = not set
+  grid->UnsetAriaTableSize();
+  grid->UnsetTableSize();
+  EXPECT_HRESULT_SUCCEEDED(grid_provider->get_RowCount(&row_count));
+  EXPECT_HRESULT_SUCCEEDED(grid_provider->get_ColumnCount(&column_count));
+  EXPECT_EQ(0, row_count);
+  EXPECT_EQ(0, column_count);
+  // To do still: When nothing is set, currently
+  // AXPlatformNodeDelegateBase::GetTable{Row/Col}Count() returns 0 Should it
+  // return base::nullopt if the attribute is not set? Like
+  // GetTableAria{Row/Col}Count()
+  // EXPECT_EQ(E_UNEXPECTED, grid_provider->get_RowCount(&row_count));
+
+  // aria row/column count = 2
+  // table row/column count = not set
+  grid->SetAriaTableSize(2, 2);
+  EXPECT_HRESULT_SUCCEEDED(grid_provider->get_RowCount(&row_count));
+  EXPECT_HRESULT_SUCCEEDED(grid_provider->get_ColumnCount(&column_count));
+  EXPECT_EQ(2, row_count);
+  EXPECT_EQ(2, column_count);
+
+  // aria row/column count = kUnknownAriaColumnOrRowCount
+  // table row/column count = not set
+  grid->SetAriaTableSize(ax::mojom::kUnknownAriaColumnOrRowCount,
+                         ax::mojom::kUnknownAriaColumnOrRowCount);
+  EXPECT_EQ(E_UNEXPECTED, grid_provider->get_RowCount(&row_count));
+  EXPECT_EQ(E_UNEXPECTED, grid_provider->get_ColumnCount(&column_count));
+
+  // aria row/column count = 3
+  // table row/column count = 4
+  grid->SetAriaTableSize(3, 3);
+  grid->SetTableSize(4, 4);
+  EXPECT_HRESULT_SUCCEEDED(grid_provider->get_RowCount(&row_count));
+  EXPECT_HRESULT_SUCCEEDED(grid_provider->get_ColumnCount(&column_count));
+  EXPECT_EQ(3, row_count);
+  EXPECT_EQ(3, column_count);
+
+  // aria row/column count = not set
+  // table row/column count = 4
+  grid->UnsetAriaTableSize();
+  grid->SetTableSize(4, 4);
+  EXPECT_HRESULT_SUCCEEDED(grid_provider->get_RowCount(&row_count));
+  EXPECT_HRESULT_SUCCEEDED(grid_provider->get_ColumnCount(&column_count));
+  EXPECT_EQ(4, row_count);
+  EXPECT_EQ(4, column_count);
+
+  // aria row/column count = not set
+  // table row/column count = kUnknownAriaColumnOrRowCount
+  grid->SetTableSize(ax::mojom::kUnknownAriaColumnOrRowCount,
+                     ax::mojom::kUnknownAriaColumnOrRowCount);
+  EXPECT_EQ(E_UNEXPECTED, grid_provider->get_RowCount(&row_count));
+  EXPECT_EQ(E_UNEXPECTED, grid_provider->get_ColumnCount(&column_count));
+}
+
+TEST_F(ViewAXPlatformNodeDelegateWinTest, IsUIAControlIsTrueEvenWhenReadonly) {
+  // This test ensures that the value returned by
+  // AXPlatformNodeWin::IsUIAControl returns true even if the element is
+  // read-only. The previous implementation was incorrect and used to return
+  // false for read-only views, causing all sorts of issues with ATs.
+  //
+  // Since we can't test IsUIAControl directly, we go through the
+  // UIA_IsControlElementPropertyId, which is computed using IsUIAControl.
+
+  Widget widget;
+  Widget::InitParams init_params = CreateParams(Widget::InitParams::TYPE_POPUP);
+  init_params.ownership = Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
+  widget.Init(std::move(init_params));
+
+  View* content = widget.SetContentsView(std::make_unique<View>());
+
+  Textfield* text_field = new Textfield();
+  text_field->SetReadOnly(true);
+  content->AddChildView(text_field);
+
+  ComPtr<IRawElementProviderSimple> textfield_provider =
+      GetIRawElementProviderSimple(text_field);
+  EXPECT_UIA_BOOL_EQ(textfield_provider, UIA_IsControlElementPropertyId, true);
 }
 }  // namespace test
 }  // namespace views

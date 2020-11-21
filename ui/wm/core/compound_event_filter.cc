@@ -4,7 +4,7 @@
 
 #include "ui/wm/core/compound_event_filter.h"
 
-#include "base/logging.h"
+#include "base/check.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
 #include "ui/aura/client/cursor_client.h"
@@ -13,8 +13,8 @@
 #include "ui/aura/window.h"
 #include "ui/aura/window_delegate.h"
 #include "ui/aura/window_event_dispatcher.h"
+#include "ui/base/cursor/mojom/cursor_type.mojom-shared.h"
 #include "ui/base/hit_test.h"
-#include "ui/base/mojom/cursor_type.mojom-shared.h"
 #include "ui/events/event.h"
 #include "ui/wm/public/activation_client.h"
 
@@ -110,7 +110,12 @@ void CompoundEventFilter::UpdateCursor(aura::Window* target,
         return;
       }
     }
-    cursor_client->SetCursor(cursor);
+    // For ET_MOUSE_ENTERED, force the update of the cursor because it may have
+    // changed without |cursor_client| knowing about it.
+    if (event->type() == ui::ET_MOUSE_ENTERED)
+      cursor_client->SetCursorForced(cursor);
+    else
+      cursor_client->SetCursor(cursor);
   }
 }
 
@@ -229,8 +234,10 @@ void CompoundEventFilter::OnTouchEvent(ui::TouchEvent* event) {
       ShouldHideCursorOnTouch(*event)) {
     aura::Window* target = static_cast<aura::Window*>(event->target());
     DCHECK(target);
-    if (!aura::Env::GetInstance()->IsMouseButtonDown())
+    if (!aura::Env::GetInstance()->IsMouseButtonDown()) {
       SetMouseEventsEnableStateOnEvent(target, event, false);
+      SetCursorVisibilityOnEvent(target, event, false);
+    }
   }
 }
 

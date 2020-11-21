@@ -35,6 +35,8 @@ void FakeWebrtcConnection::OnWebrtcTransportError(protocol::ErrorCode error) {
   std::move(on_closed_).Run();
 }
 
+void FakeWebrtcConnection::OnWebrtcTransportProtocolChanged() {}
+
 void FakeWebrtcConnection::OnWebrtcTransportIncomingDataChannel(
     const std::string& name,
     std::unique_ptr<protocol::MessagePipe> pipe) {}
@@ -45,5 +47,7 @@ void FakeWebrtcConnection::OnWebrtcTransportMediaStreamAdded(
 void FakeWebrtcConnection::OnWebrtcTransportMediaStreamRemoved(
     scoped_refptr<webrtc::MediaStreamInterface> stream) {}
 
+void FakeWebrtcConnection::OnWebrtcTransportRouteChanged(
+    const protocol::TransportRoute& route) {}
 }  // namespace test
 }  // namespace remoting

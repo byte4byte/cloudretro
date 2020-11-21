@@ -9,11 +9,17 @@
 #include <unordered_map>
 
 #include "chrome/browser/ui/browser_list_observer.h"
+#include "chrome/common/caption.mojom.h"
 #include "components/keyed_service/core/keyed_service.h"
+#include "ui/native_theme/caption_style.h"
 
 class Browser;
 class Profile;
 class PrefChangeRegistrar;
+
+namespace content {
+class WebContents;
+}
 
 namespace user_prefs {
 class PrefRegistrySyncable;
@@ -41,22 +47,37 @@ class CaptionController : public BrowserListObserver, public KeyedService {
 
   static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
 
-  // Off the record profiles will default to having the feature disabled.
-  static void InitOffTheRecordPrefs(Profile* off_the_record_profile);
-
   void Init();
+
+  // Routes a transcription to the CaptionBubbleController that belongs to the
+  // appropriate browser. Returns whether the transcription result was routed
+  // successfully. Transcriptions will halt if this returns false.
+  bool DispatchTranscription(
+      content::WebContents* web_contents,
+      const chrome::mojom::TranscriptionResultPtr& transcription_result);
+
+  // Alerts the CaptionBubbleController that belongs to the appropriate browser
+  // that there is an error in the speech recognition service.
+  void OnError(content::WebContents* web_contents);
+
+  CaptionBubbleController* GetCaptionBubbleControllerForBrowser(
+      Browser* browser);
 
  private:
   friend class CaptionControllerFactory;
+  friend class CaptionControllerTest;
 
   // BrowserListObserver:
   void OnBrowserAdded(Browser* browser) override;
   void OnBrowserRemoved(Browser* browser) override;
 
   void OnLiveCaptionEnabledChanged();
+  void OnLiveCaptionLanguageChanged();
   bool IsLiveCaptionEnabled();
-  void UpdateSpeechRecognitionServiceEnabled();
   void UpdateUIEnabled();
+  void UpdateCaptionStyle();
+
+  void UpdateAccessibilityCaptionHistograms();
 
   // Owns us via the KeyedService mechanism.
   Profile* profile_;
@@ -67,6 +88,8 @@ class CaptionController : public BrowserListObserver, public KeyedService {
   // to the browser.
   std::unordered_map<Browser*, std::unique_ptr<CaptionBubbleController>>
       caption_bubble_controllers_;
+
+  base::Optional<ui::CaptionStyle> caption_style_;
 
   bool enabled_ = false;
 };

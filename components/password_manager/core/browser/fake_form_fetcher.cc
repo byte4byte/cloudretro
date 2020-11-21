@@ -6,11 +6,9 @@
 
 #include <memory>
 
-#include "components/autofill/core/common/password_form.h"
+#include "components/password_manager/core/browser/password_form.h"
 #include "components/password_manager/core/browser/password_manager_util.h"
 #include "components/password_manager/core/browser/statistics_table.h"
-
-using autofill::PasswordForm;
 
 namespace password_manager {
 
@@ -37,6 +35,11 @@ FormFetcher::State FakeFormFetcher::GetState() const {
 const std::vector<InteractionsStats>& FakeFormFetcher::GetInteractionsStats()
     const {
   return stats_;
+}
+
+base::span<const CompromisedCredentials>
+FakeFormFetcher::GetCompromisedCredentials() const {
+  return base::make_span(compromised_);
 }
 
 std::vector<const PasswordForm*> FakeFormFetcher::GetNonFederatedMatches()
@@ -90,6 +93,10 @@ const PasswordForm* FakeFormFetcher::GetPreferredMatch() const {
   return preferred_match_;
 }
 
+std::unique_ptr<FormFetcher> FakeFormFetcher::Clone() {
+  return std::make_unique<FakeFormFetcher>();
+}
+
 void FakeFormFetcher::SetNonFederated(
     const std::vector<const PasswordForm*>& non_federated) {
   non_federated_ = non_federated;
@@ -107,9 +114,4 @@ void FakeFormFetcher::NotifyFetchCompleted() {
   for (Consumer& consumer : consumers_)
     consumer.OnFetchCompleted();
 }
-
-std::unique_ptr<FormFetcher> FakeFormFetcher::Clone() {
-  return std::make_unique<FakeFormFetcher>();
-}
-
 }  // namespace password_manager

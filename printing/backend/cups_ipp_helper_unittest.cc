@@ -13,7 +13,9 @@
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "printing/backend/cups_printer.h"
+#include "printing/mojom/print.mojom.h"
 #include "printing/printing_features.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -37,9 +39,14 @@ class MockCupsOptionProvider : public CupsOptionProvider {
       return std::vector<base::StringPiece>();
 
     std::vector<base::StringPiece> strings;
-    int size = ippGetCount(attr);
+    const int size = ippGetCount(attr);
+    strings.reserve(size);
     for (int i = 0; i < size; ++i) {
-      strings.emplace_back(ippGetString(attr, i, nullptr));
+      const char* const value = ippGetString(attr, i, nullptr);
+      if (!value) {
+        continue;
+      }
+      strings.push_back(value);
     }
 
     return strings;
@@ -164,8 +171,9 @@ TEST_F(PrintBackendCupsIppHelperTest, DuplexSupported) {
   CapsAndDefaultsFromPrinter(*printer_, &caps);
 
   EXPECT_THAT(caps.duplex_modes,
-              testing::UnorderedElementsAre(SIMPLEX, LONG_EDGE));
-  EXPECT_EQ(SIMPLEX, caps.duplex_default);
+              testing::UnorderedElementsAre(mojom::DuplexMode::kSimplex,
+                                            mojom::DuplexMode::kLongEdge));
+  EXPECT_EQ(mojom::DuplexMode::kSimplex, caps.duplex_default);
 }
 
 TEST_F(PrintBackendCupsIppHelperTest, DuplexNotSupported) {
@@ -176,8 +184,9 @@ TEST_F(PrintBackendCupsIppHelperTest, DuplexNotSupported) {
   PrinterSemanticCapsAndDefaults caps;
   CapsAndDefaultsFromPrinter(*printer_, &caps);
 
-  EXPECT_THAT(caps.duplex_modes, testing::UnorderedElementsAre(SIMPLEX));
-  EXPECT_EQ(SIMPLEX, caps.duplex_default);
+  EXPECT_THAT(caps.duplex_modes,
+              testing::UnorderedElementsAre(mojom::DuplexMode::kSimplex));
+  EXPECT_EQ(mojom::DuplexMode::kSimplex, caps.duplex_default);
 }
 
 TEST_F(PrintBackendCupsIppHelperTest, A4PaperSupported) {
@@ -276,7 +285,7 @@ TEST_F(PrintBackendCupsIppHelperTest, OmitPapersWithSpecialVendorIds) {
                          "iso b0")));
 }
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_ASH)
 TEST_F(PrintBackendCupsIppHelperTest, PinSupported) {
   printer_->SetSupportedOptions("job-password", MakeInteger(ipp_, 4));
   printer_->SetSupportedOptions("job-password-encryption",
@@ -338,19 +347,23 @@ TEST_F(PrintBackendCupsIppHelperTest, AdvancedCaps) {
 
   EXPECT_EQ(6u, caps.advanced_capabilities.size());
   EXPECT_EQ("confirmation-sheet-print", caps.advanced_capabilities[0].name);
-  EXPECT_EQ(base::Value::Type::BOOLEAN, caps.advanced_capabilities[0].type);
+  EXPECT_EQ(AdvancedCapability::Type::kBoolean,
+            caps.advanced_capabilities[0].type);
   EXPECT_EQ("finishings/7", caps.advanced_capabilities[1].name);
-  EXPECT_EQ(base::Value::Type::BOOLEAN, caps.advanced_capabilities[1].type);
+  EXPECT_EQ(AdvancedCapability::Type::kBoolean,
+            caps.advanced_capabilities[1].type);
   EXPECT_EQ("finishings/10", caps.advanced_capabilities[2].name);
-  EXPECT_EQ(base::Value::Type::BOOLEAN, caps.advanced_capabilities[2].type);
+  EXPECT_EQ(AdvancedCapability::Type::kBoolean,
+            caps.advanced_capabilities[2].type);
   EXPECT_EQ("job-message-to-operator", caps.advanced_capabilities[3].name);
-  EXPECT_EQ(base::Value::Type::STRING, caps.advanced_capabilities[3].type);
+  EXPECT_EQ(AdvancedCapability::Type::kString,
+            caps.advanced_capabilities[3].type);
   EXPECT_EQ("output-bin", caps.advanced_capabilities[4].name);
   EXPECT_EQ(2u, caps.advanced_capabilities[4].values.size());
   EXPECT_EQ("print-quality", caps.advanced_capabilities[5].name);
   EXPECT_EQ(3u, caps.advanced_capabilities[5].values.size());
   histograms.ExpectUniqueSample("Printing.CUPS.IppAttributesCount", 5, 1);
 }
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_ASH)
 
 }  // namespace printing

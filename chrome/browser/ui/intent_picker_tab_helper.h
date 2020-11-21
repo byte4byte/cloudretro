@@ -12,7 +12,7 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/apps/intent_helper/apps_navigation_types.h"
-#include "chrome/services/app_service/public/mojom/types.mojom-forward.h"
+#include "components/services/app_service/public/mojom/types.mojom-forward.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_contents_user_data.h"
 
@@ -51,6 +51,9 @@ class IntentPickerTabHelper
   void LoadAppIcon(std::vector<apps::IntentPickerAppInfo> apps,
                    IntentPickerIconLoaderCallback callback,
                    size_t index);
+
+  void DidFinishNavigation(
+      content::NavigationHandle* navigation_handle) override;
 
   bool should_show_icon_ = false;
 

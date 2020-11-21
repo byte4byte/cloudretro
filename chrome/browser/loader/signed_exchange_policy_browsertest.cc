@@ -11,6 +11,7 @@
 #include "components/policy/core/common/mock_configuration_policy_provider.h"
 #include "components/policy/core/common/policy_map.h"
 #include "components/policy/policy_constants.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/signed_exchange_browser_test_helper.h"
 
@@ -71,7 +72,7 @@ IN_PROC_BROWSER_TEST_F(SignedExchangePolicyBrowserTest, BlackList) {
   policy::PolicyMap policies;
   policies.Set(policy::key::kURLBlacklist, policy::POLICY_LEVEL_MANDATORY,
                policy::POLICY_SCOPE_USER, policy::POLICY_SOURCE_CLOUD,
-               blacklist.CreateDeepCopy(), nullptr);
+               blacklist.Clone(), nullptr);
 
 #if defined(OS_CHROMEOS)
   policy::SetEnterpriseUsersDefaults(&policies);

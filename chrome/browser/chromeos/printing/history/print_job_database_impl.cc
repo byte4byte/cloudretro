@@ -31,13 +31,6 @@ const int kMaxInitializeAttempts = 3;
 
 }  // namespace
 
-const char* const PrintJobDatabaseImpl::kPrintJobDatabaseEntries =
-    "Printing.CUPS.PrintJobDatabaseEntries";
-const char* const PrintJobDatabaseImpl::kPrintJobDatabaseEntrySize =
-    "Printing.CUPS.PrintJobDatabaseEntrySize";
-const char* const PrintJobDatabaseImpl::kPrintJobDatabaseLoadTime =
-    "Printing.CUPS.PrintJobDatabaseLoadTime";
-
 PrintJobDatabaseImpl::PrintJobDatabaseImpl(
     leveldb_proto::ProtoDatabaseProvider* database_provider,
     base::FilePath profile_path)
@@ -53,7 +46,7 @@ PrintJobDatabaseImpl::PrintJobDatabaseImpl(
       database_task_runner);
 }
 
-PrintJobDatabaseImpl::~PrintJobDatabaseImpl() {}
+PrintJobDatabaseImpl::~PrintJobDatabaseImpl() = default;
 
 void PrintJobDatabaseImpl::Initialize(InitializeCallback callback) {
   if (init_status_ == InitStatus::PENDING)
@@ -87,8 +80,6 @@ void PrintJobDatabaseImpl::SavePrintJob(
   }
 
   cache_[print_job_info.id()] = print_job_info;
-  base::UmaHistogramCounts1000(kPrintJobDatabaseEntrySize,
-                               print_job_info.ByteSizeLong());
 
   auto entries_to_save = std::make_unique<EntryVector>();
   entries_to_save->push_back(
@@ -120,7 +111,35 @@ void PrintJobDatabaseImpl::DeletePrintJobs(const std::vector<std::string>& ids,
   database_->UpdateEntries(
       /*entries_to_save=*/std::make_unique<EntryVector>(),
       /*keys_to_remove=*/std::make_unique<std::vector<std::string>>(ids),
-      base::BindOnce(&PrintJobDatabaseImpl::OnPrintJobDeleted,
+      base::BindOnce(&PrintJobDatabaseImpl::OnPrintJobsDeleted,
+                     weak_ptr_factory_.GetWeakPtr(), ids, std::move(callback)));
+}
+
+void PrintJobDatabaseImpl::Clear(DeletePrintJobsCallback callback) {
+  // TODO(crbug/1074444): Maybe try to remove duplicate code in this function.
+  if (init_status_ == InitStatus::FAILED) {
+    base::SequencedTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::BindOnce(std::move(callback), false));
+    return;
+  }
+
+  if (init_status_ != InitStatus::INITIALIZED) {
+    deferred_callbacks_.push(base::BindOnce(&PrintJobDatabaseImpl::Clear,
+                                            weak_ptr_factory_.GetWeakPtr(),
+                                            std::move(callback)));
+    return;
+  }
+
+  std::vector<std::string> ids;
+  ids.reserve(cache_.size());
+  for (const auto& pair : cache_)
+    ids.push_back(pair.second.id());
+
+  database_->UpdateEntries(
+      /*entries_to_save=*/std::make_unique<EntryVector>(),
+      /*keys_to_remove=*/
+      std::make_unique<std::vector<std::string>>(ids),
+      base::BindOnce(&PrintJobDatabaseImpl::OnPrintJobsDeleted,
                      weak_ptr_factory_.GetWeakPtr(), ids, std::move(callback)));
 }
 
@@ -141,13 +160,10 @@ void PrintJobDatabaseImpl::GetPrintJobs(GetPrintJobsCallback callback) {
     return;
   }
 
-  base::Time start_time = base::Time::Now();
   std::vector<printing::proto::PrintJobInfo> entries;
   entries.reserve(cache_.size());
   for (const auto& pair : cache_)
     entries.push_back(pair.second);
-  base::UmaHistogramTimes(kPrintJobDatabaseLoadTime,
-                          base::Time::Now() - start_time);
 
   base::SequencedTaskRunnerHandle::Get()->PostTask(
       FROM_HERE, base::BindOnce(std::move(callback), true, std::move(entries)));
@@ -187,7 +203,6 @@ void PrintJobDatabaseImpl::OnKeysAndEntriesLoaded(
         entries) {
   if (success)
     cache_.insert(entries->begin(), entries->end());
-  base::UmaHistogramCounts10000(kPrintJobDatabaseEntries, cache_.size());
   FinishInitialization(std::move(callback), success);
 }
 
@@ -215,7 +230,7 @@ void PrintJobDatabaseImpl::OnPrintJobSaved(
       FROM_HERE, base::BindOnce(std::move(callback), success));
 }
 
-void PrintJobDatabaseImpl::OnPrintJobDeleted(
+void PrintJobDatabaseImpl::OnPrintJobsDeleted(
     const std::vector<std::string>& ids,
     DeletePrintJobsCallback callback,
     bool success) {

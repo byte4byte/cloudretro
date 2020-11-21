@@ -31,10 +31,10 @@
 #include "chrome/browser/downgrade/downgrade_utils.h"
 #include "chrome/browser/downgrade/snapshot_manager.h"
 #include "chrome/browser/downgrade/user_data_downgrade.h"
-#include "chrome/browser/policy/browser_dm_token_storage.h"
 #include "chrome/common/channel_info.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
+#include "components/enterprise/browser/controller/browser_dm_token_storage.h"
 #include "components/prefs/pref_service.h"
 #include "components/version_info/version_info.h"
 #include "components/version_info/version_info_values.h"
@@ -89,8 +89,7 @@ base::Optional<int> MoveUserData(const base::FilePath& source,
       *result += 1;
     // Attempt to delete Last Version if all else failed so that Chrome does not
     // continually attempt to perform a migration.
-    base::DeleteFile(source.Append(kDowngradeLastVersionFile),
-                     false /* recursive */);
+    base::DeleteFile(source.Append(kDowngradeLastVersionFile));
     // Inform system administrators that things have gone awry.
     SYSLOG(ERROR) << "Failed to perform User Data migration following a Chrome "
                      "version downgrade. Chrome will run with User Data from a "
@@ -115,23 +114,13 @@ void MoveCache(const base::FilePath& disk_cache_dir) {
   const base::FilePath target =
       GetTempDirNameForDelete(parent, disk_cache_dir.BaseName());
 
-  // The cache dir should have no files in use, so a simple move should suffice.
-  const bool move_result = MoveWithoutFallback(disk_cache_dir, target);
-  base::UmaHistogramBoolean("Downgrade.CacheDirMove.Result", move_result);
-  if (move_result)
+  // A simple move succeeds in approx 2/3 of attempts.
+  if (MoveWithoutFallback(disk_cache_dir, target))
     return;
 
   // The directory couldn't be moved whole-hog. Attempt a recursive move of its
-  // contents.
-  auto failure_count =
-      MoveContents(disk_cache_dir, target, ExclusionPredicate());
-  if (!failure_count || *failure_count) {
-    // Report precise values rather than an exponentially bucketed histogram.
-    // Bucket 0 means that the target directory could not be created. All other
-    // buckets are a count of files/directories left behind.
-    base::UmaHistogramExactLinear("Downgrade.CacheDirMove.FailureCount",
-                                  failure_count.value_or(0), 50);
-  }
+  // contents. This succeeds in nearly all cases.
+  MoveContents(disk_cache_dir, target, ExclusionPredicate());
 }
 
 // Deletes all subdirectories in |dir| named |name|*.CHROME_DELETE.
@@ -143,7 +132,7 @@ void DeleteAllRenamedUserDirectories(const base::FilePath& dir,
                                   pattern);
   for (base::FilePath to_delete = enumerator.Next(); !to_delete.empty();
        to_delete = enumerator.Next()) {
-    base::DeleteFileRecursively(to_delete);
+    base::DeletePathRecursively(to_delete);
   }
 }
 
@@ -172,7 +161,7 @@ bool UserDataSnapshotEnabled() {
   if (g_snapshots_enabled_for_testing)
     return true;
   bool is_enterprise_managed =
-#if defined(OS_WIN) || defined(OS_MACOSX)
+#if defined(OS_WIN) || defined(OS_MAC)
       base::IsMachineExternallyManaged() ||
 #endif
       policy::BrowserDMTokenStorage::Get()->RetrieveDMToken().is_valid();
@@ -238,7 +227,7 @@ bool DowngradeManager::PrepareUserDataDirectoryForCurrentVersion(
 
   auto current_milestone = current_version.components()[0];
   int max_number_of_snapshots = g_browser_process->local_state()->GetInteger(
-      prefs::kUserDataSnapshotRentionLimit);
+      prefs::kUserDataSnapshotRetentionLimit);
   base::Optional<uint32_t> purge_milestone;
   if (current_milestone == last_version->components()[0]) {
     // Mid-milestone snapshots are only taken on canary installs.

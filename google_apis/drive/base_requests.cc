@@ -175,13 +175,9 @@ void CloseFile(base::File file) {}
 namespace google_apis {
 
 std::unique_ptr<base::Value> ParseJson(const std::string& json) {
-  int error_code = -1;
-  std::string error_message;
-  std::unique_ptr<base::Value> value =
-      base::JSONReader::ReadAndReturnErrorDeprecated(
-          json, base::JSON_PARSE_RFC, &error_code, &error_message);
-
-  if (!value.get()) {
+  base::JSONReader::ValueWithError parsed_json =
+      base::JSONReader::ReadAndReturnValueWithError(json);
+  if (!parsed_json.value) {
     std::string trimmed_json;
     if (json.size() < 80) {
       trimmed_json  = json;
@@ -192,10 +188,12 @@ std::unique_ptr<base::Value> ParseJson(const std::string& json) {
                              base::NumberToString(json.size() - 60).c_str(),
                              json.substr(json.size() - 10).c_str());
     }
-    LOG(WARNING) << "Error while parsing entry response: " << error_message
-                 << ", code: " << error_code << ", json:\n" << trimmed_json;
+    LOG(WARNING) << "Error while parsing entry response: "
+                 << parsed_json.error_message << ", json:\n"
+                 << trimmed_json;
+    return nullptr;
   }
-  return value;
+  return base::Value::ToUniquePtrValue(std::move(*parsed_json.value));
 }
 
 void GenerateMultipartBody(MultipartType multipart_type,
@@ -590,10 +588,10 @@ UrlFetchRequestBase::GetWeakPtr() {
 //============================ EntryActionRequest ============================
 
 EntryActionRequest::EntryActionRequest(RequestSender* sender,
-                                       const EntryActionCallback& callback)
+                                       EntryActionCallback callback)
     : UrlFetchRequestBase(sender, ProgressCallback(), ProgressCallback()),
-      callback_(callback) {
-  DCHECK(!callback_.is_null());
+      callback_(std::move(callback)) {
+  DCHECK(callback_);
 }
 
 EntryActionRequest::~EntryActionRequest() {}
@@ -602,23 +600,23 @@ void EntryActionRequest::ProcessURLFetchResults(
     const network::mojom::URLResponseHead* response_head,
     base::FilePath response_file,
     std::string response_body) {
-  callback_.Run(GetErrorCode());
+  std::move(callback_).Run(GetErrorCode());
   OnProcessURLFetchResultsComplete();
 }
 
 void EntryActionRequest::RunCallbackOnPrematureFailure(DriveApiErrorCode code) {
-  callback_.Run(code);
+  std::move(callback_).Run(code);
 }
 
 //========================= InitiateUploadRequestBase ========================
 
 InitiateUploadRequestBase::InitiateUploadRequestBase(
     RequestSender* sender,
-    const InitiateUploadCallback& callback,
+    InitiateUploadCallback callback,
     const std::string& content_type,
     int64_t content_length)
     : UrlFetchRequestBase(sender, ProgressCallback(), ProgressCallback()),
-      callback_(callback),
+      callback_(std::move(callback)),
       content_type_(content_type),
       content_length_(content_length) {
   DCHECK(!callback_.is_null());
@@ -639,13 +637,13 @@ void InitiateUploadRequestBase::ProcessURLFetchResults(
                                             &upload_location);
   }
 
-  callback_.Run(GetErrorCode(), GURL(upload_location));
+  std::move(callback_).Run(GetErrorCode(), GURL(upload_location));
   OnProcessURLFetchResultsComplete();
 }
 
 void InitiateUploadRequestBase::RunCallbackOnPrematureFailure(
     DriveApiErrorCode code) {
-  callback_.Run(code, GURL());
+  std::move(callback_).Run(code, GURL());
 }
 
 std::vector<std::string>

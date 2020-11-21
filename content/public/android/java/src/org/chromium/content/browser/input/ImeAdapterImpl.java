@@ -17,7 +17,6 @@ import android.content.Context;
 import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.Rect;
-import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.ResultReceiver;
@@ -48,9 +47,9 @@ import org.chromium.base.UserData;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
 import org.chromium.base.annotations.NativeMethods;
+import org.chromium.blink.mojom.EventType;
 import org.chromium.blink.mojom.FocusType;
 import org.chromium.blink_public.web.WebInputEventModifier;
-import org.chromium.blink_public.web.WebInputEventType;
 import org.chromium.blink_public.web.WebTextInputMode;
 import org.chromium.content.browser.WindowEventObserver;
 import org.chromium.content.browser.WindowEventObserverManager;
@@ -66,6 +65,8 @@ import org.chromium.ui.base.ViewUtils;
 import org.chromium.ui.base.WindowAndroid;
 import org.chromium.ui.base.ime.TextInputAction;
 import org.chromium.ui.base.ime.TextInputType;
+import org.chromium.ui.mojom.VirtualKeyboardPolicy;
+import org.chromium.ui.mojom.VirtualKeyboardVisibilityRequest;
 
 import java.lang.ref.WeakReference;
 import java.lang.reflect.InvocationTargetException;
@@ -153,6 +154,9 @@ public class ImeAdapterImpl
     // True if ImeAdapter is connected to render process.
     private boolean mIsConnected;
 
+    // Returns true if the overlaycontent flag is set in the JS, else false.
+    private boolean mKeyboardOverlayContent;
+
     /**
      * {@ResultReceiver} passed in InputMethodManager#showSoftInput}. We need this to scroll to the
      * editable node at the right timing, which is after input method window shows up.
@@ -217,33 +221,29 @@ public class ImeAdapterImpl
         mCurrentConfig = new Configuration(getContainerView().getResources().getConfiguration());
 
         // CursorAnchroInfo is supported only after L.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            mCursorAnchorInfoController = CursorAnchorInfoController.create(
-                    wrapper, new CursorAnchorInfoController.ComposingTextDelegate() {
-                        @Override
-                        public CharSequence getText() {
-                            return mLastText;
-                        }
-                        @Override
-                        public int getSelectionStart() {
-                            return mLastSelectionStart;
-                        }
-                        @Override
-                        public int getSelectionEnd() {
-                            return mLastSelectionEnd;
-                        }
-                        @Override
-                        public int getComposingTextStart() {
-                            return mLastCompositionStart;
-                        }
-                        @Override
-                        public int getComposingTextEnd() {
-                            return mLastCompositionEnd;
-                        }
-                    });
-        } else {
-            mCursorAnchorInfoController = null;
-        }
+        mCursorAnchorInfoController = CursorAnchorInfoController.create(
+                wrapper, new CursorAnchorInfoController.ComposingTextDelegate() {
+                    @Override
+                    public CharSequence getText() {
+                        return mLastText;
+                    }
+                    @Override
+                    public int getSelectionStart() {
+                        return mLastSelectionStart;
+                    }
+                    @Override
+                    public int getSelectionEnd() {
+                        return mLastSelectionEnd;
+                    }
+                    @Override
+                    public int getComposingTextStart() {
+                        return mLastCompositionStart;
+                    }
+                    @Override
+                    public int getComposingTextEnd() {
+                        return mLastCompositionEnd;
+                    }
+                });
         mInputMethodManagerWrapper = wrapper;
         mNativeImeAdapterAndroid = ImeAdapterImplJni.get().init(ImeAdapterImpl.this, mWebContents);
         WindowEventObserverManager.from(mWebContents).addObserver(this);
@@ -272,6 +272,19 @@ public class ImeAdapterImpl
     @Override
     public void addEventObserver(ImeEventObserver eventObserver) {
         mEventObservers.add(eventObserver);
+    }
+
+    /**
+     * Returns true if the overlaycontent flag is set in the JS, else false.
+     * This determines whether to fire geometrychange event to JS and also not
+     * resize the visual/layout viewports in response to keyboard visibility
+     * changes.
+     *
+     * @return Whether overlaycontent flag is set or not.
+     */
+    @Override
+    public boolean shouldVirtualKeyboardOverlayContent() {
+        return mKeyboardOverlayContent;
     }
 
     private void createInputConnectionFactory() {
@@ -326,9 +339,10 @@ public class ImeAdapterImpl
         }
         if (mInputConnectionFactory == null) return null;
         View containerView = getContainerView();
+        if (DEBUG_LOGS) Log.i(TAG, "Last text: " + mLastText);
         setInputConnection(mInputConnectionFactory.initializeAndGet(containerView, this,
                 mTextInputType, mTextInputFlags, mTextInputMode, mTextInputAction,
-                mLastSelectionStart, mLastSelectionEnd, outAttrs));
+                mLastSelectionStart, mLastSelectionEnd, mLastText, outAttrs));
         if (DEBUG_LOGS) Log.i(TAG, "onCreateInputConnection: " + mInputConnection);
 
         if (mCursorAnchorInfoController != null) {
@@ -436,12 +450,16 @@ public class ImeAdapterImpl
      * @param compositionEnd The character offset of the composition end, or -1 if there is no
      *                       selection.
      * @param replyToRequest True when the update was requested by IME.
+     * @param lastVkVisibilityRequest VK visibility request type if show/hide APIs are called
+     *         from JS.
+     * @param vkPolicy VK policy type whether it is manual or automatic.
      */
     @CalledByNative
     private void updateState(int textInputType, int textInputFlags, int textInputMode,
             int textInputAction, boolean showIfNeeded, boolean alwaysHide, String text,
             int selectionStart, int selectionEnd, int compositionStart, int compositionEnd,
-            boolean replyToRequest) {
+            boolean replyToRequest, int lastVkVisibilityRequest, int vkPolicy,
+            boolean keyboardOverlayContent) {
         TraceEvent.begin("ImeAdapter.updateState");
         try {
             if (DEBUG_LOGS) {
@@ -457,6 +475,7 @@ public class ImeAdapterImpl
                 mRestartInputOnNextStateUpdate = false;
             }
 
+            mKeyboardOverlayContent = keyboardOverlayContent;
             mTextInputFlags = textInputFlags;
             if (mTextInputMode != textInputMode) {
                 mTextInputMode = textInputMode;
@@ -500,15 +519,25 @@ public class ImeAdapterImpl
             mLastCompositionStart = compositionStart;
             mLastCompositionEnd = compositionEnd;
 
-            if (hide || alwaysHide) {
-                hideKeyboard();
-            } else {
-                if (needsRestart) restartInput();
-                if (showIfNeeded && focusedNodeAllowsSoftKeyboard()) {
-                    // There is no API for us to get notified of user's dismissal of keyboard.
-                    // Therefore, we should try to show keyboard even when text input type hasn't
-                    // changed.
+            // Check for the visibility request and policy if VK APIs are enabled.
+            if (vkPolicy == VirtualKeyboardPolicy.MANUAL) {
+                // policy is manual.
+                if (lastVkVisibilityRequest == VirtualKeyboardVisibilityRequest.SHOW) {
                     showSoftKeyboard();
+                } else if (lastVkVisibilityRequest == VirtualKeyboardVisibilityRequest.HIDE) {
+                    hideKeyboard();
+                }
+            } else {
+                if (hide || alwaysHide) {
+                    hideKeyboard();
+                } else {
+                    if (needsRestart) restartInput();
+                    if (showIfNeeded && focusedNodeAllowsSoftKeyboard()) {
+                        // There is no API for us to get notified of user's dismissal of keyboard.
+                        // Therefore, we should try to show keyboard even when text input type
+                        // hasn't changed.
+                        showSoftKeyboard();
+                    }
                 }
             }
 
@@ -861,7 +890,7 @@ public class ImeAdapterImpl
         onImeEvent();
         long timestampMs = SystemClock.uptimeMillis();
         ImeAdapterImplJni.get().sendKeyEvent(mNativeImeAdapterAndroid, ImeAdapterImpl.this, null,
-                WebInputEventType.RAW_KEY_DOWN, 0, timestampMs, COMPOSITION_KEY_CODE, 0, false,
+                EventType.RAW_KEY_DOWN, 0, timestampMs, COMPOSITION_KEY_CODE, 0, false,
                 unicodeFromKeyEvent);
 
         if (isCommit) {
@@ -873,12 +902,11 @@ public class ImeAdapterImpl
         }
 
         ImeAdapterImplJni.get().sendKeyEvent(mNativeImeAdapterAndroid, ImeAdapterImpl.this, null,
-                WebInputEventType.KEY_UP, 0, timestampMs, COMPOSITION_KEY_CODE, 0, false,
+                EventType.KEY_UP, 0, timestampMs, COMPOSITION_KEY_CODE, 0, false,
                 unicodeFromKeyEvent);
         return true;
     }
 
-    @VisibleForTesting
     boolean finishComposingText() {
         if (!isValid()) return false;
         ImeAdapterImplJni.get().finishComposingText(mNativeImeAdapterAndroid, ImeAdapterImpl.this);
@@ -891,9 +919,9 @@ public class ImeAdapterImpl
         int action = event.getAction();
         int type;
         if (action == KeyEvent.ACTION_DOWN) {
-            type = WebInputEventType.KEY_DOWN;
+            type = EventType.KEY_DOWN;
         } else if (action == KeyEvent.ACTION_UP) {
-            type = WebInputEventType.KEY_UP;
+            type = EventType.KEY_UP;
         } else {
             // In theory, KeyEvent.ACTION_MULTIPLE is a valid value, but in practice
             // this seems to have been quietly deprecated and we've never observed
@@ -923,13 +951,12 @@ public class ImeAdapterImpl
         onImeEvent();
         if (!isValid()) return false;
         ImeAdapterImplJni.get().sendKeyEvent(mNativeImeAdapterAndroid, ImeAdapterImpl.this, null,
-                WebInputEventType.RAW_KEY_DOWN, 0, SystemClock.uptimeMillis(), COMPOSITION_KEY_CODE,
-                0, false, 0);
+                EventType.RAW_KEY_DOWN, 0, SystemClock.uptimeMillis(), COMPOSITION_KEY_CODE, 0,
+                false, 0);
         ImeAdapterImplJni.get().deleteSurroundingText(
                 mNativeImeAdapterAndroid, ImeAdapterImpl.this, beforeLength, afterLength);
         ImeAdapterImplJni.get().sendKeyEvent(mNativeImeAdapterAndroid, ImeAdapterImpl.this, null,
-                WebInputEventType.KEY_UP, 0, SystemClock.uptimeMillis(), COMPOSITION_KEY_CODE, 0,
-                false, 0);
+                EventType.KEY_UP, 0, SystemClock.uptimeMillis(), COMPOSITION_KEY_CODE, 0, false, 0);
         return true;
     }
 
@@ -945,13 +972,12 @@ public class ImeAdapterImpl
         onImeEvent();
         if (!isValid()) return false;
         ImeAdapterImplJni.get().sendKeyEvent(mNativeImeAdapterAndroid, ImeAdapterImpl.this, null,
-                WebInputEventType.RAW_KEY_DOWN, 0, SystemClock.uptimeMillis(), COMPOSITION_KEY_CODE,
-                0, false, 0);
+                EventType.RAW_KEY_DOWN, 0, SystemClock.uptimeMillis(), COMPOSITION_KEY_CODE, 0,
+                false, 0);
         ImeAdapterImplJni.get().deleteSurroundingTextInCodePoints(
                 mNativeImeAdapterAndroid, ImeAdapterImpl.this, beforeLength, afterLength);
         ImeAdapterImplJni.get().sendKeyEvent(mNativeImeAdapterAndroid, ImeAdapterImpl.this, null,
-                WebInputEventType.KEY_UP, 0, SystemClock.uptimeMillis(), COMPOSITION_KEY_CODE, 0,
-                false, 0);
+                EventType.KEY_UP, 0, SystemClock.uptimeMillis(), COMPOSITION_KEY_CODE, 0, false, 0);
         return true;
     }
 

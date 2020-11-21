@@ -9,7 +9,7 @@ import static org.chromium.chrome.browser.partnercustomizations.BasePartnerBrows
 import static org.chromium.chrome.browser.partnercustomizations.BasePartnerBrowserCustomizationUnitTestRule.PARTNER_BROWSER_CUSTOMIZATIONS_NO_PROVIDER;
 import static org.chromium.chrome.browser.partnercustomizations.BasePartnerBrowserCustomizationUnitTestRule.PARTNER_BROWSER_CUSTOMIZATIONS_PROVIDER;
 
-import android.support.test.filters.SmallTest;
+import androidx.test.filters.SmallTest;
 
 import org.junit.After;
 import org.junit.Assert;
@@ -19,10 +19,8 @@ import org.junit.Test;
 import org.junit.rules.TestRule;
 import org.junit.runner.RunWith;
 
-import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
-import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.homepage.HomepageManager;
 import org.chromium.chrome.browser.homepage.HomepageTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
@@ -59,7 +57,6 @@ public class PartnerHomepageUnitTest {
         mHomepageManager = HomepageManager.getInstance();
         mPartnerBrowserCustomizations = PartnerBrowserCustomizations.getInstance();
 
-        RecordHistogram.setDisabledForTests(true);
         Assert.assertNotNull(mHomepageManager);
 
         Assert.assertNotSame(
@@ -70,7 +67,6 @@ public class PartnerHomepageUnitTest {
     @After
     public void tearDown() {
         PartnerBrowserCustomizations.destroy();
-        RecordHistogram.setDisabledForTests(false);
     }
 
     @Test
@@ -174,7 +170,6 @@ public class PartnerHomepageUnitTest {
     @Test
     @SmallTest
     @Feature({"Homepage"})
-    @RetryOnFailure
     public void testCustomHomepage() throws InterruptedException {
         mHomepageManager.setPrefHomepageEnabled(true);
         mHomepageManager.setHomepagePreferences(false, false, TEST_CUSTOM_HOMEPAGE_URI);
@@ -286,7 +281,6 @@ public class PartnerHomepageUnitTest {
     @Test
     @SmallTest
     @Feature({"Homepage"})
-    @RetryOnFailure
     public void testReadHomepageProvider() throws InterruptedException {
         mHomepageManager.setPrefHomepageEnabled(true);
         mHomepageManager.setHomepagePreferences(false, true, TEST_CUSTOM_HOMEPAGE_URI);

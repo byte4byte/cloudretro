@@ -56,7 +56,7 @@ LocationBarBubbleDelegateView::LocationBarBubbleDelegateView(
     Browser* browser = chrome::FindBrowserWithWebContents(web_contents);
     // |browser| can be null in tests.
     if (browser)
-      fullscreen_observer_.Add(
+      fullscreen_observation_.Observe(
           browser->exclusive_access_manager()->fullscreen_controller());
   }
 }
@@ -65,6 +65,8 @@ LocationBarBubbleDelegateView::~LocationBarBubbleDelegateView() = default;
 
 void LocationBarBubbleDelegateView::ShowForReason(DisplayReason reason,
                                                   bool allow_refocus_alert) {
+  display_reason_ = reason;
+
   // These bubbles all anchor to the location bar or toolbar. We selectively
   // anchor location bar bubbles to one end or the other of the toolbar based on
   // whether their normal anchor point is visible. However, if part or all of
@@ -94,10 +96,13 @@ void LocationBarBubbleDelegateView::ShowForReason(DisplayReason reason,
           l10n_util::GetStringUTF8(IDS_SHOW_BUBBLE_INACTIVE_DESCRIPTION));
     }
   }
-  if (ui::IsAlert(GetAccessibleWindowRole())) {
-    GetWidget()->GetRootView()->NotifyAccessibilityEvent(
-        ax::mojom::Event::kAlert, true);
-  }
+}
+
+ax::mojom::Role LocationBarBubbleDelegateView::GetAccessibleWindowRole() {
+  if (display_reason_ == USER_GESTURE)
+    return ax::mojom::Role::kDialog;
+
+  return ax::mojom::Role::kAlertDialog;
 }
 
 void LocationBarBubbleDelegateView::OnFullscreenStateChanged() {

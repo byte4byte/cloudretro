@@ -10,11 +10,15 @@
 
 #include "base/callback.h"
 #include "chromeos/components/quick_answers/utils/language_detector.h"
+#include "chromeos/services/machine_learning/public/mojom/machine_learning_service.mojom.h"
+#include "chromeos/services/machine_learning/public/mojom/text_classifier.mojom.h"
+#include "mojo/public/cpp/bindings/remote.h"
 
 namespace chromeos {
 namespace quick_answers {
 
 struct QuickAnswersRequest;
+struct IntentInfo;
 enum class IntentType;
 
 // Generate intent from the |QuickAnswersRequest|.
@@ -22,24 +26,43 @@ class IntentGenerator {
  public:
   // Callback used when intent generation is complete.
   using IntentGeneratorCallback =
-      base::OnceCallback<void(const std::string& text, IntentType type)>;
+      base::OnceCallback<void(const IntentInfo& intent_info)>;
 
   explicit IntentGenerator(IntentGeneratorCallback complete_callback);
 
   IntentGenerator(const IntentGenerator&) = delete;
   IntentGenerator& operator=(const IntentGenerator&) = delete;
 
-  ~IntentGenerator();
+  virtual ~IntentGenerator();
 
-  // Generate intent from the |request|.
-  void GenerateIntent(const QuickAnswersRequest& request);
-
-  void SetLanguageDetectorForTesting(
-      std::unique_ptr<LanguageDetector> language_detector);
+  // Generate intent from the |request|. Virtual for testing.
+  virtual void GenerateIntent(const QuickAnswersRequest& request);
 
  private:
+  FRIEND_TEST_ALL_PREFIXES(IntentGeneratorTest,
+                           TextAnnotationIntentNoAnnotation);
+  FRIEND_TEST_ALL_PREFIXES(IntentGeneratorTest, TextAnnotationIntentNoEntity);
+  FRIEND_TEST_ALL_PREFIXES(IntentGeneratorTest,
+                           TextAnnotationIntentUnSupportedEntity);
+
+  void LoadModelCallback(
+      const QuickAnswersRequest& request,
+      chromeos::machine_learning::mojom::LoadModelResult result);
+  void AnnotationCallback(
+      const QuickAnswersRequest& request,
+      std::vector<machine_learning::mojom::TextAnnotationPtr> annotations);
+  void LanguageDetectorCallback(const QuickAnswersRequest& request,
+                                base::Optional<std::string> detected_locale);
+
+  void MaybeGenerateTranslationIntent(const QuickAnswersRequest& request,
+                                      const std::string& detected_locale);
+
   IntentGeneratorCallback complete_callback_;
+  mojo::Remote<::chromeos::machine_learning::mojom::TextClassifier>
+      text_classifier_;
   std::unique_ptr<LanguageDetector> language_detector_;
+
+  base::WeakPtrFactory<IntentGenerator> weak_factory_{this};
 };
 
 }  // namespace quick_answers

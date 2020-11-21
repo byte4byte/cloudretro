@@ -10,6 +10,12 @@
 
 class TestingProfile;
 
+namespace base {
+namespace test {
+class ScopedRunningOnChromeOS;
+}  // namespace test
+}  // namespace base
+
 namespace user_manager {
 class ScopedUserManager;
 }  // namespace user_manager
@@ -34,7 +40,10 @@ class PluginVmTestHelper {
   void EnablePluginVmFeature();
   void EnterpriseEnrollDevice();
 
+  // Naming follows plugin_vm_util. Allow indicates Plugin VM can be used, while
+  // enable indicates Plugin VM has been installed.
   void AllowPluginVm();
+  void EnablePluginVm();
 
   // Fakes the Plugin VM window being opened or closed.
   void OpenShelfItem();
@@ -44,6 +53,7 @@ class PluginVmTestHelper {
   TestingProfile* testing_profile_;
   std::unique_ptr<user_manager::ScopedUserManager> scoped_user_manager_;
   base::test::ScopedFeatureList scoped_feature_list_;
+  std::unique_ptr<base::test::ScopedRunningOnChromeOS> running_on_chromeos_;
 
   DISALLOW_COPY_AND_ASSIGN(PluginVmTestHelper);
 };

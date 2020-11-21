@@ -24,7 +24,7 @@ gen_spec() {
   process_template "${SCRIPTDIR}/chrome.spec.template" "${SPEC}"
 }
 
-# Setup the installation directory hierachy in the package staging area.
+# Setup the installation directory hierarchy in the package staging area.
 prep_staging_rpm() {
   prep_staging_common
   install -m 755 -d "${STAGEDIR}/etc/cron.daily"
@@ -107,6 +107,7 @@ do_package() {
     --define "_topdir $RPMBUILD_DIR" \
     --define "${COMPRESSION_OPT}" \
     --define "__os_install_post  %{nil}" \
+    --define "_build_id_links none" \
     "${SPEC}"
   PKGNAME="${PACKAGE}-${CHANNEL}-${VERSION}-${PACKAGE_RELEASE}"
   mv "$RPMBUILD_DIR/RPMS/$ARCHITECTURE/${PKGNAME}.${ARCHITECTURE}.rpm" \

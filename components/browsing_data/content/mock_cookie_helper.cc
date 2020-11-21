@@ -6,7 +6,7 @@
 
 #include <memory>
 
-#include "base/logging.h"
+#include "base/callback_helpers.h"
 #include "base/optional.h"
 #include "base/stl_util.h"
 #include "base/time/time.h"
@@ -17,8 +17,9 @@
 namespace browsing_data {
 
 MockCookieHelper::MockCookieHelper(content::BrowserContext* browser_context)
-    : CookieHelper(content::BrowserContext::GetDefaultStoragePartition(
-          browser_context)) {}
+    : CookieHelper(
+          content::BrowserContext::GetDefaultStoragePartition(browser_context),
+          base::NullCallback()) {}
 
 MockCookieHelper::~MockCookieHelper() {}
 

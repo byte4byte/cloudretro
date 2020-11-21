@@ -3,10 +3,10 @@
 // found in the LICENSE file.
 
 // clang-format off
-import {ChromeCleanupProxyImpl, ChromeCleanupIdleReason, CHROME_CLEANUP_DEFAULT_ITEMS_TO_SHOW} from 'chrome://settings/lazy_load.js';
-import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
-import {TestBrowserProxy} from 'chrome://test/test_browser_proxy.m.js';
 import {webUIListenerCallback} from 'chrome://resources/js/cr.m.js';
+import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+import {CHROME_CLEANUP_DEFAULT_ITEMS_TO_SHOW, ChromeCleanupIdleReason,ChromeCleanupProxyImpl} from 'chrome://settings/lazy_load.js';
+import {TestBrowserProxy} from 'chrome://test/test_browser_proxy.m.js';
 // clang-format on
 
 /** @implements {ChromeCleanupProxy} */
@@ -40,8 +40,9 @@ class TestChromeCleanupProxy extends TestBrowserProxy {
   }
 
   /** @override */
-  startScanning(logsUploadEnabled) {
-    this.methodCalled('startScanning', logsUploadEnabled);
+  startScanning(logsUploadEnabled, notificationEnabled) {
+    this.methodCalled(
+        'startScanning', [logsUploadEnabled, notificationEnabled]);
   }
 
   /** @override */
@@ -118,8 +119,7 @@ function validateVisibleItemsList(originalItems, visibleItems) {
     assertTrue(moreItemsLink.hidden);
   } else {
     assertEquals(
-        visibleItemsList.length,
-        CHROME_CLEANUP_DEFAULT_ITEMS_TO_SHOW - 1);
+        visibleItemsList.length, CHROME_CLEANUP_DEFAULT_ITEMS_TO_SHOW - 1);
     assertFalse(moreItemsLink.hidden);
 
     // Tapping on the "show more" link should expand the list.
@@ -306,48 +306,39 @@ suite('ChromeCleanupHandler', function() {
   }
 
   test('scanOfferedOnInitiallyIdle_ReporterFoundNothing', function() {
-    scanOfferedOnInitiallyIdle(
-        ChromeCleanupIdleReason.REPORTER_FOUND_NOTHING);
+    scanOfferedOnInitiallyIdle(ChromeCleanupIdleReason.REPORTER_FOUND_NOTHING);
   });
 
   test('scanOfferedOnInitiallyIdle_ReporterFailed', function() {
-    scanOfferedOnInitiallyIdle(
-        ChromeCleanupIdleReason.REPORTER_FAILED);
+    scanOfferedOnInitiallyIdle(ChromeCleanupIdleReason.REPORTER_FAILED);
   });
 
   test('scanOfferedOnInitiallyIdle_ScanningFoundNothing', function() {
-    scanOfferedOnInitiallyIdle(
-        ChromeCleanupIdleReason.SCANNING_FOUND_NOTHING);
+    scanOfferedOnInitiallyIdle(ChromeCleanupIdleReason.SCANNING_FOUND_NOTHING);
   });
 
   test('scanOfferedOnInitiallyIdle_ScanningFailed', function() {
-    scanOfferedOnInitiallyIdle(
-        ChromeCleanupIdleReason.SCANNING_FAILED);
+    scanOfferedOnInitiallyIdle(ChromeCleanupIdleReason.SCANNING_FAILED);
   });
 
   test('scanOfferedOnInitiallyIdle_ConnectionLost', function() {
-    scanOfferedOnInitiallyIdle(
-        ChromeCleanupIdleReason.CONNECTION_LOST);
+    scanOfferedOnInitiallyIdle(ChromeCleanupIdleReason.CONNECTION_LOST);
   });
 
   test('scanOfferedOnInitiallyIdle_UserDeclinedCleanup', function() {
-    scanOfferedOnInitiallyIdle(
-        ChromeCleanupIdleReason.USER_DECLINED_CLEANUP);
+    scanOfferedOnInitiallyIdle(ChromeCleanupIdleReason.USER_DECLINED_CLEANUP);
   });
 
   test('scanOfferedOnInitiallyIdle_CleaningFailed', function() {
-    scanOfferedOnInitiallyIdle(
-        ChromeCleanupIdleReason.CLEANING_FAILED);
+    scanOfferedOnInitiallyIdle(ChromeCleanupIdleReason.CLEANING_FAILED);
   });
 
   test('scanOfferedOnInitiallyIdle_CleaningSucceeded', function() {
-    scanOfferedOnInitiallyIdle(
-        ChromeCleanupIdleReason.CLEANING_SUCCEEDED);
+    scanOfferedOnInitiallyIdle(ChromeCleanupIdleReason.CLEANING_SUCCEEDED);
   });
 
   test('scanOfferedOnInitiallyIdle_CleanerDownloadFailed', function() {
-    scanOfferedOnInitiallyIdle(
-        ChromeCleanupIdleReason.CLEANER_DOWNLOAD_FAILED);
+    scanOfferedOnInitiallyIdle(ChromeCleanupIdleReason.CLEANER_DOWNLOAD_FAILED);
   });
 
   test('cleanerDownloadFailure', function() {
@@ -385,24 +376,45 @@ suite('ChromeCleanupHandler', function() {
     assertFalse(!!actionButton);
   });
 
-  test('startScanFromIdle', function() {
+  /**
+   * @param {boolean} clickNotification Whether to test the case
+   *     where the user clicks on the completion notification option.
+   * @return {!Promise}
+   */
+  async function startScanFromIdle(clickNotification) {
     updateReportingEnabledPref(false);
     webUIListenerCallback(
         'chrome-cleanup-on-idle', ChromeCleanupIdleReason.INITIAL);
     flush();
 
+    if (clickNotification) {
+      const notificationControl =
+          chromeCleanupPage.$$('#chromeCleanupShowNotificationControl');
+      assertTrue(!!notificationControl);
+      notificationControl.$.checkbox.click();
+    }
+
     const actionButton = chromeCleanupPage.$$('#action-button');
     assertTrue(!!actionButton);
     actionButton.click();
-    return chromeCleanupProxy.whenCalled('startScanning')
-        .then(function(logsUploadEnabled) {
-          assertFalse(logsUploadEnabled);
-          webUIListenerCallback('chrome-cleanup-on-scanning', false);
-          flush();
+    const [logsUploadEnabled, notificationEnabled] =
+        await chromeCleanupProxy.whenCalled('startScanning');
+    assertFalse(logsUploadEnabled);
+    // Notification is disabled by default, hence a click enables it.
+    assertEquals(clickNotification, notificationEnabled);
+    webUIListenerCallback('chrome-cleanup-on-scanning', false);
+    flush();
 
-          const spinner = chromeCleanupPage.$$('#waiting-spinner');
-          assertTrue(spinner.active);
-        });
+    const spinner = chromeCleanupPage.$$('#waiting-spinner');
+    assertTrue(spinner.active);
+  }
+
+  test('startScanFromIdle_NotificationDisabled', function() {
+    return startScanFromIdle(false);
+  });
+
+  test('startScanFromIdle_NotificationEnabled', function() {
+    return startScanFromIdle(true);
   });
 
   test('scanFoundNothing', function() {
@@ -419,8 +431,7 @@ suite('ChromeCleanupHandler', function() {
   test('scanFailure', function() {
     webUIListenerCallback('chrome-cleanup-on-scanning', false);
     webUIListenerCallback(
-        'chrome-cleanup-on-idle',
-        ChromeCleanupIdleReason.SCANNING_FAILED);
+        'chrome-cleanup-on-idle', ChromeCleanupIdleReason.SCANNING_FAILED);
     flush();
 
     const actionButton = chromeCleanupPage.$$('#action-button');
@@ -464,8 +475,7 @@ suite('ChromeCleanupHandler', function() {
         'chrome-cleanup-on-cleaning', true /* isPoweredByPartner */,
         defaultScannerResults);
     webUIListenerCallback(
-        'chrome-cleanup-on-idle',
-        ChromeCleanupIdleReason.CLEANING_FAILED);
+        'chrome-cleanup-on-idle', ChromeCleanupIdleReason.CLEANING_FAILED);
     flush();
 
     const actionButton = chromeCleanupPage.$$('#action-button');
@@ -477,8 +487,7 @@ suite('ChromeCleanupHandler', function() {
         'chrome-cleanup-on-cleaning', true /* isPoweredByPartner */,
         defaultScannerResults);
     webUIListenerCallback(
-        'chrome-cleanup-on-idle',
-        ChromeCleanupIdleReason.CLEANING_SUCCEEDED);
+        'chrome-cleanup-on-idle', ChromeCleanupIdleReason.CLEANING_SUCCEEDED);
     flush();
 
     const actionButton = chromeCleanupPage.$$('#action-button');

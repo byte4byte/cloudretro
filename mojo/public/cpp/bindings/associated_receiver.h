@@ -8,8 +8,8 @@
 #include <memory>
 #include <utility>
 
+#include "base/check.h"
 #include "base/compiler_specific.h"
-#include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/sequenced_task_runner.h"
@@ -139,6 +139,38 @@ class AssociatedReceiver {
     return remote;
   }
 
+  // Like BindNewEndpointAndPassRemote() above, but it creates a dedicated
+  // message pipe. The returned remote can be bound directly to an
+  // implementation, without being first passed through a message pipe endpoint.
+  //
+  // For testing, where the returned request is bound to e.g. a mock and there
+  // are no other interfaces involved.
+  PendingAssociatedRemote<Interface> BindNewEndpointAndPassDedicatedRemote()
+      WARN_UNUSED_RESULT {
+    DCHECK(!is_bound()) << "AssociatedReceiver is already bound";
+
+    MessagePipe pipe;
+    scoped_refptr<internal::MultiplexRouter> router0 =
+        new internal::MultiplexRouter(
+            std::move(pipe.handle0), internal::MultiplexRouter::MULTI_INTERFACE,
+            false, base::SequencedTaskRunnerHandle::Get());
+    scoped_refptr<internal::MultiplexRouter> router1 =
+        new internal::MultiplexRouter(
+            std::move(pipe.handle1), internal::MultiplexRouter::MULTI_INTERFACE,
+            true, base::SequencedTaskRunnerHandle::Get());
+
+    ScopedInterfaceEndpointHandle remote_handle;
+    ScopedInterfaceEndpointHandle receiver_handle;
+    ScopedInterfaceEndpointHandle::CreatePairPendingAssociation(
+        &remote_handle, &receiver_handle);
+    InterfaceId id = router1->AssociateInterface(std::move(receiver_handle));
+    receiver_handle = router0->CreateLocalEndpointHandle(id);
+
+    Bind(PendingAssociatedReceiver<Interface>(std::move(receiver_handle)),
+         nullptr);
+    return PendingAssociatedRemote<Interface>(std::move(remote_handle), 0);
+  }
+
   // Binds this AssociatedReceiver by consuming |pending_receiver|. Must only be
   // called on an unbound AssociatedReceiver.
   //
@@ -207,6 +239,26 @@ class AssociatedReceiver {
   // Allows test code to swap the interface implementation.
   ImplPointerType SwapImplForTesting(ImplPointerType new_impl) {
     return binding_.SwapImplForTesting(new_impl);
+  }
+
+  // Reports the currently dispatching message as bad and resets this receiver.
+  // Note that this is only legal to call from within the stack frame of a
+  // message dispatch. If you need to do asynchronous work before determining
+  // the legitimacy of a message, use GetBadMessageCallback() and retain its
+  // result until ready to invoke or discard it.
+  void ReportBadMessage(const std::string& error) {
+    GetBadMessageCallback().Run(error);
+  }
+
+  // Acquires a callback which may be run to report the currently dispatching
+  // message as bad and reset this receiver. Note that this is only legal to
+  // call from directly within stack frame of a message dispatch, but the
+  // returned callback may be called exactly once any time thereafter to report
+  // the message as bad. |GetBadMessageCallback()| may only be called once per
+  // message, and the returned callback must be run on the same sequence to
+  // which this Receiver is bound.
+  ReportBadMessageCallback GetBadMessageCallback() {
+    return binding_.GetBadMessageCallback();
   }
 
  private:

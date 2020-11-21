@@ -6,6 +6,8 @@
  * @fileoverview Tests for chrome://bluetooth-internals
  */
 
+GEN('#include "content/public/test/browser_test.h"');
+
 /**
  * Test fixture for BluetoothInternals WebUI testing.
  * @constructor
@@ -29,6 +31,7 @@ BluetoothInternalsTest.prototype = {
   extraLibraries: [
     '//third_party/mocha/mocha.js',
     '//chrome/test/data/webui/mocha_adapter.js',
+    '//ui/webui/resources/js/assert.js',
     '//ui/webui/resources/js/promise_resolver.js',
     '//ui/webui/resources/js/cr.js',
     '//ui/webui/resources/js/util.js',
@@ -85,7 +88,7 @@ BluetoothInternalsTest.prototype = {
         super([
           'getInfo',
           'getDevices',
-          'setClient',
+          'addObserver',
         ]);
 
         this.receiver = new bluetooth.mojom.AdapterReceiver(this);
@@ -120,12 +123,35 @@ BluetoothInternalsTest.prototype = {
         return {devices: this.devices_};
       }
 
-      async setClient(client) {
-        this.methodCalled('setClient', client);
+      async addObserver(observer) {
+        this.methodCalled('addObserver', observer);
+      }
+
+      async registerAdvertisement() {
+        this.methodCalled('registerAdvertisement');
+        return {advertisement: null};
+      }
+
+      async setDiscoverable() {
+        this.methodCalled('setDiscoverable');
+        return {success: true};
+      }
+
+      async setName() {
+        this.methodCalled('setName');
+        return {success: true};
       }
 
       async startDiscoverySession() {
         return {session: null};
+      }
+
+      async connectToServiceInsecurely(address, service_uuid) {
+        return {result: null};
+      }
+
+      async createRfcommService(service_name, service_uuid) {
+        return {result: null};
       }
 
       setTestConnectResult(connectResult) {
@@ -225,6 +251,7 @@ BluetoothInternalsTest.prototype = {
       discovering: false,
       initialized: true,
       name: 'computer.example.com-0',
+      systemName: 'Example Bluetooth Stack 1.0',
       powered: true,
       present: true,
     };
@@ -241,6 +268,7 @@ BluetoothInternalsTest.prototype = {
       nameForDisplay: 'AAA',
       rssi: {value: -40},
       isGattConnected: false,
+      serviceDataMap: {},
       services: [],
     };
   },
@@ -256,6 +284,7 @@ BluetoothInternalsTest.prototype = {
       nameForDisplay: 'BBB',
       rssi: null,
       isGattConnected: false,
+      serviceDataMap: {},
       services: [],
     };
   },
@@ -270,6 +299,7 @@ BluetoothInternalsTest.prototype = {
       address: 'CC:CC:84:96:92:84',
       name: 'CCC',
       nameForDisplay: 'CCC',
+      serviceDataMap: {},
       isGattConnected: false,
     };
   },
@@ -345,7 +375,7 @@ TEST_F('BluetoothInternalsTest', 'Startup_BluetoothInternals', function() {
         internalsHandler.whenCalled('getAdapter'),
         internalsHandler.adapter.whenCalled('getInfo'),
         internalsHandler.adapter.whenCalled('getDevices'),
-        internalsHandler.adapter.whenCalled('setClient')
+        internalsHandler.adapter.whenCalled('addObserver')
       ]);
     });
 
@@ -756,7 +786,7 @@ TEST_F('BluetoothInternalsTest', 'Startup_BluetoothInternals', function() {
           value = value[part];
         }
 
-        if (propName == 'isGattConnected') {
+        if (propName === 'isGattConnected') {
           value = value ? 'Connected' : 'Not Connected';
         }
 

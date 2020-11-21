@@ -5,7 +5,6 @@
 package org.chromium.chrome.browser.payments.handler.toolbar;
 
 import android.os.Handler;
-import android.view.View;
 
 import androidx.annotation.DrawableRes;
 
@@ -19,12 +18,11 @@ import org.chromium.ui.modelutil.PropertyModel;
  * PaymentHandlerToolbar mediator, which is responsible for receiving events from the view and
  * notifies the backend (the coordinator).
  */
-/* package */ class PaymentHandlerToolbarMediator
-        extends WebContentsObserver implements View.OnClickListener {
+/* package */ class PaymentHandlerToolbarMediator extends WebContentsObserver {
     /** The delay (four video frames - for 60Hz) after which the hide progress will be hidden. */
     private static final long HIDE_PROGRESS_BAR_DELAY_MS = (1000 / 60) * 4;
     /**
-     * The minimum load progress that can be shown when a page is loading.  This is not 0 so that
+     * The minimum load progress that can be shown when a page is loading. This is not 0 so that
      * it's obvious to the user that something is attempting to load.
      */
     /* package */ static final float MINIMUM_LOAD_PROGRESS = 0.05f;
@@ -32,7 +30,7 @@ import org.chromium.ui.modelutil.PropertyModel;
     private final PropertyModel mModel;
     /** The handler to delay hiding the progress bar. */
     private Handler mHideProgressBarHandler;
-    /** Postfixed with "Ref" to distinguish from mWebContent in WebContentsObserver. */
+    /** Postfix with "Ref" to distinguish from mWebContent in WebContentsObserver. */
     private final WebContents mWebContentsRef;
     private final PaymentHandlerToolbarMediatorDelegate mDelegate;
 
@@ -53,9 +51,6 @@ import org.chromium.ui.modelutil.PropertyModel;
          * @param securityLevel The security level.
          */
         String getSecurityIconContentDescription(@ConnectionSecurityLevel int securityLevel);
-
-        /** Show the PageInfo dialog for the PaymentHandler's WebContents. */
-        void showPageInfoDialog();
     }
 
     /**
@@ -136,10 +131,4 @@ import org.chromium.ui.modelutil.PropertyModel;
     public void didChangeVisibleSecurityState() {
         setSecurityState(mDelegate.getSecurityLevel());
     }
-
-    // (PaymentHandlerToolbarView security icon's) OnClickListener:
-    @Override
-    public void onClick(View view) {
-        mDelegate.showPageInfoDialog();
-    };
 }

@@ -10,14 +10,15 @@ import android.content.Context;
 import android.content.Intent;
 
 import org.chromium.base.ApplicationStatus;
-import org.chromium.base.task.AsyncTask;
 import org.chromium.base.task.PostTask;
 import org.chromium.chrome.browser.init.BrowserParts;
 import org.chromium.chrome.browser.init.ChromeBrowserInitializer;
 import org.chromium.chrome.browser.init.EmptyBrowserParts;
+import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.signin.IdentityServicesProvider;
 import org.chromium.chrome.browser.signin.SigninHelper;
 import org.chromium.chrome.browser.signin.SigninPreferencesManager;
+import org.chromium.components.signin.AccountTrackerService;
 import org.chromium.content_public.browser.UiThreadTaskTraits;
 
 /**
@@ -32,22 +33,6 @@ public class AccountsChangedReceiver extends BroadcastReceiver {
     public void onReceive(Context context, final Intent intent) {
         if (!AccountManager.LOGIN_ACCOUNTS_CHANGED_ACTION.equals(intent.getAction())) return;
 
-        AsyncTask<Void> task = new AsyncTask<Void>() {
-            @Override
-            protected Void doInBackground() {
-                SigninHelper.updateAccountRenameData();
-                return null;
-            }
-
-            @Override
-            protected void onPostExecute(Void result) {
-                continueHandleAccountChangeIfNeeded();
-            }
-        };
-        task.executeOnExecutor(AsyncTask.SERIAL_EXECUTOR);
-    }
-
-    private void continueHandleAccountChangeIfNeeded() {
         boolean isChromeVisible = ApplicationStatus.hasVisibleActivities();
         if (isChromeVisible) {
             startBrowserIfNeededAndValidateAccounts();
@@ -62,10 +47,11 @@ public class AccountsChangedReceiver extends BroadcastReceiver {
             @Override
             public void finishNativeInitialization() {
                 PostTask.runOrPostTask(UiThreadTaskTraits.DEFAULT, () -> {
+                    AccountTrackerService trackerService =
+                            IdentityServicesProvider.get().getAccountTrackerService(
+                                    Profile.getLastUsedRegularProfile());
                     // TODO(bsazonov): Check whether invalidateAccountSeedStatus is needed here.
-                    IdentityServicesProvider.get()
-                            .getAccountTrackerService()
-                            .invalidateAccountSeedStatus(false /* don't refresh right now */);
+                    trackerService.invalidateAccountSeedStatus(false /* don't refresh right now */);
                     SigninHelper.get().validateAccountSettings(true);
                 });
             }

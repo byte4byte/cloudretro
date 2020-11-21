@@ -40,6 +40,7 @@ from blinkpy.common.system.system_host_mock import MockSystemHost
 from blinkpy.web_tests.port import android
 from blinkpy.web_tests.port import driver_unittest
 from blinkpy.web_tests.port import port_testcase
+from blinkpy.web_tests.models.test_expectations import TestExpectations
 
 _DEVIL_ROOT = os.path.join(get_chromium_src_dir(), 'third_party', 'catapult',
                            'devil')
@@ -47,8 +48,6 @@ sys.path.insert(0, _DEVIL_ROOT)
 from devil.android import device_utils
 from devil.android.sdk import adb_wrapper
 
-_MOCK_ROOT = os.path.join(get_chromium_src_dir(), 'third_party', 'pymock')
-sys.path.insert(0, _MOCK_ROOT)
 import mock
 
 
@@ -121,17 +120,26 @@ class AndroidPortTest(port_testcase.PortTestCase):
         self.assertEquals(6, port_default.default_child_processes())
         self.assertEquals(1, port_fixed_device.default_child_processes())
 
-    def test_weblayer_expectation_tags(self):
+    def test_no_bot_expectations_searched(self):
+        # We don't support bot expectations at the moment
         host = MockSystemHost()
         port = android.AndroidPort(host, apk='apks/WebLayerShell.apk')
+        port.expectations_dict = lambda: {}
+        test_expectations = TestExpectations(port)
+        self.assertFalse(test_expectations._expectations)
+
+    def test_weblayer_expectation_tags(self):
+        host = MockSystemHost()
+        port = android.AndroidPort(
+            host, product='android_weblayer')
         self.assertEqual(port.get_platform_tags(),
                          set(['android', 'android-weblayer']))
 
-    def test_content_shell_expectation_tags(self):
+    def test_default_no_wpt_product_tag(self):
         host = MockSystemHost()
         port = android.AndroidPort(host)
         self.assertEqual(port.get_platform_tags(),
-                         set(['android', 'android-content-shell']))
+                         set(['android']))
 
     # Test that an HTTP server indeed is required by Android (as we serve all tests over them)
     def test_requires_http_server(self):
@@ -139,16 +147,7 @@ class AndroidPortTest(port_testcase.PortTestCase):
 
     # Tests the default timeouts for Android, which are different than the rest of Chromium.
     def test_default_timeout_ms(self):
-        self.assertEqual(
-            self.make_port(
-                options=optparse.Values({
-                    'configuration': 'Release'
-                })).default_timeout_ms(), 10000)
-        self.assertEqual(
-            self.make_port(
-                options=optparse.Values({
-                    'configuration': 'Debug'
-                })).default_timeout_ms(), 10000)
+        self.assertEqual(self.make_port().timeout_ms(), 10000)
 
     def test_path_to_apache_config_file(self):
         port = self.make_port()

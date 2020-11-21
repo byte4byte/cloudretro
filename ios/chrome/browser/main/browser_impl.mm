@@ -4,7 +4,7 @@
 
 #import "ios/chrome/browser/main/browser_impl.h"
 
-#include "base/logging.h"
+#include "base/check.h"
 #include "base/memory/ptr_util.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #import "ios/chrome/browser/main/browser_agent_util.h"
@@ -35,13 +35,10 @@ void BrowserImpl::CreateTabModel() {
 }
 
 BrowserImpl::BrowserImpl(ChromeBrowserState* browser_state,
-                         TabModel* tab_model,
                          std::unique_ptr<WebStateList> web_state_list)
     : browser_state_(browser_state),
-      tab_model_(tab_model),
       web_state_list_(std::move(web_state_list)) {
   DCHECK(browser_state_);
-  DCHECK(tab_model.webStateList == web_state_list_.get());
 }
 
 BrowserImpl::~BrowserImpl() {

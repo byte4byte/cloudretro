@@ -4,7 +4,10 @@
 
 #include "components/viz/common/resources/resource_format_utils.h"
 
-#include "base/logging.h"
+#include <ostream>
+
+#include "base/check_op.h"
+#include "base/notreached.h"
 #include "base/stl_util.h"
 #include "third_party/khronos/GLES2/gl2.h"
 #include "third_party/khronos/GLES2/gl2ext.h"
@@ -39,10 +42,11 @@ SkColorType ResourceFormatToClosestSkColorType(bool gpu_compositing,
     case RGBX_8888:
     case ETC1:
       return kRGB_888x_SkColorType;
+    case P010:
     case RGBA_1010102:
-      return kBGRA_1010102_SkColorType;
-    case BGRA_1010102:
       return kRGBA_1010102_SkColorType;
+    case BGRA_1010102:
+      return kBGRA_1010102_SkColorType;
 
     // YUV images are sampled as RGB.
     case YVU_420:
@@ -55,10 +59,10 @@ SkColorType ResourceFormatToClosestSkColorType(bool gpu_compositing,
     case LUMINANCE_F16:
     case R16_EXT:
     case BGR_565:
-    case RG_88:
-    case BGRX_8888:
-    case P010:
       return kN32_SkColorType;
+    case RG_88:
+      return kR8G8_unorm_SkColorType;
+    case BGRX_8888:
 
     case RGBA_F16:
       return kRGBA_F16_SkColorType;
@@ -318,14 +322,15 @@ unsigned int TextureStorageFormat(ResourceFormat format) {
     case RGBX_8888:
     case ETC1:
       return GL_RGB8_OES;
+    case P010:
     case RGBA_1010102:
     case BGRA_1010102:
       return GL_RGB10_A2_EXT;
-    case BGR_565:
-    case BGRX_8888:
     case YVU_420:
     case YUV_420_BIPLANAR:
-    case P010:
+      return GL_RGB8_OES;
+    case BGR_565:
+    case BGRX_8888:
       break;
   }
   NOTREACHED();

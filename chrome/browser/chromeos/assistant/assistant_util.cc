@@ -22,7 +22,7 @@
 
 namespace {
 
-using ash::mojom::AssistantAllowedState;
+using chromeos::assistant::AssistantAllowedState;
 
 bool g_override_is_google_device = false;
 
@@ -55,9 +55,6 @@ AssistantAllowedState GetErrorForUserType(const Profile* profile) {
     case user_manager::USER_TYPE_PUBLIC_ACCOUNT:
       return AssistantAllowedState::DISALLOWED_BY_PUBLIC_SESSION;
 
-    case user_manager::USER_TYPE_SUPERVISED:
-      return AssistantAllowedState::DISALLOWED_BY_SUPERVISED_USER;
-
     case user_manager::USER_TYPE_KIOSK_APP:
     case user_manager::USER_TYPE_ARC_KIOSK_APP:
     case user_manager::USER_TYPE_WEB_KIOSK_APP:
@@ -75,6 +72,7 @@ AssistantAllowedState GetErrorForUserType(const Profile* profile) {
       NOTREACHED();
       return AssistantAllowedState::DISALLOWED_BY_ACCOUNT_TYPE;
 
+    case user_manager::USER_TYPE_SUPERVISED:
     case user_manager::NUM_USER_TYPES:
       NOTREACHED();
       return AssistantAllowedState::DISALLOWED_BY_ACCOUNT_TYPE;
@@ -134,8 +132,7 @@ bool HasDedicatedAssistantKey() {
 
 namespace assistant {
 
-ash::mojom::AssistantAllowedState IsAssistantAllowedForProfile(
-    const Profile* profile) {
+AssistantAllowedState IsAssistantAllowedForProfile(const Profile* profile) {
   // Primary account might be missing during unittests.
   if (!HasPrimaryAccount(profile))
     return AssistantAllowedState::DISALLOWED_BY_NONPRIMARY_USER;

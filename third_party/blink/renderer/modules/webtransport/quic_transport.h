@@ -8,7 +8,7 @@
 #include <stdint.h>
 
 #include "base/containers/span.h"
-#include "base/util/type_safety/pass_key.h"
+#include "base/types/pass_key.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/system/data_pipe.h"
@@ -27,15 +27,16 @@
 namespace blink {
 
 class ExceptionState;
+class QuicTransportOptions;
 class ReadableStream;
 class ReadableStreamDefaultControllerWithScriptScope;
+class ScriptPromise;
+class ScriptPromiseResolver;
 class ScriptPromiseResolver;
 class ScriptState;
 class WebTransportCloseInfo;
-class WritableStream;
-class ScriptPromise;
-class ScriptPromiseResolver;
 class WebTransportStream;
+class WritableStream;
 
 // https://wicg.github.io/web-transport/#quic-transport
 class MODULES_EXPORT QuicTransport final
@@ -46,12 +47,12 @@ class MODULES_EXPORT QuicTransport final
       public network::mojom::blink::QuicTransportClient {
   DEFINE_WRAPPERTYPEINFO();
   USING_PRE_FINALIZER(QuicTransport, Dispose);
-  USING_GARBAGE_COLLECTED_MIXIN(QuicTransport);
 
  public:
-  using PassKey = util::PassKey<QuicTransport>;
-  static QuicTransport* Create(ScriptState* script_state,
+  using PassKey = base::PassKey<QuicTransport>;
+  static QuicTransport* Create(ScriptState*,
                                const String& url,
+                               QuicTransportOptions*,
                                ExceptionState&);
 
   QuicTransport(PassKey, ScriptState*, const String& url);
@@ -59,10 +60,13 @@ class MODULES_EXPORT QuicTransport final
 
   // QuicTransport IDL implementation.
   ScriptPromise createSendStream(ScriptState*, ExceptionState&);
-  ReadableStream* receiveStreams() { return received_streams_; }
+  ReadableStream* receiveStreams();
 
-  WritableStream* sendDatagrams() { return outgoing_datagrams_; }
-  ReadableStream* receiveDatagrams() { return received_datagrams_; }
+  ScriptPromise createBidirectionalStream(ScriptState*, ExceptionState&);
+  ReadableStream* receiveBidirectionalStreams();
+
+  WritableStream* sendDatagrams();
+  ReadableStream* receiveDatagrams();
   void close(const WebTransportCloseInfo*);
   ScriptPromise ready() { return ready_; }
   ScriptPromise closed() { return closed_; }
@@ -72,7 +76,7 @@ class MODULES_EXPORT QuicTransport final
       mojo::PendingRemote<network::mojom::blink::QuicTransport>,
       mojo::PendingReceiver<network::mojom::blink::QuicTransportClient>)
       override;
-  void OnHandshakeFailed() override;
+  void OnHandshakeFailed(network::mojom::blink::QuicTransportErrorPtr) override;
 
   // QuicTransportClient implementation
   void OnDatagramReceived(base::span<const uint8_t> data) override;
@@ -87,30 +91,41 @@ class MODULES_EXPORT QuicTransport final
   // Forwards a SendFin() message to the mojo interface.
   void SendFin(uint32_t stream_id);
 
+  // Forwards a AbortStream() message to the mojo interface.
+  void AbortStream(uint32_t stream_id);
+
   // Removes the reference to a stream.
   void ForgetStream(uint32_t stream_id);
 
   // ScriptWrappable implementation
-  void Trace(Visitor* visitor) override;
+  void Trace(Visitor* visitor) const override;
 
  private:
   class DatagramUnderlyingSink;
   class DatagramUnderlyingSource;
-  class ReceivedStreamsUnderlyingSource;
+  class StreamVendingUnderlyingSource;
+  class ReceiveStreamVendor;
+  class BidirectionalStreamVendor;
 
   QuicTransport(ScriptState*, const String& url, ExecutionContext* context);
 
-  void Init(const String& url, ExceptionState&);
+  void Init(const String& url, const QuicTransportOptions&, ExceptionState&);
 
   // Reset the QuicTransport object and all associated streams.
   void ResetAll();
+
   void Dispose();
   void OnConnectionError();
   void RejectPendingStreamResolvers();
-  void OnCreateStreamResponse(ScriptPromiseResolver*,
-                              mojo::ScopedDataPipeProducerHandle producer,
-                              bool succeeded,
-                              uint32_t stream_id);
+  void OnCreateSendStreamResponse(ScriptPromiseResolver*,
+                                  mojo::ScopedDataPipeProducerHandle,
+                                  bool succeeded,
+                                  uint32_t stream_id);
+  void OnCreateBidirectionalStreamResponse(ScriptPromiseResolver*,
+                                           mojo::ScopedDataPipeProducerHandle,
+                                           mojo::ScopedDataPipeConsumerHandle,
+                                           bool succeeded,
+                                           uint32_t stream_id);
 
   bool cleanly_closed_ = false;
   Member<ReadableStream> received_datagrams_;
@@ -145,14 +160,18 @@ class MODULES_EXPORT QuicTransport final
   Member<ScriptPromiseResolver> closed_resolver_;
   ScriptPromise closed_;
 
-  // Tracks resolvers for in-progress createSendStream() operations so they can
-  // be rejected
-  HeapHashSet<Member<ScriptPromiseResolver>> create_send_stream_resolvers_;
+  // Tracks resolvers for in-progress createSendStream() and
+  // createBidirectionalStream() operations so they can be rejected.
+  HeapHashSet<Member<ScriptPromiseResolver>> create_stream_resolvers_;
 
   // The [[ReceivedStreams]] slot.
   // https://wicg.github.io/web-transport/#dom-quictransport-receivedstreams-slot
   Member<ReadableStream> received_streams_;
-  Member<ReceivedStreamsUnderlyingSource> received_streams_underlying_source_;
+  Member<StreamVendingUnderlyingSource> received_streams_underlying_source_;
+
+  Member<ReadableStream> received_bidirectional_streams_;
+  Member<StreamVendingUnderlyingSource>
+      received_bidirectional_streams_underlying_source_;
 };
 
 }  // namespace blink

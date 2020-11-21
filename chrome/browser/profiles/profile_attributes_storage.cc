@@ -19,7 +19,7 @@
 #include "base/task/thread_pool.h"
 #include "base/task_runner_util.h"
 #include "base/threading/scoped_blocking_call.h"
-#include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/profiles/profile_avatar_downloader.h"
 #include "chrome/browser/profiles/profile_avatar_icon_util.h"
 #include "chrome/browser/profiles/profile_metrics.h"
@@ -31,6 +31,10 @@
 #include "third_party/icu/source/i18n/unicode/coll.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/image/image.h"
+
+#if !defined(OS_ANDROID)
+#include "chrome/browser/ui/browser_list.h"
+#endif
 
 namespace {
 
@@ -114,11 +118,12 @@ bool SaveBitmap(std::unique_ptr<ImageData> data,
 }
 
 void RunCallbackIfFileMissing(const base::FilePath& file_path,
-                              const base::Closure& callback) {
+                              base::OnceClosure callback) {
   base::ScopedBlockingCall scoped_blocking_call(FROM_HERE,
                                                 base::BlockingType::MAY_BLOCK);
   if (!base::PathExists(file_path))
-    base::PostTask(FROM_HERE, {content::BrowserThread::UI}, callback);
+    content::GetUIThreadTaskRunner({})->PostTask(FROM_HERE,
+                                                 std::move(callback));
 }
 
 // Compares two ProfileAttributesEntry using locale-sensitive comparison of
@@ -149,13 +154,13 @@ bool ProfileAttributesSortComparator::operator()(
 
 MultiProfileUserType GetMultiProfileUserType(
     const std::vector<ProfileAttributesEntry*>& entries) {
-  DCHECK(entries.size() > 0);
+  DCHECK_GT(entries.size(), 0u);
   if (entries.size() == 1u)
     return MultiProfileUserType::kSingleProfile;
 
   int active_count = std::count_if(
       entries.begin(), entries.end(), [](ProfileAttributesEntry* entry) {
-        return ProfileMetrics::IsProfileActive(entry);
+        return ProfileMetrics::IsProfileActive(entry) && !entry->IsGuest();
       });
 
   if (active_count <= 1)
@@ -216,6 +221,10 @@ void RecordProfileState(ProfileAttributesEntry* entry,
   profile_metrics::LogProfileName(GetNameState(entry), suffix);
   profile_metrics::LogProfileAccountType(
       GetUnconsentedPrimaryAccountType(entry), suffix);
+  profile_metrics::LogProfileSyncEnabled(
+      entry->GetSigninState() ==
+          SigninState::kSignedInWithConsentedPrimaryAccount,
+      suffix);
   profile_metrics::LogProfileDaysSinceLastUse(
       (base::Time::Now() - entry->GetActiveTime()).InDays(), suffix);
 }
@@ -268,7 +277,7 @@ base::string16 ProfileAttributesStorage::ChooseNameForNewProfile(
     size_t icon_index) const {
   base::string16 name;
   for (int name_index = 1; ; ++name_index) {
-#if !defined(OS_CHROMEOS) && !defined(OS_ANDROID)
+#if !BUILDFLAG(IS_CHROMEOS_ASH) && !defined(OS_ANDROID)
     // Using native digits will break IsDefaultProfileName() below because
     // it uses sscanf.
     // TODO(jshin): fix IsDefaultProfileName to handle native digits.
@@ -317,7 +326,7 @@ bool ProfileAttributesStorage::IsDefaultProfileName(
   if (assignments == 1)
     return true;
 
-#if !defined(OS_CHROMEOS) && !defined(OS_ANDROID)
+#if !BUILDFLAG(IS_CHROMEOS_ASH) && !defined(OS_ANDROID)
   if (!include_check_for_legacy_profile_name)
     return false;
 #endif
@@ -383,6 +392,20 @@ void ProfileAttributesStorage::RemoveObserver(Observer* obs) {
   observer_list_.RemoveObserver(obs);
 }
 
+#if !defined(OS_ANDROID)
+void ProfileAttributesStorage::RecordDeletedProfileState(
+    ProfileAttributesEntry* entry) {
+  DCHECK(entry);
+  RecordProfileState(entry, profile_metrics::StateSuffix::kUponDeletion);
+  bool is_last_profile = GetNumberOfProfiles() <= 1u;
+  // If the profile has windows opened, they are still open at this moment.
+  // Thus, this really means that only the profile manager is open.
+  bool no_browser_windows = BrowserList::GetInstance()->empty();
+  profile_metrics::LogProfileDeletionContext(is_last_profile,
+                                             no_browser_windows);
+}
+#endif
+
 void ProfileAttributesStorage::RecordProfilesState() {
   std::vector<ProfileAttributesEntry*> entries = GetAllProfilesAttributes();
   if (entries.size() == 0)
@@ -391,6 +414,8 @@ void ProfileAttributesStorage::RecordProfilesState() {
   MultiProfileUserType type = GetMultiProfileUserType(entries);
 
   for (ProfileAttributesEntry* entry : entries) {
+    if (entry->IsGuest())
+      continue;
     RecordProfileState(entry, profile_metrics::StateSuffix::kAll);
 
     switch (type) {
@@ -445,12 +470,12 @@ void ProfileAttributesStorage::DownloadHighResAvatarIfNeeded(
 
   const base::FilePath& file_path =
       profiles::GetPathOfHighResAvatarAtIndex(icon_index);
-  base::Closure callback =
-      base::Bind(&ProfileAttributesStorage::DownloadHighResAvatar, AsWeakPtr(),
-                 icon_index, profile_path);
+  base::OnceClosure callback =
+      base::BindOnce(&ProfileAttributesStorage::DownloadHighResAvatar,
+                     AsWeakPtr(), icon_index, profile_path);
   file_task_runner_->PostTask(
-      FROM_HERE,
-      base::BindOnce(&RunCallbackIfFileMissing, file_path, callback));
+      FROM_HERE, base::BindOnce(&RunCallbackIfFileMissing, file_path,
+                                std::move(callback)));
 }
 
 void ProfileAttributesStorage::DownloadHighResAvatar(
@@ -496,8 +521,8 @@ void ProfileAttributesStorage::SaveAvatarImageAtPath(
   if (downloader_iter != avatar_images_downloads_in_progress_.end()) {
     // We mustn't delete the avatar downloader right here, since we're being
     // called by it.
-    base::DeleteSoon(FROM_HERE, {content::BrowserThread::UI},
-                     downloader_iter->second.release());
+    content::GetUIThreadTaskRunner({})->DeleteSoon(
+        FROM_HERE, downloader_iter->second.release());
     avatar_images_downloads_in_progress_.erase(downloader_iter);
   }
 

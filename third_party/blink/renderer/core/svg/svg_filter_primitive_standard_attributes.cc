@@ -23,6 +23,8 @@
 
 #include "third_party/blink/renderer/core/layout/svg/layout_svg_filter_primitive.h"
 #include "third_party/blink/renderer/core/svg/graphics/filters/svg_filter_builder.h"
+#include "third_party/blink/renderer/core/svg/svg_animated_length.h"
+#include "third_party/blink/renderer/core/svg/svg_animated_string.h"
 #include "third_party/blink/renderer/core/svg/svg_filter_element.h"
 #include "third_party/blink/renderer/core/svg/svg_length.h"
 #include "third_party/blink/renderer/core/svg_names.h"
@@ -69,7 +71,7 @@ SVGFilterPrimitiveStandardAttributes::SVGFilterPrimitiveStandardAttributes(
   AddToPropertyMap(result_);
 }
 
-void SVGFilterPrimitiveStandardAttributes::Trace(Visitor* visitor) {
+void SVGFilterPrimitiveStandardAttributes::Trace(Visitor* visitor) const {
   visitor->Trace(x_);
   visitor->Trace(y_);
   visitor->Trace(width_);
@@ -94,7 +96,8 @@ bool SVGFilterPrimitiveStandardAttributes::SetFilterEffectAttribute(
 }
 
 void SVGFilterPrimitiveStandardAttributes::SvgAttributeChanged(
-    const QualifiedName& attr_name) {
+    const SvgAttributeChangedParams& params) {
+  const QualifiedName& attr_name = params.name;
   if (attr_name == svg_names::kXAttr || attr_name == svg_names::kYAttr ||
       attr_name == svg_names::kWidthAttr ||
       attr_name == svg_names::kHeightAttr ||
@@ -104,7 +107,7 @@ void SVGFilterPrimitiveStandardAttributes::SvgAttributeChanged(
     return;
   }
 
-  SVGElement::SvgAttributeChanged(attr_name);
+  SVGElement::SvgAttributeChanged(params);
 }
 
 void SVGFilterPrimitiveStandardAttributes::ChildrenChanged(

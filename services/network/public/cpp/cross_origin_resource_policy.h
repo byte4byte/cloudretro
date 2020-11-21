@@ -45,10 +45,10 @@ class COMPONENT_EXPORT(NETWORK_CPP) CrossOriginResourcePolicy {
       const base::Optional<url::Origin>& request_initiator,
       const network::mojom::URLResponseHead& response,
       mojom::RequestMode request_mode,
-      base::Optional<url::Origin> request_initiator_site_lock,
+      base::Optional<url::Origin> request_initiator_origin_lock,
+      mojom::RequestDestination request_destination,
       const CrossOriginEmbedderPolicy& embedder_policy,
-      mojom::CrossOriginEmbedderPolicyReporter* reporter = nullptr)
-      WARN_UNUSED_RESULT;
+      mojom::CrossOriginEmbedderPolicyReporter* reporter) WARN_UNUSED_RESULT;
 
   // Same as IsBlocked(), but this method can take a raw value of
   // Cross-Origin-Resource-Policy header instead of using a URLResponseHead.
@@ -58,10 +58,10 @@ class COMPONENT_EXPORT(NETWORK_CPP) CrossOriginResourcePolicy {
       const base::Optional<url::Origin>& request_initiator,
       base::Optional<std::string> corp_header_value,
       mojom::RequestMode request_mode,
-      base::Optional<url::Origin> request_initiator_site_lock,
+      base::Optional<url::Origin> request_initiator_origin_lock,
+      mojom::RequestDestination request_destination,
       const CrossOriginEmbedderPolicy& embedder_policy,
-      mojom::CrossOriginEmbedderPolicyReporter* reporter = nullptr)
-      WARN_UNUSED_RESULT;
+      mojom::CrossOriginEmbedderPolicyReporter* reporter) WARN_UNUSED_RESULT;
 
   // The CORP check for navigation requests. This is expected to be called
   // from the navigation algorithm.
@@ -70,9 +70,10 @@ class COMPONENT_EXPORT(NETWORK_CPP) CrossOriginResourcePolicy {
       const GURL& original_url,
       const base::Optional<url::Origin>& request_initiator,
       const network::mojom::URLResponseHead& response,
-      base::Optional<url::Origin> request_initiator_site_lock,
+      base::Optional<url::Origin> request_initiator_origin_lock,
+      mojom::RequestDestination request_destination,
       const CrossOriginEmbedderPolicy& embedder_policy,
-      mojom::CrossOriginEmbedderPolicyReporter* reporter = nullptr);
+      mojom::CrossOriginEmbedderPolicyReporter* reporter);
 
   // Parsing of the Cross-Origin-Resource-Policy http response header.
   enum ParsedHeader {

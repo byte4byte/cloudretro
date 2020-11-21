@@ -12,6 +12,7 @@
 #include "base/optional.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/web_applications/components/app_registrar.h"
+#include "chrome/browser/web_applications/components/os_integration_manager.h"
 #include "chrome/browser/web_applications/components/web_app_constants.h"
 #include "chrome/browser/web_applications/components/web_app_ui_manager.h"
 
@@ -41,18 +42,15 @@ void InstallFinalizer::UninstallExternalWebAppByUrl(
                           std::move(callback));
 }
 
-void InstallFinalizer::SetSubsystems(AppRegistrar* registrar,
-                                     WebAppUiManager* ui_manager) {
+void InstallFinalizer::SetSubsystems(
+    AppRegistrar* registrar,
+    WebAppUiManager* ui_manager,
+    AppRegistryController* registry_controller,
+    OsIntegrationManager* os_integration_manager) {
   registrar_ = registrar;
   ui_manager_ = ui_manager;
-}
-
-bool InstallFinalizer::CanAddAppToQuickLaunchBar() const {
-  return ui_manager().CanAddAppToQuickLaunchBar();
-}
-
-void InstallFinalizer::AddAppToQuickLaunchBar(const AppId& app_id) {
-  ui_manager().AddAppToQuickLaunchBar(app_id);
+  registry_controller_ = registry_controller;
+  os_integration_manager_ = os_integration_manager;
 }
 
 bool InstallFinalizer::CanReparentTab(const AppId& app_id,
@@ -72,6 +70,15 @@ void InstallFinalizer::ReparentTab(const AppId& app_id,
   DCHECK(web_contents);
   return ui_manager().ReparentAppTabToWindow(web_contents, app_id,
                                              shortcut_created);
+}
+
+InstallFinalizer* InstallFinalizer::legacy_finalizer_for_testing() {
+  return nullptr;
+}
+
+AppRegistrar& InstallFinalizer::registrar() const {
+  DCHECK(!is_legacy_finalizer());
+  return *registrar_;
 }
 
 }  // namespace web_app

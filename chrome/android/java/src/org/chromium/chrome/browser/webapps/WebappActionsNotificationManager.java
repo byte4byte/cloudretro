@@ -18,20 +18,21 @@ import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.IntentHandler;
 import org.chromium.chrome.browser.browserservices.BrowserServicesIntentDataProvider;
+import org.chromium.chrome.browser.customtabs.BaseCustomTabActivity;
 import org.chromium.chrome.browser.customtabs.content.CustomTabActivityTabProvider;
 import org.chromium.chrome.browser.dependency_injection.ActivityScope;
 import org.chromium.chrome.browser.lifecycle.ActivityLifecycleDispatcher;
 import org.chromium.chrome.browser.lifecycle.PauseResumeWithNativeObserver;
-import org.chromium.chrome.browser.notifications.NotificationBuilderFactory;
 import org.chromium.chrome.browser.notifications.NotificationConstants;
 import org.chromium.chrome.browser.notifications.NotificationUmaTracker;
-import org.chromium.chrome.browser.notifications.PendingIntentProvider;
+import org.chromium.chrome.browser.notifications.NotificationWrapperBuilderFactory;
 import org.chromium.chrome.browser.notifications.channels.ChromeChannelDefinitions;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.components.browser_ui.notifications.ChromeNotification;
 import org.chromium.components.browser_ui.notifications.NotificationManagerProxy;
 import org.chromium.components.browser_ui.notifications.NotificationManagerProxyImpl;
 import org.chromium.components.browser_ui.notifications.NotificationMetadata;
+import org.chromium.components.browser_ui.notifications.NotificationWrapper;
+import org.chromium.components.browser_ui.notifications.PendingIntentProvider;
 import org.chromium.ui.base.Clipboard;
 
 import java.lang.ref.WeakReference;
@@ -87,7 +88,7 @@ class WebappActionsNotificationManager implements PauseResumeWithNativeObserver 
         }
 
         Context appContext = ContextUtils.getApplicationContext();
-        ChromeNotification notification = createNotification(appContext, tab, webappExtras);
+        NotificationWrapper notification = createNotification(appContext, tab, webappExtras);
         NotificationManagerProxy nm = new NotificationManagerProxyImpl(appContext);
         nm.notify(notification);
 
@@ -96,7 +97,7 @@ class WebappActionsNotificationManager implements PauseResumeWithNativeObserver 
                 notification.getNotification());
     }
 
-    private static ChromeNotification createNotification(
+    private static NotificationWrapper createNotification(
             Context appContext, Tab tab, @NonNull WebappExtras webappExtras) {
         // The pending intents target an activity (instead of a service or a broadcast receiver) so
         // that the notification tray closes when a user taps the one of the notification action
@@ -111,8 +112,8 @@ class WebappActionsNotificationManager implements PauseResumeWithNativeObserver 
         NotificationMetadata metadata = new NotificationMetadata(
                 NotificationUmaTracker.SystemNotificationType.WEBAPP_ACTIONS,
                 null /* notificationTag */, NotificationConstants.NOTIFICATION_ID_WEBAPP_ACTIONS);
-        return NotificationBuilderFactory
-                .createChromeNotificationBuilder(true /* prefer compat */,
+        return NotificationWrapperBuilderFactory
+                .createNotificationWrapperBuilder(true /* prefer compat */,
                         ChromeChannelDefinitions.ChannelId.WEBAPP_ACTIONS,
                         null /* remoteAppPackageName */, metadata)
                 .setSmallIcon(R.drawable.ic_chrome)
@@ -130,7 +131,7 @@ class WebappActionsNotificationManager implements PauseResumeWithNativeObserver 
                         appContext.getResources().getString(R.string.menu_open_in_chrome),
                         openInChromeIntent,
                         NotificationUmaTracker.ActionType.WEB_APP_ACTION_OPEN_IN_CHROME)
-                .buildChromeNotification();
+                .buildNotificationWrapper();
     }
 
     /** Creates an intent which targets {@link WebappLauncherActivity} with the passed-in action. */
@@ -156,25 +157,25 @@ class WebappActionsNotificationManager implements PauseResumeWithNativeObserver 
 
         int tabId =
                 IntentUtils.safeGetIntExtra(intent, IntentHandler.EXTRA_TAB_ID, Tab.INVALID_TAB_ID);
-        WeakReference<WebappActivity> webappActivityRef =
-                WebappActivity.findWebappActivityWithTabId(tabId);
-        if (webappActivityRef == null) return false;
+        WeakReference<BaseCustomTabActivity> customTabActivityRef =
+                WebappLocator.findWebappActivityWithTabId(tabId);
+        if (customTabActivityRef == null) return false;
 
-        WebappActivity webappActivity = webappActivityRef.get();
-        if (webappActivity == null) return false;
+        BaseCustomTabActivity customTabActivity = customTabActivityRef.get();
+        if (customTabActivity == null) return false;
 
         if (ACTION_SHARE.equals(intent.getAction())) {
             // Not routing through onMenuOrKeyboardAction to control UMA String.
-            Tab tab = webappActivity.getActivityTab();
+            Tab tab = customTabActivity.getActivityTab();
             boolean isIncognito = tab.isIncognito();
-            webappActivity.getShareDelegateSupplier().get().share(tab, false);
+            customTabActivity.getShareDelegateSupplier().get().share(tab, false);
             RecordUserAction.record("Webapp.NotificationShare");
             return true;
         } else if (ACTION_OPEN_IN_CHROME.equals(intent.getAction())) {
-            webappActivity.onMenuOrKeyboardAction(R.id.open_in_browser_id, false /* fromMenu */);
+            customTabActivity.onMenuOrKeyboardAction(R.id.open_in_browser_id, false /* fromMenu */);
             return true;
         } else if (ACTION_FOCUS.equals(intent.getAction())) {
-            Tab tab = webappActivity.getActivityTab();
+            Tab tab = customTabActivity.getActivityTab();
             if (tab != null) {
                 Clipboard.getInstance().copyUrlToClipboard(tab.getOriginalUrl());
             }

@@ -4,6 +4,10 @@
 
 package org.chromium.chrome.browser.tab;
 
+import androidx.annotation.Nullable;
+
+import org.chromium.base.Callback;
+import org.chromium.chrome.browser.tab.state.CriticalPersistedTabData;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.ui.base.WindowAndroid;
@@ -26,6 +30,8 @@ public class TabBuilder {
     private TabDelegateFactory mDelegateFactory;
     private boolean mInitiallyHidden;
     private TabState mTabState;
+    private byte[] mSerializedCriticalPersistedTabData;
+    private Callback<Tab> mPreInitializeAction;
 
     /**
      * Sets the id with which the Tab to create should be identified.
@@ -99,6 +105,16 @@ public class TabBuilder {
     }
 
     /**
+     * Sets a pre-initialization action to run.
+     * @param action {@link Callback} object to invoke before {@link #initialize()}.
+     * @return {@link TabBuilder} creating the Tab.
+     */
+    public TabBuilder setPreInitializeAction(Callback<Tab> action) {
+        mPreInitializeAction = action;
+        return this;
+    }
+
+    /**
      * Sets a flag indicating whether the Tab should start as hidden. Only used if
      * {@code webContents} is {@code null}.
      * @param initiallyHidden {@code true} if the newly created {@link WebContents} will be hidden.
@@ -116,6 +132,18 @@ public class TabBuilder {
      */
     public TabBuilder setTabState(TabState tabState) {
         mTabState = tabState;
+        return this;
+    }
+
+    /**
+     * Sets a serialized {@link CriticalPersistedTabData} object containing information about the
+     * tab, if it was persisted
+     * @param serializedCriticalPersistedTabData serialized {@link CriticalPersistedTabData}
+     * @return {@link TabBuilder} creating the Tab
+     */
+    public TabBuilder setSerializedCriticalPersistedTabData(
+            @Nullable byte[] serializedCriticalPersistedTabData) {
+        mSerializedCriticalPersistedTabData = serializedCriticalPersistedTabData;
         return this;
     }
 
@@ -139,10 +167,21 @@ public class TabBuilder {
             mDelegateFactory = ((TabImpl) mParent).getDelegateFactory();
         }
 
+        if (mPreInitializeAction != null) mPreInitializeAction.onResult(tab);
+
         // Initializes Tab. Its user data objects are also initialized through the event
         // |onInitialized| of TabObserver they register.
         tab.initialize(mParent, mCreationType, mLoadUrlParams, mWebContents, mDelegateFactory,
-                mInitiallyHidden, mTabState);
+                mInitiallyHidden, mTabState, mSerializedCriticalPersistedTabData);
+        if (mParent != null) {
+            if (mParent.getAddApi2TransitionToFutureNavigations()) {
+                tab.setAddApi2TransitionToFutureNavigations(true);
+            }
+            if (mParent.getHideFutureNavigations()) {
+                tab.setHideFutureNavigations(true);
+            }
+        }
+
         return tab;
     }
 

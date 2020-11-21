@@ -7,13 +7,14 @@
 #include <memory>
 #include <string>
 
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "build/build_config.h"
 #include "chrome/browser/extensions/test_extension_environment.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/test/test_browser_dialog.h"
 #include "chrome/test/base/testing_profile.h"
+#include "content/public/test/browser_test.h"
 
 class AppInfoDialogBrowserTest : public DialogBrowserTest {
  public:

@@ -22,11 +22,15 @@ AutoSigninFirstRunDialogView::AutoSigninFirstRunDialogView(
     CredentialManagerDialogController* controller,
     content::WebContents* web_contents)
     : controller_(controller), web_contents_(web_contents) {
-  DialogDelegate::SetButtonLabel(
-      ui::DIALOG_BUTTON_OK,
-      l10n_util::GetStringUTF16(IDS_AUTO_SIGNIN_FIRST_RUN_OK));
-  DialogDelegate::SetButtonLabel(ui::DIALOG_BUTTON_CANCEL,
-                                   l10n_util::GetStringUTF16(IDS_TURN_OFF));
+  SetButtonLabel(ui::DIALOG_BUTTON_OK,
+                 l10n_util::GetStringUTF16(IDS_AUTO_SIGNIN_FIRST_RUN_OK));
+  SetButtonLabel(ui::DIALOG_BUTTON_CANCEL,
+                 l10n_util::GetStringUTF16(IDS_TURN_OFF));
+
+  SetModalType(ui::MODAL_TYPE_CHILD);
+  SetShowCloseButton(false);
+  set_fixed_width(views::LayoutProvider::Get()->GetDistanceMetric(
+      views::DISTANCE_MODAL_DIALOG_PREFERRED_WIDTH));
 
   using ControllerCallbackFn = void (CredentialManagerDialogController::*)();
   auto call_controller = [](AutoSigninFirstRunDialogView* dialog,
@@ -35,10 +39,10 @@ AutoSigninFirstRunDialogView::AutoSigninFirstRunDialogView(
       (dialog->controller_->*func)();
     }
   };
-  DialogDelegate::SetAcceptCallback(
+  SetAcceptCallback(
       base::BindOnce(call_controller, base::Unretained(this),
                      &CredentialManagerDialogController::OnAutoSigninOK));
-  DialogDelegate::SetCancelCallback(
+  SetCancelCallback(
       base::BindOnce(call_controller, base::Unretained(this),
                      &CredentialManagerDialogController::OnAutoSigninTurnOff));
 
@@ -60,23 +64,8 @@ void AutoSigninFirstRunDialogView::ControllerGone() {
   controller_ = nullptr;
 }
 
-ui::ModalType AutoSigninFirstRunDialogView::GetModalType() const {
-  return ui::MODAL_TYPE_CHILD;
-}
-
 base::string16 AutoSigninFirstRunDialogView::GetWindowTitle() const {
   return controller_->GetAutoSigninPromoTitle();
-}
-
-bool AutoSigninFirstRunDialogView::ShouldShowCloseButton() const {
-  return false;
-}
-
-gfx::Size AutoSigninFirstRunDialogView::CalculatePreferredSize() const {
-  const int width = ChromeLayoutProvider::Get()->GetDistanceMetric(
-                        DISTANCE_MODAL_DIALOG_PREFERRED_WIDTH) -
-                    margins().width();
-  return gfx::Size(width, GetHeightForWidth(width));
 }
 
 void AutoSigninFirstRunDialogView::WindowClosing() {
@@ -89,9 +78,9 @@ void AutoSigninFirstRunDialogView::InitWindow() {
       views::TEXT, views::TEXT));
   SetLayoutManager(std::make_unique<views::FillLayout>());
 
-  auto label = std::make_unique<views::Label>(controller_->GetAutoSigninText(),
-                                              CONTEXT_BODY_TEXT_LARGE,
-                                              views::style::STYLE_SECONDARY);
+  auto label = std::make_unique<views::Label>(
+      controller_->GetAutoSigninText(), views::style::CONTEXT_DIALOG_BODY_TEXT,
+      views::style::STYLE_SECONDARY);
   label->SetMultiLine(true);
   label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   AddChildView(label.release());

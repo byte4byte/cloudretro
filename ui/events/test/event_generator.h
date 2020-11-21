@@ -38,12 +38,25 @@ class EventGeneratorDelegate {
 
   // This factory function is used by EventGenerator to create a delegate if an
   // EventGeneratorDelegate was not supplied to the constructor.
+  //
+  // Note: Implementations for Windows/Linux, ChromeOS and Mac differ in the way
+  // they handle the |root_window| and |target_window|. On Windows/Linux all
+  // events are dispatched through the provided |root_window| and the
+  // |target_window| is ignored. On ChromeOS both the |root_window| and
+  // |target_window| are ignored and all events are dispatched through the root
+  // window deduced using the event's screen coordinates. On Mac the concept of
+  // a |root_window| doesn't exist and events will only be dispatched to the
+  // specified |target_window|.
   using FactoryFunction =
       base::RepeatingCallback<std::unique_ptr<EventGeneratorDelegate>(
           EventGenerator* owner,
           gfx::NativeWindow root_window,
-          gfx::NativeWindow window)>;
+          gfx::NativeWindow target_window)>;
   static void SetFactoryFunction(FactoryFunction factory);
+
+  // Sets the |root_window| on Windows/Linux, ignored on ChromeOS, sets the
+  // |target_window| on Mac.
+  virtual void SetTargetWindow(gfx::NativeWindow target_window) = 0;
 
   // The ui::EventTarget at the given |location|.
   virtual EventTarget* GetTargetAt(const gfx::Point& location) = 0;
@@ -118,8 +131,9 @@ class EventGenerator {
                  const gfx::Point& initial_location);
 
   // Creates an EventGenerator with the mouse/touch location centered over
-  // |window|.
-  EventGenerator(gfx::NativeWindow root_window, gfx::NativeWindow window);
+  // |target_window|.
+  EventGenerator(gfx::NativeWindow root_window,
+                 gfx::NativeWindow target_window);
 
   virtual ~EventGenerator();
 
@@ -146,6 +160,10 @@ class EventGenerator {
     // based on event type. Most robust.
     WIDGET,
   };
+
+  // Updates the |current_screen_location_| to point to the middle of the target
+  // window and sets the appropriate dispatcher target.
+  void SetTargetWindow(gfx::NativeWindow target_window);
 
   // Selects dispatch method. Currently only supported on Mac.
   void set_target(Target target) { target_ = target; }
@@ -249,7 +267,7 @@ class EventGenerator {
   void MoveMouseToCenterOf(EventTarget* window);
 
   // Enter pen-pointer mode, which will cause any generated mouse events to have
-  // a pointer type ui::EventPointerType::POINTER_TYPE_PEN.
+  // a pointer type ui::EventPointerType::kPen.
   void EnterPenPointerMode();
 
   // Exit pen-pointer mode. Generated mouse events will use the default pointer
@@ -270,11 +288,17 @@ class EventGenerator {
   // Set force of touch PointerDetails.
   void SetTouchForce(float force) { touch_pointer_details_.force = force; }
 
-  // Generates a touch press event.
-  void PressTouch();
+  // Generates a touch press event. If |touch_location_in_screen| is not null,
+  // the touch press event will happen at |touch_location_in_screen|. Otherwise,
+  // it will happen at the current event location |current_screen_location_|.
+  void PressTouch(const base::Optional<gfx::Point>& touch_location_in_screen =
+                      base::nullopt);
 
-  // Generates a touch press event with |touch_id|.
-  void PressTouchId(int touch_id);
+  // Generates a touch press event with |touch_id|. See PressTouch() event for
+  // the description of |touch_location_in_screen| parameter.
+  void PressTouchId(int touch_id,
+                    const base::Optional<gfx::Point>& touch_location_in_screen =
+                        base::nullopt);
 
   // Generates a ET_TOUCH_MOVED event to |point|.
   void MoveTouch(const gfx::Point& point);
@@ -419,13 +443,17 @@ class EventGenerator {
   // event without native_event() is generated. Note that ui::EF_ flags should
   // be passed as |flags|, not the native ones like 'ShiftMask' in <X11/X.h>.
   // TODO(yusukes): Support native_event() on all platforms.
-  void PressKey(KeyboardCode key_code, int flags);
+  void PressKey(KeyboardCode key_code,
+                int flags,
+                int source_device_id = ED_UNKNOWN_DEVICE);
 
   // Generates a key release event. On platforms except Windows and X11, a key
   // event without native_event() is generated. Note that ui::EF_ flags should
   // be passed as |flags|, not the native ones like 'ShiftMask' in <X11/X.h>.
   // TODO(yusukes): Support native_event() on all platforms.
-  void ReleaseKey(KeyboardCode key_code, int flags);
+  void ReleaseKey(KeyboardCode key_code,
+                  int flags,
+                  int source_device_id = ED_UNKNOWN_DEVICE);
 
   // Dispatch the event to the WindowEventDispatcher.
   void Dispatch(Event* event);
@@ -439,10 +467,13 @@ class EventGenerator {
 
  private:
   // Set up the test context using the delegate.
-  void Init(gfx::NativeWindow root_window, gfx::NativeWindow window_context);
+  void Init(gfx::NativeWindow root_window, gfx::NativeWindow target_window);
 
   // Dispatch a key event to the WindowEventDispatcher.
-  void DispatchKeyEvent(bool is_press, KeyboardCode key_code, int flags);
+  void DispatchKeyEvent(bool is_press,
+                        KeyboardCode key_code,
+                        int flags,
+                        int source_device_id);
 
   void UpdateCurrentDispatcher(const gfx::Point& point);
   void PressButton(int flag);

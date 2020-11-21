@@ -58,50 +58,45 @@ GlobalErrorBubbleView::GlobalErrorBubbleView(
     Browser* browser,
     const base::WeakPtr<GlobalErrorWithStandardBubble>& error)
     : BubbleDialogDelegateView(anchor_view, arrow),
-      browser_(browser),
       error_(error) {
   // error_ is a WeakPtr, but it's always non-null during construction.
   DCHECK(error_);
 
-  DialogDelegate::SetDefaultButton(error_->GetDefaultDialogButton());
-  DialogDelegate::SetButtons(
-      !error_->GetBubbleViewCancelButtonLabel().empty()
-          ? (ui::DIALOG_BUTTON_OK | ui::DIALOG_BUTTON_CANCEL)
-          : ui::DIALOG_BUTTON_OK);
-  DialogDelegate::SetButtonLabel(ui::DIALOG_BUTTON_OK,
-                                   error_->GetBubbleViewAcceptButtonLabel());
-  DialogDelegate::SetButtonLabel(ui::DIALOG_BUTTON_CANCEL,
-                                   error_->GetBubbleViewCancelButtonLabel());
+  WidgetDelegate::SetTitle(error_->GetBubbleViewTitle());
+  WidgetDelegate::SetShowCloseButton(error_->ShouldShowCloseButton());
+  WidgetDelegate::RegisterWindowClosingCallback(base::BindOnce(
+      &GlobalErrorWithStandardBubble::BubbleViewDidClose, error_, browser));
+
+  SetDefaultButton(error_->GetDefaultDialogButton());
+  SetButtons(!error_->GetBubbleViewCancelButtonLabel().empty()
+                 ? (ui::DIALOG_BUTTON_OK | ui::DIALOG_BUTTON_CANCEL)
+                 : ui::DIALOG_BUTTON_OK);
+  SetButtonLabel(ui::DIALOG_BUTTON_OK,
+                 error_->GetBubbleViewAcceptButtonLabel());
+  SetButtonLabel(ui::DIALOG_BUTTON_CANCEL,
+                 error_->GetBubbleViewCancelButtonLabel());
 
   // Note that error is already a WeakPtr, so these callbacks will simply do
   // nothing if they are invoked after its destruction.
-  DialogDelegate::SetAcceptCallback(base::BindOnce(
+  SetAcceptCallback(base::BindOnce(
       &GlobalErrorWithStandardBubble::BubbleViewAcceptButtonPressed, error,
-      base::Unretained(browser_)));
-  DialogDelegate::SetCancelCallback(base::BindOnce(
+      base::Unretained(browser)));
+  SetCancelCallback(base::BindOnce(
       &GlobalErrorWithStandardBubble::BubbleViewCancelButtonPressed, error,
-      base::Unretained(browser_)));
+      base::Unretained(browser)));
 
   if (!error_->GetBubbleViewDetailsButtonLabel().empty()) {
-    DialogDelegate::SetExtraView(views::MdTextButton::CreateSecondaryUiButton(
-        this, error_->GetBubbleViewDetailsButtonLabel()));
+    SetExtraView(std::make_unique<views::MdTextButton>(
+        base::BindRepeating(
+            &GlobalErrorWithStandardBubble::BubbleViewDetailsButtonPressed,
+            error_, browser),
+        error_->GetBubbleViewDetailsButtonLabel()));
   }
 
   chrome::RecordDialogCreation(chrome::DialogIdentifier::GLOBAL_ERROR);
 }
 
-GlobalErrorBubbleView::~GlobalErrorBubbleView() {}
-
-base::string16 GlobalErrorBubbleView::GetWindowTitle() const {
-  if (!error_)
-    return base::string16();
-  return error_->GetBubbleViewTitle();
-}
-
-void GlobalErrorBubbleView::WindowClosing() {
-  if (error_)
-    error_->BubbleViewDidClose(browser_);
-}
+GlobalErrorBubbleView::~GlobalErrorBubbleView() = default;
 
 void GlobalErrorBubbleView::Init() {
   const int kMaxBubbleViewWidth = 362;
@@ -123,7 +118,7 @@ void GlobalErrorBubbleView::Init() {
   // First row, message labels.
   views::ColumnSet* cs = layout->AddColumnSet(0);
   cs->AddColumn(views::GridLayout::FILL, views::GridLayout::FILL, 1.0,
-                views::GridLayout::FIXED, kMaxBubbleViewWidth, 0);
+                views::GridLayout::ColumnSize::kFixed, kMaxBubbleViewWidth, 0);
 
   for (size_t i = 0; i < message_labels.size(); ++i) {
     layout->StartRow(1.0, 0);
@@ -140,10 +135,6 @@ void GlobalErrorBubbleView::Init() {
   set_close_on_deactivate(error_->ShouldCloseOnDeactivate());
 }
 
-bool GlobalErrorBubbleView::ShouldShowCloseButton() const {
-  return error_ && error_->ShouldShowCloseButton();
-}
-
 void GlobalErrorBubbleView::OnDialogInitialized() {
   views::LabelButton* ok_button = GetOkButton();
   if (ok_button && error_ && error_->ShouldAddElevationIconToAcceptButton()) {
@@ -155,10 +146,4 @@ void GlobalErrorBubbleView::OnDialogInitialized() {
 
 void GlobalErrorBubbleView::CloseBubbleView() {
   GetWidget()->Close();
-}
-
-void GlobalErrorBubbleView::ButtonPressed(views::Button* sender,
-                                          const ui::Event& event) {
-  if (error_)
-    error_->BubbleViewDetailsButtonPressed(browser_);
 }

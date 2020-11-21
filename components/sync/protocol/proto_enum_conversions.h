@@ -91,6 +91,9 @@ const char* ProtoEnumToString(
     sync_pb::UserEventSpecifics::GaiaPasswordCaptured::EventTrigger trigger);
 
 const char* ProtoEnumToString(
+    sync_pb::UserEventSpecifics::FlocIdComputed::EventTrigger trigger);
+
+const char* ProtoEnumToString(
     sync_pb::WalletMaskedCreditCard::WalletCardStatus wallet_card_status);
 
 const char* ProtoEnumToString(
@@ -103,6 +106,9 @@ const char* ProtoEnumToString(
 
 const char* ProtoEnumToString(
     sync_pb::WebAppSpecifics::UserDisplayMode user_display_mode);
+
+const char* ProtoEnumToString(
+    sync_pb::AutofillProfileSpecifics::VerificationStatus status);
 
 const char* ProtoEnumToString(
     sync_pb::WifiConfigurationSpecifics::SecurityType security_type);

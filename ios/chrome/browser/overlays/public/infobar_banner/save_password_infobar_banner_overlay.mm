@@ -4,7 +4,7 @@
 
 #import "ios/chrome/browser/overlays/public/infobar_banner/save_password_infobar_banner_overlay.h"
 
-#include "base/logging.h"
+#include "base/check.h"
 #include "base/strings/sys_string_conversions.h"
 #include "components/infobars/core/infobar.h"
 #include "ios/chrome/browser/infobars/infobar_ios.h"
@@ -19,7 +19,7 @@ using infobars::InfoBar;
 
 namespace {
 // The name of the icon image for the save passwords banner.
-NSString* const kIconImageName = @"infobar_passwords_icon";
+NSString* const kIconImageName = @"password_key";
 }
 
 OVERLAY_USER_DATA_SETUP_IMPL(SavePasswordInfobarBannerOverlayRequestConfig);
@@ -46,5 +46,5 @@ void SavePasswordInfobarBannerOverlayRequestConfig::CreateAuxiliaryData(
     base::SupportsUserData* user_data) {
   InfobarOverlayRequestConfig::CreateForUserData(
       user_data, static_cast<InfoBarIOS*>(infobar_),
-      InfobarOverlayType::kBanner);
+      InfobarOverlayType::kBanner, false);
 }

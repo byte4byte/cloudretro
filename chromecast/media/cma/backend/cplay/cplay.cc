@@ -22,8 +22,8 @@
 #include "base/no_destructor.h"
 #include "base/numerics/ranges.h"
 #include "base/task/thread_pool/thread_pool_instance.h"
+#include "chromecast/media/audio/wav_header.h"
 #include "chromecast/media/cma/backend/cast_audio_json.h"
-#include "chromecast/media/cma/backend/cplay/wav_header.h"
 #include "chromecast/media/cma/backend/mixer/mixer_input.h"
 #include "chromecast/media/cma/backend/mixer/mixer_pipeline.h"
 #include "chromecast/media/cma/backend/mixer/post_processing_pipeline_impl.h"
@@ -246,7 +246,7 @@ Parameters ReadArgs(int argc, char* argv[]) {
   Parameters params;
   params.cast_audio_json_path = CastAudioJson::GetFilePath();
   int opt;
-  while ((opt = getopt(argc, argv, "i:o:c:v:d:r:")) != -1) {
+  while ((opt = getopt(argc, argv, "i:o:c:v:d:r:s")) != -1) {
     switch (opt) {
       case 'i':
         params.input_file_path = base::FilePath(optarg);

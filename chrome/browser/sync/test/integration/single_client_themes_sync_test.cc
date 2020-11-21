@@ -11,6 +11,7 @@
 #include "chrome/browser/sync/test/integration/updated_progress_marker_checker.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "components/sync/driver/profile_sync_service.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/test_utils.h"
 
 using themes_helper::GetCustomTheme;
@@ -26,11 +27,12 @@ namespace {
 class SingleClientThemesSyncTest : public SyncTest {
  public:
   SingleClientThemesSyncTest() : SyncTest(SINGLE_CLIENT) {}
+  ~SingleClientThemesSyncTest() override = default;
 
-  ~SingleClientThemesSyncTest() override {}
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(SingleClientThemesSyncTest);
+  bool UseVerifier() override {
+    // TODO(crbug.com/1137777): rewrite tests to not use verifier.
+    return true;
+  }
 };
 
 // TODO(akalin): Add tests for model association (i.e., tests that

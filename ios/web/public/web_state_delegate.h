@@ -68,12 +68,12 @@ class WebStateDelegate {
   // |protection_space|, and is unable to respond using cached credentials.
   // Clients must call |callback| even if they want to cancel authentication
   // (in which case |username| or |password| should be nil).
-  typedef base::Callback<void(NSString* username, NSString* password)>
+  typedef base::OnceCallback<void(NSString* username, NSString* password)>
       AuthCallback;
   virtual void OnAuthRequired(WebState* source,
                               NSURLProtectionSpace* protection_space,
                               NSURLCredential* proposed_credential,
-                              const AuthCallback& callback) = 0;
+                              AuthCallback callback) = 0;
 
   // Determines whether the given link with |link_url| should show a preview on
   // force touch.
@@ -89,6 +89,10 @@ class WebStateDelegate {
   virtual void CommitPreviewingViewController(
       WebState* source,
       UIViewController* previewing_view_controller);
+
+  // Returns the UIView used to contain the WebView for sizing purposes. Can be
+  // nil.
+  virtual UIView* GetWebViewContainer(WebState* source);
 
   // Called when iOS13+ context menu is triggered and now it is required to
   // provide a UIContextMenuConfiguration to |completion_handler| to generate

@@ -17,7 +17,6 @@ import androidx.annotation.StyleRes;
 import androidx.annotation.VisibleForTesting;
 
 import org.chromium.base.BuildInfo;
-import org.chromium.chrome.browser.ChromeBaseAppCompatActivity;
 import org.chromium.chrome.browser.preferences.SharedPreferencesManager;
 
 /**
@@ -28,29 +27,11 @@ public class NightModeUtils {
     private static Boolean sNightModeDefaultToLightForTesting;
 
     /**
-     * Due to Lemon issues on resources access, night mode is disabled on Kitkat until the issue is
-     * resolved. See https://crbug.com/957286 for details.
      * @return Whether night mode is supported.
      */
     public static boolean isNightModeSupported() {
         if (sNightModeSupportedForTest != null) return sNightModeSupportedForTest;
-        return Build.VERSION.SDK_INT > Build.VERSION_CODES.KITKAT;
-    }
-
-    /**
-     * If the {@link Context} is a ChromeBaseAppCompatActivity, this method will get the
-     * {@link NightModeStateProvider} from the activity. Otherwise, the
-     * {@link GlobalNightModeStateProviderHolder} will be used.
-     * @param context The {@link Context} to get the NightModeStateProvider.
-     * @return Whether or not the night mode is enabled.
-     */
-    public static boolean isInNightMode(Context context) {
-        if (context instanceof ChromeBaseAppCompatActivity) {
-            return ((ChromeBaseAppCompatActivity) context)
-                    .getNightModeStateProvider()
-                    .isInNightMode();
-        }
-        return GlobalNightModeStateProviderHolder.getInstance().isInNightMode();
+        return true;
     }
 
     /**
@@ -59,16 +40,16 @@ public class NightModeUtils {
      * {@link Activity#onConfigurationChanged(Configuration)}) if uiMode was not overridden on
      * the configuration during activity initialization
      * (see {@link #applyOverridesForNightMode(NightModeStateProvider, Configuration)}).
-     * @param activity The {@link ChromeBaseAppCompatActivity} that needs to be updated.
+     * @param activity The {@link Activity} that needs to be updated.
+     * @param inNightMode Whether night mode should be set on the activity.
      * @param newConfig The new {@link Configuration} from
      *                  {@link Activity#onConfigurationChanged(Configuration)}.
      * @param themeResId The {@link StyleRes} for the theme of the specified activity.
      */
-    public static void updateConfigurationForNightMode(ChromeBaseAppCompatActivity activity,
+    public static void updateConfigurationForNightMode(Activity activity, boolean inNightMode,
             Configuration newConfig, @StyleRes int themeResId) {
-        final int uiNightMode = activity.getNightModeStateProvider().isInNightMode()
-                ? Configuration.UI_MODE_NIGHT_YES
-                : Configuration.UI_MODE_NIGHT_NO;
+        final int uiNightMode =
+                inNightMode ? Configuration.UI_MODE_NIGHT_YES : Configuration.UI_MODE_NIGHT_NO;
 
         if (uiNightMode == (newConfig.uiMode & Configuration.UI_MODE_NIGHT_MASK)) return;
 

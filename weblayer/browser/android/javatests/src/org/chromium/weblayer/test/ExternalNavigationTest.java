@@ -4,22 +4,23 @@
 
 package org.chromium.weblayer.test;
 
+import android.app.Activity;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
-import android.support.test.filters.SmallTest;
 
 import androidx.fragment.app.Fragment;
+import androidx.test.filters.SmallTest;
 
 import org.junit.Assert;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
-import org.chromium.base.test.BaseJUnit4ClassRunner;
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 import org.chromium.weblayer.Browser;
+import org.chromium.weblayer.NavigateParams;
 import org.chromium.weblayer.Tab;
 import org.chromium.weblayer.TabListCallback;
 import org.chromium.weblayer.shell.InstrumentationActivity;
@@ -27,13 +28,33 @@ import org.chromium.weblayer.shell.InstrumentationActivity;
 /**
  * Tests handling of external intents.
  */
-@RunWith(BaseJUnit4ClassRunner.class)
+@RunWith(WebLayerJUnit4ClassRunner.class)
 public class ExternalNavigationTest {
     @Rule
     public InstrumentationActivityTestRule mActivityTestRule =
             new InstrumentationActivityTestRule();
 
+    /**
+     * A dummy activity that claims to handle "weblayer://weblayertest".
+     */
+    public static class DummyActivityForSpecialScheme extends Activity {
+        @Override
+        protected void onCreate(Bundle savedInstanceState) {
+            super.onCreate(savedInstanceState);
+            finish();
+        }
+    }
+
     private static final String ABOUT_BLANK_URL = "about:blank";
+    private static final String CUSTOM_SCHEME_URL_WITH_DEFAULT_EXTERNAL_HANDLER =
+            "weblayer://weblayertest/intent";
+    private static final String INTENT_TO_DUMMY_ACTIVITY_FOR_SPECIAL_SCHEME_DATA_STRING =
+            CUSTOM_SCHEME_URL_WITH_DEFAULT_EXTERNAL_HANDLER;
+    private static final String INTENT_TO_DUMMY_ACTIVITY_FOR_SPECIAL_SCHEME_ACTION =
+            "android.intent.action.VIEW";
+    // The package is not specified in the intent that gets created when navigating to the special
+    // scheme.
+    private static final String INTENT_TO_DUMMY_ACTIVITY_FOR_SPECIAL_SCHEME_PACKAGE = null;
     private static final String INTENT_TO_CHROME_DATA_CONTENT =
             "play.google.com/store/apps/details?id=com.facebook.katana/";
     private static final String INTENT_TO_CHROME_SCHEME = "https";
@@ -76,6 +97,9 @@ public class ExternalNavigationTest {
     private final String mNonResolvableIntentWithFallbackUrl =
             NON_RESOLVABLE_INTENT + mTestServerSiteFallbackUrlExtra + "end";
 
+    private final String mRedirectToCustomSchemeUrlWithDefaultExternalHandler =
+            mActivityTestRule.getTestServer().getURL(
+                    "/server-redirect?" + CUSTOM_SCHEME_URL_WITH_DEFAULT_EXTERNAL_HANDLER);
     private final String mRedirectToIntentToChromeURL =
             mActivityTestRule.getTestServer().getURL("/server-redirect?" + INTENT_TO_CHROME_URL);
     private final String mNonResolvableIntentWithFallbackUrlThatLaunchesIntent =
@@ -120,26 +144,29 @@ public class ExternalNavigationTest {
     }
 
     /**
-     * Tests that a direct navigation to an external intent is blocked, resulting in a failed
-     * browser navigation.
+     * Tests that a direct navigation to an external intent is launched due to the navigation type
+     * being set as from a link with a user gesture.
      */
     @Test
     @SmallTest
-    public void testExternalIntentWithNoRedirectBlocked() throws Throwable {
+    public void testExternalIntentWithNoRedirectLaunched() throws Throwable {
         InstrumentationActivity activity = mActivityTestRule.launchShellWithUrl(ABOUT_BLANK_URL);
         IntentInterceptor intentInterceptor = new IntentInterceptor();
         activity.setIntentInterceptor(intentInterceptor);
 
         Tab tab = mActivityTestRule.getActivity().getTab();
+        TestThreadUtils.runOnUiThreadBlocking(
+                () -> { tab.getNavigationController().navigate(Uri.parse(INTENT_TO_CHROME_URL)); });
 
-        // Note that this navigation will not result in a paint.
-        mActivityTestRule.navigateAndWaitForFailure(
-                tab, INTENT_TO_CHROME_URL, /*waitForPaint=*/false);
+        intentInterceptor.waitForIntent();
 
-        Assert.assertNull(intentInterceptor.mLastIntent);
-
-        // The current URL should not have changed.
+        // The current URL should not have changed, and the intent should have been launched.
         Assert.assertEquals(ABOUT_BLANK_URL, mActivityTestRule.getCurrentDisplayUrl());
+        Intent intent = intentInterceptor.mLastIntent;
+        Assert.assertNotNull(intent);
+        Assert.assertEquals(INTENT_TO_CHROME_PACKAGE, intent.getPackage());
+        Assert.assertEquals(INTENT_TO_CHROME_ACTION, intent.getAction());
+        Assert.assertEquals(INTENT_TO_CHROME_DATA_STRING, intent.getDataString());
     }
 
     /**
@@ -167,6 +194,38 @@ public class ExternalNavigationTest {
         Assert.assertEquals(INTENT_TO_CHROME_PACKAGE, intent.getPackage());
         Assert.assertEquals(INTENT_TO_CHROME_ACTION, intent.getAction());
         Assert.assertEquals(INTENT_TO_CHROME_DATA_STRING, intent.getDataString());
+    }
+
+    /**
+     * Tests that a navigation that redirects to a URL with a special scheme that has a default
+     * external handler results in an external intent being launched.
+     */
+    @Test
+    @SmallTest
+    public void testRedirectToCustomSchemeUrlWithDefaultExternalHandlerLaunchesIntent()
+            throws Throwable {
+        InstrumentationActivity activity = mActivityTestRule.launchShellWithUrl(ABOUT_BLANK_URL);
+        IntentInterceptor intentInterceptor = new IntentInterceptor();
+        activity.setIntentInterceptor(intentInterceptor);
+
+        Tab tab = mActivityTestRule.getActivity().getTab();
+        TestThreadUtils.runOnUiThreadBlocking(() -> {
+            tab.getNavigationController().navigate(
+                    Uri.parse(mRedirectToCustomSchemeUrlWithDefaultExternalHandler));
+        });
+
+        intentInterceptor.waitForIntent();
+
+        // The current URL should not have changed, and the intent should have been launched.
+        Assert.assertEquals(ABOUT_BLANK_URL, mActivityTestRule.getCurrentDisplayUrl());
+        Intent intent = intentInterceptor.mLastIntent;
+        Assert.assertNotNull(intent);
+
+        Assert.assertEquals(
+                INTENT_TO_DUMMY_ACTIVITY_FOR_SPECIAL_SCHEME_PACKAGE, intent.getPackage());
+        Assert.assertEquals(INTENT_TO_DUMMY_ACTIVITY_FOR_SPECIAL_SCHEME_ACTION, intent.getAction());
+        Assert.assertEquals(
+                INTENT_TO_DUMMY_ACTIVITY_FOR_SPECIAL_SCHEME_DATA_STRING, intent.getDataString());
     }
 
     /**
@@ -393,13 +452,18 @@ public class ExternalNavigationTest {
 
     /**
      * Tests that going to a page that loads an intent that can be handled in onload() results in
-     * the external intent being blocked by policy on intents without user gestures loading in the
-     * midst of a user-typed navigation.
+     * the external intent being launched due to the navigation being specified as being from a link
+     * with a user gesture (if the navigation were specified as being from user typing the intent
+     * would be blocked due to Chrome's policy on not launching intents from user-typed navigations
+     * without a redirect). Also verifies that WebLayer eliminates the navigation entry that
+     * launched the intent, so that the user is back on the original URL (i.e., the URL before that
+     * of the page that launched the intent in onload().
      */
     @Test
     @SmallTest
-    public void testExternalIntentViaOnLoadBlocked() throws Throwable {
-        InstrumentationActivity activity = mActivityTestRule.launchShellWithUrl(ABOUT_BLANK_URL);
+    public void testExternalIntentViaOnLoadLaunched() throws Throwable {
+        String initialUrl = ABOUT_BLANK_URL;
+        InstrumentationActivity activity = mActivityTestRule.launchShellWithUrl(initialUrl);
         IntentInterceptor intentInterceptor = new IntentInterceptor();
         activity.setIntentInterceptor(intentInterceptor);
 
@@ -407,17 +471,18 @@ public class ExternalNavigationTest {
 
         Tab tab = mActivityTestRule.getActivity().getTab();
 
-        TestThreadUtils.runOnUiThreadBlocking(
-                () -> { tab.getNavigationController().navigate(Uri.parse(url)); });
+        mActivityTestRule.navigateAndWait(url);
 
-        NavigationWaiter waiter = new NavigationWaiter(
-                INTENT_TO_CHROME_URL, tab, /*expectFailure=*/true, /*waitForPaint=*/false);
-        waiter.waitForNavigation();
+        intentInterceptor.waitForIntent();
 
-        Assert.assertNull(intentInterceptor.mLastIntent);
-
-        // The current URL should not have changed.
-        Assert.assertEquals(url, mActivityTestRule.getCurrentDisplayUrl());
+        // The intent should have been launched, and the user should now be back on the original
+        // URL.
+        Assert.assertEquals(initialUrl, mActivityTestRule.getCurrentDisplayUrl());
+        Intent intent = intentInterceptor.mLastIntent;
+        Assert.assertNotNull(intent);
+        Assert.assertEquals(INTENT_TO_CHROME_PACKAGE, intent.getPackage());
+        Assert.assertEquals(INTENT_TO_CHROME_ACTION, intent.getAction());
+        Assert.assertEquals(INTENT_TO_CHROME_DATA_STRING, intent.getDataString());
     }
 
     /**
@@ -467,5 +532,36 @@ public class ExternalNavigationTest {
         Assert.assertEquals(INTENT_TO_CHROME_PACKAGE, intent.getPackage());
         Assert.assertEquals(INTENT_TO_CHROME_ACTION, intent.getAction());
         Assert.assertEquals(INTENT_TO_CHROME_DATA_STRING, intent.getDataString());
+    }
+
+    /**
+     * Verifies that disableIntentProcessing() does in fact disable intent processing.
+     */
+    @Test
+    @SmallTest
+    @MinWebLayerVersion(87)
+    public void testDisableIntentProcessing() throws Throwable {
+        InstrumentationActivity activity = mActivityTestRule.launchShellWithUrl(ABOUT_BLANK_URL);
+        IntentInterceptor intentInterceptor = new IntentInterceptor();
+        activity.setIntentInterceptor(intentInterceptor);
+
+        String url = mActivityTestRule.getTestDataURL(PAGE_THAT_INTENTS_TO_CHROME_ON_LOAD_FILE);
+
+        Tab tab = mActivityTestRule.getActivity().getTab();
+
+        TestThreadUtils.runOnUiThreadBlocking(() -> {
+            NavigateParams.Builder navigateParamsBuilder = new NavigateParams.Builder();
+            navigateParamsBuilder.disableIntentProcessing();
+            tab.getNavigationController().navigate(Uri.parse(url), navigateParamsBuilder.build());
+        });
+
+        NavigationWaiter waiter = new NavigationWaiter(
+                INTENT_TO_CHROME_URL, tab, /*expectFailure=*/true, /*waitForPaint=*/false);
+        waiter.waitForNavigation();
+
+        Assert.assertNull(intentInterceptor.mLastIntent);
+
+        // The current URL should not have changed.
+        Assert.assertEquals(url, mActivityTestRule.getCurrentDisplayUrl());
     }
 }

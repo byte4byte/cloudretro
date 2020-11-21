@@ -5,6 +5,11 @@
 Polymer({
   is: 'os-settings-printing-page',
 
+  behaviors: [
+    DeepLinkingBehavior,
+    settings.RouteObserverBehavior,
+  ],
+
   properties: {
     /** Preferences state. */
     prefs: {
@@ -28,10 +33,65 @@ Polymer({
         return map;
       },
     },
+
+    /** @private */
+    isPrintManagementEnabled_: {
+      type: Boolean,
+      value: function() {
+        return loadTimeData.getBoolean('printManagementEnabled');
+      }
+    },
+
+    /** @private */
+    isScanningAppEnabled_: {
+      type: Boolean,
+      value: function() {
+        return loadTimeData.getBoolean('scanningAppEnabled');
+      }
+    },
+
+    /**
+     * Used by DeepLinkingBehavior to focus this page's deep links.
+     * @type {!Set<!chromeos.settings.mojom.Setting>}
+     */
+    supportedSettingIds: {
+      type: Object,
+      value: () => new Set([
+        chromeos.settings.mojom.Setting.kPrintJobs,
+        chromeos.settings.mojom.Setting.kScanningApp
+      ]),
+    },
+  },
+
+  /**
+   * @param {!settings.Route} route
+   * @param {!settings.Route} oldRoute
+   */
+  currentRouteChanged(route, oldRoute) {
+    // Does not apply to this page.
+    if (route !== settings.routes.OS_PRINTING) {
+      return;
+    }
+
+    this.attemptDeepLink();
   },
 
   /** @private */
   onTapCupsPrinters_() {
     settings.Router.getInstance().navigateTo(settings.routes.CUPS_PRINTERS);
   },
+
+  /** @private */
+  onOpenPrintManagement_() {
+    assert(this.isPrintManagementEnabled_);
+    settings.CupsPrintersBrowserProxyImpl.getInstance()
+        .openPrintManagementApp();
+  },
+
+  /** @private */
+  onOpenScanningApp_() {
+    assert(this.isScanningAppEnabled_);
+    settings.CupsPrintersBrowserProxyImpl.getInstance().openScanningApp();
+    settings.recordSettingChange(chromeos.settings.mojom.Setting.kScanningApp);
+  }
 });

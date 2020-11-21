@@ -6,7 +6,7 @@ package org.chromium.chrome.browser.webapps;
 
 import static org.junit.Assert.assertTrue;
 
-import android.support.test.filters.LargeTest;
+import androidx.test.filters.LargeTest;
 
 import org.junit.Rule;
 import org.junit.Test;
@@ -17,6 +17,8 @@ import org.junit.runner.RunWith;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
+import org.chromium.chrome.browser.browserservices.ui.SharedActivityCoordinator;
+import org.chromium.chrome.browser.browserservices.ui.controller.webapps.WebappDisclosureController;
 import org.chromium.chrome.browser.customtabs.CustomTabOrientationController;
 import org.chromium.chrome.browser.dependency_injection.ChromeActivityCommonsModule;
 import org.chromium.chrome.browser.dependency_injection.ModuleOverridesRule;
@@ -24,7 +26,7 @@ import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.lifecycle.ActivityLifecycleDispatcher;
 import org.chromium.chrome.browser.lifecycle.LifecycleObserver;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
-import org.chromium.chrome.test.util.browser.webapps.WebApkInfoBuilder;
+import org.chromium.chrome.test.util.browser.webapps.WebApkIntentDataProviderBuilder;
 import org.chromium.net.test.EmbeddedTestServer;
 
 import java.util.HashSet;
@@ -84,10 +86,25 @@ public class WebApkInitializationTest {
             new TrackingActivityLifecycleDispatcher();
 
     private final TestRule mModuleOverridesRule = new ModuleOverridesRule().setOverride(
-            ChromeActivityCommonsModule.Factory.class, (activity, lifecycleDispatcher) -> {
+            ChromeActivityCommonsModule.Factory.class,
+            (activity, bottomSheetControllerSupplier, tabModelSelectorSupplier,
+                    browserControlsManager, browserControlsVisibilityManager, browserControlsSizer,
+                    fullscreenManager, layoutManagerSupplier, lifecycleDispatcher,
+                    snackbarManagerSupplier, activityTabProvider, tabContentManager,
+                    activityWindowAndroid, compositorViewHolderSupplier, tabCreatorManager,
+                    tabCreatorSupplier, isPromotableToTabSupplier, statusBarColorController,
+                    screenOrientationProvider, notificationManagerProxySupplier,
+                    tabContentManagerSupplier, compositorViewHolderInitializer) -> {
                 mTrackingActivityLifecycleDispatcher.init(lifecycleDispatcher);
-                return new ChromeActivityCommonsModule(
-                        activity, mTrackingActivityLifecycleDispatcher);
+                return new ChromeActivityCommonsModule(activity, bottomSheetControllerSupplier,
+                        tabModelSelectorSupplier, browserControlsManager,
+                        browserControlsVisibilityManager, browserControlsSizer, fullscreenManager,
+                        layoutManagerSupplier, mTrackingActivityLifecycleDispatcher,
+                        snackbarManagerSupplier, activityTabProvider, tabContentManager,
+                        activityWindowAndroid, compositorViewHolderSupplier, tabCreatorManager,
+                        tabCreatorSupplier, isPromotableToTabSupplier, statusBarColorController,
+                        screenOrientationProvider, notificationManagerProxySupplier,
+                        tabContentManagerSupplier, compositorViewHolderInitializer);
             });
 
     private final WebApkActivityTestRule mActivityRule = new WebApkActivityTestRule();
@@ -108,21 +125,22 @@ public class WebApkInitializationTest {
     public void testInitialization() throws TimeoutException {
         EmbeddedTestServer embeddedTestServer =
                 mActivityRule.getEmbeddedTestServerRule().getServer();
-        WebApkInfoBuilder webApkInfoBuilder = new WebApkInfoBuilder(
-                "org.chromium.webapk.for.testing",
-                embeddedTestServer.getURL("/chrome/test/data/banners/manifest_test_page.html"));
-        mActivityRule.startWebApkActivity(webApkInfoBuilder.build());
+        WebApkIntentDataProviderBuilder intentDataProviderBuilder =
+                new WebApkIntentDataProviderBuilder("org.chromium.webapk.for.testing",
+                        embeddedTestServer.getURL(
+                                "/chrome/test/data/banners/manifest_test_page.html"));
+        mActivityRule.startWebApkActivity(intentDataProviderBuilder.build());
 
         Set<String> registeredObserverClassNames =
                 mTrackingActivityLifecycleDispatcher.getRegisteredObserverClassNames();
         assertTrue(registeredObserverClassNames.contains(
                 WebappActionsNotificationManager.class.getName()));
-        assertTrue(registeredObserverClassNames.contains(
-                WebappDisclosureSnackbarController.class.getName()));
+        assertTrue(
+                registeredObserverClassNames.contains(WebappDisclosureController.class.getName()));
         assertTrue(registeredObserverClassNames.contains(
                 WebApkActivityLifecycleUmaTracker.class.getName()));
-        assertTrue(registeredObserverClassNames.contains(
-                CustomTabOrientationController.class.getName()));
+        assertTrue(
+                registeredObserverClassNames.contains(SharedActivityCoordinator.class.getName()));
 
         // Test that WebappActiveTabUmaTracker is hooked up.
         assertTrue(0 < RecordHistogram.getHistogramTotalCountForTesting(

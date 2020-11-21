@@ -2,7 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import {TestBrowserProxy} from 'chrome://test/test_browser_proxy.m.js';
+import {MetricsBrowserProxy} from 'chrome://settings/settings.js';
+
+import {TestBrowserProxy} from '../test_browser_proxy.m.js';
 
 /** @implements {MetricsBrowserProxy} */
 export class TestMetricsBrowserProxy extends TestBrowserProxy {
@@ -11,6 +13,7 @@ export class TestMetricsBrowserProxy extends TestBrowserProxy {
       'recordAction',
       'recordSafetyCheckInteractionHistogram',
       'recordSettingsPageHistogram',
+      'recordSafeBrowsingInteractionHistogram',
     ]);
   }
 
@@ -27,5 +30,10 @@ export class TestMetricsBrowserProxy extends TestBrowserProxy {
   /** @override */
   recordSettingsPageHistogram(interaction) {
     this.methodCalled('recordSettingsPageHistogram', interaction);
+  }
+
+  /** @override */
+  recordSafeBrowsingInteractionHistogram(interaction) {
+    this.methodCalled('recordSafeBrowsingInteractionHistogram', interaction);
   }
 }

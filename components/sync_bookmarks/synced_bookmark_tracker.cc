@@ -5,10 +5,11 @@
 #include "components/sync_bookmarks/synced_bookmark_tracker.h"
 
 #include <algorithm>
-#include <set>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "base/base64.h"
+#include "base/guid.h"
 #include "base/hash/hash.h"
 #include "base/hash/sha1.h"
 #include "base/memory/ptr_util.h"
@@ -29,7 +30,22 @@ namespace sync_bookmarks {
 
 const base::Feature kInvalidateBookmarkSyncMetadataIfMismatchingGuid{
     "InvalidateBookmarkSyncMetadataIfMismatchingGuid",
-    base::FEATURE_DISABLED_BY_DEFAULT};
+    base::FEATURE_ENABLED_BY_DEFAULT};
+
+// TODO(crbug.com/1032052): Clean up once UMA metric
+// Sync.BookmarksModelMetadataCorruptionReason, bucket MISSING_CLIENT_TAG_HASH,
+// is verified to be small enough.
+extern const base::Feature kInvalidateBookmarkSyncMetadataIfClientTagMissing{
+    "InvalidateBookmarkSyncMetadataIfClientTagMissing",
+    base::FEATURE_ENABLED_BY_DEFAULT};
+// Soft version of the above: it does treat local sync metadata as obsolete if
+// client tags are missing, but only if the local client is in sync with the
+// server, for some definition of in-sync (see implementation in
+// ShouldInvalidateMetadataDueToMissingClientTags()).
+extern const base::Feature
+    kInvalidateBookmarkSyncMetadataIfClientTagMissingWhileInSync{
+        "InvalidateBookmarkSyncMetadataIfClientTagMissingWhileInSync",
+        base::FEATURE_ENABLED_BY_DEFAULT};
 
 namespace {
 
@@ -77,6 +93,37 @@ BuildIdToBookmarkNodeMap(const bookmarks::BookmarkModel* model) {
     id_to_bookmark_node_map[node->id()] = node;
   }
   return id_to_bookmark_node_map;
+}
+
+// Predicate that determines whether a last-synced-time is considered recent
+// enough to activate the logic for
+// |kInvalidateBookmarkSyncMetadataIfClientTagMissingWhileInSync|.
+bool IsRecentEnoughTimeToConsiderInSync(base::Time time) {
+  return base::Time::Now() - time < base::TimeDelta::FromDays(2);
+}
+
+bool ShouldInvalidateMetadataDueToMissingClientTags(
+    bool bookmark_without_client_tag_found,
+    bool has_local_changes,
+    base::Time last_sync_time) {
+  if (!bookmark_without_client_tag_found) {
+    // All good, nothing to invalidate.
+    return false;
+  }
+
+  if (!has_local_changes &&
+      IsRecentEnoughTimeToConsiderInSync(last_sync_time) &&
+      base::FeatureList::IsEnabled(
+          kInvalidateBookmarkSyncMetadataIfClientTagMissingWhileInSync)) {
+    // This seems like a very good time to invalidate metadata, since it's very
+    // likely that the local state is in sync with the remote (server-side)
+    // state. This means there's low change to run into conflicts.
+    return true;
+  }
+
+  // Force-invalidate if the corresponding feature toggle is enabled.
+  return base::FeatureList::IsEnabled(
+      kInvalidateBookmarkSyncMetadataIfClientTagMissing);
 }
 
 }  // namespace
@@ -135,16 +182,19 @@ bool SyncedBookmarkTracker::Entity::has_final_guid() const {
 }
 
 bool SyncedBookmarkTracker::Entity::final_guid_matches(
-    const std::string& guid) const {
+    const base::GUID& guid) const {
   return metadata_->has_client_tag_hash() &&
          metadata_->client_tag_hash() ==
-             syncer::ClientTagHash::FromUnhashed(syncer::BOOKMARKS, guid)
+             syncer::ClientTagHash::FromUnhashed(syncer::BOOKMARKS,
+                                                 guid.AsLowercaseString())
                  .value();
 }
 
-void SyncedBookmarkTracker::Entity::set_final_guid(const std::string& guid) {
+void SyncedBookmarkTracker::Entity::set_final_guid(const base::GUID& guid) {
   metadata_->set_client_tag_hash(
-      syncer::ClientTagHash::FromUnhashed(syncer::BOOKMARKS, guid).value());
+      syncer::ClientTagHash::FromUnhashed(syncer::BOOKMARKS,
+                                          guid.AsLowercaseString())
+          .value());
 }
 
 void SyncedBookmarkTracker::Entity::PopulateFaviconHashIfUnset(
@@ -170,7 +220,8 @@ std::unique_ptr<SyncedBookmarkTracker> SyncedBookmarkTracker::CreateEmpty(
     sync_pb::ModelTypeState model_type_state) {
   // base::WrapUnique() used because the constructor is private.
   auto tracker = base::WrapUnique(new SyncedBookmarkTracker(
-      std::move(model_type_state), /*bookmarks_full_title_reuploaded=*/false));
+      std::move(model_type_state), /*bookmarks_full_title_reuploaded=*/false,
+      /*last_sync_time=*/base::Time::Now()));
   return tracker;
 }
 
@@ -185,12 +236,22 @@ SyncedBookmarkTracker::CreateFromBookmarkModelAndMetadata(
     return nullptr;
   }
 
-  const bool bookmarks_full_title_reuploaded =
-      model_metadata.bookmarks_full_title_reuploaded();
+  auto tracker =
+      CreateEmpty(std::move(*model_metadata.mutable_model_type_state()));
 
-  auto tracker = base::WrapUnique(new SyncedBookmarkTracker(
-      std::move(*model_metadata.mutable_model_type_state()),
-      bookmarks_full_title_reuploaded));
+  // When the reupload feature is enabled and disabled again, there may occur
+  // new entities which weren't reuploaded.
+  const bool bookmarks_full_title_reuploaded =
+      model_metadata.bookmarks_full_title_reuploaded() &&
+      base::FeatureList::IsEnabled(switches::kSyncReuploadBookmarkFullTitles);
+  if (bookmarks_full_title_reuploaded) {
+    tracker->SetBookmarksFullTitleReuploaded();
+  }
+
+  // If the field is not present, |last_sync_time| will be initialized with the
+  // Unix epoch.
+  tracker->last_sync_time_ =
+      syncer::ProtoTimeToTime(model_metadata.last_sync_time());
 
   const CorruptionReason corruption_reason =
       tracker->InitEntitiesFromModelAndMetadata(model,
@@ -203,12 +264,14 @@ SyncedBookmarkTracker::CreateFromBookmarkModelAndMetadata(
     return nullptr;
   }
 
-  tracker->ReuploadBookmarksOnLoadIfNeeded();
-
   return tracker;
 }
 
 SyncedBookmarkTracker::~SyncedBookmarkTracker() = default;
+
+void SyncedBookmarkTracker::SetBookmarksFullTitleReuploaded() {
+  bookmarks_full_title_reuploaded_ = true;
+}
 
 const SyncedBookmarkTracker::Entity* SyncedBookmarkTracker::GetEntityForSyncId(
     const std::string& sync_id) const {
@@ -217,10 +280,10 @@ const SyncedBookmarkTracker::Entity* SyncedBookmarkTracker::GetEntityForSyncId(
 }
 
 const SyncedBookmarkTracker::Entity*
-SyncedBookmarkTracker::GetTombstoneEntityForGuid(
-    const std::string& guid) const {
+SyncedBookmarkTracker::GetTombstoneEntityForGuid(const base::GUID& guid) const {
   const syncer::ClientTagHash client_tag_hash =
-      syncer::ClientTagHash::FromUnhashed(syncer::BOOKMARKS, guid);
+      syncer::ClientTagHash::FromUnhashed(syncer::BOOKMARKS,
+                                          guid.AsLowercaseString());
 
   for (const Entity* tombstone_entity : ordered_local_tombstones_) {
     if (tombstone_entity->metadata()->client_tag_hash() ==
@@ -270,9 +333,10 @@ const SyncedBookmarkTracker::Entity* SyncedBookmarkTracker::Add(
   metadata->mutable_unique_position()->CopyFrom(unique_position);
   // For any newly added bookmark, be it a local creation or a remote one, the
   // authoritative final GUID is known from start.
-  metadata->set_client_tag_hash(syncer::ClientTagHash::FromUnhashed(
-                                    syncer::BOOKMARKS, bookmark_node->guid())
-                                    .value());
+  metadata->set_client_tag_hash(
+      syncer::ClientTagHash::FromUnhashed(
+          syncer::BOOKMARKS, bookmark_node->guid().AsLowercaseString())
+          .value());
   HashSpecifics(specifics, metadata->mutable_specifics_hash());
   metadata->set_bookmark_favicon_hash(
       base::PersistentHash(specifics.bookmark().favicon()));
@@ -316,7 +380,7 @@ void SyncedBookmarkTracker::UpdateServerVersion(const Entity* entity,
 }
 
 void SyncedBookmarkTracker::PopulateFinalGuid(const Entity* entity,
-                                              const std::string& guid) {
+                                              const base::GUID& guid) {
   DCHECK(entity);
   AsMutableEntity(entity)->set_final_guid(guid);
 }
@@ -354,16 +418,17 @@ void SyncedBookmarkTracker::MarkDeleted(const Entity* entity) {
 
 void SyncedBookmarkTracker::Remove(const Entity* entity) {
   DCHECK(entity);
-  // TODO(rushans): erase only if entity is not a tombstone.
+  DCHECK_EQ(entity, GetEntityForSyncId(entity->metadata()->server_id()));
+
   if (entity->bookmark_node()) {
     DCHECK(!entity->metadata()->is_deleted());
     DCHECK_EQ(0, std::count(ordered_local_tombstones_.begin(),
                             ordered_local_tombstones_.end(), entity));
+    bookmark_node_to_entities_map_.erase(entity->bookmark_node());
   } else {
     DCHECK(entity->metadata()->is_deleted());
   }
 
-  bookmark_node_to_entities_map_.erase(entity->bookmark_node());
   base::Erase(ordered_local_tombstones_, entity);
   sync_id_to_entities_map_.erase(entity->metadata()->server_id());
 }
@@ -381,6 +446,7 @@ SyncedBookmarkTracker::BuildBookmarkModelMetadata() const {
   sync_pb::BookmarkModelMetadata model_metadata;
   model_metadata.set_bookmarks_full_title_reuploaded(
       bookmarks_full_title_reuploaded_);
+  model_metadata.set_last_sync_time(syncer::TimeToProtoTime(last_sync_time_));
   for (const std::pair<const std::string, std::unique_ptr<Entity>>& pair :
        sync_id_to_entities_map_) {
     DCHECK(pair.second) << " for ID " << pair.first;
@@ -468,9 +534,11 @@ SyncedBookmarkTracker::GetEntitiesWithLocalChanges(size_t max_entries) const {
 
 SyncedBookmarkTracker::SyncedBookmarkTracker(
     sync_pb::ModelTypeState model_type_state,
-    bool bookmarks_full_title_reuploaded)
+    bool bookmarks_full_title_reuploaded,
+    base::Time last_sync_time)
     : model_type_state_(std::move(model_type_state)),
-      bookmarks_full_title_reuploaded_(bookmarks_full_title_reuploaded) {}
+      bookmarks_full_title_reuploaded_(bookmarks_full_title_reuploaded),
+      last_sync_time_(last_sync_time) {}
 
 SyncedBookmarkTracker::CorruptionReason
 SyncedBookmarkTracker::InitEntitiesFromModelAndMetadata(
@@ -486,8 +554,8 @@ SyncedBookmarkTracker::InitEntitiesFromModelAndMetadata(
   std::unordered_map<int64_t, const bookmarks::BookmarkNode*>
       id_to_bookmark_node_map = BuildIdToBookmarkNodeMap(model);
 
-  // Collect ids of non-deletion entries in the metadata.
-  std::vector<int> metadata_node_ids;
+  std::unordered_set<syncer::ClientTagHash, syncer::ClientTagHash::Hash>
+      used_client_tag_hashes;
 
   for (sync_pb::BookmarkMetadata& bookmark_metadata :
        *model_metadata.mutable_bookmarks_metadata()) {
@@ -503,6 +571,25 @@ SyncedBookmarkTracker::InitEntitiesFromModelAndMetadata(
       return CorruptionReason::DUPLICATED_SERVER_ID;
     }
 
+    // Duplicate nodes might happen by restoring of a removed bookmark due to
+    // some past bugs (see https://crbug.com/1071061). In this case it was
+    // possible that there were two entities for the same node: one of them is a
+    // tombstone and another one is the entity for the restored bookmark.
+    // Currently the tombstone entity is overridden in this case, but it is
+    // still possible that the incorrect state was stored.
+    if (bookmark_metadata.metadata().has_client_tag_hash()) {
+      const syncer::ClientTagHash client_tag_hash =
+          syncer::ClientTagHash::FromHashed(
+              bookmark_metadata.metadata().client_tag_hash());
+      const bool new_element =
+          used_client_tag_hashes.insert(client_tag_hash).second;
+      if (!new_element) {
+        DLOG(ERROR) << "Error when decoding sync metadata: Duplicated client "
+                       "tag hash.";
+        return CorruptionReason::DUPLICATED_CLIENT_TAG_HASH;
+      }
+    }
+
     // Handle tombstones.
     if (bookmark_metadata.metadata().is_deleted()) {
       if (bookmark_metadata.has_id()) {
@@ -511,10 +598,15 @@ SyncedBookmarkTracker::InitEntitiesFromModelAndMetadata(
         return CorruptionReason::BOOKMARK_ID_IN_TOMBSTONE;
       }
 
+      if (!bookmark_metadata.metadata().has_client_tag_hash()) {
+        bookmark_without_client_tag_found = true;
+      }
+
       auto tombstone_entity = std::make_unique<Entity>(
           /*node=*/nullptr, std::make_unique<sync_pb::EntityMetadata>(std::move(
                                 *bookmark_metadata.mutable_metadata())));
       ordered_local_tombstones_.push_back(tombstone_entity.get());
+      DCHECK_EQ(0U, sync_id_to_entities_map_.count(sync_id));
       sync_id_to_entities_map_[sync_id] = std::move(tombstone_entity);
       continue;
     }
@@ -551,7 +643,8 @@ SyncedBookmarkTracker::InitEntitiesFromModelAndMetadata(
     if (bookmark_metadata.metadata().has_client_tag_hash() &&
         !node->is_permanent_node() &&
         bookmark_metadata.metadata().client_tag_hash() !=
-            syncer::ClientTagHash::FromUnhashed(syncer::BOOKMARKS, node->guid())
+            syncer::ClientTagHash::FromUnhashed(
+                syncer::BOOKMARKS, node->guid().AsLowercaseString())
                 .value()) {
       DLOG(ERROR) << "Bookmark GUID does not match the client tag.";
       client_tag_mismatch_found = true;
@@ -572,6 +665,7 @@ SyncedBookmarkTracker::InitEntitiesFromModelAndMetadata(
     entity->set_commit_may_have_started(true);
     CHECK_EQ(0U, bookmark_node_to_entities_map_.count(node));
     bookmark_node_to_entities_map_[node] = entity.get();
+    DCHECK_EQ(0U, sync_id_to_entities_map_.count(sync_id));
     sync_id_to_entities_map_[sync_id] = std::move(entity);
   }
 
@@ -582,6 +676,9 @@ SyncedBookmarkTracker::InitEntitiesFromModelAndMetadata(
   while (iterator.has_next()) {
     const bookmarks::BookmarkNode* node = iterator.Next();
     if (!model->client()->CanSyncNode(node)) {
+      if (bookmark_node_to_entities_map_.count(node) != 0) {
+        return CorruptionReason::TRACKED_MANAGED_NODE;
+      }
       continue;
     }
     if (bookmark_node_to_entities_map_.count(node) == 0) {
@@ -593,6 +690,12 @@ SyncedBookmarkTracker::InitEntitiesFromModelAndMetadata(
       "Sync.BookmarkModelMetadataClientTagState",
       GetMetadataClientTagHashHistogramBucket(
           client_tag_mismatch_found, bookmark_without_client_tag_found));
+
+  if (ShouldInvalidateMetadataDueToMissingClientTags(
+          bookmark_without_client_tag_found, HasLocalChanges(),
+          last_sync_time_)) {
+    return CorruptionReason::MISSING_CLIENT_TAG_HASH;
+  }
 
   CheckAllNodesTracked(model);
   return CorruptionReason::NO_CORRUPTION;
@@ -611,7 +714,7 @@ SyncedBookmarkTracker::ReorderUnsyncedEntitiesExceptDeletions(
   //    node. What's left in |nodes| are the roots of the forest.
   // 3. Start at each root in |nodes|, emit the update and recurse over its
   //    children.
-  std::set<const bookmarks::BookmarkNode*> nodes;
+  std::unordered_set<const bookmarks::BookmarkNode*> nodes;
   // Collect nodes with updates
   for (const SyncedBookmarkTracker::Entity* entity : entities) {
     DCHECK(entity->IsUnsynced());
@@ -634,11 +737,11 @@ SyncedBookmarkTracker::ReorderUnsyncedEntitiesExceptDeletions(
   return ordered_entities;
 }
 
-void SyncedBookmarkTracker::ReuploadBookmarksOnLoadIfNeeded() {
+bool SyncedBookmarkTracker::ReuploadBookmarksOnLoadIfNeeded() {
   if (bookmarks_full_title_reuploaded_ ||
       !base::FeatureList::IsEnabled(
           switches::kSyncReuploadBookmarkFullTitles)) {
-    return;
+    return false;
   }
   for (const auto& sync_id_and_entity : sync_id_to_entities_map_) {
     const SyncedBookmarkTracker::Entity* entity =
@@ -651,7 +754,8 @@ void SyncedBookmarkTracker::ReuploadBookmarksOnLoadIfNeeded() {
     }
     IncrementSequenceNumber(entity);
   }
-  bookmarks_full_title_reuploaded_ = true;
+  SetBookmarksFullTitleReuploaded();
+  return true;
 }
 
 void SyncedBookmarkTracker::TraverseAndAppend(
@@ -750,7 +854,8 @@ void SyncedBookmarkTracker::UndeleteTombstoneForBookmarkNode(
   DCHECK(node);
   DCHECK(entity->metadata()->is_deleted());
   const syncer::ClientTagHash client_tag_hash =
-      syncer::ClientTagHash::FromUnhashed(syncer::BOOKMARKS, node->guid());
+      syncer::ClientTagHash::FromUnhashed(syncer::BOOKMARKS,
+                                          node->guid().AsLowercaseString());
   // The same entity must be used only for the same bookmark node.
   DCHECK_EQ(entity->metadata()->client_tag_hash(), client_tag_hash.value());
   DCHECK_EQ(GetTombstoneEntityForGuid(node->guid()), entity);
@@ -785,17 +890,16 @@ size_t SyncedBookmarkTracker::EstimateMemoryUsage() const {
   return memory_usage;
 }
 
-size_t SyncedBookmarkTracker::TrackedEntitiesCountForTest() const {
-  return sync_id_to_entities_map_.size();
-}
-
-size_t SyncedBookmarkTracker::TrackedBookmarksCountForDebugging() const {
+size_t SyncedBookmarkTracker::TrackedBookmarksCount() const {
   return bookmark_node_to_entities_map_.size();
 }
 
-size_t SyncedBookmarkTracker::TrackedUncommittedTombstonesCountForDebugging()
-    const {
+size_t SyncedBookmarkTracker::TrackedUncommittedTombstonesCount() const {
   return ordered_local_tombstones_.size();
+}
+
+size_t SyncedBookmarkTracker::TrackedEntitiesCountForTest() const {
+  return sync_id_to_entities_map_.size();
 }
 
 void SyncedBookmarkTracker::ClearSpecificsHashForTest(const Entity* entity) {

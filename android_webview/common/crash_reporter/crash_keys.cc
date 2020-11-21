@@ -12,6 +12,7 @@ namespace crash_keys {
 
 const char kAppPackageName[] = "app-package-name";
 const char kAppPackageVersionCode[] = "app-package-version-code";
+const char kAppProcessName[] = "app-process-name";
 
 const char kAndroidSdkInt[] = "android-sdk-int";
 
@@ -21,10 +22,10 @@ extern const char kWeblayerWebViewCompatMode[] =
     "WEBLAYER_WEB_VIEW_COMPAT_MODE";
 
 // clang-format off
-const char* const kWebViewCrashKeyWhiteList[] = {
-    "AW_WHITELISTED_DEBUG_KEY",
+const char* const kWebViewCrashKeyAllowList[] = {
     kAppPackageName,
     kAppPackageVersionCode,
+    kAppProcessName,
     kAndroidSdkInt,
     kSupportLibraryWebkitVersion,
 
@@ -39,23 +40,21 @@ const char* const kWebViewCrashKeyWhiteList[] = {
     "gpu-psver",
     "gpu-vsver",
     "gpu-gl-vendor",
-    "gpu-gl-vendor__1",
-    "gpu-gl-vendor__2",
     "gpu-gl-renderer",
     "oop_read_failure",
+
+    // components/viz
+    "viz_deserialization",
 
     // content/:
     "bad_message_reason",
     "discardable-memory-allocated",
     "discardable-memory-free",
     "mojo-message-error",
-    "mojo-message-error__1",
-    "mojo-message-error__2",
-    "mojo-message-error__3",
-    "mojo-message-error__4",
     "total-discardable-memory-allocated",
-    // TODO(https://crbug.com/1006814): Remove this.
-    "IsRenderFrameLive",
+
+    // services/network
+    "network_deserialization",
 
     // GWP-ASan
     gwp_asan::kMallocCrashKey,
@@ -63,14 +62,6 @@ const char* const kWebViewCrashKeyWhiteList[] = {
 
     // crash keys needed for recording finch trials
     "variations",
-    "variations__1",
-    "variations__2",
-    "variations__3",
-    "variations__4",
-    "variations__5",
-    "variations__6",
-    "variations__7",
-    "variations__8",
     "num-experiments",
 
     kWeblayerWebViewCompatMode,

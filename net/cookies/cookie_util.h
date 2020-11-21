@@ -13,6 +13,7 @@
 #include "base/time/time.h"
 #include "net/base/net_export.h"
 #include "net/cookies/canonical_cookie.h"
+#include "net/cookies/cookie_access_result.h"
 #include "net/cookies/cookie_options.h"
 #include "net/cookies/site_for_cookies.h"
 #include "url/origin.h"
@@ -26,6 +27,19 @@ namespace cookie_util {
 const int kVlogPerCookieMonster = 1;
 const int kVlogSetCookies = 7;
 const int kVlogGarbageCollection = 5;
+
+// This enum must match the numbering for StorageAccessResult in
+// histograms/enums.xml. Do not reorder or remove items, only add new items
+// at the end.
+enum class StorageAccessResult {
+  ACCESS_BLOCKED = 0,
+  ACCESS_ALLOWED = 1,
+  ACCESS_ALLOWED_STORAGE_ACCESS_GRANT = 2,
+  kMaxValue = ACCESS_ALLOWED_STORAGE_ACCESS_GRANT,
+};
+// Helper to fire telemetry indicating if a given request for storage was
+// allowed or not by the provided |result|.
+NET_EXPORT void FireStorageAccessHistogram(StorageAccessResult result);
 
 // Returns the effective TLD+1 for a given host. This only makes sense for http
 // and https schemes. For other schemes, the host will be returned unchanged
@@ -63,6 +77,22 @@ NET_EXPORT std::string CookieDomainAsHost(const std::string& cookie_domain);
 // Time::Max(), respectively.
 NET_EXPORT base::Time ParseCookieExpirationTime(const std::string& time_string);
 
+// Get a cookie's URL from it's domain, path, and source scheme.
+// The first field can be the combined domain-and-host-only-flag (e.g. the
+// string returned by CanonicalCookie::Domain()) as opposed to the domain
+// attribute per RFC6265bis. The GURL is constructed after stripping off any
+// leading dot.
+// Note: the GURL returned by this method is not guaranteed to be valid.
+NET_EXPORT GURL CookieDomainAndPathToURL(const std::string& domain,
+                                         const std::string& path,
+                                         const std::string& source_scheme);
+NET_EXPORT GURL CookieDomainAndPathToURL(const std::string& domain,
+                                         const std::string& path,
+                                         bool is_https);
+NET_EXPORT GURL CookieDomainAndPathToURL(const std::string& domain,
+                                         const std::string& path,
+                                         CookieSourceScheme source_scheme);
+
 // Convenience for converting a cookie origin (domain and https pair) to a URL.
 NET_EXPORT GURL CookieOriginToURL(const std::string& domain, bool is_https);
 
@@ -72,6 +102,14 @@ NET_EXPORT GURL CookieOriginToURL(const std::string& domain, bool is_https);
 // a source URL is required but only a source scheme may be available.
 NET_EXPORT GURL SimulatedCookieSource(const CanonicalCookie& cookie,
                                       const std::string& source_scheme);
+
+// Provisional evaluation of acceptability of setting secure cookies on
+// `source_url` based only on the `source_url`'s scheme and whether it
+// is a localhost URL.  If this returns kNonCryptographic, it may be upgraded to
+// kTrustworthy by a CookieAccessDelegate when the cookie operation is being
+// performed, as the delegate may have access to user settings like manually
+// configured test domains which declare additional things trustworthy.
+NET_EXPORT CookieAccessScheme ProvisionalAccessScheme(const GURL& source_url);
 
 // |domain| is the output of cookie.Domain() for some cookie. This returns true
 // if a |domain| indicates that the cookie can be accessed by |host|.
@@ -176,34 +214,23 @@ ComputeSameSiteContextForSubresource(const GURL& url,
 NET_EXPORT bool IsSameSiteByDefaultCookiesEnabled();
 NET_EXPORT bool IsCookiesWithoutSameSiteMustBeSecureEnabled();
 NET_EXPORT bool IsSchemefulSameSiteEnabled();
-bool IsRecentHttpSameSiteAccessGrantsLegacyCookieSemanticsEnabled();
-bool IsRecentCreationTimeGrantsLegacyCookieSemanticsEnabled();
 
-// Determines whether the last same-site access to a cookie should grant legacy
-// access semantics to the current attempted cookies access, based on the state
-// of the feature kRecentSameSiteAccessGrantsLegacyCookieSemantics, the value of
-// the feature param, and the time since the last eligible same-site access.
-bool DoesLastHttpSameSiteAccessGrantLegacySemantics(
-    base::TimeTicks last_http_same_site_access);
-
-// Determines whether the creation time of a cookie should grant legacy
-// access semantics to the current attempted cookies access, based on the state
-// of the feature kRecentCreationTimeGrantsLegacyCookieSemantics, the value of
-// the feature param, and the creation time of the cookie.
-bool DoesCreationTimeGrantLegacySemantics(base::Time creation_date);
-
-// Takes a callback accepting a CookieInclusionStatus and returns a callback
+// Takes a callback accepting a CookieAccessResult and returns a callback
 // that accepts a bool, setting the bool to true if the CookieInclusionStatus
-// was set to "include", else sending false.
+// in CookieAccessResult was set to "include", else sending false.
 //
 // Can be used with SetCanonicalCookie when you don't need to know why a cookie
 // was blocked, only whether it was blocked.
-NET_EXPORT base::OnceCallback<void(CanonicalCookie::CookieInclusionStatus)>
-AdaptCookieInclusionStatusToBool(base::OnceCallback<void(bool)> callback);
+NET_EXPORT base::OnceCallback<void(CookieAccessResult)>
+AdaptCookieAccessResultToBool(base::OnceCallback<void(bool)> callback);
 
-// Turn a CookieStatusList into a CookieList by stripping out the statuses
-// (for callers who don't care about the statuses).
-NET_EXPORT CookieList StripStatuses(const CookieStatusList& cookie_status_list);
+// Turn a CookieAccessResultList into a CookieList by stripping out access
+// results (for callers who only care about cookies).
+NET_EXPORT CookieList
+StripAccessResults(const CookieAccessResultList& cookie_access_result_list);
+
+// Records port related metrics from Omnibox navigations.
+NET_EXPORT void RecordCookiePortOmniboxHistograms(const GURL& url);
 
 }  // namespace cookie_util
 }  // namespace net

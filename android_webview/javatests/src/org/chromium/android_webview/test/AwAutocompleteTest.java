@@ -6,8 +6,9 @@ package org.chromium.android_webview.test;
 
 import static org.junit.Assert.assertEquals;
 
-import android.support.test.filters.SmallTest;
 import android.view.KeyEvent;
+
+import androidx.test.filters.SmallTest;
 
 import org.junit.After;
 import org.junit.Before;
@@ -26,7 +27,7 @@ import java.util.concurrent.Callable;
 /**
  * AwAutocompleteTest only runs below Android O.
  */
-@DisabledTest
+@DisabledTest(message = "https://crbug.com/944504")
 public class AwAutocompleteTest {
     public static final String FILE = "/login.html";
     public static final String TITLE = "DONE";

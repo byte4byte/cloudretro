@@ -10,10 +10,12 @@
 
 #include "base/memory/weak_ptr.h"
 #include "chromeos/dbus/shill/shill_device_client.h"
+#include "chromeos/dbus/shill/shill_ipconfig_client.h"
 #include "chromeos/dbus/shill/shill_manager_client.h"
 #include "chromeos/dbus/shill/shill_profile_client.h"
 #include "chromeos/dbus/shill/shill_service_client.h"
 #include "chromeos/services/network_config/public/mojom/cros_network_config.mojom-forward.h"
+#include "chromeos/services/network_config/public/mojom/network_types.mojom-forward.h"
 
 namespace chromeos {
 
@@ -86,6 +88,9 @@ class NetworkStateTestHelper {
   ShillProfileClient::TestInterface* profile_test() { return profile_test_; }
   ShillDeviceClient::TestInterface* device_test() { return device_test_; }
   ShillServiceClient::TestInterface* service_test() { return service_test_; }
+  ShillIPConfigClient::TestInterface* ip_config_test() {
+    return ip_config_test_;
+  }
 
  private:
   void ConfigureCallback(const dbus::ObjectPath& result);
@@ -97,6 +102,7 @@ class NetworkStateTestHelper {
   ShillProfileClient::TestInterface* profile_test_;
   ShillDeviceClient::TestInterface* device_test_;
   ShillServiceClient::TestInterface* service_test_;
+  ShillIPConfigClient::TestInterface* ip_config_test_;
 
   std::unique_ptr<NetworkStateHandler> network_state_handler_;
 

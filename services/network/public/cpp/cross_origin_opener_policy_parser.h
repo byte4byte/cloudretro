@@ -5,6 +5,7 @@
 #ifndef SERVICES_NETWORK_PUBLIC_CPP_CROSS_ORIGIN_OPENER_POLICY_PARSER_H_
 #define SERVICES_NETWORK_PUBLIC_CPP_CROSS_ORIGIN_OPENER_POLICY_PARSER_H_
 
+#include "services/network/public/mojom/cross_origin_embedder_policy.mojom.h"
 #include "services/network/public/mojom/cross_origin_opener_policy.mojom.h"
 
 namespace net {
@@ -18,8 +19,9 @@ namespace network {
 // TODO(ahemery): add a fuzzer for the parser, see
 // services/network/content_security_policy_fuzzer.cc for an example.
 COMPONENT_EXPORT(NETWORK_CPP)
-mojom::CrossOriginOpenerPolicy ParseCrossOriginOpenerPolicy(
-    const net::HttpResponseHeaders& headers);
+CrossOriginOpenerPolicy ParseCrossOriginOpenerPolicy(
+    const net::HttpResponseHeaders& headers,
+    const CrossOriginEmbedderPolicy& coep);
 
 }  // namespace network
 

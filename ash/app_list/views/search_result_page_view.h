@@ -5,6 +5,8 @@
 #ifndef ASH_APP_LIST_VIEWS_SEARCH_RESULT_PAGE_VIEW_H_
 #define ASH_APP_LIST_VIEWS_SEARCH_RESULT_PAGE_VIEW_H_
 
+#include <memory>
+#include <utility>
 #include <vector>
 
 #include "ash/app_list/app_list_export.h"
@@ -18,11 +20,15 @@
 #include "base/memory/weak_ptr.h"
 #include "base/timer/timer.h"
 
+namespace views {
+class DialogDelegateView;
+}
+
 namespace ash {
 
-class AppListViewDelegate;
 class SearchResultBaseView;
 class ViewShadow;
+class SearchResultPageAnchoredDialog;
 
 // The search results page for the app list.
 class APP_LIST_EXPORT SearchResultPageView
@@ -30,12 +36,15 @@ class APP_LIST_EXPORT SearchResultPageView
       public SearchResultContainerView::Delegate,
       public SearchBoxModelObserver {
  public:
-  SearchResultPageView(AppListViewDelegate* view_delegate,
-                       SearchModel* search_model);
+  explicit SearchResultPageView(SearchModel* search_model);
   ~SearchResultPageView() override;
 
-  void AddSearchResultContainerView(
-      SearchResultContainerView* result_container);
+  template <typename T>
+  T* AddSearchResultContainerView(std::unique_ptr<T> result_container) {
+    auto* result = result_container.get();
+    AddSearchResultContainerViewInternal(std::move(result_container));
+    return result;
+  }
 
   const std::vector<SearchResultContainerView*>& result_container_views() {
     return result_container_views_;
@@ -45,18 +54,28 @@ class APP_LIST_EXPORT SearchResultPageView
   bool IsFirstResultHighlighted() const;
 
   // Overridden from views::View:
-  bool OnKeyPressed(const ui::KeyEvent& event) override;
   const char* GetClassName() const override;
   gfx::Size CalculatePreferredSize() const override;
   void OnBoundsChanged(const gfx::Rect& previous_bounds) override;
   void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
 
   // AppListPage overrides:
+  void OnWillBeHidden() override;
   void OnHidden() override;
   void OnShown() override;
   void AnimateYPosition(AppListViewState target_view_state,
-                        const TransformAnimator& animator) override;
-
+                        const TransformAnimator& animator,
+                        float default_offset) override;
+  void UpdatePageOpacityForState(AppListState state,
+                                 float search_box_opacity,
+                                 bool restore_opacity) override;
+  void UpdatePageBoundsForState(AppListState state,
+                                const gfx::Rect& contents_bounds,
+                                const gfx::Rect& search_box_bounds) override;
+  gfx::Rect GetPageBoundsForState(
+      AppListState state,
+      const gfx::Rect& contents_bounds,
+      const gfx::Rect& search_box_bounds) const override;
   void OnAnimationStarted(AppListState from_state,
                           AppListState to_state) override;
   void OnAnimationUpdated(double progress,
@@ -65,32 +84,34 @@ class APP_LIST_EXPORT SearchResultPageView
   gfx::Size GetPreferredSearchBoxSize() const override;
   base::Optional<int> GetSearchBoxTop(
       AppListViewState view_state) const override;
-  gfx::Rect GetPageBoundsForState(
-      AppListState state,
-      const gfx::Rect& contents_bounds,
-      const gfx::Rect& search_box_bounds) const override;
   views::View* GetFirstFocusableView() override;
   views::View* GetLastFocusableView() override;
 
   // Overridden from SearchResultContainerView::Delegate:
   void OnSearchResultContainerResultsChanging() override;
   void OnSearchResultContainerResultsChanged() override;
-  void OnSearchResultContainerResultFocused(
-      SearchResultBaseView* focused_result_view) override;
 
   // Overridden from SearchBoxModelObserver:
-  void HintTextChanged() override;
   void Update() override;
   void SearchEngineChanged() override;
   void ShowAssistantChanged() override;
 
-  void OnAssistantPrivacyInfoViewCloseButtonPressed();
+  // Shows a dialog widget, and anchors it within the search results page. The
+  // dialog will be positioned relative to the search box bounds, and will be
+  // repositioned as the page layout changes. The dialog will be closed if the
+  // search results page gets hidden.
+  // |dialog| should not yet have a widget.
+  void ShowAnchoredDialog(std::unique_ptr<views::DialogDelegateView> dialog);
 
   views::View* contents_view() { return contents_view_; }
 
   SearchResultBaseView* first_result_view() const { return first_result_view_; }
   ResultSelectionController* result_selection_controller() {
     return result_selection_controller_.get();
+  }
+
+  SearchResultPageAnchoredDialog* anchored_dialog_for_test() {
+    return anchored_dialog_.get();
   }
 
  private:
@@ -132,7 +153,11 @@ class APP_LIST_EXPORT SearchResultPageView
   // selected search result view.
   void NotifySelectedResultChanged();
 
-  AppListViewDelegate* view_delegate_;
+  // Called when the widget anchored in the search results page gets closed.
+  void OnAnchoredDialogClosed();
+
+  void AddSearchResultContainerViewInternal(
+      std::unique_ptr<SearchResultContainerView> result_container);
 
   // The search model for which the results are displayed.
   SearchModel* const search_model_;
@@ -164,9 +189,10 @@ class APP_LIST_EXPORT SearchResultPageView
   // containers.
   int last_search_result_count_ = 0;
 
-  views::View* assistant_privacy_info_view_ = nullptr;
-
   std::unique_ptr<ViewShadow> view_shadow_;
+
+  // The dialog anchored within the search results page.
+  std::unique_ptr<SearchResultPageAnchoredDialog> anchored_dialog_;
 
   ScopedObserver<SearchBoxModel, SearchBoxModelObserver> search_box_observer_{
       this};

@@ -53,7 +53,7 @@ function createRow(rowInfo) {
  * Remove all rows from the engagement table.
  */
 function clearTable() {
-  engagementTableBody.innerHTML = '';
+  engagementTableBody.innerHTML = trustedTypes.emptyHTML;
 }
 
 /**
@@ -114,7 +114,7 @@ function createConfigRow(name, value) {
  */
 
 function renderConfigTable(config) {
-  configTableBody.innerHTML = '';
+  configTableBody.innerHTML = trustedTypes.emptyHTML;
 
   configTableBody.appendChild(
       createConfigRow('Min Sessions', config.scoreMinVisits));
@@ -135,9 +135,6 @@ function renderConfigTable(config) {
   configTableBody.appendChild(createConfigRow(
       'Autoplay disable settings',
       formatFeatureFlag(config.featureAutoplayDisableSettings)));
-  configTableBody.appendChild(createConfigRow(
-      'Autoplay whitelist settings',
-      formatFeatureFlag(config.featureAutoplayWhitelistSettings)));
   configTableBody.appendChild(createConfigRow(
       'Unified autoplay (preference)',
       formatFeatureFlag(config.prefDisableUnifiedAutoplay)));

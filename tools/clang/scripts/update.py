@@ -14,8 +14,6 @@ near-tip-of-tree clang version:
 (Note that the output dir may be deleted and re-created if it exists.)
 """
 
-# TODO: Running stand-alone won't work on Windows due to the dia dll copying.
-
 from __future__ import division
 from __future__ import print_function
 import argparse
@@ -39,13 +37,12 @@ import zipfile
 # Do NOT CHANGE this if you don't know what you're doing -- see
 # https://chromium.googlesource.com/chromium/src/+/master/docs/updating_clang.md
 # Reverting problematic clang rolls is safe, though.
-CLANG_REVISION = '4e0d9925d6a3561449bdd8def27fd3f3f1b3fb9f'
-CLANG_SVN_REVISION = 'n346557'
-CLANG_SUB_REVISION = 2
+# This is the output of `git describe` and is usable as a commit-ish.
+CLANG_REVISION = 'llvmorg-12-init-12083-g94e4ec64'
+CLANG_SUB_REVISION = 1
 
-PACKAGE_VERSION = '%s-%s-%s' % (CLANG_SVN_REVISION, CLANG_REVISION[:8],
-                                CLANG_SUB_REVISION)
-RELEASE_VERSION = '11.0.0'
+PACKAGE_VERSION = '%s-%s' % (CLANG_REVISION, CLANG_SUB_REVISION)
+RELEASE_VERSION = '12.0.0'
 
 
 CDS_URL = os.environ.get('CDS_CLANG_BUCKET_OVERRIDE',
@@ -181,12 +178,12 @@ def DownloadAndUnpackPackage(package_file, output_dir, host_os):
     sys.exit(1)
 
 
-# TODO(hans): Create a clang-win-runtime package instead.
-def DownloadAndUnpackClangWinRuntime(output_dir):
-  cds_file = "clang-%s.tgz" %  PACKAGE_VERSION
-  cds_full_url = GetPlatformUrlPrefix('win') + cds_file
-  path_prefixes =  [ 'lib/clang/' + RELEASE_VERSION + '/lib/',
-                     'bin/llvm-symbolizer.exe' ]
+def DownloadAndUnpackClangMacRuntime(output_dir):
+  cds_file = "clang-%s.tgz" % PACKAGE_VERSION
+  cds_full_url = GetPlatformUrlPrefix('mac') + cds_file
+  path_prefixes = [
+      'lib/clang/' + RELEASE_VERSION + '/lib/darwin', 'include/c++/v1'
+  ]
   try:
     DownloadAndUnpack(cds_full_url, output_dir, path_prefixes)
   except URLError:
@@ -196,56 +193,20 @@ def DownloadAndUnpackClangWinRuntime(output_dir):
     sys.exit(1)
 
 
-win_sdk_dir = None
-dia_dll = None
-def GetWinSDKDir():
-  """Get the location of the current SDK. Sets dia_dll as a side-effect."""
-  global win_sdk_dir
-  global dia_dll
-  if win_sdk_dir:
-    return win_sdk_dir
-
-  # Bump after VC updates.
-  DIA_DLL = {
-    '2013': 'msdia120.dll',
-    '2015': 'msdia140.dll',
-    '2017': 'msdia140.dll',
-    '2019': 'msdia140.dll',
-  }
-
-  # Don't let vs_toolchain overwrite our environment.
-  environ_bak = os.environ
-
-  sys.path.append(os.path.join(CHROMIUM_DIR, 'build'))
-  import vs_toolchain
-  win_sdk_dir = vs_toolchain.SetEnvironmentAndGetSDKDir()
-  msvs_version = vs_toolchain.GetVisualStudioVersion()
-
-  if bool(int(os.environ.get('DEPOT_TOOLS_WIN_TOOLCHAIN', '1'))):
-    dia_path = os.path.join(win_sdk_dir, '..', 'DIA SDK', 'bin', 'amd64')
-  else:
-    if 'GYP_MSVS_OVERRIDE_PATH' not in os.environ:
-      vs_path = vs_toolchain.DetectVisualStudioPath()
-    else:
-      vs_path = os.environ['GYP_MSVS_OVERRIDE_PATH']
-    dia_path = os.path.join(vs_path, 'DIA SDK', 'bin', 'amd64')
-
-  dia_dll = os.path.join(dia_path, DIA_DLL[msvs_version])
-
-  os.environ = environ_bak
-  return win_sdk_dir
-
-
-def CopyFile(src, dst):
-  """Copy a file from src to dst."""
-  print("Copying %s to %s" % (src, dst))
-  shutil.copy(src, dst)
-
-
-def CopyDiaDllTo(target_dir):
-  # This script always wants to use the 64-bit msdia*.dll.
-  GetWinSDKDir()
-  CopyFile(dia_dll, target_dir)
+# TODO(hans): Create a clang-win-runtime package instead.
+def DownloadAndUnpackClangWinRuntime(output_dir):
+  cds_file = "clang-%s.tgz" % PACKAGE_VERSION
+  cds_full_url = GetPlatformUrlPrefix('win') + cds_file
+  path_prefixes = [
+      'lib/clang/' + RELEASE_VERSION + '/lib/windows', 'bin/llvm-symbolizer.exe'
+  ]
+  try:
+    DownloadAndUnpack(cds_full_url, output_dir, path_prefixes)
+  except URLError:
+    print('Failed to download prebuilt clang %s' % cds_file)
+    print('Use build.py if you want to build locally.')
+    print('Exiting.')
+    sys.exit(1)
 
 
 def UpdatePackage(package_name, host_os):
@@ -289,7 +250,7 @@ def UpdatePackage(package_name, host_os):
     try:
       GCLIENT_CONFIG = os.path.join(os.path.dirname(CHROMIUM_DIR), '.gclient')
       env = {}
-      execfile(GCLIENT_CONFIG, env, env)
+      exec (open(GCLIENT_CONFIG).read(), env, env)
       target_os = env.get('target_os', target_os)
     except:
       pass
@@ -311,15 +272,12 @@ def UpdatePackage(package_name, host_os):
 
   DownloadAndUnpackPackage(package_file, LLVM_BUILD_DIR, host_os)
 
+  if package_name == 'clang' and 'mac' in target_os:
+    DownloadAndUnpackClangMacRuntime(LLVM_BUILD_DIR)
   if package_name == 'clang' and 'win' in target_os:
     # When doing win/cross builds on other hosts, get the Windows runtime
     # libraries, and llvm-symbolizer.exe (needed in asan builds).
     DownloadAndUnpackClangWinRuntime(LLVM_BUILD_DIR)
-    # Copy DIA dll when targeting Windows independent of the host OS as well,
-    # in case it needs to be copied to swarming.
-    # TODO(https://crbug.com/1073298): It's not clear what this is for,
-    # try removing it.
-    CopyDiaDllTo(os.path.join(LLVM_BUILD_DIR, 'bin'))
 
   WriteStampFile(expected_stamp, stamp_file)
   return 0

@@ -10,10 +10,11 @@
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "chrome/browser/media/router/providers/cast/cast_session_tracker.h"
 #include "chrome/browser/media/router/test/mock_mojo_media_router.h"
-#include "chrome/browser/media/router/test/test_helper.h"
-#include "chrome/common/media_router/test/test_helper.h"
+#include "chrome/browser/media/router/test/provider_test_helpers.h"
 #include "components/cast_channel/cast_test_util.h"
+#include "components/media_router/common/test/test_helper.h"
 #include "content/public/browser/browser_task_traits.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/test/browser_task_environment.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/receiver.h"
@@ -27,7 +28,11 @@ using ::testing::_;
 namespace media_router {
 
 namespace {
-static constexpr char kCastSource[] = "cast:ABCDEFGH?clientId=123";
+static constexpr char kAppId[] = "ABCDEFGH";
+
+constexpr char kCastSource[] =
+    "cast:ABCDEFGH?clientId=theClientId&appParams={\"credentialsType\":"
+    "\"mobile\"}";
 static constexpr char kPresentationId[] = "presentationId";
 static constexpr char kOrigin[] = "https://www.youtube.com";
 static constexpr int kTabId = 1;
@@ -38,8 +43,7 @@ static constexpr base::TimeDelta kRouteTimeout =
 class CastMediaRouteProviderTest : public testing::Test {
  public:
   CastMediaRouteProviderTest()
-      : socket_service_(
-            base::CreateSingleThreadTaskRunner({content::BrowserThread::UI})),
+      : socket_service_(content::GetUIThreadTaskRunner({})),
         message_handler_(&socket_service_) {}
   ~CastMediaRouteProviderTest() override = default;
 
@@ -178,26 +182,32 @@ TEST_F(CastMediaRouteProviderTest, CreateRoute) {
   MediaSinkInternal sink = CreateCastSink(1);
   media_sink_service_.AddOrUpdateSink(sink);
 
-  EXPECT_CALL(message_handler_, LaunchSession(_, _, _, _));
+  std::vector<std::string> default_supported_app_types = {"WEB"};
+  EXPECT_CALL(
+      message_handler_,
+      LaunchSession(sink.cast_data().cast_channel_id, kAppId,
+                    kDefaultLaunchTimeout, default_supported_app_types, _, _));
   provider_->CreateRoute(
       kCastSource, sink.sink().id(), kPresentationId, origin_, kTabId,
       kRouteTimeout, /* incognito */ false,
       base::BindOnce(
           &CastMediaRouteProviderTest::ExpectCreateRouteSuccessAndSetRoute,
           base::Unretained(this)));
+  base::RunLoop().RunUntilIdle();
 }
 
 TEST_F(CastMediaRouteProviderTest, TerminateRoute) {
   MediaSinkInternal sink = CreateCastSink(1);
   media_sink_service_.AddOrUpdateSink(sink);
 
-  EXPECT_CALL(message_handler_, LaunchSession(_, _, _, _));
+  EXPECT_CALL(message_handler_, LaunchSession(_, _, _, _, _, _));
   provider_->CreateRoute(
       kCastSource, sink.sink().id(), kPresentationId, origin_, kTabId,
       kRouteTimeout, /* incognito */ false,
       base::BindOnce(
           &CastMediaRouteProviderTest::ExpectCreateRouteSuccessAndSetRoute,
           base::Unretained(this)));
+  base::RunLoop().RunUntilIdle();
 
   ASSERT_TRUE(route_);
   provider_->TerminateRoute(

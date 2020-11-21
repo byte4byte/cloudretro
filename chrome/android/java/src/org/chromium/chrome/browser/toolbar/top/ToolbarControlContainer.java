@@ -16,13 +16,13 @@ import android.view.ViewStub;
 
 import org.chromium.base.TraceEvent;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.compositor.layouts.eventfilter.EdgeSwipeHandler;
 import org.chromium.chrome.browser.compositor.resources.ResourceFactory;
-import org.chromium.chrome.browser.contextualsearch.SwipeRecognizer;
 import org.chromium.chrome.browser.toolbar.ControlContainer;
 import org.chromium.chrome.browser.toolbar.ToolbarProgressBar;
 import org.chromium.components.browser_ui.widget.ClipDrawableProgressBar.DrawingInfo;
 import org.chromium.components.browser_ui.widget.ViewResourceFrameLayout;
+import org.chromium.components.browser_ui.widget.gesture.SwipeGestureListener;
+import org.chromium.components.browser_ui.widget.gesture.SwipeGestureListener.SwipeHandler;
 import org.chromium.ui.KeyboardVisibilityDelegate;
 import org.chromium.ui.base.ViewUtils;
 import org.chromium.ui.resources.dynamics.ViewResourceAdapter;
@@ -37,8 +37,7 @@ public class ToolbarControlContainer extends OptimizedFrameLayout implements Con
     private Toolbar mToolbar;
     private ToolbarViewResourceFrameLayout mToolbarContainer;
 
-    private final SwipeRecognizer mSwipeRecognizer;
-    private EdgeSwipeHandler mSwipeHandler;
+    private SwipeGestureListener mSwipeGestureListener;
 
     /**
      * Constructs a new control container.
@@ -51,7 +50,6 @@ public class ToolbarControlContainer extends OptimizedFrameLayout implements Con
     public ToolbarControlContainer(Context context, AttributeSet attrs) {
         super(context, attrs);
         mTabStripHeight = context.getResources().getDimension(R.dimen.tab_strip_height);
-        mSwipeRecognizer = new SwipeRecognizerImpl(context);
     }
 
     @Override
@@ -79,9 +77,8 @@ public class ToolbarControlContainer extends OptimizedFrameLayout implements Con
     }
 
     @Override
-    public void setSwipeHandler(EdgeSwipeHandler handler) {
-        mSwipeHandler = handler;
-        mSwipeRecognizer.setSwipeHandler(handler);
+    public void setSwipeHandler(SwipeHandler handler) {
+        mSwipeGestureListener = new SwipeGestureListenerImpl(getContext(), handler);
     }
 
     @Override
@@ -111,6 +108,21 @@ public class ToolbarControlContainer extends OptimizedFrameLayout implements Con
             // ready to draw the real tab strip. (On phone, the toolbar is made entirely
             // of Android views, which are already initialized.)
             setBackgroundResource(R.drawable.toolbar_background);
+        }
+    }
+
+    /**
+     * TODO(crbug.com/1136111): Try to remove this method. ToolbarContainer's visibility should not
+     * be set outside this class. Please do not use this method without discussing with the owners.
+     *
+     * Sets the visibility of the toolbar_container view.
+     */
+    @Deprecated
+    void setToolbarContainerVisibility(int visibility) {
+        mToolbarContainer.setVisibility(visibility);
+        // Trigger a capture when toolbar container view is set visible.
+        if (mToolbarContainer.isReadyForCapture()) {
+            invalidateBitmap();
         }
     }
 
@@ -165,7 +177,7 @@ public class ToolbarControlContainer extends OptimizedFrameLayout implements Con
 
         @Override
         protected boolean isReadyForCapture() {
-            return mReadyForBitmapCapture;
+            return mReadyForBitmapCapture && getVisibility() == VISIBLE;
         }
     }
 
@@ -248,10 +260,10 @@ public class ToolbarControlContainer extends OptimizedFrameLayout implements Con
     @Override
     public boolean onTouchEvent(MotionEvent event) {
         // Don't eat the event if we don't have a handler.
-        if (mSwipeHandler == null) return false;
+        if (mSwipeGestureListener == null) return false;
 
         // Don't react on touch events if the toolbar container is not fully visible.
-        if (!isFullyVisible()) return true;
+        if (!isToolbarContainerFullyVisible()) return true;
 
         // If we have ACTION_DOWN in this context, that means either no child consumed the event or
         // this class is the top UI at the event position. Then, we don't need to feed the event to
@@ -262,15 +274,15 @@ public class ToolbarControlContainer extends OptimizedFrameLayout implements Con
             return true;
         }
 
-        return mSwipeRecognizer.onTouchEvent(event);
+        return mSwipeGestureListener.onTouchEvent(event);
     }
 
     @Override
     public boolean onInterceptTouchEvent(MotionEvent event) {
-        if (!isFullyVisible()) return true;
-        if (mSwipeHandler == null || isOnTabStrip(event)) return false;
+        if (!isToolbarContainerFullyVisible()) return true;
+        if (mSwipeGestureListener == null || isOnTabStrip(event)) return false;
 
-        return mSwipeRecognizer.onTouchEvent(event);
+        return mSwipeGestureListener.onTouchEvent(event);
     }
 
     private boolean isOnTabStrip(MotionEvent e) {
@@ -278,15 +290,16 @@ public class ToolbarControlContainer extends OptimizedFrameLayout implements Con
     }
 
     /**
-     * @return Whether or not the control container is fully visible on screen.
+     * @return Whether or not the toolbar container is fully visible on screen.
      */
-    private boolean isFullyVisible() {
-        return Float.compare(0f, getTranslationY()) == 0;
+    private boolean isToolbarContainerFullyVisible() {
+        return Float.compare(0f, getTranslationY()) == 0
+                && mToolbarContainer.getVisibility() == VISIBLE;
     }
 
-    private class SwipeRecognizerImpl extends SwipeRecognizer {
-        public SwipeRecognizerImpl(Context context) {
-            super(context);
+    private class SwipeGestureListenerImpl extends SwipeGestureListener {
+        public SwipeGestureListenerImpl(Context context, SwipeHandler handler) {
+            super(context, handler);
         }
 
         @Override

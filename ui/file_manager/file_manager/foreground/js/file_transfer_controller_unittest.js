@@ -11,6 +11,11 @@ let fileTransferController;
 /** @type {!DirectoryTree} */
 let directoryTree;
 
+/** @type {!FileSelectionHandler} */
+let selectionHandler;
+
+/** @type {!VolumeManager} */
+let volumeManager;
 /**
  * Mock chrome APIs.
  * @type {!Object}
@@ -52,6 +57,7 @@ function setUp() {
   // Mock LoadTimeData strings.
   window.loadTimeData.getString = id => id;
   window.loadTimeData.getBoolean = id => false;
+  window.loadTimeData.data = {};
 
   // Mock chome APIs.
   mockChrome = {
@@ -59,7 +65,10 @@ function setUp() {
       enableExternalFileScheme: () => {},
       getProfiles: (callback) => {
         setTimeout(callback, 0, [], '', '');
-      }
+      },
+      grantAccess: (entryURLs, callback) => {
+        setTimeout(callback, 0);
+      },
     },
   };
   installMockChrome(mockChrome);
@@ -85,11 +94,14 @@ function setUp() {
   // Fake DirectoryModel.
   const directoryModel = createFakeDirectoryModel();
 
-  // Fake VolumeManager.
-  const volumeManager = new MockVolumeManager();
+  // Create fake VolumeManager and install webkitResolveLocalFileSystemURL.
+  volumeManager = new MockVolumeManager();
+  window.webkitResolveLocalFileSystemURL =
+      MockVolumeManager.resolveLocalFileSystemURL.bind(null, volumeManager);
+
 
   // Fake FileSelectionHandler.
-  const selectionHandler = new FakeFileSelectionHandler();
+  selectionHandler = new FakeFileSelectionHandler();
 
   // Fake HistoryLoader.
   const historyLoader = /** @type {!importer.HistoryLoader} */ ({
@@ -121,8 +133,9 @@ function setUp() {
   FileGrid.decorate(grid, metadataModel, volumeManager, historyLoader, a11y);
 
   // Setup the ListContainer and its dependencies
-  listContainer =
-      new ListContainer(queryRequiredElement('#list-container'), table, grid);
+  listContainer = new ListContainer(
+      queryRequiredElement('#list-container'), table, grid,
+      DialogType.FULL_PAGE);
   listContainer.dataModel = dataModel;
   listContainer.selectionModel = new cr.ui.ListSelectionModel();
   listContainer.setCurrentListType(ListContainer.ListType.DETAIL);
@@ -187,4 +200,92 @@ function testIsDocumentWideEvent() {
   crInput.focus();
   assertEquals(crInput, document.activeElement);
   assertFalse(fileTransferController.isDocumentWideEvent_());
+}
+
+/**
+ * Tests canCutOrDrag() respects non-modifiable entries like Downloads.
+ */
+function testCanMoveDownloads() {
+  // Item 1 of the volume info list should be Downloads volume type.
+  assertEquals(
+      VolumeManagerCommon.VolumeType.DOWNLOADS,
+      volumeManager.volumeInfoList.item(1).volumeType);
+
+  // Create a downloads folder inside the item.
+  const myFilesVolume = volumeManager.volumeInfoList.item(1);
+  const myFilesMockFs =
+      /** @type {!MockFileSystem} */ (myFilesVolume.fileSystem);
+
+  myFilesMockFs.populate([
+    '/Downloads/',
+    '/otherFolder/',
+  ]);
+  const downloadsEntry = myFilesMockFs.entries['/Downloads'];
+  const otherFolderEntry = myFilesMockFs.entries['/otherFolder'];
+
+  assertTrue(!!downloadsEntry);
+  assertTrue(!!otherFolderEntry);
+
+  selectionHandler =
+      /** @type {!FakeFileSelectionHandler} */ (selectionHandler);
+
+  // Downloads can't be cut.
+  selectionHandler.updateSelection([downloadsEntry], []);
+  assertFalse(fileTransferController.canCutOrDrag());
+
+  // otherFolder can be cut.
+  selectionHandler.updateSelection([otherFolderEntry], []);
+  assertTrue(fileTransferController.canCutOrDrag());
+}
+
+/**
+ * Tests preparePaste() with FilesApp fs/sources and standard DataTransfer.
+ */
+async function testPreparePaste(done) {
+  const myFilesVolume = volumeManager.volumeInfoList.item(1);
+  const myFilesMockFs =
+      /** @type {!MockFileSystem} */ (myFilesVolume.fileSystem);
+  myFilesMockFs.populate(['/testfile.txt', '/testdir/']);
+  const testFile = MockFileEntry.create(myFilesMockFs, '/testfile.txt');
+  const testDir = MockDirectoryEntry.create(myFilesMockFs, '/testdir');
+
+  // FilesApp internal drag and drop should populate sourceURLs at first, and
+  // only populate sourceEntries after calling resolveEntries().
+  const filesAppDataTransfer = new DataTransfer();
+  filesAppDataTransfer.setData('fs/sources', testFile.toURL());
+  const filesAppPastePlan =
+      fileTransferController.preparePaste(filesAppDataTransfer, testDir);
+  assertEquals(filesAppPastePlan.sourceURLs.length, 1);
+  assertEquals(filesAppPastePlan.sourceEntries.length, 0);
+  await filesAppPastePlan.resolveEntries();
+  assertEquals(filesAppPastePlan.sourceEntries.length, 1);
+  assertEquals(filesAppPastePlan.sourceEntries[0], testFile);
+
+  // Drag and drop from other apps will use DataTransfer.item with
+  // item.kind === 'file', and use webkitGetAsEntry() to populate sourceEntries.
+  const otherMockFs = new MockFileSystem('not-filesapp');
+  const otherFile = MockFileEntry.create(otherMockFs, '/otherfile.txt');
+  const otherDataTransfer = /** @type {!DataTransfer} */ ({
+    effectAllowed: 'copy',
+    getData: () => {
+      return '';
+    },
+    items: [{
+      kind: 'file',
+      webkitGetAsEntry: () => {
+        return otherFile;
+      },
+    }],
+  });
+  const otherPastePlan =
+      fileTransferController.preparePaste(otherDataTransfer, testDir);
+  assertEquals(otherPastePlan.sourceURLs.length, 0);
+  assertEquals(otherPastePlan.sourceEntries.length, 1);
+  assertEquals(otherPastePlan.sourceEntries[0], otherFile);
+  await otherPastePlan.resolveEntries();
+  assertEquals(otherPastePlan.sourceURLs.length, 0);
+  assertEquals(otherPastePlan.sourceEntries.length, 1);
+  assertEquals(otherPastePlan.sourceEntries[0], otherFile);
+
+  done();
 }

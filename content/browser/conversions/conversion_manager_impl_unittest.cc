@@ -10,20 +10,39 @@
 #include <utility>
 #include <vector>
 
+#include "base/bind.h"
 #include "base/callback_forward.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/run_loop.h"
 #include "base/sequenced_task_runner.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "base/time/clock.h"
 #include "base/time/time.h"
+#include "build/build_config.h"
+#include "content/browser/conversions/conversion_report.h"
 #include "content/browser/conversions/conversion_test_utils.h"
+#include "content/browser/conversions/storable_conversion.h"
+#include "content/browser/conversions/storable_impression.h"
 #include "content/public/test/browser_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace content {
 
 namespace {
+
+constexpr base::TimeDelta kExpiredReportOffset =
+    base::TimeDelta::FromMinutes(2);
+
+class ConstantStartupDelayPolicy : public ConversionPolicy {
+ public:
+  ConstantStartupDelayPolicy() = default;
+  ~ConstantStartupDelayPolicy() override = default;
+
+  base::Time GetReportTimeForExpiredReportAtStartup(
+      base::Time now) const override {
+    return now + kExpiredReportOffset;
+  }
+};
 
 // Mock reporter that tracks reports being queued by the ConversionManager.
 class TestConversionReporter
@@ -33,17 +52,32 @@ class TestConversionReporter
   ~TestConversionReporter() override = default;
 
   // ConversionManagerImpl::ConversionReporter
-  void AddReportsToQueue(std::vector<ConversionReport> reports) override {
+  void AddReportsToQueue(
+      std::vector<ConversionReport> reports,
+      base::RepeatingCallback<void(int64_t)> report_sent_callback) override {
     num_reports_ += reports.size();
     last_conversion_id_ = *reports.back().conversion_id;
+    last_report_time_ = reports.back().report_time;
+
+    if (should_run_report_sent_callbacks_) {
+      for (const auto& report : reports) {
+        report_sent_callback.Run(*report.conversion_id);
+      }
+    }
 
     if (quit_closure_ && num_reports_ >= expected_num_reports_)
       std::move(quit_closure_).Run();
   }
 
+  void ShouldRunReportSentCallbacks(bool should_run_report_sent_callbacks) {
+    should_run_report_sent_callbacks_ = should_run_report_sent_callbacks;
+  }
+
   size_t num_reports() { return num_reports_; }
 
   int64_t last_conversion_id() { return last_conversion_id_; }
+
+  base::Time last_report_time() { return last_report_time_; }
 
   void WaitForNumReports(size_t expected_num_reports) {
     if (num_reports_ >= expected_num_reports)
@@ -56,9 +90,11 @@ class TestConversionReporter
   }
 
  private:
+  bool should_run_report_sent_callbacks_ = false;
   size_t expected_num_reports_ = 0u;
   size_t num_reports_ = 0u;
   int64_t last_conversion_id_ = 0UL;
+  base::Time last_report_time_;
   base::OnceClosure quit_closure_;
 };
 
@@ -83,8 +119,8 @@ class ConversionManagerImplTest : public testing::Test {
     auto reporter = std::make_unique<TestConversionReporter>();
     test_reporter_ = reporter.get();
     conversion_manager_ = ConversionManagerImpl::CreateForTesting(
-        std::move(reporter), task_environment_.GetMockClock(), dir_.GetPath(),
-        base::ThreadPool::CreateSequencedTaskRunner({base::MayBlock()}));
+        std::move(reporter), std::make_unique<ConstantStartupDelayPolicy>(),
+        task_environment_.GetMockClock(), dir_.GetPath());
   }
 
   const base::Clock& clock() { return *task_environment_.GetMockClock(); }
@@ -95,6 +131,72 @@ class ConversionManagerImplTest : public testing::Test {
   std::unique_ptr<ConversionManagerImpl> conversion_manager_;
   TestConversionReporter* test_reporter_ = nullptr;
 };
+
+TEST_F(ConversionManagerImplTest, ImpressionRegistered_ReturnedToWebUI) {
+  auto impression = ImpressionBuilder(clock().Now())
+                        .SetExpiry(kImpressionExpiry)
+                        .SetData("100")
+                        .Build();
+  conversion_manager_->HandleImpression(impression);
+
+  base::RunLoop run_loop;
+  auto get_impressions_callback = base::BindLambdaForTesting(
+      [&](std::vector<StorableImpression> impressions) {
+        EXPECT_EQ(1u, impressions.size());
+        EXPECT_TRUE(ImpressionsEqual(impression, impressions.back()));
+        run_loop.Quit();
+      });
+  conversion_manager_->GetActiveImpressionsForWebUI(
+      std::move(get_impressions_callback));
+  run_loop.Run();
+}
+
+TEST_F(ConversionManagerImplTest, ExpiredImpression_NotReturnedToWebUI) {
+  conversion_manager_->HandleImpression(ImpressionBuilder(clock().Now())
+                                            .SetExpiry(kImpressionExpiry)
+                                            .SetData("100")
+                                            .Build());
+  task_environment_.FastForwardBy(2 * kImpressionExpiry);
+
+  base::RunLoop run_loop;
+  auto get_impressions_callback = base::BindLambdaForTesting(
+      [&](std::vector<StorableImpression> impressions) {
+        EXPECT_TRUE(impressions.empty());
+        run_loop.Quit();
+      });
+  conversion_manager_->GetActiveImpressionsForWebUI(
+      std::move(get_impressions_callback));
+  run_loop.Run();
+}
+
+TEST_F(ConversionManagerImplTest, ImpressionConverted_ReportReturnedToWebUI) {
+  auto impression = ImpressionBuilder(clock().Now())
+                        .SetExpiry(kImpressionExpiry)
+                        .SetData("100")
+                        .Build();
+  conversion_manager_->HandleImpression(impression);
+
+  auto conversion = DefaultConversion();
+  conversion_manager_->HandleConversion(conversion);
+
+  ConversionReport expected_report(
+      impression, conversion.conversion_data(),
+      /*conversion_time=*/clock().Now(),
+      /*report_time=*/clock().Now() + kFirstReportingWindow,
+      base::nullopt /* conversion_id */);
+  expected_report.attribution_credit = 100;
+
+  base::RunLoop run_loop;
+  auto reports_callback =
+      base::BindLambdaForTesting([&](std::vector<ConversionReport> reports) {
+        EXPECT_EQ(1u, reports.size());
+        EXPECT_TRUE(ReportsEqual({expected_report}, reports));
+        run_loop.Quit();
+      });
+  conversion_manager_->GetReportsForWebUI(std::move(reports_callback),
+                                          base::Time::Max());
+  run_loop.Run();
+}
 
 TEST_F(ConversionManagerImplTest, ImpressionConverted_ReportQueued) {
   conversion_manager_->HandleImpression(
@@ -126,15 +228,13 @@ TEST_F(ConversionManagerImplTest, QueuedReportNotSent_QueuedAgain) {
 }
 
 TEST_F(ConversionManagerImplTest, QueuedReportSent_NotQueuedAgain) {
+  test_reporter_->ShouldRunReportSentCallbacks(true);
   conversion_manager_->HandleImpression(
       ImpressionBuilder(clock().Now()).SetExpiry(kImpressionExpiry).Build());
   conversion_manager_->HandleConversion(DefaultConversion());
   task_environment_.FastForwardBy(kFirstReportingWindow -
                                   kConversionManagerQueueReportsInterval);
   EXPECT_EQ(1u, test_reporter_->num_reports());
-
-  // Notify the manager that the report has been sent.
-  conversion_manager_->HandleSentReport(test_reporter_->last_conversion_id());
 
   // The report should not be added to the queue again.
   task_environment_.FastForwardBy(kConversionManagerQueueReportsInterval);
@@ -169,9 +269,9 @@ TEST_F(ConversionManagerImplTest, ExpiredReportsAtStartup_Queued) {
 
   // Create the manager and check that the first report is queued immediately.
   CreateManager();
+  test_reporter_->ShouldRunReportSentCallbacks(true);
   test_reporter_->WaitForNumReports(1);
   EXPECT_EQ(1u, test_reporter_->num_reports());
-  conversion_manager_->HandleSentReport(test_reporter_->last_conversion_id());
 
   // The second report is still queued at the correct time.
   task_environment_.FastForwardBy(kConversionManagerQueueReportsInterval);
@@ -200,6 +300,75 @@ TEST_F(ConversionManagerImplTest, ClearData) {
     size_t expected_reports = match_url ? 0u : 1u;
     EXPECT_EQ(expected_reports, test_reporter_->num_reports());
   }
+}
+
+TEST_F(ConversionManagerImplTest, ConversionsSentFromUI_ReportedImmediately) {
+  conversion_manager_->HandleImpression(
+      ImpressionBuilder(clock().Now()).SetExpiry(kImpressionExpiry).Build());
+  conversion_manager_->HandleImpression(
+      ImpressionBuilder(clock().Now()).SetExpiry(kImpressionExpiry).Build());
+  conversion_manager_->HandleConversion(DefaultConversion());
+  EXPECT_EQ(0u, test_reporter_->num_reports());
+
+  conversion_manager_->SendReportsForWebUI(base::DoNothing());
+  task_environment_.FastForwardBy(base::TimeDelta::FromMinutes(0));
+  EXPECT_EQ(2u, test_reporter_->num_reports());
+}
+
+// TODO(crbug.com/1088449): Flaky on Linux and Android.
+#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_ANDROID)
+#define MAYBE_ExpiredReportsAtStartup_Delayed \
+  DISABLED_ExpiredReportsAtStartup_Delayed
+#else
+#define MAYBE_ExpiredReportsAtStartup_Delayed ExpiredReportsAtStartup_Delayed
+#endif
+TEST_F(ConversionManagerImplTest, MAYBE_ExpiredReportsAtStartup_Delayed) {
+  // Create a report that will be reported at t= 2 days.
+  base::Time start_time = clock().Now();
+  conversion_manager_->HandleImpression(
+      ImpressionBuilder(clock().Now()).SetExpiry(kImpressionExpiry).Build());
+  conversion_manager_->HandleConversion(DefaultConversion());
+  EXPECT_EQ(0u, test_reporter_->num_reports());
+
+  // Reset the manager to simulate shutdown.
+  conversion_manager_.reset();
+
+  // Fast forward past the expected report time of the first conversion, t =
+  // (kFirstReportingWindow+ 1 minute).
+  task_environment_.FastForwardBy(kFirstReportingWindow +
+                                  base::TimeDelta::FromMinutes(1));
+
+  CreateManager();
+  test_reporter_->WaitForNumReports(1);
+
+  // Ensure that the expired report is delayed based on the time the browser
+  // started.
+  EXPECT_EQ(start_time + kFirstReportingWindow +
+                base::TimeDelta::FromMinutes(1) + kExpiredReportOffset,
+            test_reporter_->last_report_time());
+}
+
+TEST_F(ConversionManagerImplTest, NonExpiredReportsQueuedAtStartup_NotDelayed) {
+  // Create a report that will be reported at t= 2 days.
+  base::Time start_time = clock().Now();
+  conversion_manager_->HandleImpression(
+      ImpressionBuilder(clock().Now()).SetExpiry(kImpressionExpiry).Build());
+  conversion_manager_->HandleConversion(DefaultConversion());
+  EXPECT_EQ(0u, test_reporter_->num_reports());
+
+  // Reset the manager to simulate shutdown.
+  conversion_manager_.reset();
+
+  // Fast forward just before the expected report time.
+  task_environment_.FastForwardBy(kFirstReportingWindow -
+                                  base::TimeDelta::FromMinutes(1));
+
+  // Ensure that this report does not receive additional delay.
+  CreateManager();
+  test_reporter_->WaitForNumReports(1);
+  EXPECT_EQ(1u, test_reporter_->num_reports());
+  EXPECT_EQ(start_time + kFirstReportingWindow,
+            test_reporter_->last_report_time());
 }
 
 }  // namespace content

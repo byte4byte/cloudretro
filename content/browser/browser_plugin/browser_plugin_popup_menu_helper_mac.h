@@ -6,9 +6,9 @@
 #define CONTENT_BROWSER_BROWSER_PLUGIN_BROWSER_PLUGIN_POPUP_MENU_HELPER_MAC_H_
 
 #include "base/macros.h"
-#include "content/browser/frame_host/popup_menu_helper_mac.h"
+#include "content/browser/renderer_host/popup_menu_helper_mac.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
-#include "third_party/blink/public/mojom/popup/popup.mojom.h"
+#include "third_party/blink/public/mojom/choosers/popup_menu.mojom.h"
 
 namespace content {
 
@@ -26,7 +26,7 @@ class BrowserPluginPopupMenuHelper : public PopupMenuHelper,
   BrowserPluginPopupMenuHelper(
       RenderFrameHostImpl* embedder_rfh,
       RenderFrameHost* guest_rfh,
-      mojo::PendingRemote<blink::mojom::ExternalPopup> popup);
+      mojo::PendingRemote<blink::mojom::PopupMenuClient> popup_client);
 
  private:
   // PopupMenuHelper:

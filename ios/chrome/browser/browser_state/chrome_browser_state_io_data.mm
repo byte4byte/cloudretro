@@ -10,12 +10,12 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
 #include "base/callback.h"
+#include "base/callback_helpers.h"
+#include "base/check_op.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/debug/alias.h"
-#include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/path_service.h"
 #include "base/single_thread_task_runner.h"
@@ -62,7 +62,7 @@
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_builder.h"
-#include "net/url_request/url_request_job_factory_impl.h"
+#include "net/url_request/url_request_job_factory.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -209,7 +209,7 @@ ChromeBrowserStateIOData::~ChromeBrowserStateIOData() {
 
 // static
 void ChromeBrowserStateIOData::InstallProtocolHandlers(
-    net::URLRequestJobFactoryImpl* job_factory,
+    net::URLRequestJobFactory* job_factory,
     ProtocolHandlerMap* protocol_handlers) {
   for (ProtocolHandlerMap::iterator it = protocol_handlers->begin();
        it != protocol_handlers->end(); ++it) {

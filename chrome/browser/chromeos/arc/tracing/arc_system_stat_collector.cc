@@ -9,12 +9,14 @@
 #include <unistd.h>
 
 #include "base/bind.h"
+#include "base/cpu.h"
 #include "base/files/file_enumerator.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_file.h"
 #include "base/logging.h"
 #include "base/no_destructor.h"
 #include "base/strings/string_util.h"
+#include "base/system/sys_info.h"
 #include "base/task/post_task.h"
 #include "base/task/thread_pool.h"
 #include "base/task_runner_util.h"
@@ -50,8 +52,11 @@ const base::FilePath::CharType kPowercapPath[] =
     FILE_PATH_LITERAL("/sys/class/powercap");
 const base::FilePath::CharType kIntelRaplQuery[] = FILE_PATH_LITERAL("intel-rapl:*");
 const base::FilePath::CharType kEnergyPath[] = FILE_PATH_LITERAL("energy_uj");
+const base::FilePath::CharType kLongTermConstraintPath[] =
+    FILE_PATH_LITERAL("constraint_0_power_limit_uw");
 const base::FilePath::CharType kNamePath[] = FILE_PATH_LITERAL("name");
 
+constexpr char kPackagePowerDomainName[] = "package-0";
 constexpr char kCpuPowerDomainName[] = "core";
 constexpr char kGpuPowerDomainName[] = "uncore";
 constexpr char kMemoryPowerDomainName[] = "dram";
@@ -130,6 +135,7 @@ enum SystemReader {
   kCpuEnergy,
   kGpuEnergy,
   kMemoryEnergy,
+  kPackagePowerConstraint,
   kTotal
 };
 
@@ -150,6 +156,8 @@ struct ArcSystemStatCollector::Sample {
   int cpu_power = 0;
   int gpu_power = 0;
   int memory_power = 0;
+  // Constraint in milli-watts.
+  int package_power_constraint = 0;
 };
 
 struct OneValueReaderInfo {
@@ -185,13 +193,20 @@ struct ArcSystemStatCollector::SystemReadersContext {
       }
 
       SystemReader reader;
+      base::FilePath component;
       base::TrimWhitespaceASCII(domain_name, base::TRIM_ALL, &domain_name);
-      if (domain_name == kCpuPowerDomainName) {
+      if (domain_name == kPackagePowerDomainName) {
+        reader = kPackagePowerConstraint;
+        component = base::FilePath(kLongTermConstraintPath);
+      } else if (domain_name == kCpuPowerDomainName) {
         reader = kCpuEnergy;
+        component = base::FilePath(kEnergyPath);
       } else if (domain_name == kGpuPowerDomainName) {
         reader = kGpuEnergy;
+        component = base::FilePath(kEnergyPath);
       } else if (domain_name == kMemoryPowerDomainName) {
         reader = kMemoryEnergy;
+        component = base::FilePath(kEnergyPath);
       } else {
         LOG(WARNING) << "Ignore power counter " << domain_name << " in "
                      << domain_file_path.value();
@@ -204,12 +219,12 @@ struct ArcSystemStatCollector::SystemReadersContext {
         continue;
       }
 
-      const base::FilePath energy_file_path = dir.Append(kEnergyPath);
+      const base::FilePath counter_file_path = dir.Append(component);
       context->system_readers[reader].reset(
-          open(energy_file_path.value().c_str(), O_RDONLY));
+          open(counter_file_path.value().c_str(), O_RDONLY));
       if (!context->system_readers[reader].is_valid()) {
         LOG(ERROR) << "Failed to open power counter: " << domain_name << " as "
-                   << energy_file_path.value();
+                   << counter_file_path.value();
       }
     }
   }
@@ -231,10 +246,22 @@ struct ArcSystemStatCollector::SystemReadersContext {
       LOG(ERROR) << "Failed to open mem info file: " << kMemoryInfoPath;
     }
 
-    context->system_readers[SystemReader::kGemInfo].reset(
-        open(kGemInfoPath, O_RDONLY));
-    if (!context->system_readers[SystemReader::kGemInfo].is_valid()) {
-      LOG(ERROR) << "Failed to open gem info file: " << kGemInfoPath;
+    // Reading i915_gem_objects on Intel platform with kernel 5.4 is slow and is
+    // prohibited. Also it changes reporting format.
+    // TODO(b/170397975): Update if i915_gem_objects reading time is improved.
+    const bool is_newer_kernel =
+        base::StartsWith(base::SysInfo::KernelVersion(), "5.");
+    const bool is_intel_cpu = base::CPU().vendor_name() == "GenuineIntel";
+
+    if (!is_newer_kernel || !is_intel_cpu) {
+      context->system_readers[SystemReader::kGemInfo].reset(
+          open(kGemInfoPath, O_RDONLY));
+      if (!context->system_readers[SystemReader::kGemInfo].is_valid()) {
+        LOG(ERROR) << "Failed to open gem info file: " << kGemInfoPath;
+      }
+    } else {
+      LOG(ERROR) << "Reading gem info from: " << kGemInfoPath
+                 << " is disabled.";
     }
 
     const base::FilePath& cpu_temp_path = GetCpuTemperaturePathOnFileThread();
@@ -335,6 +362,9 @@ void ArcSystemStatCollector::Flush(const base::TimeTicks& min_timestamp,
                                        ArcValueEvent::Type::kCpuTemperature);
   ArcValueEventTrimmer cpu_frequency(&system_model->memory_events(),
                                      ArcValueEvent::Type::kCpuFrequency);
+  ArcValueEventTrimmer package_power_constraint(
+      &system_model->memory_events(),
+      ArcValueEvent::Type::kPackagePowerConstraint);
   ArcValueEventTrimmer cpu_power(&system_model->memory_events(),
                                  ArcValueEvent::Type::kCpuPower);
   ArcValueEventTrimmer gpu_power(&system_model->memory_events(),
@@ -362,12 +392,15 @@ void ArcSystemStatCollector::Flush(const base::TimeTicks& min_timestamp,
       cpu_temperature.MaybeAdd(timestamp, sample.cpu_temperature);
     if (sample.cpu_frequency > 0)
       cpu_frequency.MaybeAdd(timestamp, sample.cpu_frequency);
+    package_power_constraint.MaybeAdd(timestamp,
+                                      sample.package_power_constraint);
     cpu_power.MaybeAdd(timestamp, sample.cpu_power);
     gpu_power.MaybeAdd(timestamp, sample.gpu_power);
     memory_power.MaybeAdd(timestamp, sample.memory_power);
   }
 
   // These are optional. Keep it if non-zero value is detected.
+  package_power_constraint.ResetIfConstant(0);
   cpu_power.ResetIfConstant(0);
   gpu_power.ResetIfConstant(0);
   memory_power.ResetIfConstant(0);
@@ -461,6 +494,8 @@ ArcSystemStatCollector::ReadSystemStatOnBackgroundThread(
       {SystemReader::kCpuTemperature, &context->current_frame.cpu_temperature,
        std::numeric_limits<int>::min()},
       {SystemReader::kCpuFrequency, &context->current_frame.cpu_frequency, 0},
+      {SystemReader::kPackagePowerConstraint,
+       &context->current_frame.package_power_constraint, 0},
       {SystemReader::kCpuEnergy, &context->current_frame.cpu_energy, 0},
       {SystemReader::kGpuEnergy, &context->current_frame.gpu_energy, 0},
       {SystemReader::kMemoryEnergy, &context->current_frame.memory_energy, 0},
@@ -527,6 +562,10 @@ void ArcSystemStatCollector::UpdateSystemStatOnUiThread(
   }
   current_sample.cpu_temperature = context->current_frame.cpu_temperature;
   current_sample.cpu_frequency = context->current_frame.cpu_frequency;
+  current_sample.package_power_constraint =
+      static_cast<int>(context->current_frame.package_power_constraint *
+                       0.001 /* micro-watts to milli-watts */);
+  DCHECK_GE(current_sample.package_power_constraint, 0);
   DCHECK_GE(current_sample.swap_sectors_read, 0);
   DCHECK_GE(current_sample.swap_sectors_write, 0);
   DCHECK_GE(current_sample.swap_waiting_time_ms, 0);
@@ -537,6 +576,8 @@ void ArcSystemStatCollector::UpdateSystemStatOnUiThread(
 
   context_ = std::move(context);
 }
+
+ArcSystemStatCollector::RuntimeFrame::RuntimeFrame() = default;
 
 bool ParseStatFile(int fd, const int* columns, int64_t* output) {
   char buffer[128];

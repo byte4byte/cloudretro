@@ -4,12 +4,15 @@
 
 <link rel="import" href="chrome://resources/cr_elements/icons.html">
 <link rel="import" href="chrome://resources/html/i18n_behavior.html">
+
 <link rel="import" href="chrome://oobe/custom_elements.html">
 
-<dom-module id="kiosk-enable">
+<link rel="import" href="/components/oobe_i18n_behavior.html">
+<link rel="import" href="/components/oobe_dialog.html">
+
+<dom-module id="kiosk-enable-element">
   <template>
-    <link rel="stylesheet" href="oobe_dialog_host.css">
-    <link rel="stylesheet" href="oobe_flex_layout.css">
+    <style include="oobe-dialog-host"></style>
 
     <oobe-dialog id="dialog" role="dialog"
         title-key="kioskEnableWarningText"
@@ -28,14 +31,14 @@
       </div>
       <div slot="footer" class="flex layout center-justified vertical">
         <img src="chrome://theme/IDR_RESET_WARNING" class="oobe-illustration">
-      </div>  
+      </div>
       <div slot="bottom-buttons" class="flex layout horizontal end-justified">
         <oobe-text-button id="enable" hidden="[[!eq_(state_, 'confirm')]]"
-            inverse on-tap="onEnableButton_" text-key="kioskEnableButton">
+            inverse on-click="onEnableButton_" text-key="kioskEnableButton">
         </oobe-text-button>
         <oobe-text-button id="close" class="focus-on-show" inverse
             text-key="[[primaryButtonTextKey_(state_)]]"
-            on-tap="closeDialog_"></oobe-text-button>
+            on-click="closeDialog_"></oobe-text-button>
       </div>
     </oobe-dialog>
   </template>

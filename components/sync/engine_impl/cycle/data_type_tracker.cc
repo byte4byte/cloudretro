@@ -7,8 +7,8 @@
 #include <algorithm>
 #include <utility>
 
-#include "base/logging.h"
-#include "components/sync/engine_impl/cycle/nudge_tracker.h"
+#include "base/check.h"
+#include "base/notreached.h"
 
 namespace syncer {
 
@@ -41,10 +41,10 @@ const char* WaitInterval::GetModeString(BlockingMode mode) {
 
 #undef ENUM_CASE
 
-DataTypeTracker::DataTypeTracker()
+DataTypeTracker::DataTypeTracker(size_t initial_payload_buffer_size)
     : local_nudge_count_(0),
       local_refresh_request_count_(0),
-      payload_buffer_size_(NudgeTracker::kDefaultMaxPayloadsPerType),
+      payload_buffer_size_(initial_payload_buffer_size),
       initial_sync_required_(false),
       sync_required_to_resolve_conflict_(false) {}
 

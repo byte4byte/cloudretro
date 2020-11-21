@@ -13,6 +13,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/browser/app_window/app_window_geometry_cache.h"
 #include "extensions/common/constants.h"
@@ -151,7 +152,7 @@ IN_PROC_BROWSER_TEST_F(AppWindowAPITest, DISABLED_TestMaximize) {
 // Flaky on Linux. http://crbug.com/424399.
 #if defined(OS_LINUX) && !defined(OS_CHROMEOS)
 #define MAYBE_TestMinimize DISABLED_TestMinimize
-#elif defined(OS_MACOSX)
+#elif defined(OS_MAC)
 // Fails on Mac: https://crbug.com/834908
 #define MAYBE_TestMinimize DISABLED_TestMinimize
 #else
@@ -171,13 +172,13 @@ IN_PROC_BROWSER_TEST_F(AppWindowAPITest, DISABLED_TestRestoreAfterClose) {
 }
 
 // These tests will be flaky in Linux as window bounds change asynchronously.
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
 #define MAYBE_TestDeprecatedBounds DISABLED_TestDeprecatedBounds
 #define MAYBE_TestInitialBounds DISABLED_TestInitialBounds
 #define MAYBE_TestInitialConstraints DISABLED_TestInitialConstraints
 #define MAYBE_TestSetBounds DISABLED_TestSetBounds
 #define MAYBE_TestSetSizeConstraints DISABLED_TestSetSizeConstraints
-#elif defined(OS_MACOSX)
+#elif defined(OS_MAC)
 // Most of these don't work under MacViews, which has never had complete support
 // for old-style app windows.
 // https://crbug.com/834908
@@ -235,7 +236,7 @@ IN_PROC_BROWSER_TEST_F(AppWindowAPITest,
 
   apps::AppServiceProxyFactory::GetForProfile(browser()->profile())
       ->BrowserAppLauncher()
-      .LaunchAppWithParams(apps::AppLaunchParams(
+      ->LaunchAppWithParams(apps::AppLaunchParams(
           extension->id(), apps::mojom::LaunchContainer::kLaunchContainerNone,
           WindowOpenDisposition::NEW_WINDOW,
           apps::mojom::AppLaunchSource::kSourceTest));

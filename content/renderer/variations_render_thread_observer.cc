@@ -6,6 +6,7 @@
 
 #include "base/no_destructor.h"
 #include "base/synchronization/lock.h"
+#include "components/variations/net/omnibox_url_loader_throttle.h"
 #include "components/variations/net/variations_url_loader_throttle.h"
 #include "content/public/renderer/render_thread.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_registry.h"
@@ -18,20 +19,25 @@ namespace {
 // workers) necessitating locking.
 class VariationsData {
  public:
-  void SetVariationsHeader(const std::string& variation_ids_header) {
+  void SetVariationsHeaders(
+      variations::mojom::VariationsHeadersPtr variations_headers) {
     base::AutoLock lock(lock_);
-    variations_header_ = variation_ids_header;
+    variations_headers_ = std::move(variations_headers);
   }
 
   // Deliberately returns a copy.
-  std::string GetVariationsHeader() const {
+  variations::mojom::VariationsHeadersPtr GetVariationsHeaders() const {
     base::AutoLock lock(lock_);
-    return variations_header_;
+    return variations_headers_.Clone();
   }
 
  private:
   mutable base::Lock lock_;
-  std::string variations_header_ GUARDED_BY(lock_);
+
+  // Stores variations headers that may be appended to eligible requests to
+  // Google web properties. For more details, see GetClientDataHeaders() in
+  // variations_ids_provider.h.
+  variations::mojom::VariationsHeadersPtr variations_headers_ GUARDED_BY(lock_);
 };
 
 VariationsData* GetVariationsData() {
@@ -47,12 +53,17 @@ VariationsRenderThreadObserver::~VariationsRenderThreadObserver() = default;
 
 // static
 void VariationsRenderThreadObserver::AppendThrottleIfNeeded(
+    const url::Origin& top_frame_origin,
     std::vector<std::unique_ptr<blink::URLLoaderThrottle>>* throttles) {
-  std::string variations_header = GetVariationsData()->GetVariationsHeader();
-  if (!variations_header.empty()) {
+  variations::OmniboxURLLoaderThrottle::AppendThrottleIfNeeded(throttles);
+
+  variations::mojom::VariationsHeadersPtr variations_headers =
+      GetVariationsData()->GetVariationsHeaders();
+
+  if (!variations_headers.is_null()) {
     throttles->push_back(
         std::make_unique<variations::VariationsURLLoaderThrottle>(
-            std::move(variations_header)));
+            std::move(variations_headers), top_frame_origin));
   }
 }
 
@@ -69,9 +80,9 @@ void VariationsRenderThreadObserver::UnregisterMojoInterfaces(
       mojom::RendererVariationsConfiguration::Name_);
 }
 
-void VariationsRenderThreadObserver::SetVariationsHeader(
-    const std::string& variation_ids_header) {
-  GetVariationsData()->SetVariationsHeader(variation_ids_header);
+void VariationsRenderThreadObserver::SetVariationsHeaders(
+    variations::mojom::VariationsHeadersPtr variations_headers) {
+  GetVariationsData()->SetVariationsHeaders(std::move(variations_headers));
 }
 
 void VariationsRenderThreadObserver::SetFieldTrialGroup(

@@ -58,32 +58,16 @@ void RelaunchRequiredDialogView::SetDeadline(base::Time deadline) {
   relaunch_required_timer_.SetDeadline(deadline);
 }
 
-ui::ModalType RelaunchRequiredDialogView::GetModalType() const {
-  return ui::MODAL_TYPE_WINDOW;
-}
-
 base::string16 RelaunchRequiredDialogView::GetWindowTitle() const {
   return relaunch_required_timer_.GetWindowTitle();
 }
 
-bool RelaunchRequiredDialogView::ShouldShowCloseButton() const {
-  return false;
-}
-
 gfx::ImageSkia RelaunchRequiredDialogView::GetWindowIcon() {
-  return gfx::CreateVectorIcon(gfx::IconDescription(
-      vector_icons::kBusinessIcon, kTitleIconSize, gfx::kChromeIconGrey));
-}
-
-bool RelaunchRequiredDialogView::ShouldShowWindowIcon() const {
-  return true;
-}
-
-gfx::Size RelaunchRequiredDialogView::CalculatePreferredSize() const {
-  const int width = ChromeLayoutProvider::Get()->GetDistanceMetric(
-                        DISTANCE_MODAL_DIALOG_PREFERRED_WIDTH) -
-                    margins().width();
-  return gfx::Size(width, GetHeightForWidth(width));
+  return gfx::CreateVectorIcon(
+      gfx::IconDescription(vector_icons::kBusinessIcon,
+                           ChromeLayoutProvider::Get()->GetDistanceMetric(
+                               DISTANCE_BUBBLE_HEADER_VECTOR_ICON_SIZE),
+                           gfx::kChromeIconGrey));
 }
 
 // |relaunch_required_timer_| automatically starts for the next time the title
@@ -95,39 +79,45 @@ RelaunchRequiredDialogView::RelaunchRequiredDialogView(
           deadline,
           base::BindRepeating(&RelaunchRequiredDialogView::UpdateWindowTitle,
                               base::Unretained(this))) {
-  DialogDelegate::SetDefaultButton(ui::DIALOG_BUTTON_NONE);
-  DialogDelegate::SetButtonLabel(
-      ui::DIALOG_BUTTON_OK,
-      l10n_util::GetStringUTF16(IDS_RELAUNCH_ACCEPT_BUTTON));
-  DialogDelegate::SetButtonLabel(
+  SetDefaultButton(ui::DIALOG_BUTTON_NONE);
+  SetButtonLabel(ui::DIALOG_BUTTON_OK,
+                 l10n_util::GetStringUTF16(IDS_RELAUNCH_ACCEPT_BUTTON));
+  SetButtonLabel(
       ui::DIALOG_BUTTON_CANCEL,
       l10n_util::GetStringUTF16(IDS_RELAUNCH_REQUIRED_CANCEL_BUTTON));
-  DialogDelegate::SetAcceptCallback(base::BindOnce(
+  SetShowIcon(true);
+  SetAcceptCallback(base::BindOnce(
       [](base::RepeatingClosure callback) {
         base::RecordAction(base::UserMetricsAction("RelaunchRequired_Accept"));
         callback.Run();
       },
       on_accept));
-  DialogDelegate::SetCancelCallback(base::BindOnce(
+  SetCancelCallback(base::BindOnce(
       base::RecordAction, base::UserMetricsAction("RelaunchRequired_Close")));
   SetLayoutManager(std::make_unique<views::FillLayout>());
+
+  SetModalType(ui::MODAL_TYPE_WINDOW);
+  SetShowCloseButton(false);
+  set_fixed_width(views::LayoutProvider::Get()->GetDistanceMetric(
+      views::DISTANCE_MODAL_DIALOG_PREFERRED_WIDTH));
+
   chrome::RecordDialogCreation(chrome::DialogIdentifier::RELAUNCH_REQUIRED);
-  set_margins(ChromeLayoutProvider::Get()->GetDialogInsetsForContentType(
-      views::TEXT, views::TEXT));
+  const ChromeLayoutProvider* provider = ChromeLayoutProvider::Get();
+  set_margins(
+      provider->GetDialogInsetsForContentType(views::TEXT, views::TEXT));
 
   auto label = std::make_unique<views::Label>(
       l10n_util::GetPluralStringFUTF16(IDS_RELAUNCH_REQUIRED_BODY,
                                        BrowserList::GetIncognitoBrowserCount()),
-      views::style::CONTEXT_MESSAGE_BOX_BODY_TEXT);
+      views::style::CONTEXT_DIALOG_BODY_TEXT);
   label->SetMultiLine(true);
   label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
 
   // Align the body label with the left edge of the dialog's title.
   // TODO(bsep): Remove this when fixing https://crbug.com/810970.
-  int title_offset = 2 * views::LayoutProvider::Get()
-                             ->GetInsetsMetric(views::INSETS_DIALOG_TITLE)
-                             .left() +
-                     kTitleIconSize;
+  const int title_offset =
+      2 * provider->GetInsetsMetric(views::INSETS_DIALOG_TITLE).left() +
+      provider->GetDistanceMetric(DISTANCE_BUBBLE_HEADER_VECTOR_ICON_SIZE);
   label->SetBorder(views::CreateEmptyBorder(
       gfx::Insets(0, title_offset - margins().left(), 0, 0)));
 

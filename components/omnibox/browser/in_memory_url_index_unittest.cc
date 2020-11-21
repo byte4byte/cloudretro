@@ -24,6 +24,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/scoped_feature_list.h"
 #include "base/test/task_environment.h"
 #include "components/history/core/browser/history_backend.h"
 #include "components/history/core/browser/history_database.h"
@@ -34,6 +35,7 @@
 #include "components/omnibox/browser/in_memory_url_index_test_util.h"
 #include "components/omnibox/browser/in_memory_url_index_types.h"
 #include "components/omnibox/browser/url_index_private_data.h"
+#include "components/omnibox/common/omnibox_features.h"
 #include "components/search_engines/template_url_service.h"
 #include "sql/transaction.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -54,7 +56,7 @@ using base::ASCIIToUTF16;
 namespace {
 const size_t kInvalid = base::string16::npos;
 const size_t kProviderMaxMatches = 3;
-const char kClientWhitelistedScheme[] = "xyz";
+const char kClientAllowlistedScheme[] = "xyz";
 
 // TemplateURLs used to test filtering of search engine URLs.
 const char kDefaultTemplateURLKeyword[] = "default-engine.com";
@@ -97,6 +99,8 @@ void StringToTerms(const char* search_string,
 class CacheFileSaverObserver : public InMemoryURLIndex::SaveCacheObserver {
  public:
   explicit CacheFileSaverObserver(const base::RepeatingClosure& task);
+  CacheFileSaverObserver(const CacheFileSaverObserver&) = delete;
+  CacheFileSaverObserver& operator=(const CacheFileSaverObserver&) = delete;
 
   bool succeeded() { return succeeded_; }
 
@@ -106,8 +110,6 @@ class CacheFileSaverObserver : public InMemoryURLIndex::SaveCacheObserver {
 
   base::RepeatingClosure task_;
   bool succeeded_;
-
-  DISALLOW_COPY_AND_ASSIGN(CacheFileSaverObserver);
 };
 
 CacheFileSaverObserver::CacheFileSaverObserver(
@@ -148,6 +150,10 @@ class InMemoryURLIndexTest : public testing::Test {
   // Pass-through function to simplify our friendship with HistoryService.
   sql::Database& GetDB();
 
+  void RebuildFromHistory() {
+    url_index_->RebuildFromHistory(history_database_);
+  }
+
   // Pass-through functions to simplify our friendship with InMemoryURLIndex.
   URLIndexPrivateData* GetPrivateData() const;
   base::CancelableTaskTracker* GetPrivateDataTracker() const;
@@ -156,7 +162,7 @@ class InMemoryURLIndexTest : public testing::Test {
   bool GetCacheFilePath(base::FilePath* file_path) const;
   void PostRestoreFromCacheFileTask();
   void PostSaveToCacheFileTask();
-  const SchemeSet& scheme_whitelist();
+  const SchemeSet& scheme_allowlist();
 
   // Pass-through functions to simplify our friendship with URLIndexPrivateData.
   bool UpdateURL(const history::URLRow& row);
@@ -213,14 +219,14 @@ void InMemoryURLIndexTest::PostSaveToCacheFileTask() {
   url_index_->PostSaveToCacheFileTask();
 }
 
-const SchemeSet& InMemoryURLIndexTest::scheme_whitelist() {
-  return url_index_->scheme_whitelist();
+const SchemeSet& InMemoryURLIndexTest::scheme_allowlist() {
+  return url_index_->scheme_allowlist();
 }
 
 bool InMemoryURLIndexTest::UpdateURL(const history::URLRow& row) {
-  return GetPrivateData()->UpdateURL(
-      history_service_.get(), row, url_index_->scheme_whitelist_,
-      GetPrivateDataTracker());
+  return GetPrivateData()->UpdateURL(history_service_.get(), row,
+                                     url_index_->scheme_allowlist_,
+                                     GetPrivateDataTracker());
 }
 
 bool InMemoryURLIndexTest::DeleteURL(const GURL& url) {
@@ -306,13 +312,13 @@ bool InMemoryURLIndexTest::InitializeInMemoryURLIndexInSetUp() const {
 void InMemoryURLIndexTest::InitializeInMemoryURLIndex() {
   DCHECK(!url_index_);
 
-  SchemeSet client_schemes_to_whitelist;
-  client_schemes_to_whitelist.insert(kClientWhitelistedScheme);
+  SchemeSet client_schemes_to_allowlist;
+  client_schemes_to_allowlist.insert(kClientAllowlistedScheme);
   url_index_.reset(new InMemoryURLIndex(
       nullptr, history_service_.get(), template_url_service_.get(),
-      base::FilePath(), client_schemes_to_whitelist));
+      base::FilePath(), client_schemes_to_allowlist));
   url_index_->Init();
-  url_index_->RebuildFromHistory(history_database_);
+  RebuildFromHistory();
 }
 
 void InMemoryURLIndexTest::CheckTerm(
@@ -678,6 +684,95 @@ TEST_F(InMemoryURLIndexTest, URLPrefixMatching) {
   EXPECT_EQ(0U, matches.size());
 }
 
+TEST_F(InMemoryURLIndexTest, HideVisitsFromCct) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeature(omnibox::kHideVisitsFromCct);
+  ScoredHistoryMatches matches = url_index_->HistoryItemsForTerms(
+      ASCIIToUTF16("QuiteUseless"), base::string16::npos, kProviderMaxMatches);
+  EXPECT_EQ(1U, matches.size());
+
+  sql::Statement s(GetDB().GetUniqueStatement(
+      "UPDATE visits SET transition = ? WHERE id = 23"));
+  s.BindInt64(0, ui::PAGE_TRANSITION_FROM_API_2);
+  ASSERT_TRUE(s.Run());
+  RebuildFromHistory();
+  matches = url_index_->HistoryItemsForTerms(
+      ASCIIToUTF16("QuiteUseless"), base::string16::npos, kProviderMaxMatches);
+  EXPECT_EQ(0U, matches.size());
+}
+
+TEST_F(InMemoryURLIndexTest, HideVisitsFromCctNewlyAddedVisit) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeature(omnibox::kHideVisitsFromCct);
+  ScoredHistoryMatches matches = url_index_->HistoryItemsForTerms(
+      ASCIIToUTF16("urlnotindb"), base::string16::npos, kProviderMaxMatches);
+  EXPECT_EQ(0U, matches.size());
+
+  // Do this history::kLowQualityMatchVisitLimit times to ensure the visit
+  // is considered significant.
+  for (int i = 0; i < history::kLowQualityMatchVisitLimit; ++i) {
+    history_service_->AddPage(GURL("http://urlnotindb.com"), base::Time::Now(),
+                              nullptr, 101, GURL(), {},
+                              ui::PAGE_TRANSITION_FROM_API_2,
+                              history::SOURCE_BROWSED, false, false);
+    // Flush twice as the first ensures HistoryServiceObservers are run, and
+    // the second for the task scheduled by URLIndexPrivateData.
+    for (int j = 0; j < 2; ++j) {
+      base::RunLoop run_loop;
+      history_service_->FlushForTest(run_loop.QuitClosure());
+      run_loop.Run();
+    }
+  }
+  matches = url_index_->HistoryItemsForTerms(
+      ASCIIToUTF16("urlnotindb"), base::string16::npos, kProviderMaxMatches);
+  EXPECT_EQ(0U, matches.size());
+}
+
+TEST_F(InMemoryURLIndexTest, HideVisitsFromCctWhenTitleChanges) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeature(omnibox::kHideVisitsFromCct);
+  ScoredHistoryMatches matches = url_index_->HistoryItemsForTerms(
+      ASCIIToUTF16("urlnotindb"), base::string16::npos, kProviderMaxMatches);
+  EXPECT_EQ(0U, matches.size());
+
+  // Add the history::kLowQualityMatchVisitLimit visits to ensure the visit
+  // count is significant.
+  for (int i = 0; i < history::kLowQualityMatchVisitLimit; ++i) {
+    history_service_->AddPage(GURL("http://urlnotindb.com"), base::Time::Now(),
+                              nullptr, 101, GURL(), {},
+                              ui::PAGE_TRANSITION_FROM_API_2,
+                              history::SOURCE_BROWSED, false, false);
+    // Flush twice as the first ensures HistoryServiceObservers are run, and
+    // the second for the task scheduled by URLIndexPrivateData.
+    for (int j = 0; j < 2; ++j) {
+      base::RunLoop run_loop;
+      history_service_->FlushForTest(run_loop.QuitClosure());
+      run_loop.Run();
+    }
+  }
+
+  // There should not be an entry.
+  matches = url_index_->HistoryItemsForTerms(
+      ASCIIToUTF16("urlnotindb"), base::string16::npos, kProviderMaxMatches);
+  EXPECT_EQ(0U, matches.size());
+
+  // Change the title.
+  history_service_->SetPageTitle(GURL("http://urlnotindb.com"),
+                                 ASCIIToUTF16("urlnotindb"));
+  // Flush twice as the first ensures HistoryServiceObservers are run, and
+  // the second for the task scheduled by URLIndexPrivateData.
+  for (int j = 0; j < 2; ++j) {
+    base::RunLoop run_loop;
+    history_service_->FlushForTest(run_loop.QuitClosure());
+    run_loop.Run();
+  }
+
+  // Entry should still not have been added.
+  matches = url_index_->HistoryItemsForTerms(
+      ASCIIToUTF16("urlnotindb"), base::string16::npos, kProviderMaxMatches);
+  EXPECT_EQ(0U, matches.size());
+}
+
 TEST_F(InMemoryURLIndexTest, ProperStringMatching) {
   // Search for the following with the expected results:
   // "atdmt view" - found
@@ -1032,87 +1127,87 @@ TEST_F(InMemoryURLIndexTest, ExpireRow) {
                   .empty());
 }
 
-TEST_F(InMemoryURLIndexTest, WhitelistedURLs) {
-  std::string client_whitelisted_url =
-      base::StringPrintf("%s://foo", kClientWhitelistedScheme);
+TEST_F(InMemoryURLIndexTest, AllowlistedURLs) {
+  std::string client_allowlisted_url =
+      base::StringPrintf("%s://foo", kClientAllowlistedScheme);
   struct TestData {
     const std::string url_spec;
-    const bool expected_is_whitelisted;
+    const bool expected_is_allowlisted;
   } data[] = {
-    // URLs with whitelisted schemes.
-    { "about:histograms", true },
-    { "file://localhost/Users/joeschmoe/sekrets", true },
-    { "ftp://public.mycompany.com/myfile.txt", true },
-    { "http://www.google.com/translate", true },
-    { "https://www.gmail.com/", true },
-    { "mailto:support@google.com", true },
-    { client_whitelisted_url, true },
-    // URLs with unacceptable schemes.
-    { "aaa://www.dummyhost.com;frammy", false },
-    { "aaas://www.dummyhost.com;frammy", false },
-    { "acap://suzie@somebody.com", false },
-    { "cap://cal.example.com/Company/Holidays", false },
-    { "cid:foo4*foo1@bar.net", false },
-    { "crid://example.com/foobar", false },
-    { "data:image/png;base64,iVBORw0KGgoAAAANSUhE=", false },
-    { "dict://dict.org/d:shortcake:", false },
-    { "dns://192.168.1.1/ftp.example.org?type=A", false },
-    { "fax:+358.555.1234567", false },
-    { "geo:13.4125,103.8667", false },
-    { "go:Mercedes%20Benz", false },
-    { "gopher://farnsworth.ca:666/gopher", false },
-    { "h323:farmer-john;sixpence", false },
-    { "iax:johnQ@example.com/12022561414", false },
-    { "icap://icap.net/service?mode=translate&lang=french", false },
-    { "im:fred@example.com", false },
-    { "imap://michael@minbari.org/users.*", false },
-    { "info:ddc/22/eng//004.678", false },
-    { "ipp://example.com/printer/fox", false },
-    { "iris:dreg1//example.com/local/myhosts", false },
-    { "iris.beep:dreg1//example.com/local/myhosts", false },
-    { "iris.lws:dreg1//example.com/local/myhosts", false },
-    { "iris.xpc:dreg1//example.com/local/myhosts", false },
-    { "iris.xpcs:dreg1//example.com/local/myhosts", false },
-    { "ldap://ldap.itd.umich.edu/o=University%20of%20Michigan,c=US", false },
-    { "mid:foo4%25foo1@bar.net", false },
-    { "modem:+3585551234567;type=v32b?7e1;type=v110", false },
-    { "msrp://atlanta.example.com:7654/jshA7weztas;tcp", false },
-    { "msrps://atlanta.example.com:7654/jshA7weztas;tcp", false },
-    { "news:colorectal.info.banned", false },
-    { "nfs://server/d/e/f", false },
-    { "nntp://www.example.com:6543/info.comp.lies/1234", false },
-    { "pop://rg;AUTH=+APOP@mail.mycompany.com:8110", false },
-    { "pres:fred@example.com", false },
-    { "prospero://host.dom//pros/name", false },
-    { "rsync://syler@lost.com/Source", false },
-    { "rtsp://media.example.com:554/twister/audiotrack", false },
-    { "acap://some.where.net;authentication=KERBEROSV4", false },
-    { "shttp://www.terces.com/secret", false },
-    { "sieve://example.com//script", false },
-    { "sip:+1-212-555-1212:1234@gateway.com;user=phone", false },
-    { "sips:+1-212-555-1212:1234@gateway.com;user=phone", false },
-    { "sms:+15105551212?body=hello%20there", false },
-    { "snmp://tester5@example.com:8161/bridge1;800002b804616263", false },
-    { "soap.beep://stockquoteserver.example.com/StockQuote", false },
-    { "soap.beeps://stockquoteserver.example.com/StockQuote", false },
-    { "tag:blogger.com,1999:blog-555", false },
-    { "tel:+358-555-1234567;postd=pp22", false },
-    { "telnet://mayor_margie:one2rule4All@www.mycity.com:6789/", false },
-    { "tftp://example.com/mystartupfile", false },
-    { "tip://123.123.123.123/?urn:xopen:xid", false },
-    { "tv:nbc.com", false },
-    { "urn:foo:A123,456", false },
-    { "vemmi://zeus.mctel.fr/demo", false },
-    { "wais://www.mydomain.net:8765/mydatabase", false },
-    { "xmpp:node@example.com", false },
-    { "xmpp://guest@example.com", false },
+      // URLs with allowlisted schemes.
+      {"about:histograms", true},
+      {"file://localhost/Users/joeschmoe/sekrets", true},
+      {"ftp://public.mycompany.com/myfile.txt", true},
+      {"http://www.google.com/translate", true},
+      {"https://www.gmail.com/", true},
+      {"mailto:support@google.com", true},
+      {client_allowlisted_url, true},
+      // URLs with unacceptable schemes.
+      {"aaa://www.dummyhost.com;frammy", false},
+      {"aaas://www.dummyhost.com;frammy", false},
+      {"acap://suzie@somebody.com", false},
+      {"cap://cal.example.com/Company/Holidays", false},
+      {"cid:foo4*foo1@bar.net", false},
+      {"crid://example.com/foobar", false},
+      {"data:image/png;base64,iVBORw0KGgoAAAANSUhE=", false},
+      {"dict://dict.org/d:shortcake:", false},
+      {"dns://192.168.1.1/ftp.example.org?type=A", false},
+      {"fax:+358.555.1234567", false},
+      {"geo:13.4125,103.8667", false},
+      {"go:Mercedes%20Benz", false},
+      {"gopher://farnsworth.ca:666/gopher", false},
+      {"h323:farmer-john;sixpence", false},
+      {"iax:johnQ@example.com/12022561414", false},
+      {"icap://icap.net/service?mode=translate&lang=french", false},
+      {"im:fred@example.com", false},
+      {"imap://michael@minbari.org/users.*", false},
+      {"info:ddc/22/eng//004.678", false},
+      {"ipp://example.com/printer/fox", false},
+      {"iris:dreg1//example.com/local/myhosts", false},
+      {"iris.beep:dreg1//example.com/local/myhosts", false},
+      {"iris.lws:dreg1//example.com/local/myhosts", false},
+      {"iris.xpc:dreg1//example.com/local/myhosts", false},
+      {"iris.xpcs:dreg1//example.com/local/myhosts", false},
+      {"ldap://ldap.itd.umich.edu/o=University%20of%20Michigan,c=US", false},
+      {"mid:foo4%25foo1@bar.net", false},
+      {"modem:+3585551234567;type=v32b?7e1;type=v110", false},
+      {"msrp://atlanta.example.com:7654/jshA7weztas;tcp", false},
+      {"msrps://atlanta.example.com:7654/jshA7weztas;tcp", false},
+      {"news:colorectal.info.banned", false},
+      {"nfs://server/d/e/f", false},
+      {"nntp://www.example.com:6543/info.comp.lies/1234", false},
+      {"pop://rg;AUTH=+APOP@mail.mycompany.com:8110", false},
+      {"pres:fred@example.com", false},
+      {"prospero://host.dom//pros/name", false},
+      {"rsync://syler@lost.com/Source", false},
+      {"rtsp://media.example.com:554/twister/audiotrack", false},
+      {"acap://some.where.net;authentication=KERBEROSV4", false},
+      {"shttp://www.terces.com/secret", false},
+      {"sieve://example.com//script", false},
+      {"sip:+1-212-555-1212:1234@gateway.com;user=phone", false},
+      {"sips:+1-212-555-1212:1234@gateway.com;user=phone", false},
+      {"sms:+15105551212?body=hello%20there", false},
+      {"snmp://tester5@example.com:8161/bridge1;800002b804616263", false},
+      {"soap.beep://stockquoteserver.example.com/StockQuote", false},
+      {"soap.beeps://stockquoteserver.example.com/StockQuote", false},
+      {"tag:blogger.com,1999:blog-555", false},
+      {"tel:+358-555-1234567;postd=pp22", false},
+      {"telnet://mayor_margie:one2rule4All@www.mycity.com:6789/", false},
+      {"tftp://example.com/mystartupfile", false},
+      {"tip://123.123.123.123/?urn:xopen:xid", false},
+      {"tv:nbc.com", false},
+      {"urn:foo:A123,456", false},
+      {"vemmi://zeus.mctel.fr/demo", false},
+      {"wais://www.mydomain.net:8765/mydatabase", false},
+      {"xmpp:node@example.com", false},
+      {"xmpp://guest@example.com", false},
   };
 
-  const SchemeSet& whitelist(scheme_whitelist());
+  const SchemeSet& allowlist(scheme_allowlist());
   for (size_t i = 0; i < base::size(data); ++i) {
     GURL url(data[i].url_spec);
-    EXPECT_EQ(data[i].expected_is_whitelisted,
-              URLIndexPrivateData::URLSchemeIsWhitelisted(url, whitelist));
+    EXPECT_EQ(data[i].expected_is_allowlisted,
+              URLIndexPrivateData::URLSchemeIsAllowlisted(url, allowlist));
   }
 }
 

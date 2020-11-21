@@ -13,7 +13,7 @@ import android.content.pm.ResolveInfo;
 import android.os.Build;
 import android.text.TextUtils;
 
-import org.chromium.webapk.lib.common.WebApkMetaDataKeys;
+import org.chromium.components.webapk.lib.common.WebApkMetaDataKeys;
 
 import java.util.Arrays;
 import java.util.HashSet;
@@ -163,7 +163,8 @@ public class HostBrowserUtils {
      * launch {@link SplashActivity} for the given host browser params.
      */
     public static boolean shouldIntentLaunchSplashActivity(HostBrowserLauncherParams params) {
-        return !params.getHostBrowserPackageName().equals(ARC_INTENT_HELPER_BROWSER)
+        return params.isNewStyleWebApk()
+                && !params.getHostBrowserPackageName().equals(ARC_INTENT_HELPER_BROWSER)
                 && params.getHostBrowserMajorChromiumVersion()
                 >= MINIMUM_REQUIRED_CHROMIUM_VERSION_NEW_SPLASH
                 && Build.VERSION.SDK_INT >= Build.VERSION_CODES.N;

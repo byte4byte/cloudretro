@@ -5,6 +5,8 @@
 #include "chrome/browser/ui/toolbar/chrome_location_bar_model_delegate.h"
 
 #include "base/check.h"
+#include "base/feature_list.h"
+#include "base/metrics/histogram_macros.h"
 #include "build/build_config.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
 #include "chrome/browser/autocomplete/chrome_autocomplete_scheme_classifier.h"
@@ -21,6 +23,7 @@
 #include "components/omnibox/browser/omnibox_prefs.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
+#include "components/search/ntp_features.h"
 #include "components/security_interstitials/content/security_interstitial_tab_helper.h"
 #include "components/security_state/core/security_state.h"
 #include "content/public/browser/navigation_controller.h"
@@ -74,19 +77,11 @@ bool ChromeLocationBarModelDelegate::GetURL(GURL* url) const {
   return true;
 }
 
-bool ChromeLocationBarModelDelegate::ShouldPreventElision() const {
-  Profile* const profile = GetProfile();
-  if (profile &&
-      profile->GetPrefs()->GetBoolean(omnibox::kPreventUrlElisionsInOmnibox)) {
+bool ChromeLocationBarModelDelegate::ShouldPreventElision() {
+  if (GetElisionConfig() != ELISION_CONFIG_DEFAULT) {
     return true;
   }
-#if BUILDFLAG(ENABLE_EXTENSIONS)
-  return profile && extensions::ExtensionRegistry::Get(profile)
-                        ->enabled_extensions()
-                        .Contains(kPreventElisionExtensionId);
-#else
   return false;
-#endif
 }
 
 bool ChromeLocationBarModelDelegate::ShouldDisplayURL() const {
@@ -191,11 +186,26 @@ bool ChromeLocationBarModelDelegate::IsOfflinePage() const {
 #endif
 }
 
-bool ChromeLocationBarModelDelegate::IsInstantNTP() const {
-  return search::IsInstantNTP(GetActiveWebContents());
+bool ChromeLocationBarModelDelegate::IsNewTabPage() const {
+  content::NavigationEntry* const entry = GetNavigationEntry();
+  if (!entry)
+    return false;
+
+  Profile* const profile = GetProfile();
+  if (!profile)
+    return false;
+
+  if (!search::DefaultSearchProviderIsGoogle(profile))
+    return false;
+
+  GURL ntp_url(base::FeatureList::IsEnabled(ntp_features::kWebUI)
+                   ? chrome::kChromeUINewTabPageURL
+                   : chrome::kChromeSearchLocalNtpUrl);
+  return ntp_url.scheme_piece() == entry->GetURL().scheme_piece() &&
+         ntp_url.host_piece() == entry->GetURL().host_piece();
 }
 
-bool ChromeLocationBarModelDelegate::IsNewTabPage(const GURL& url) const {
+bool ChromeLocationBarModelDelegate::IsNewTabPageURL(const GURL& url) const {
   return url.spec() == chrome::kChromeUINewTabURL;
 }
 
@@ -221,6 +231,23 @@ Profile* ChromeLocationBarModelDelegate::GetProfile() const {
   return controller
              ? Profile::FromBrowserContext(controller->GetBrowserContext())
              : nullptr;
+}
+
+ChromeLocationBarModelDelegate::ElisionConfig
+ChromeLocationBarModelDelegate::GetElisionConfig() const {
+  Profile* const profile = GetProfile();
+  if (profile &&
+      profile->GetPrefs()->GetBoolean(omnibox::kPreventUrlElisionsInOmnibox)) {
+    return ELISION_CONFIG_TURNED_OFF_BY_PREF;
+  }
+#if BUILDFLAG(ENABLE_EXTENSIONS)
+  if (profile && extensions::ExtensionRegistry::Get(profile)
+                     ->enabled_extensions()
+                     .Contains(kPreventElisionExtensionId)) {
+    return ELISION_CONFIG_TURNED_OFF_BY_EXTENSION;
+  }
+#endif
+  return ELISION_CONFIG_DEFAULT;
 }
 
 AutocompleteClassifier*

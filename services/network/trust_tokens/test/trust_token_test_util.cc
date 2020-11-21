@@ -4,12 +4,17 @@
 
 #include "services/network/trust_tokens/test/trust_token_test_util.h"
 
-#include "base/test/bind_test_util.h"
-#include "services/network/public/mojom/trust_tokens.mojom-shared.h"
+#include "base/json/json_reader.h"
+#include "base/json/json_string_value_serializer.h"
+#include "base/test/bind.h"
+#include "base/test/task_environment.h"
+#include "base/values.h"
 
 namespace network {
 
-TestURLRequestMaker::TestURLRequestMaker() = default;
+TestURLRequestMaker::TestURLRequestMaker() {
+  context_.set_net_log(&net_log_);
+}
 TestURLRequestMaker::~TestURLRequestMaker() = default;
 
 std::unique_ptr<net::URLRequest> TestURLRequestMaker::MakeURLRequest(
@@ -21,7 +26,12 @@ std::unique_ptr<net::URLRequest> TestURLRequestMaker::MakeURLRequest(
 
 TrustTokenRequestHelperTest::TrustTokenRequestHelperTest(
     base::test::TaskEnvironment::TimeSource time_source)
-    : env_(time_source) {}
+    : env_(time_source,
+           // Since the various TrustTokenRequestHelper implementations might be
+           // posting tasks from within calls to Begin or Finalize, use
+           // execution mode ASYNC to ensure these tasks get run during
+           // RunLoop::Run calls.
+           base::test::TaskEnvironment::ThreadPoolExecutionMode::ASYNC) {}
 TrustTokenRequestHelperTest::~TrustTokenRequestHelperTest() = default;
 
 mojom::TrustTokenOperationStatus
@@ -40,14 +50,30 @@ TrustTokenRequestHelperTest::ExecuteBeginOperationAndWaitForResult(
   return status;
 }
 
+mojom::TrustTokenOperationStatus
+TrustTokenRequestHelperTest::ExecuteFinalizeAndWaitForResult(
+    TrustTokenRequestHelper* helper,
+    mojom::URLResponseHead* response) {
+  base::RunLoop run_loop;
+  mojom::TrustTokenOperationStatus status;
+  helper->Finalize(response,
+                   base::BindLambdaForTesting(
+                       [&](mojom::TrustTokenOperationStatus returned_status) {
+                         status = returned_status;
+                         run_loop.Quit();
+                       }));
+  run_loop.Run();
+  return status;
+}
+
 std::string TrustTokenEnumToString(mojom::TrustTokenOperationType type) {
   switch (type) {
     case mojom::TrustTokenOperationType::kIssuance:
       return "token-request";
     case mojom::TrustTokenOperationType::kRedemption:
-      return "srr-token-redemption";
+      return "token-redemption";
     case mojom::TrustTokenOperationType::kSigning:
-      return "send-srr";
+      return "send-redemption-record";
   }
 }
 
@@ -82,8 +108,9 @@ TrustTokenParametersAndSerialization::~TrustTokenParametersAndSerialization() =
 
 TrustTokenParametersAndSerialization::TrustTokenParametersAndSerialization(
     TrustTokenParametersAndSerialization&&) = default;
-TrustTokenParametersAndSerialization& TrustTokenParametersAndSerialization::
-operator=(TrustTokenParametersAndSerialization&&) = default;
+TrustTokenParametersAndSerialization&
+TrustTokenParametersAndSerialization::operator=(
+    TrustTokenParametersAndSerialization&&) = default;
 
 TrustTokenTestParameters::~TrustTokenTestParameters() = default;
 TrustTokenTestParameters::TrustTokenTestParameters(
@@ -96,14 +123,17 @@ TrustTokenTestParameters::TrustTokenTestParameters(
     base::Optional<network::mojom::TrustTokenRefreshPolicy> refresh_policy,
     base::Optional<network::mojom::TrustTokenSignRequestData> sign_request_data,
     base::Optional<bool> include_timestamp_header,
-    base::Optional<std::string> issuer_spec,
-    base::Optional<std::vector<std::string>> additional_signed_headers)
+    base::Optional<std::vector<std::string>> issuer_specs,
+    base::Optional<std::vector<std::string>> additional_signed_headers,
+    base::Optional<std::string> possibly_unsafe_additional_signing_data)
     : type(type),
       refresh_policy(refresh_policy),
       sign_request_data(sign_request_data),
       include_timestamp_header(include_timestamp_header),
-      issuer_spec(issuer_spec),
-      additional_signed_headers(additional_signed_headers) {}
+      issuer_specs(issuer_specs),
+      additional_signed_headers(additional_signed_headers),
+      possibly_unsafe_additional_signing_data(
+          possibly_unsafe_additional_signing_data) {}
 
 TrustTokenParametersAndSerialization
 SerializeTrustTokenParametersAndConstructExpectation(
@@ -133,9 +163,14 @@ SerializeTrustTokenParametersAndConstructExpectation(
         *input.include_timestamp_header;
   }
 
-  if (input.issuer_spec.has_value()) {
-    parameters.SetStringKey("issuer", *input.issuer_spec);
-    trust_token_params->issuer = url::Origin::Create(GURL(*input.issuer_spec));
+  if (input.issuer_specs.has_value()) {
+    base::Value issuers(base::Value::Type::LIST);
+    for (const std::string& issuer_spec : *input.issuer_specs) {
+      issuers.Append(issuer_spec);
+      trust_token_params->issuers.push_back(
+          url::Origin::Create(GURL(issuer_spec)));
+    }
+    parameters.SetKey("issuers", std::move(issuers));
   }
 
   if (input.additional_signed_headers.has_value()) {
@@ -148,10 +183,40 @@ SerializeTrustTokenParametersAndConstructExpectation(
     }
   }
 
+  if (input.possibly_unsafe_additional_signing_data.has_value()) {
+    parameters.SetStringKey("additionalSigningData",
+                            *input.possibly_unsafe_additional_signing_data);
+    trust_token_params->possibly_unsafe_additional_signing_data =
+        *input.possibly_unsafe_additional_signing_data;
+  }
+
   std::string serialized_parameters;
   JSONStringValueSerializer serializer(&serialized_parameters);
   CHECK(serializer.Serialize(parameters));
+
   return {std::move(trust_token_params), std::move(serialized_parameters)};
+}
+
+std::string WrapKeyCommitmentsForIssuers(
+    base::flat_map<url::Origin, base::StringPiece> issuers_and_commitments) {
+  std::string ret;
+  JSONStringValueSerializer serializer(&ret);
+
+  base::Value to_serialize(base::Value::Type::DICTIONARY);
+
+  for (const auto& kv : issuers_and_commitments) {
+    const url::Origin& issuer = kv.first;
+    base::StringPiece commitment = kv.second;
+
+    // guard against accidentally passing an origin without a unique
+    // serialization
+    CHECK_NE(issuer.Serialize(), "null");
+
+    to_serialize.SetKey(issuer.Serialize(),
+                        *base::JSONReader::Read(commitment));
+  }
+  CHECK(serializer.Serialize(to_serialize));
+  return ret;
 }
 
 }  // namespace network

@@ -43,7 +43,7 @@ class TemplateWriter(object):
       policy: The dictionary of the policy.
 
     Returns:
-      True if the writer chooses to include the deprecated 'policy' in its
+      True if the writer chooses to include the unreleased 'policy' in its
       output.
     '''
     return False
@@ -55,7 +55,19 @@ class TemplateWriter(object):
       policy: The dictionary of the policy.
 
     Returns:
-      True if the writer chooses to include the deprecated 'policy' in its
+      True if the writer chooses to include the cloud only 'policy' in its
+      output.
+    '''
+    return False
+
+  def IsInternalOnlyPolicySupported(self, policy):
+    '''Checks if the given internal policy is supported by the writer.
+
+    Args:
+      policy: The dictionary of the policy.
+
+    Returns:
+      True if the writer chooses to include the internal only 'policy' in its
       output.
     '''
     return False
@@ -84,14 +96,22 @@ class TemplateWriter(object):
         and not self.IsCloudOnlyPolicySupported(policy)):
       return False
 
+    if (self.IsInternalOnlyPolicy(policy)
+        and not self.IsInternalOnlyPolicySupported(policy)):
+      return False
+
     for supported_on in policy['supported_on']:
       if not self.IsVersionSupported(policy, supported_on):
         continue
-      if '*' in self.platforms:
+      if '*' in self.platforms or supported_on['platform'] in self.platforms:
         return True
-      if any(
-          platform in self.platforms for platform in supported_on['platforms']):
+
+    if self.IsFuturePolicySupported(policy):
+      if '*' in self.platforms and policy['future_on']:
         return True
+      for future in policy['future_on']:
+        if future['platform'] in self.platforms:
+          return True
     return False
 
   def GetPolicyFeature(self, policy, feature_name, value=None):
@@ -110,6 +130,10 @@ class TemplateWriter(object):
   def IsCloudOnlyPolicy(self, policy):
     '''Checks if the given policy is cloud only'''
     return self.GetPolicyFeature(policy, 'cloud_only', False)
+
+  def IsInternalOnlyPolicy(self, policy):
+    '''Checks if the given policy is internal only'''
+    return self.GetPolicyFeature(policy, 'internal_only', False)
 
   def IsPolicyOrItemSupportedOnPlatform(self,
                                         item,
@@ -134,9 +158,18 @@ class TemplateWriter(object):
       return False
 
     for supported_on in item['supported_on']:
-      if (platform in supported_on['platforms'] and
-          (not product or product in supported_on['product']) and
-          self.IsVersionSupported(item, supported_on)):
+      if (platform == supported_on['platform']
+          and (not product or product in supported_on['product'])
+          and self.IsVersionSupported(item, supported_on)):
+        return True
+    if self.IsFuturePolicySupported(item):
+      if (product and {
+          'platform': platform,
+          'product': product
+      } in item.get('future_on', [])):
+        return True
+      if (not product and filter(lambda f: f['platform'] == platform,
+                                 item.get('future_on', []))):
         return True
     return False
 

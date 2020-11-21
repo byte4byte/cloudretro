@@ -12,9 +12,8 @@ import android.text.method.LinkMovementMethod;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.View.OnClickListener;
+import android.view.ViewGroup.LayoutParams;
 import android.widget.Button;
-import android.widget.FrameLayout;
-import android.widget.FrameLayout.LayoutParams;
 import android.widget.TextView;
 
 import androidx.annotation.VisibleForTesting;
@@ -22,7 +21,7 @@ import androidx.annotation.VisibleForTesting;
 import org.chromium.base.UserData;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.help.HelpAndFeedback;
+import org.chromium.chrome.browser.feedback.HelpAndFeedbackLauncherImpl;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.components.ui_metrics.SadTabEvent;
 import org.chromium.content_public.browser.LoadUrlParams;
@@ -35,7 +34,7 @@ import org.chromium.ui.widget.ChromeBulletSpan;
  * Represent the sad tab displayed in place of a crashed renderer. Instantiated on the first
  * |show()| request from a Tab, and destroyed together with it.
  */
-public class SadTab extends EmptyTabObserver implements UserData {
+public class SadTab extends EmptyTabObserver implements UserData, TabViewProvider {
     private static final Class<SadTab> USER_DATA_KEY = SadTab.class;
 
     private final TabImpl mTab;
@@ -90,7 +89,7 @@ public class SadTab extends EmptyTabObserver implements UserData {
             public void run() {
                 Activity activity = mTab.getWindowAndroid().getActivity().get();
                 assert activity != null;
-                HelpAndFeedback.getInstance().show(activity,
+                HelpAndFeedbackLauncherImpl.getInstance().show(activity,
                         activity.getString(R.string.help_context_sad_tab),
                         Profile.fromWebContents(mTab.getWebContents()), null);
             }
@@ -113,10 +112,7 @@ public class SadTab extends EmptyTabObserver implements UserData {
                 suggestionAction, buttonAction, showSendFeedbackView, mTab.isIncognito());
         mSadTabSuccessiveRefreshCounter++;
 
-        // Show the sad tab inside ContentView.
-        mTab.getContentView().addView(mView,
-                new FrameLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
-        mTab.notifyContentChanged();
+        mTab.getTabViewManager().addTabViewProvider(this);
     }
 
     /**
@@ -124,10 +120,7 @@ public class SadTab extends EmptyTabObserver implements UserData {
      */
     @VisibleForTesting
     public void removeIfPresent() {
-        if (isShowing()) {
-            mTab.getContentView().removeView(mView);
-            mTab.notifyContentChanged();
-        }
+        mTab.getTabViewManager().removeTabViewProvider(this);
         mView = null;
     }
 
@@ -135,7 +128,7 @@ public class SadTab extends EmptyTabObserver implements UserData {
      * @return Whether or not the sad tab is showing.
      */
     public boolean isShowing() {
-        return mView != null && mView.getParent() == mTab.getContentView();
+        return mView != null && mTab.getTabViewManager().isShowing(this);
     }
 
     // TabObserver
@@ -181,6 +174,8 @@ public class SadTab extends EmptyTabObserver implements UserData {
         LayoutInflater inflater =
                 (LayoutInflater) context.getSystemService(Context.LAYOUT_INFLATER_SERVICE);
         View sadTabView = inflater.inflate(R.layout.sad_tab, null);
+        sadTabView.setLayoutParams(
+                new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
 
         TextView titleText = (TextView) sadTabView.findViewById(R.id.sad_tab_title);
         int titleTextId =
@@ -298,5 +293,15 @@ public class SadTab extends EmptyTabObserver implements UserData {
     @VisibleForTesting
     public static void initForTesting(Tab tab, SadTab sadTab) {
         tab.getUserDataHost().setUserData(USER_DATA_KEY, sadTab);
+    }
+
+    @Override
+    public int getTabViewProviderType() {
+        return Type.SAD_TAB;
+    }
+
+    @Override
+    public View getView() {
+        return mView;
     }
 }

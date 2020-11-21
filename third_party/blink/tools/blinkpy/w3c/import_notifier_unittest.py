@@ -12,8 +12,10 @@ from blinkpy.common.system.executive_mock import mock_git_commands
 from blinkpy.common.system.filesystem_mock import MockFileSystem
 from blinkpy.w3c.local_wpt_mock import MockLocalWPT
 from blinkpy.w3c.import_notifier import ImportNotifier, TestFailure
-from blinkpy.w3c.wpt_expectations_updater import UMBRELLA_BUG
+from blinkpy.w3c.wpt_expectations_updater import WPTExpectationsUpdater
 
+
+UMBRELLA_BUG = WPTExpectationsUpdater.UMBRELLA_BUG
 MOCK_WEB_TESTS = '/mock-checkout/' + RELATIVE_WEB_TESTS
 
 
@@ -94,6 +96,66 @@ class ImportNotifierTest(unittest.TestCase):
         })
         self.notifier.git = MockGit(executive=executive)
         self.assertFalse(
+            self.notifier.more_failures_in_baseline('foo-expected.txt'))
+
+    def test_more_failures_in_baseline_new_error(self):
+        executive = mock_git_commands({
+            'diff': ('diff --git a/foo-expected.txt b/foo-expected.txt\n'
+                     '--- a/foo-expected.txt\n'
+                     '+++ b/foo-expected.txt\n'
+                     '-PASS an existing pass\n'
+                     '+Harness Error. harness_status.status = 1 , harness_status.message = bad\n')
+        })
+        self.notifier.git = MockGit(executive=executive)
+        self.assertTrue(
+            self.notifier.more_failures_in_baseline('foo-expected.txt'))
+
+    def test_more_failures_in_baseline_remove_error(self):
+        executive = mock_git_commands({
+            'diff': ('diff --git a/foo-expected.txt b/foo-expected.txt\n'
+                     '--- a/foo-expected.txt\n'
+                     '+++ b/foo-expected.txt\n'
+                     '-Harness Error. harness_status.status = 1 , harness_status.message = bad\n'
+                     '+PASS a new pass\n')
+        })
+        self.notifier.git = MockGit(executive=executive)
+        self.assertFalse(
+            self.notifier.more_failures_in_baseline('foo-expected.txt'))
+
+    def test_more_failures_in_baseline_changing_error(self):
+        executive = mock_git_commands({
+            'diff': ('diff --git a/foo-expected.txt b/foo-expected.txt\n'
+                     '--- a/foo-expected.txt\n'
+                     '+++ b/foo-expected.txt\n'
+                     '-Harness Error. harness_status.status = 1 , harness_status.message = bad\n'
+                     '+Harness Error. new text, still an error\n')
+        })
+        self.notifier.git = MockGit(executive=executive)
+        self.assertFalse(
+            self.notifier.more_failures_in_baseline('foo-expected.txt'))
+
+    def test_more_failures_in_baseline_fail_to_error(self):
+        executive = mock_git_commands({
+            'diff': ('diff --git a/foo-expected.txt b/foo-expected.txt\n'
+                     '--- a/foo-expected.txt\n'
+                     '+++ b/foo-expected.txt\n'
+                     '-FAIL a previous failure\n'
+                     '+Harness Error. harness_status.status = 1 , harness_status.message = bad\n')
+        })
+        self.notifier.git = MockGit(executive=executive)
+        self.assertTrue(
+            self.notifier.more_failures_in_baseline('foo-expected.txt'))
+
+    def test_more_failures_in_baseline_error_to_fail(self):
+        executive = mock_git_commands({
+            'diff': ('diff --git a/foo-expected.txt b/foo-expected.txt\n'
+                     '--- a/foo-expected.txt\n'
+                     '+++ b/foo-expected.txt\n'
+                     '-Harness Error. harness_status.status = 1 , harness_status.message = bad\n'
+                     '+FAIL a new failure\n')
+        })
+        self.notifier.git = MockGit(executive=executive)
+        self.assertTrue(
             self.notifier.more_failures_in_baseline('foo-expected.txt'))
 
     def test_examine_baseline_changes(self):

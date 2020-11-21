@@ -127,11 +127,52 @@ public class Navigation extends IClientNavigation.Stub {
     }
 
     /**
+     * Whether this navigation resulted in a download. Returns false if this navigation did not
+     * result in a download, or if download status is not yet known for this navigation.  Download
+     * status is determined for a navigation when processing final (post redirect) HTTP response
+     * headers. This means the only time the embedder can know if it's a download is in
+     * NavigationCallback.onNavigationFailed.
+     *
+     * @since 84
+     */
+    public boolean isDownload() {
+        ThreadCheck.ensureOnUiThread();
+        try {
+            return mNavigationImpl.isDownload();
+        } catch (RemoteException e) {
+            throw new APICallException(e);
+        }
+    }
+
+    /**
+     * Whether this navigation was stopped before it could complete because
+     * NavigationController.stop() was called.
+     *
+     * @since 84
+     */
+    public boolean wasStopCalled() {
+        ThreadCheck.ensureOnUiThread();
+        try {
+            return mNavigationImpl.wasStopCalled();
+        } catch (RemoteException e) {
+            throw new APICallException(e);
+        }
+    }
+
+    /**
      * Sets a header for a network request. If a header with the specified name exists it is
      * overwritten. This method can only be called at two times, from
      * {@link NavigationCallback.onNavigationStarted} and {@link
-     * NavigationCallback.onNavigationStarted}. When called during start, the header applies to both
-     * the initial network request as well as redirects.
+     * NavigationCallback.onNavigationRedirected}. When called during start, the header applies to
+     * both the initial network request as well as redirects.
+     *
+     * This method may be used to set the referer. If the referer is set in navigation start, it is
+     * reset during the redirect. In other words, if you need to set a referer that applies to
+     * redirects, then this must be called from {@link onNavigationRedirected}.
+     *
+     * Note that any headers that are set here won't be sent again if the frame html is fetched
+     * again due to a user reloading the page, navigating back and forth etc... when this fetch
+     * couldn't be cached (either in the disk cache or in the back-forward cache).
      *
      * @param name The name of the header. The name must be rfc 2616 compliant.
      * @param value The value of the header. The value must not contain '\0', '\n' or '\r'.
@@ -143,11 +184,82 @@ public class Navigation extends IClientNavigation.Stub {
      */
     public void setRequestHeader(@NonNull String name, @NonNull String value) {
         ThreadCheck.ensureOnUiThread();
-        if (WebLayer.getSupportedMajorVersionInternal() < 83) {
+        try {
+            mNavigationImpl.setRequestHeader(name, value);
+        } catch (RemoteException e) {
+            throw new APICallException(e);
+        }
+    }
+
+    /**
+     * Sets the user-agent string that applies to the current navigation. This user-agent is not
+     * sticky, it applies to this navigation only (and any redirects or resources that are loaded).
+     * This method may only be called from {@link NavigationCallback.onNavigationStarted}.
+     *
+     * Note that this user agent won't be sent again if the frame html is fetched again due to a
+     * user reloading the page, navigating back and forth etc... when this fetch couldn't be cached
+     * (either in the disk cache or in the back-forward cache).
+     *
+     * @param value The user-agent string. The value must not contain '\0', '\n' or '\r'. An empty
+     * string results in the default user-agent string.
+     *
+     * @throws IllegalArgumentException If supplied an invalid value.
+     * @throws IllegalStateException If not called during start or if {@link
+     *         Tab.setDesktopUserAgent} was called with a value of true.
+     *
+     * @since 84
+     */
+    public void setUserAgentString(@NonNull String value) {
+        ThreadCheck.ensureOnUiThread();
+        try {
+            mNavigationImpl.setUserAgentString(value);
+        } catch (RemoteException e) {
+            throw new APICallException(e);
+        }
+    }
+
+    /**
+     * Returns whether the navigation was initiated by the page. Examples of page-initiated
+     * navigations:
+     * * Clicking <a> links.
+     * * changing window.location.href
+     * * redirect via the <meta http-equiv="refresh"> tag
+     * * using window.history.pushState
+     *
+     * This method returns false for navigations initiated by the WebLayer API, including using
+     *  window.history.forward() or window.history.back().
+     *
+     * @return Whether the navigation was initiated by the page.
+     *
+     * @since 86
+     */
+    public boolean isPageInitiated() {
+        ThreadCheck.ensureOnUiThread();
+        if (WebLayer.getSupportedMajorVersionInternal() < 86) {
             throw new UnsupportedOperationException();
         }
         try {
-            mNavigationImpl.setRequestHeader(name, value);
+            return mNavigationImpl.isPageInitiated();
+        } catch (RemoteException e) {
+            throw new APICallException(e);
+        }
+    }
+
+    /**
+     * Whether the navigation is a reload. Examples of reloads include:
+     * * embedder-specified through NavigationController::Reload
+     * * page-initiated reloads, e.g. location.reload()
+     * * reloads when the network interface is reconnected
+     *
+     * @since 86
+     */
+    public boolean isReload() {
+        ThreadCheck.ensureOnUiThread();
+        if (WebLayer.getSupportedMajorVersionInternal() < 86) {
+            throw new UnsupportedOperationException();
+        }
+        try {
+            return mNavigationImpl.isReload();
         } catch (RemoteException e) {
             throw new APICallException(e);
         }

@@ -7,7 +7,7 @@
 #import <AppKit/AppKit.h>
 #include <Carbon/Carbon.h>
 
-#include "base/logging.h"
+#include "base/check.h"
 #include "base/mac/foundation_util.h"
 #include "base/no_destructor.h"
 #include "base/stl_util.h"
@@ -166,6 +166,7 @@ const std::vector<KeyboardShortcutData>& GetShortcutsNotPresentInMainMenu() {
     {true,  false, false, true,  kVK_ANSI_L,            IDC_SHOW_DOWNLOADS},
     {true,  true,  false, false, kVK_ANSI_C,            IDC_DEV_TOOLS_INSPECT},
     {true,  false, false, true,  kVK_ANSI_C,            IDC_DEV_TOOLS_INSPECT},
+    {true,  true,  false, false, kVK_ANSI_A,            IDC_TAB_SEARCH},
 
     {true,  false, false, true,  kVK_DownArrow,         IDC_FOCUS_NEXT_PANE},
     {true,  false, false, true,  kVK_UpArrow,           IDC_FOCUS_PREVIOUS_PANE},

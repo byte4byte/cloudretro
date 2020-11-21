@@ -11,7 +11,7 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/guid.h"
 #include "base/memory/weak_ptr.h"
 #include "base/stl_util.h"
@@ -34,7 +34,7 @@ namespace {
 bool CreateTimeCompare(const NotificationEntry* lhs,
                        const NotificationEntry* rhs) {
   DCHECK(lhs && rhs);
-  return lhs->create_time <= rhs->create_time;
+  return lhs->create_time < rhs->create_time;
 }
 
 // Vailidates notification entry. Returns false if the entry should be deleted.
@@ -60,6 +60,10 @@ class ScheduledNotificationManagerImpl : public ScheduledNotificationManager {
         icon_store_(std::move(icon_store)),
         clients_(clients.begin(), clients.end()),
         config_(config) {}
+  ScheduledNotificationManagerImpl(const ScheduledNotificationManagerImpl&) =
+      delete;
+  ScheduledNotificationManagerImpl& operator=(
+      const ScheduledNotificationManagerImpl&) = delete;
 
  private:
   // NotificationManager implementation.
@@ -443,7 +447,6 @@ class ScheduledNotificationManagerImpl : public ScheduledNotificationManager {
   const SchedulerConfig& config_;
   base::WeakPtrFactory<ScheduledNotificationManagerImpl> weak_ptr_factory_{
       this};
-  DISALLOW_COPY_AND_ASSIGN(ScheduledNotificationManagerImpl);
 };
 
 }  // namespace

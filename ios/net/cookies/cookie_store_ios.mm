@@ -8,14 +8,15 @@
 #include <stddef.h>
 
 #include "base/bind.h"
+#include "base/check_op.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/location.h"
-#include "base/logging.h"
 #include "base/mac/foundation_util.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/notreached.h"
 #include "base/observer_list.h"
 #include "base/sequenced_task_runner.h"
 #include "base/strings/sys_string_conversions.h"
@@ -102,24 +103,24 @@ NotificationTrampoline* NotificationTrampoline::g_notification_trampoline =
 #pragma mark Utility functions
 
 // Returns an empty closure if |callback| is null callback or binds the
-// callback to |status|.
+// callback to |result|.
 base::OnceClosure BindSetCookiesCallback(
     CookieStoreIOS::SetCookiesCallback* callback,
-    net::CanonicalCookie::CookieInclusionStatus status) {
+    net::CookieAccessResult result) {
   base::OnceClosure set_callback;
   if (!callback->is_null()) {
-    set_callback = base::BindOnce(std::move(*callback), status);
+    set_callback = base::BindOnce(std::move(*callback), result);
   }
   return set_callback;
 }
 
 // Adds cookies in |cookies| with name |name| to |filtered|.
-void OnlyCookiesWithName(const net::CookieStatusList& cookies,
+void OnlyCookiesWithName(const net::CookieAccessResultList& cookies,
                          const std::string& name,
                          net::CookieList* filtered) {
-  for (const auto& cookie_with_status : cookies) {
-    if (cookie_with_status.cookie.Name() == name)
-      filtered->push_back(cookie_with_status.cookie);
+  for (const auto& cookie_with_access_result : cookies) {
+    if (cookie_with_access_result.cookie.Name() == name)
+      filtered->push_back(cookie_with_access_result.cookie);
   }
 }
 
@@ -243,12 +244,15 @@ void CookieStoreIOS::SetCanonicalCookieAsync(
   // engine.
   DCHECK(!options.exclude_httponly());
 
-  bool secure_source = source_url.SchemeIsCryptographic();
+  CookieAccessScheme access_scheme =
+      cookie_util::ProvisionalAccessScheme(source_url);
 
-  if (cookie->IsSecure() && !secure_source) {
+  if (cookie->IsSecure() &&
+      access_scheme == CookieAccessScheme::kNonCryptographic) {
     if (!callback.is_null())
-      std::move(callback).Run(net::CanonicalCookie::CookieInclusionStatus(
-          net::CanonicalCookie::CookieInclusionStatus::EXCLUDE_SECURE_ONLY));
+      std::move(callback).Run(
+          net::CookieAccessResult(net::CookieInclusionStatus(
+              net::CookieInclusionStatus::EXCLUDE_SECURE_ONLY)));
     return;
   }
 
@@ -257,14 +261,13 @@ void CookieStoreIOS::SetCanonicalCookieAsync(
   if (ns_cookie != nil) {
     system_store_->SetCookieAsync(
         ns_cookie, &cookie->CreationDate(),
-        BindSetCookiesCallback(&callback,
-                               net::CanonicalCookie::CookieInclusionStatus()));
+        BindSetCookiesCallback(&callback, net::CookieAccessResult()));
     return;
   }
 
   if (!callback.is_null())
-    std::move(callback).Run(net::CanonicalCookie::CookieInclusionStatus(
-        net::CanonicalCookie::CookieInclusionStatus::EXCLUDE_FAILURE_TO_STORE));
+    std::move(callback).Run(net::CookieAccessResult(net::CookieInclusionStatus(
+        net::CookieInclusionStatus::EXCLUDE_FAILURE_TO_STORE)));
 }
 
 void CookieStoreIOS::GetCookieListWithOptionsAsync(
@@ -447,8 +450,11 @@ void CookieStoreIOS::WriteToCookieMonster(NSArray* system_cookies) {
   NSUInteger cookie_count = [system_cookies count];
   cookie_list.reserve(cookie_count);
   for (NSHTTPCookie* cookie in system_cookies) {
-    cookie_list.push_back(CanonicalCookieFromSystemCookie(
-        cookie, system_store_->GetCookieCreationTime(cookie)));
+    if (std::unique_ptr<net::CanonicalCookie> canonical_cookie =
+            CanonicalCookieFromSystemCookie(
+                cookie, system_store_->GetCookieCreationTime(cookie))) {
+      cookie_list.push_back(*std::move(canonical_cookie));
+    }
   }
   cookie_monster_->SetAllCookiesAsync(cookie_list, SetCookiesCallback());
 
@@ -464,7 +470,12 @@ void CookieStoreIOS::DeleteCookiesMatchingInfoAsync(
       base::BindRepeating(
           [](const CookieDeletionInfo& delete_info,
              const net::CanonicalCookie& cc) {
-            return delete_info.Matches(cc);
+            // No extra trustworthy URLs.
+            bool delegate_treats_url_as_trustworthy = false;
+            net::CookieAccessParams params = {
+                net::CookieAccessSemantics::UNKNOWN,
+                delegate_treats_url_as_trustworthy};
+            return delete_info.Matches(cc, params);
           },
           std::move(delete_info)),
       std::move(callback));
@@ -490,9 +501,11 @@ void CookieStoreIOS::DeleteCookiesMatchingPredicateAsync(
         for (NSHTTPCookie* cookie in cookies) {
           base::Time creation_time =
               weak_system_store->GetCookieCreationTime(cookie);
-          CanonicalCookie cc =
+          std::unique_ptr<net::CanonicalCookie> canonical_cookie =
               CanonicalCookieFromSystemCookie(cookie, creation_time);
-          if (shared_predicate.Run(cc)) {
+          if (!canonical_cookie)
+            continue;
+          if (shared_predicate.Run(*std::move(canonical_cookie))) {
             weak_system_store->DeleteCookieAsync(
                 cookie, SystemCookieStore::SystemCookieCallback());
             to_delete_count++;
@@ -517,8 +530,9 @@ void CookieStoreIOS::OnSystemCookiesChanged() {
   if (!flush_closure_.IsCancelled())
     return;
 
-  flush_closure_.Reset(base::Bind(&CookieStoreIOS::FlushStore,
-                                  weak_factory_.GetWeakPtr(), base::Closure()));
+  flush_closure_.Reset(base::BindOnce(&CookieStoreIOS::FlushStore,
+                                      weak_factory_.GetWeakPtr(),
+                                      base::OnceClosure()));
   base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
       FROM_HERE, flush_closure_.callback(), base::TimeDelta::FromSeconds(10));
 }
@@ -575,9 +589,11 @@ void CookieStoreIOS::UpdateCacheForCookies(const GURL& gurl,
   std::vector<net::CanonicalCookie> out_added_cookies;
   for (NSHTTPCookie* nscookie in nscookies) {
     if (base::SysNSStringToUTF8(nscookie.name) == cookie_name) {
-      net::CanonicalCookie canonical_cookie = CanonicalCookieFromSystemCookie(
-          nscookie, system_store_->GetCookieCreationTime(nscookie));
-      cookies.push_back(canonical_cookie);
+      if (std::unique_ptr<net::CanonicalCookie> canonical_cookie =
+              CanonicalCookieFromSystemCookie(
+                  nscookie, system_store_->GetCookieCreationTime(nscookie))) {
+        cookies.push_back(*std::move(canonical_cookie));
+      }
     }
   }
 
@@ -606,15 +622,15 @@ void CookieStoreIOS::RunCallbacksForCookies(
     DCHECK_EQ(name, cookie.Name());
     // TODO(crbug.com/978172): Support CookieAccessSemantics values on iOS and
     // use it to check IncludeForRequestURL before notifying?
-    callbacks->Notify(net::CookieChangeInfo(
-        cookie, net::CookieAccessSemantics::UNKNOWN, cause));
+    callbacks->Notify(
+        net::CookieChangeInfo(cookie, net::CookieAccessResult(), cause));
   }
 }
 
 void CookieStoreIOS::GotCookieListFor(
     const std::pair<GURL, std::string> key,
-    const net::CookieStatusList& cookies,
-    const net::CookieStatusList& excluded_cookies) {
+    const net::CookieAccessResultList& cookies,
+    const net::CookieAccessResultList& excluded_cookies) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
   net::CookieList filtered;
@@ -641,14 +657,13 @@ void CookieStoreIOS::UpdateCachesFromCookieMonster() {
   }
 }
 
-void CookieStoreIOS::UpdateCachesAfterSet(
-    SetCookiesCallback callback,
-    net::CanonicalCookie::CookieInclusionStatus status) {
+void CookieStoreIOS::UpdateCachesAfterSet(SetCookiesCallback callback,
+                                          net::CookieAccessResult result) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  if (status.IsInclude())
+  if (result.status.IsInclude())
     UpdateCachesFromCookieMonster();
   if (!callback.is_null())
-    std::move(callback).Run(status);
+    std::move(callback).Run(result);
 }
 
 void CookieStoreIOS::UpdateCachesAfterDelete(DeleteCallback callback,
@@ -672,20 +687,26 @@ CookieStoreIOS::CanonicalCookieListFromSystemCookies(NSArray* cookies) {
   cookie_list.reserve([cookies count]);
   for (NSHTTPCookie* cookie in cookies) {
     base::Time created = system_store_->GetCookieCreationTime(cookie);
-    cookie_list.push_back(CanonicalCookieFromSystemCookie(cookie, created));
+    if (std::unique_ptr<net::CanonicalCookie> canonical_cookie =
+            CanonicalCookieFromSystemCookie(cookie, created)) {
+      cookie_list.push_back(*std::move(canonical_cookie));
+    }
   }
   return cookie_list;
 }
 
-net::CookieStatusList
-CookieStoreIOS::CanonicalCookieWithStatusListFromSystemCookies(
+net::CookieAccessResultList
+CookieStoreIOS::CanonicalCookieWithAccessResultListFromSystemCookies(
     NSArray* cookies) {
-  net::CookieStatusList cookie_list;
+  net::CookieAccessResultList cookie_list;
   cookie_list.reserve([cookies count]);
   for (NSHTTPCookie* cookie in cookies) {
     base::Time created = system_store_->GetCookieCreationTime(cookie);
-    cookie_list.push_back({CanonicalCookieFromSystemCookie(cookie, created),
-                           net::CanonicalCookie::CookieInclusionStatus()});
+    if (std::unique_ptr<net::CanonicalCookie> canonical_cookie =
+            CanonicalCookieFromSystemCookie(cookie, created)) {
+      cookie_list.push_back(
+          {*std::move(canonical_cookie), net::CookieAccessResult()});
+    }
   }
   return cookie_list;
 }
@@ -694,9 +715,9 @@ void CookieStoreIOS::RunGetCookieListCallbackOnSystemCookies(
     CookieStoreIOS::GetCookieListCallback callback,
     NSArray<NSHTTPCookie*>* cookies) {
   if (!callback.is_null()) {
-    net::CookieStatusList excluded_cookies;
+    net::CookieAccessResultList excluded_cookies;
     std::move(callback).Run(
-        CanonicalCookieWithStatusListFromSystemCookies(cookies),
+        CanonicalCookieWithAccessResultListFromSystemCookies(cookies),
         excluded_cookies);
   }
 }

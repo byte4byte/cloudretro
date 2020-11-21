@@ -18,14 +18,13 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/notreached.h"
 #include "base/synchronization/lock.h"
-#include "base/task/post_task.h"
 #include "chrome/android/chrome_jni_headers/DownloadController_jni.h"
+#include "chrome/browser/android/profile_key_startup_accessor.h"
 #include "chrome/browser/android/profile_key_util.h"
 #include "chrome/browser/android/tab_android.h"
 #include "chrome/browser/download/android/dangerous_download_infobar_delegate.h"
 #include "chrome/browser/download/android/download_manager_service.h"
 #include "chrome/browser/download/android/download_utils.h"
-#include "chrome/browser/download/android/mixed_content_download_infobar_delegate.h"
 #include "chrome/browser/download/download_offline_content_provider.h"
 #include "chrome/browser/download/download_offline_content_provider_factory.h"
 #include "chrome/browser/download/download_stats.h"
@@ -33,9 +32,6 @@
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/offline_pages/android/offline_page_bridge.h"
 #include "chrome/browser/permissions/permission_update_infobar_delegate_android.h"
-#include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/profiles/profile_key.h"
-#include "chrome/browser/ui/android/view_android_helper.h"
 #include "chrome/browser/vr/vr_tab_helper.h"
 #include "chrome/grit/chromium_strings.h"
 #include "components/download/public/common/auto_resumption_handler.h"
@@ -265,14 +261,14 @@ void DownloadController::AcquireFileAccessPermission(
         StoragePermissionType::STORAGE_PERMISSION_REQUESTED);
     RecordStoragePermission(
         StoragePermissionType::STORAGE_PERMISSION_NO_ACTION_NEEDED);
-    base::PostTask(FROM_HERE, {BrowserThread::UI},
-                   base::BindOnce(std::move(cb), true));
+    content::GetUIThreadTaskRunner({})->PostTask(
+        FROM_HERE, base::BindOnce(std::move(cb), true));
     return;
   } else if (vr::VrTabHelper::IsUiSuppressedInVr(
                  web_contents,
                  vr::UiSuppressedElement::kFileAccessPermission)) {
-    base::PostTask(FROM_HERE, {BrowserThread::UI},
-                   base::BindOnce(std::move(cb), false));
+    content::GetUIThreadTaskRunner({})->PostTask(
+        FROM_HERE, base::BindOnce(std::move(cb), false));
     return;
   }
 
@@ -290,8 +286,8 @@ void DownloadController::AcquireFileAccessPermission(
 void DownloadController::CreateAndroidDownload(
     const content::WebContents::Getter& wc_getter,
     const DownloadInfo& info) {
-  base::PostTask(FROM_HERE, {BrowserThread::UI},
-                 base::BindOnce(&DownloadController::StartAndroidDownload,
+  content::GetUIThreadTaskRunner({})->PostTask(
+      FROM_HERE, base::BindOnce(&DownloadController::StartAndroidDownload,
                                 base::Unretained(this), wc_getter, info));
 }
 
@@ -368,10 +364,10 @@ bool DownloadController::HasFileAccessPermission() {
 }
 
 void DownloadController::OnDownloadStarted(DownloadItem* download_item) {
-  // For dangerous or mixed-content downloads, we need to show the dangerous
-  // infobar before the download can start.
+  // For dangerous downloads, we need to show the dangerous infobar before the
+  // download can start.
   JNIEnv* env = base::android::AttachCurrentThread();
-  if (!download_item->IsDangerous() && !download_item->IsMixedContent())
+  if (!download_item->IsDangerous())
     Java_DownloadController_onDownloadStarted(env);
 
   // Register for updates to the DownloadItem.
@@ -381,10 +377,9 @@ void DownloadController::OnDownloadStarted(DownloadItem* download_item) {
   if (download::AutoResumptionHandler::Get())
     download::AutoResumptionHandler::Get()->OnDownloadStarted(download_item);
 
-  Profile* profile = Profile::FromBrowserContext(
-      content::DownloadItemUtils::GetBrowserContext(download_item));
-  ProfileKey* profile_key =
-      profile ? profile->GetProfileKey() : ::android::GetLastUsedProfileKey();
+  ProfileKey* profile_key = GetProfileKey(download_item);
+  if (!profile_key)
+    return;
 
   DownloadOfflineContentProviderFactory::GetForKey(profile_key)
       ->OnDownloadStarted(download_item);
@@ -400,14 +395,6 @@ void DownloadController::OnDownloadUpdated(DownloadItem* item) {
     // Dont't show notification for a dangerous download, as user can resume
     // the download after browser crash through notification.
     OnDangerousDownload(item);
-    return;
-  }
-
-  if (item->IsMixedContent() && (item->GetState() != DownloadItem::CANCELLED)) {
-    // Don't show a notification for a mixed content download, either.
-    // Note: Mixed content is less scary than a Dangerous download, so check for
-    // danger first.
-    OnMixedContentDownload(item);
     return;
   }
 
@@ -452,8 +439,8 @@ void DownloadController::OnDangerousDownload(DownloadItem* item) {
     auto download_manager_getter = std::make_unique<DownloadManagerGetter>(
         BrowserContext::GetDownloadManager(
             content::DownloadItemUtils::GetBrowserContext(item)));
-    base::PostTask(
-        FROM_HERE, {BrowserThread::UI},
+    content::GetUIThreadTaskRunner({})->PostTask(
+        FROM_HERE,
         base::BindOnce(&RemoveDownloadItem, std::move(download_manager_getter),
                        item->GetGuid()));
     item->RemoveObserver(this);
@@ -461,24 +448,6 @@ void DownloadController::OnDangerousDownload(DownloadItem* item) {
   }
 
   DangerousDownloadInfoBarDelegate::Create(
-      InfoBarService::FromWebContents(web_contents), item);
-}
-
-void DownloadController::OnMixedContentDownload(DownloadItem* item) {
-  WebContents* web_contents = content::DownloadItemUtils::GetWebContents(item);
-  if (!web_contents) {
-    auto download_manager_getter = std::make_unique<DownloadManagerGetter>(
-        BrowserContext::GetDownloadManager(
-            content::DownloadItemUtils::GetBrowserContext(item)));
-    base::PostTask(
-        FROM_HERE, {BrowserThread::UI},
-        base::BindOnce(&RemoveDownloadItem, std::move(download_manager_getter),
-                       item->GetGuid()));
-    item->RemoveObserver(this);
-    return;
-  }
-
-  MixedContentDownloadInfoBarDelegate::Create(
       InfoBarService::FromWebContents(web_contents), item);
 }
 
@@ -534,4 +503,17 @@ bool DownloadController::IsInterruptedDownloadAutoResumable(
              download::DOWNLOAD_INTERRUPT_REASON_NETWORK_FAILED ||
          interrupt_reason ==
              download::DOWNLOAD_INTERRUPT_REASON_NETWORK_DISCONNECTED;
+}
+
+ProfileKey* DownloadController::GetProfileKey(DownloadItem* download_item) {
+  Profile* profile = Profile::FromBrowserContext(
+      content::DownloadItemUtils::GetBrowserContext(download_item));
+
+  ProfileKey* profile_key;
+  if (profile)
+    profile_key = profile->GetProfileKey();
+  else
+    profile_key = ProfileKeyStartupAccessor::GetInstance()->profile_key();
+
+  return profile_key;
 }

@@ -13,7 +13,7 @@
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/web_applications/test/web_app_browsertest_util.h"
-#include "chrome/common/web_application_info.h"
+#include "chrome/browser/web_applications/components/web_application_info.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
@@ -122,9 +122,9 @@ void WebAppNavigationBrowserTest::ClickLinkWithModifiersAndWaitForURL(
       "link.rel = '%s';"
       // Make a click target that covers the whole viewport.
       "const click_target = document.createElement('textarea');"
-      "click_target.position = 'absolute';"
-      "click_target.top = 0;"
-      "click_target.left = 0;"
+      "click_target.style.position = 'absolute';"
+      "click_target.style.top = 0;"
+      "click_target.style.left = 0;"
       "click_target.style.height = '100vh';"
       "click_target.style.width = '100vw';"
       "link.appendChild(click_target);"
@@ -225,7 +225,7 @@ AppId WebAppNavigationBrowserTest::InstallTestWebApp(
   }
 
   auto web_app_info = std::make_unique<WebApplicationInfo>();
-  web_app_info->app_url = https_server_.GetURL(app_host, GetAppUrlPath());
+  web_app_info->start_url = https_server_.GetURL(app_host, GetAppUrlPath());
   web_app_info->scope = https_server_.GetURL(app_host, app_scope);
   web_app_info->title = base::UTF8ToUTF16(GetAppName());
   web_app_info->description = base::UTF8ToUTF16("Test description");

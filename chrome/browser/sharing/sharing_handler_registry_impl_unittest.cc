@@ -9,6 +9,7 @@
 
 #include "chrome/browser/sharing/mock_sharing_message_handler.h"
 #include "chrome/browser/sharing/sharing_device_registration.h"
+#include "content/public/test/browser_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
@@ -44,10 +45,11 @@ class SharingHandlerRegistryImplTest : public testing::Test {
     return std::make_unique<SharingHandlerRegistryImpl>(
         /*profile=*/nullptr, &sharing_device_registration_,
         /*message_sender=*/nullptr, /*device_source=*/nullptr,
-        /*sms_fetcher=*/nullptr, /*sharing_service_host=*/nullptr);
+        /*sms_fetcher=*/nullptr);
   }
 
  protected:
+  content::BrowserTaskEnvironment task_environment_;
   FakeSharingDeviceRegistration sharing_device_registration_;
 };
 

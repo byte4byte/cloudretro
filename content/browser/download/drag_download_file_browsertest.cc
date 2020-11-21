@@ -8,7 +8,6 @@
 #include "base/memory/ref_counted.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
-#include "base/task/post_task.h"
 #include "content/browser/download/download_manager_impl.h"
 #include "content/browser/download/drag_download_file.h"
 #include "content/browser/download/drag_download_util.h"
@@ -18,6 +17,7 @@
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_paths.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/content_browser_test_utils.h"
 #include "content/public/test/download_test_observer.h"
@@ -52,7 +52,7 @@ class DragDownloadFileTest : public ContentBrowserTest {
   DragDownloadFileTest() = default;
 
   void Succeed() {
-    base::PostTask(FROM_HERE, {BrowserThread::UI}, std::move(quit_closure_));
+    GetUIThreadTaskRunner({})->PostTask(FROM_HERE, std::move(quit_closure_));
   }
 
   void FailFast() {

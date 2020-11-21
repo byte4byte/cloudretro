@@ -2,10 +2,12 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//build/config/jumbo.gni")
+import("//build/config/chromeos/ui_mode.gni")
 import("//build/config/ui.gni")
+import("//testing/test.gni")
+import("//tools/grit/grit_rule.gni")
 
-jumbo_component("views_examples_lib") {
+component("views_examples_lib") {
   testonly = true
 
   sources = [
@@ -21,6 +23,8 @@ jumbo_component("views_examples_lib") {
     "button_sticker_sheet.h",
     "checkbox_example.cc",
     "checkbox_example.h",
+    "colored_dialog_example.cc",
+    "colored_dialog_example.h",
     "combobox_example.cc",
     "combobox_example.h",
     "create_examples.cc",
@@ -41,6 +45,8 @@ jumbo_component("views_examples_lib") {
     "layout_example_base.h",
     "link_example.cc",
     "link_example.h",
+    "login_bubble_dialog_example.cc",
+    "login_bubble_dialog_example.h",
     "menu_example.cc",
     "menu_example.h",
     "message_box_example.cc",
@@ -87,6 +93,8 @@ jumbo_component("views_examples_lib") {
   ]
 
   deps = [
+    ":views_examples_resources_grd",
+    ":views_examples_resources_pak",
     "//base",
     "//cc/paint",
     "//skia",
@@ -98,6 +106,7 @@ jumbo_component("views_examples_lib") {
     "//ui/native_theme",
     "//ui/resources",
     "//ui/resources:ui_test_pak",
+    "//ui/strings:ui_strings",
     "//ui/views",
   ]
 
@@ -110,31 +119,47 @@ jumbo_component("views_examples_lib") {
   }
 }
 
-executable("views_examples") {
+source_set("views_examples_proc") {
   testonly = true
 
-  sources = [ "examples_main.cc" ]
+  sources = [
+    "examples_exit_code.h",
+    "examples_main_proc.cc",
+    "examples_main_proc.h",
+  ]
 
   deps = [
     ":views_examples_lib",
     "//base",
-    "//base:i18n",
     "//base/test:test_support",
-    "//build/win:default_exe_manifest",
+    "//build:chromeos_buildflags",
+    "//cc/paint",
     "//components/viz/host",
     "//components/viz/service",
     "//mojo/core/embedder",
+    "//skia",
     "//ui/base",
-    "//ui/base/ime/init",
     "//ui/compositor",
     "//ui/compositor:test_support",
     "//ui/gfx",
-    "//ui/gl",
-    "//ui/gl/init",
-    "//ui/resources:ui_test_pak",
     "//ui/views",
     "//ui/views:test_support",
   ]
+
+  if (is_win || is_mac || (is_linux || is_chromeos_lacros)) {
+    sources += [
+      "examples_skia_gold_pixel_diff.cc",
+      "examples_skia_gold_pixel_diff.h",
+    ]
+    deps += [
+      "//ui/base:pixel_diff_test_support",
+      "//ui/snapshot",
+    ]
+  }
+
+  if (is_win) {
+    deps += [ "//build/win:default_exe_manifest" ]
+  }
 
   if (use_aura) {
     deps += [
@@ -145,9 +170,31 @@ executable("views_examples") {
   if (use_x11) {
     deps += [ "//ui/gfx/x" ]
   }
+  if (is_chromeos_ash) {
+    sources += [
+      "examples_views_delegate_chromeos.cc",
+      "examples_views_delegate_chromeos.h",
+    ]
+    deps += [ "//ui/wm:test_support" ]
+  }
 }
 
-jumbo_component("views_examples_with_content_lib") {
+executable("views_examples") {
+  testonly = true
+
+  sources = [ "examples_main.cc" ]
+
+  deps = [
+    ":views_examples_lib",
+    ":views_examples_proc",
+    "//base",
+    "//base/test:test_support",
+    "//build/win:default_exe_manifest",
+    "//ui/resources:ui_test_pak",
+  ]
+}
+
+component("views_examples_with_content_lib") {
   testonly = true
   sources = [
     "examples_window_with_content.cc",
@@ -161,6 +208,8 @@ jumbo_component("views_examples_with_content_lib") {
 
   deps = [
     ":views_examples_lib",
+    ":views_examples_resources_grd",
+    ":views_examples_resources_pak",
     "//base",
     "//content",
     "//skia",
@@ -174,7 +223,7 @@ jumbo_component("views_examples_with_content_lib") {
 executable("views_examples_with_content") {
   testonly = true
 
-  sources = [ "examples_with_content_main_exe.cc" ]
+  sources = [ "examples_with_content_main.cc" ]
 
   defines = [ "VIEWS_EXAMPLES_WITH_CONTENT_IMPLEMENTATION" ]
 
@@ -193,10 +242,74 @@ executable("views_examples_with_content") {
     configs += [ "//build/config/win:windowed" ]
     configs -= [ "//build/config/win:console" ]
   }
+
+  if (is_mac) {
+    deps += [ "//sandbox/mac:seatbelt" ]
+  }
 }
 
 copy("copy_content_resources") {
   deps = [ "//content:content_resources" ]
   sources = [ "$root_gen_dir/content/content_resources.pak" ]
   outputs = [ "$root_out_dir/content_resources.pak" ]
+}
+
+grit("views_examples_resources_grd") {
+  testonly = true
+  source = "views_examples_resources.grd"
+  outputs = [
+    "grit/views_examples_resources.h",
+    "views_examples_resources.pak",
+  ]
+}
+
+copy("views_examples_resources_pak") {
+  testonly = true
+  sources = [ "$target_gen_dir/views_examples_resources.pak" ]
+  outputs = [ "$root_out_dir/views_examples_resources.pak" ]
+  public_deps = [ ":views_examples_resources_grd" ]
+}
+
+test("views_examples_unittests") {
+  use_xvfb = use_xvfb_in_this_config
+
+  sources = [
+    "examples_unittest.cc",
+    "examples_unittest_main.cc",
+  ]
+
+  deps = [
+    ":views_examples_lib",
+    ":views_examples_proc",
+    "//base",
+    "//base/test:test_support",
+    "//components/viz/host",
+    "//components/viz/service",
+    "//mojo/core/embedder",
+    "//ui/base",
+    "//ui/base/ime/init",
+    "//ui/compositor",
+    "//ui/compositor:test_support",
+    "//ui/gfx",
+    "//ui/gl",
+    "//ui/gl/init",
+    "//ui/resources:ui_test_pak",
+    "//ui/snapshot",
+    "//ui/views",
+    "//ui/views:test_support",
+  ]
+
+  if (use_aura) {
+    deps += [
+      "//ui/aura",
+      "//ui/wm",
+    ]
+  }
+
+  data_deps = [
+    ":views_examples_resources_pak",
+    "//ui/resources:ui_test_pak_data",
+  ]
+
+  data = [ "$root_out_dir/views_examples_resources.pak" ]
 }

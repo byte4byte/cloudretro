@@ -19,7 +19,6 @@
 #include "components/variations/net/variations_http_headers.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_task_traits.h"
-#include "content/public/browser/cors_exempt_headers.h"
 #include "content/public/browser/network_service_instance.h"
 #include "content/public/browser/storage_partition.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
@@ -141,25 +140,18 @@ CastNetworkContexts::GetSystemSharedURLLoaderFactory() {
   return system_shared_url_loader_factory_;
 }
 
-mojo::Remote<network::mojom::NetworkContext>
-CastNetworkContexts::CreateNetworkContext(
+void CastNetworkContexts::ConfigureNetworkContextParams(
     content::BrowserContext* context,
     bool in_memory,
-    const base::FilePath& relative_partition_path) {
+    const base::FilePath& relative_partition_path,
+    network::mojom::NetworkContextParams* network_context_params,
+    network::mojom::CertVerifierCreationParams* cert_verifier_creation_params) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
-  mojo::Remote<network::mojom::NetworkContext> network_context;
-  network::mojom::NetworkContextParamsPtr context_params =
-      CreateDefaultNetworkContextParams();
-
-  content::UpdateCorsExemptHeader(context_params.get());
+  ConfigureDefaultNetworkContextParams(network_context_params);
 
   // Copy of what's in ContentBrowserClient::CreateNetworkContext for now.
-  context_params->accept_language = "en-us,en";
-
-  content::GetNetworkService()->CreateNetworkContext(
-      network_context.BindNewPipeAndPassReceiver(), std::move(context_params));
-  return network_context;
+  network_context_params->accept_language = "en-us,en";
 }
 
 void CastNetworkContexts::OnNetworkServiceCreated(
@@ -169,8 +161,6 @@ void CastNetworkContexts::OnNetworkServiceCreated(
   if (!chromecast::IsFeatureEnabled(kEnableQuic))
     network_service->DisableQuic();
 
-  // The system NetworkContext must be created first, since it sets
-  // |primary_network_context| to true.
   network_service->CreateNetworkContext(
       system_network_context_.BindNewPipeAndPassReceiver(),
       CreateSystemNetworkContextParams());
@@ -196,11 +186,8 @@ void CastNetworkContexts::OnPrefServiceShutdown() {
     pref_proxy_config_tracker_impl_->DetachFromPrefService();
 }
 
-network::mojom::NetworkContextParamsPtr
-CastNetworkContexts::CreateDefaultNetworkContextParams() {
-  network::mojom::NetworkContextParamsPtr network_context_params =
-      network::mojom::NetworkContextParams::New();
-
+void CastNetworkContexts::ConfigureDefaultNetworkContextParams(
+    network::mojom::NetworkContextParams* network_context_params) {
   network_context_params->http_cache_enabled = false;
   network_context_params->user_agent = GetUserAgent();
   network_context_params->accept_language =
@@ -215,22 +202,23 @@ CastNetworkContexts::CreateDefaultNetworkContextParams() {
   network_context_params->disable_idle_sockets_close_on_memory_pressure =
       IsFeatureEnabled(kDisableIdleSocketsCloseOnMemoryPressure);
 
-  AddProxyToNetworkContextParams(network_context_params.get());
+  AddProxyToNetworkContextParams(network_context_params);
 
-  network_context_params->cors_exempt_header_list = cors_exempt_headers_list_;
-
-  return network_context_params;
+  network_context_params->cors_exempt_header_list.insert(
+      network_context_params->cors_exempt_header_list.end(),
+      cors_exempt_headers_list_.begin(), cors_exempt_headers_list_.end());
 }
 
 network::mojom::NetworkContextParamsPtr
 CastNetworkContexts::CreateSystemNetworkContextParams() {
   network::mojom::NetworkContextParamsPtr network_context_params =
-      CreateDefaultNetworkContextParams();
-  content::UpdateCorsExemptHeader(network_context_params.get());
+      network::mojom::NetworkContextParams::New();
+  ConfigureDefaultNetworkContextParams(network_context_params.get());
 
   network_context_params->context_name = std::string("system");
 
-  network_context_params->primary_network_context = true;
+  network_context_params->cert_verifier_params = content::GetCertVerifierParams(
+      network::mojom::CertVerifierCreationParams::New());
 
   return network_context_params;
 }

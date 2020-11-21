@@ -107,28 +107,16 @@ void MetadataRecorder::Remove(uint64_t name_hash, Optional<int64_t> key) {
 MetadataRecorder::MetadataProvider::MetadataProvider(
     MetadataRecorder* metadata_recorder)
     : metadata_recorder_(metadata_recorder),
-      auto_lock_(&metadata_recorder->read_lock_) {}
+      auto_lock_(metadata_recorder->read_lock_) {}
 
 MetadataRecorder::MetadataProvider::~MetadataProvider() = default;
 
-// This function is marked as NO_THREAD_SAFETY_ANALYSIS because the analyzer
-// doesn't understand that the lock is acquired in the constructor initializer
-// list and can therefore be safely released here.
-size_t MetadataRecorder::MetadataProvider::GetItems(ItemArray* items)
-    NO_THREAD_SAFETY_ANALYSIS {
-  size_t item_count = metadata_recorder_->GetItems(items);
-  auto_lock_.Release();
-  return item_count;
-}
-
-std::unique_ptr<MetadataRecorder::MetadataProvider>
-MetadataRecorder::CreateMetadataProvider() {
-  return std::make_unique<MetadataRecorder::MetadataProvider>(this);
+size_t MetadataRecorder::MetadataProvider::GetItems(
+    ItemArray* const items) const {
+  return metadata_recorder_->GetItems(items);
 }
 
 size_t MetadataRecorder::GetItems(ItemArray* const items) const {
-  read_lock_.AssertAcquired();
-
   // If a writer adds a new item after this load, it will be ignored.  We do
   // this instead of calling item_slots_used_.load() explicitly in the for loop
   // bounds checking, which would be expensive.

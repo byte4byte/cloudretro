@@ -7,6 +7,7 @@
 #include "base/feature_list.h"
 #include "base/files/file_path.h"
 #include "base/strings/sys_string_conversions.h"
+#import "ios/chrome/app/application_delegate/app_state.h"
 #include "ios/chrome/browser/application_context.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/chrome/browser/crash_report/crash_report_helper.h"
@@ -14,10 +15,8 @@
 #import "ios/chrome/browser/main/browser.h"
 #import "ios/chrome/browser/main/browser_list.h"
 #import "ios/chrome/browser/main/browser_list_factory.h"
-#import "ios/chrome/browser/sessions/session_ios.h"
 #import "ios/chrome/browser/sessions/session_restoration_browser_agent.h"
-#import "ios/chrome/browser/sessions/session_service_ios.h"
-#import "ios/chrome/browser/sessions/session_window_ios.h"
+#import "ios/chrome/browser/snapshots/snapshot_browser_agent.h"
 #import "ios/chrome/browser/tabs/tab_model.h"
 #import "ios/chrome/browser/ui/browser_view/browser_coordinator.h"
 #import "ios/chrome/browser/ui/browser_view/browser_view_controller.h"
@@ -25,7 +24,10 @@
 #import "ios/chrome/browser/ui/commands/application_commands.h"
 #import "ios/chrome/browser/ui/commands/browsing_data_commands.h"
 #import "ios/chrome/browser/ui/commands/command_dispatcher.h"
+#import "ios/chrome/browser/ui/main/scene_state.h"
+#import "ios/chrome/browser/ui/main/scene_state_browser_agent.h"
 #import "ios/chrome/browser/ui/util/multi_window_support.h"
+#import "ios/chrome/browser/web_state_list/web_state_list.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -57,10 +59,6 @@
 
 - (BrowserViewController*)bvc {
   return self.coordinator.viewController;
-}
-
-- (TabModel*)tabModel {
-  return self.browser->GetTabModel();
 }
 
 - (Browser*)browser {
@@ -97,6 +95,7 @@
 
 @interface BrowserViewWrangler () {
   ChromeBrowserState* _browserState;
+  SceneState* _sceneState;
   __weak id<ApplicationCommands> _applicationCommandEndpoint;
   __weak id<BrowsingDataCommands> _browsingDataCommandEndpoint;
   BOOL _isShutdown;
@@ -105,23 +104,22 @@
   std::unique_ptr<Browser> _otrBrowser;
 }
 
+// Opaque session ID from _sceneState, nil when multi-window isn't enabled.
+@property(nonatomic, readonly) NSString* sessionID;
+
 @property(nonatomic, strong, readwrite) WrangledBrowser* mainInterface;
 @property(nonatomic, strong, readwrite) WrangledBrowser* incognitoInterface;
 
 // Backing objects.
 @property(nonatomic) BrowserCoordinator* mainBrowserCoordinator;
 @property(nonatomic) BrowserCoordinator* incognitoBrowserCoordinator;
-//@property(nonatomic, readonly) TabModel* mainTabModel;
-//@property(nonatomic, readonly) TabModel* otrTabModel;
 @property(nonatomic, readonly) Browser* mainBrowser;
 @property(nonatomic, readonly) Browser* otrBrowser;
 
-// Restore session to the given |browser|, any existing tabs that have been
-// saved for the |browser| will be loaded.
-- (void)restoreSessionToBrowser:(Browser*)browser;
-
-// Setters for the main and otr Browsers.
-- (void)setMainBrowser:(std::unique_ptr<Browser>)browser;
+// The main browser can't be set after creation, but they can be
+// cleared (setting them to nullptr).
+- (void)clearMainBrowser;
+// The OTR browser can be reset after creation.
 - (void)setOtrBrowser:(std::unique_ptr<Browser>)browser;
 
 // Creates a new off-the-record ("incognito") browser state for |_browserState|,
@@ -138,12 +136,14 @@
 @synthesize currentInterface = _currentInterface;
 
 - (instancetype)initWithBrowserState:(ChromeBrowserState*)browserState
+                          sceneState:(SceneState*)sceneState
           applicationCommandEndpoint:
               (id<ApplicationCommands>)applicationCommandEndpoint
          browsingDataCommandEndpoint:
              (id<BrowsingDataCommands>)browsingDataCommandEndpoint {
   if ((self = [super init])) {
     _browserState = browserState;
+    _sceneState = sceneState;
     _applicationCommandEndpoint = applicationCommandEndpoint;
     _browsingDataCommandEndpoint = browsingDataCommandEndpoint;
   }
@@ -159,8 +159,30 @@
   BrowserList* browserList =
       BrowserListFactory::GetForBrowserState(_mainBrowser->GetBrowserState());
   browserList->AddBrowser(_mainBrowser.get());
+
+  // Associate |_sceneState| with the new browser.
+  SceneStateBrowserAgent::CreateForBrowser(_mainBrowser.get(), _sceneState);
+
   [self dispatchToEndpointsForBrowser:_mainBrowser.get()];
-  [self restoreSessionToBrowser:_mainBrowser.get()];
+
+  std::string sessionID = base::SysNSStringToUTF8(self.sessionID);
+  SnapshotBrowserAgent::FromBrowser(_mainBrowser.get())
+      ->SetSessionID(sessionID);
+
+  // If the OS doesn't support multiple scenes, use the previous run scene ID
+  // for the session restoration.
+  NSString* restoreSessionID = self.sessionID;
+  if (_sceneState.appState.previousSingleWindowSessionID) {
+    restoreSessionID = _sceneState.appState.previousSingleWindowSessionID;
+  }
+  SessionRestorationBrowserAgent* restorationAgent =
+      SessionRestorationBrowserAgent::FromBrowser(_mainBrowser.get());
+  restorationAgent->SetSessionID(base::SysNSStringToUTF8(restoreSessionID));
+  restorationAgent->RestoreSession();
+  restorationAgent->SetSessionID(sessionID);
+  if (base::SysNSStringToUTF8(restoreSessionID) != sessionID) {
+    restorationAgent->SaveSession(true);
+  }
   breakpad::MonitorTabStateForWebStateList(_mainBrowser->GetWebStateList());
   // Follow loaded URLs in the main tab model to send those in case of
   // crashes.
@@ -175,6 +197,16 @@
 }
 
 #pragma mark - BrowserViewInformation property implementations
+
+- (NSString*)sessionID {
+  NSString* sessionID = nil;
+  if (IsMultiwindowSupported()) {
+    if (@available(iOS 13, *)) {
+      sessionID = _sceneState.scene.session.persistentIdentifier;
+    }
+  }
+  return sessionID;
+}
 
 - (void)setCurrentInterface:(WrangledBrowser*)interface {
   DCHECK(interface);
@@ -220,6 +252,10 @@
   return _incognitoInterface;
 }
 
+- (BOOL)hasIncognitoInterface {
+  return _incognitoInterface;
+}
+
 - (Browser*)mainBrowser {
   DCHECK(_mainBrowser.get())
       << "-createMainBrowser must be called before -mainBrowser is accessed.";
@@ -233,24 +269,23 @@
   return _otrBrowser.get();
 }
 
-- (void)setMainBrowser:(std::unique_ptr<Browser>)mainBrowser {
+- (void)clearMainBrowser {
   if (_mainBrowser.get()) {
-    TabModel* tabModel = self.mainBrowser->GetTabModel();
     WebStateList* webStateList = self.mainBrowser->GetWebStateList();
     breakpad::StopMonitoringTabStateForWebStateList(webStateList);
     breakpad::StopMonitoringURLsForWebStateList(webStateList);
-    [tabModel disconnect];
+    [self.mainBrowser->GetTabModel() disconnect];
   }
 
-  _mainBrowser = std::move(mainBrowser);
+  _mainBrowser = nullptr;
+  ;
 }
 
 - (void)setOtrBrowser:(std::unique_ptr<Browser>)otrBrowser {
   if (_otrBrowser.get()) {
-    TabModel* tabModel = self.otrBrowser->GetTabModel();
     WebStateList* webStateList = self.otrBrowser->GetWebStateList();
     breakpad::StopMonitoringTabStateForWebStateList(webStateList);
-    [tabModel disconnect];
+    [self.otrBrowser->GetTabModel() disconnect];
   }
 
   _otrBrowser = std::move(otrBrowser);
@@ -279,11 +314,11 @@
 
 #pragma mark - Other public methods
 
-- (void)destroyAndRebuildIncognitoBrowser {
-  // It is theoretically possible that a Tab has been added to |_otrTabModel|
+- (void)willDestroyIncognitoBrowserState {
+  // It is theoretically possible that a Tab has been added to the webStateList
   // since the deletion has been scheduled. It is unlikely to happen for real
   // because it would require superhuman speed.
-  DCHECK(![self.otrBrowser->GetTabModel() count]);
+  DCHECK(self.otrBrowser->GetWebStateList()->empty());
   DCHECK(_browserState);
 
   // Remove the OTR browser from the browser list. The browser itself is
@@ -313,18 +348,20 @@
       _currentInterface = nil;
     }
   }
+}
 
-  _browserState->DestroyOffTheRecordChromeBrowserState();
+- (void)incognitoBrowserStateCreated {
+  DCHECK(_browserState);
+  DCHECK(_browserState->HasOffTheRecordChromeBrowserState());
 
-  // An empty _otrTabModel must be created at this point, because it is then
+  // An empty _otrBrowser must be created at this point, because it is then
   // possible to prevent the tabChanged notification being sent. Otherwise,
   // when it is created, a notification with no tabs will be sent, and it will
   // be immediately deleted.
   [self setOtrBrowser:[self buildOtrBrowser:NO]];
-  DCHECK(![self.otrBrowser->GetTabModel() count]);
-  DCHECK(_browserState->HasOffTheRecordChromeBrowserState());
+  DCHECK(self.otrBrowser->GetWebStateList()->empty());
 
-  if (otrBVCIsCurrent) {
+  if (_currentInterface == nil) {
     self.currentInterface = self.incognitoInterface;
   }
 }
@@ -349,7 +386,7 @@
 
   // Handles removing observers, stopping breakpad monitoring, and closing all
   // tabs.
-  [self setMainBrowser:nullptr];
+  [self clearMainBrowser];
   [self setOtrBrowser:nullptr];
 
   _browserState = nullptr;
@@ -369,8 +406,18 @@
       BrowserListFactory::GetForBrowserState(browser->GetBrowserState());
   browserList->AddIncognitoBrowser(browser.get());
   [self dispatchToEndpointsForBrowser:browser.get()];
-  if (restorePersistedState)
-    [self restoreSessionToBrowser:browser.get()];
+  std::string sessionID = base::SysNSStringToUTF8(self.sessionID);
+  SnapshotBrowserAgent::FromBrowser(browser.get())->SetSessionID(sessionID);
+  SessionRestorationBrowserAgent::FromBrowser(browser.get())
+      ->SetSessionID(sessionID);
+  if (restorePersistedState) {
+    SessionRestorationBrowserAgent::FromBrowser(browser.get())
+        ->RestoreSession();
+  }
+
+  // Associate the same SceneState with the new OTR browser as is associated
+  // with the main browser.
+  SceneStateBrowserAgent::CreateForBrowser(browser.get(), _sceneState);
 
   breakpad::MonitorTabStateForWebStateList(browser->GetWebStateList());
 
@@ -401,28 +448,6 @@
   [browser->GetCommandDispatcher()
       startDispatchingToTarget:_browsingDataCommandEndpoint
                    forProtocol:@protocol(BrowsingDataCommands)];
-}
-
-- (void)restoreSessionToBrowser:(Browser*)browser {
-  SessionWindowIOS* sessionWindow = nil;
-  NSString* statePath = base::SysUTF8ToNSString(
-      browser->GetBrowserState()->GetStatePath().AsUTF8Unsafe());
-  SessionIOS* session =
-      [[SessionServiceIOS sharedService] loadSessionFromDirectory:statePath];
-  if (IsMultiwindowSupported()) {
-    if (session && session.sessionWindows.count > self.windowID) {
-      sessionWindow = session.sessionWindows[self.windowID];
-    }
-
-  } else {
-    if (session) {
-      DCHECK_EQ(session.sessionWindows.count, 1u);
-      sessionWindow = session.sessionWindows[0];
-    }
-  }
-
-  SessionRestorationBrowserAgent::FromBrowser(browser)->RestoreSessionWindow(
-      sessionWindow);
 }
 
 @end

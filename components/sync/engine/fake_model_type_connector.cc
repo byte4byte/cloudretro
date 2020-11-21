@@ -12,15 +12,14 @@ FakeModelTypeConnector::FakeModelTypeConnector() {}
 
 FakeModelTypeConnector::~FakeModelTypeConnector() {}
 
-void FakeModelTypeConnector::ConnectNonBlockingType(
+void FakeModelTypeConnector::ConnectDataType(
     ModelType type,
     std::unique_ptr<DataTypeActivationResponse> activation_response) {}
 
-void FakeModelTypeConnector::DisconnectNonBlockingType(ModelType type) {}
+void FakeModelTypeConnector::DisconnectDataType(ModelType type) {}
 
-void FakeModelTypeConnector::RegisterDirectoryType(ModelType type,
-                                                   ModelSafeGroup group) {}
+void FakeModelTypeConnector::ConnectProxyType(ModelType type) {}
 
-void FakeModelTypeConnector::UnregisterDirectoryType(ModelType type) {}
+void FakeModelTypeConnector::DisconnectProxyType(ModelType type) {}
 
 }  // namespace syncer

@@ -115,39 +115,10 @@ void ChromeAppListModelUpdater::SetStatus(ash::AppListModelStatus status) {
   app_list_controller_->SetStatus(status);
 }
 
-void ChromeAppListModelUpdater::SetState(ash::AppListState state) {
-  if (!app_list_controller_)
-    return;
-  app_list_controller_->SetState(state);
-}
-
-void ChromeAppListModelUpdater::HighlightItemInstalledFromUI(
-    const std::string& id) {
-  if (!app_list_controller_)
-    return;
-  app_list_controller_->HighlightItemInstalledFromUI(id);
-}
-
 void ChromeAppListModelUpdater::SetSearchEngineIsGoogle(bool is_google) {
   search_engine_is_google_ = is_google;
   if (app_list_controller_)
     app_list_controller_->SetSearchEngineIsGoogle(is_google);
-}
-
-void ChromeAppListModelUpdater::SetSearchTabletAndClamshellAccessibleName(
-    const base::string16& tablet_accessible_name,
-    const base::string16& clamshell_accessible_name) {
-  if (!app_list_controller_)
-    return;
-  app_list_controller_->SetSearchTabletAndClamshellAccessibleName(
-      tablet_accessible_name, clamshell_accessible_name);
-}
-
-void ChromeAppListModelUpdater::SetSearchHintText(
-    const base::string16& hint_text) {
-  if (!app_list_controller_)
-    return;
-  app_list_controller_->SetSearchHintText(hint_text);
 }
 
 void ChromeAppListModelUpdater::UpdateSearchBox(const base::string16& text,
@@ -159,6 +130,7 @@ void ChromeAppListModelUpdater::UpdateSearchBox(const base::string16& text,
 
 void ChromeAppListModelUpdater::PublishSearchResults(
     const std::vector<ChromeSearchResult*>& results) {
+  published_results_ = results;
   for (auto* const result : results)
     result->set_model_updater(this);
   if (!app_list_controller_)
@@ -167,6 +139,11 @@ void ChromeAppListModelUpdater::PublishSearchResults(
   for (auto* result : results)
     result_data.push_back(result->CloneMetadata());
   app_list_controller_->PublishSearchResults(std::move(result_data));
+}
+
+std::vector<ChromeSearchResult*>
+ChromeAppListModelUpdater::GetPublishedSearchResultsForTest() {
+  return published_results_;
 }
 
 void ChromeAppListModelUpdater::ActivateChromeItem(const std::string& id,
@@ -275,21 +252,6 @@ void ChromeAppListModelUpdater::SetItemFolderId(const std::string& id,
   app_list_controller_->SetItemMetadata(id, std::move(data));
 }
 
-void ChromeAppListModelUpdater::SetItemIsInstalling(const std::string& id,
-                                                    bool is_installing) {
-  if (!app_list_controller_)
-    return;
-  app_list_controller_->SetItemIsInstalling(id, is_installing);
-}
-
-void ChromeAppListModelUpdater::SetItemPercentDownloaded(
-    const std::string& id,
-    int32_t percent_downloaded) {
-  if (!app_list_controller_)
-    return;
-  app_list_controller_->SetItemPercentDownloaded(id, percent_downloaded);
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 // Methods only used by ChromeSearchResult that talk to ash directly.
 
@@ -299,30 +261,6 @@ void ChromeAppListModelUpdater::SetSearchResultMetadata(
   if (!app_list_controller_)
     return;
   app_list_controller_->SetSearchResultMetadata(std::move(metadata));
-}
-
-void ChromeAppListModelUpdater::SetSearchResultIsInstalling(
-    const std::string& id,
-    bool is_installing) {
-  if (!app_list_controller_)
-    return;
-  app_list_controller_->SetSearchResultIsInstalling(id, is_installing);
-}
-
-void ChromeAppListModelUpdater::SetSearchResultPercentDownloaded(
-    const std::string& id,
-    int percent_downloaded) {
-  if (!app_list_controller_)
-    return;
-  app_list_controller_->SetSearchResultPercentDownloaded(id,
-                                                         percent_downloaded);
-}
-
-void ChromeAppListModelUpdater::NotifySearchResultItemInstalled(
-    const std::string& id) {
-  if (!app_list_controller_)
-    return;
-  app_list_controller_->NotifySearchResultItemInstalled(id);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -512,6 +450,11 @@ void ChromeAppListModelUpdater::UpdateAppItemFromSyncItem(
   }
 }
 
+void ChromeAppListModelUpdater::NotifyProcessSyncChangesFinished() {
+  if (app_list_controller_)
+    app_list_controller_->NotifyProcessSyncChangesFinished();
+}
+
 void ChromeAppListModelUpdater::AddObserver(
     AppListModelUpdaterObserver* observer) {
   observers_.AddObserver(observer);
@@ -525,36 +468,26 @@ void ChromeAppListModelUpdater::RemoveObserver(
 ////////////////////////////////////////////////////////////////////////////////
 // Methods called from Ash:
 
-void ChromeAppListModelUpdater::OnFolderCreated(
+void ChromeAppListModelUpdater::OnItemAdded(
     std::unique_ptr<ash::AppListItemMetadata> item) {
-  DCHECK(item->is_folder);
   ChromeAppListItem* chrome_item = FindItem(item->id);
   // If the item already exists, we should have set its information properly.
-  if (chrome_item)
-    return;
-  // Otherwise, we detect an item is created in Ash which is not added into our
-  // Chrome list yet. This only happens when a folder is created.
-  std::unique_ptr<ChromeAppListItem> new_item =
-      std::make_unique<ChromeAppListItem>(profile_, item->id, this);
-  chrome_item = AddChromeItem(std::move(new_item));
-  chrome_item->SetMetadata(std::move(item));
+  if (!chrome_item) {
+    // Otherwise, we detect an item is created in Ash which is not added into
+    // our Chrome list yet. This only happens when a folder is created or when a
+    // page break is added.
+    DCHECK(item->is_folder || item->is_page_break);
+    std::unique_ptr<ChromeAppListItem> new_item =
+        std::make_unique<ChromeAppListItem>(profile_, item->id, this);
+    chrome_item = AddChromeItem(std::move(new_item));
+    chrome_item->SetMetadata(std::move(item));
+  }
 
+  // Notify observers that an item is added to the AppListModel in ash.
+  // Note that items of apps are added from Chrome side so there would be an
+  // existing |chrome_item| when running here.
   for (AppListModelUpdaterObserver& observer : observers_)
     observer.OnAppListItemAdded(chrome_item);
-}
-
-void ChromeAppListModelUpdater::OnFolderDeleted(
-    std::unique_ptr<ash::AppListItemMetadata> item) {
-  DCHECK(item->is_folder);
-
-  ChromeAppListItem* chrome_item = FindItem(item->id);
-  if (!chrome_item)
-    return;
-
-  for (AppListModelUpdaterObserver& observer : observers_)
-    observer.OnAppListItemWillBeDeleted(chrome_item);
-
-  items_.erase(item->id);
 }
 
 void ChromeAppListModelUpdater::OnItemUpdated(
@@ -575,23 +508,18 @@ void ChromeAppListModelUpdater::OnItemUpdated(
     observer.OnAppListItemUpdated(chrome_item);
 }
 
-void ChromeAppListModelUpdater::OnPageBreakItemAdded(
-    const std::string& id,
-    const syncer::StringOrdinal& position) {
-  ChromeAppListItem* chrome_item = FindItem(id);
+void ChromeAppListModelUpdater::OnFolderDeleted(
+    std::unique_ptr<ash::AppListItemMetadata> item) {
+  DCHECK(item->is_folder);
 
-  // If the item already exists, we should have set its information properly.
-  if (chrome_item)
+  ChromeAppListItem* chrome_item = FindItem(item->id);
+  if (!chrome_item)
     return;
 
-  // Otherwise, create a new "page break" item.
-  auto new_item = std::make_unique<ChromeAppListItem>(profile_, id, this);
-  new_item->SetPosition(position);
-  new_item->SetIsPageBreak(true);
-  chrome_item = AddChromeItem(std::move(new_item));
-
   for (AppListModelUpdaterObserver& observer : observers_)
-    observer.OnAppListItemAdded(chrome_item);
+    observer.OnAppListItemWillBeDeleted(chrome_item);
+
+  items_.erase(item->id);
 }
 
 void ChromeAppListModelUpdater::OnPageBreakItemDeleted(const std::string& id) {

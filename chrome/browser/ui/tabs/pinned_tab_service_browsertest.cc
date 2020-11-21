@@ -16,6 +16,7 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/test_utils.h"
 
 namespace {
@@ -26,6 +27,8 @@ class BrowserRemovalWaiter : public BrowserListObserver {
   explicit BrowserRemovalWaiter(const Browser* browser) : browser_(browser) {
     BrowserList::AddObserver(this);
   }
+  BrowserRemovalWaiter(const BrowserRemovalWaiter&) = delete;
+  BrowserRemovalWaiter& operator=(const BrowserRemovalWaiter&) = delete;
   ~BrowserRemovalWaiter() override = default;
 
   void WaitForRemoval() {
@@ -46,8 +49,6 @@ class BrowserRemovalWaiter : public BrowserListObserver {
 
   const Browser* const browser_;
   scoped_refptr<content::MessageLoopRunner> message_loop_runner_;
-
-  DISALLOW_COPY_AND_ASSIGN(BrowserRemovalWaiter);
 };
 
 using PinnedTabServiceBrowserTest = InProcessBrowserTest;

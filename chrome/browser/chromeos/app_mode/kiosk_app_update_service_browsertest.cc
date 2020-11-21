@@ -20,8 +20,8 @@
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/task/post_task.h"
 #include "base/task/task_traits.h"
+#include "base/task/thread_pool.h"
 #include "base/test/scoped_path_override.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/time/time.h"
@@ -37,6 +37,7 @@
 #include "chromeos/dbus/update_engine_client.h"
 #include "components/prefs/pref_service.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/test/browser_test.h"
 #include "extensions/common/extension.h"
 #include "extensions/test/extension_test_message_listener.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -85,9 +86,7 @@ class KioskAppUpdateServiceTest
     const std::string uptime_seconds =
         base::NumberToString(uptime.InSecondsF());
     const base::FilePath uptime_file = temp_dir.Append("uptime");
-    ASSERT_EQ(static_cast<int>(uptime_seconds.size()),
-              base::WriteFile(
-                  uptime_file, uptime_seconds.c_str(), uptime_seconds.size()));
+    ASSERT_TRUE(base::WriteFile(uptime_file, uptime_seconds));
     uptime_file_override_.reset(
         new base::ScopedPathOverride(chromeos::FILE_UPTIME, uptime_file));
   }
@@ -109,7 +108,7 @@ class KioskAppUpdateServiceTest
     // Wait for |automatic_reboot_manager_| to finish initializing.
     bool initialized = false;
     base::RunLoop run_loop;
-    base::PostTask(
+    base::ThreadPool::PostTask(
         FROM_HERE,
         base::BindOnce(&WaitForAutomaticRebootManagerInit,
                        base::Unretained(automatic_reboot_manager_),

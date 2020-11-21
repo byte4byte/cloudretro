@@ -6,11 +6,10 @@
 
 #include <memory>
 #include <string>
-#include <vector>
 
 #include "base/unguessable_token.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/web_applications/components/file_handler_manager.h"
+#include "chrome/browser/web_applications/components/os_integration_manager.h"
 #include "chrome/browser/web_applications/components/policy/web_app_policy_manager.h"
 #include "chrome/browser/web_applications/components/web_app_audio_focus_id_map.h"
 #include "chrome/browser/web_applications/components/web_app_provider_base.h"
@@ -52,14 +51,19 @@ const base::UnguessableToken& WebAppTabHelper::GetAudioFocusGroupIdForTesting()
   return audio_focus_group_id_;
 }
 
+bool WebAppTabHelper::HasLoadedNonAboutBlankPage() const {
+  return has_loaded_non_about_blank_page_;
+}
+
 void WebAppTabHelper::SetAppId(const AppId& app_id) {
   DCHECK(app_id.empty() || provider_->registrar().IsInstalled(app_id));
   if (app_id_ == app_id)
     return;
 
+  AppId previous_app_id = app_id_;
   app_id_ = app_id;
 
-  OnAssociatedAppChanged();
+  OnAssociatedAppChanged(previous_app_id, app_id_);
 }
 
 void WebAppTabHelper::ReadyToCommitNavigation(
@@ -83,6 +87,9 @@ void WebAppTabHelper::DidFinishNavigation(
     content::NavigationHandle* navigation_handle) {
   if (!navigation_handle->IsInMainFrame() || !navigation_handle->HasCommitted())
     return;
+
+  if (!navigation_handle->GetURL().IsAboutBlank())
+    has_loaded_non_about_blank_page_ = true;
 
   is_error_page_ = navigation_handle->IsErrorPage();
 
@@ -108,7 +115,7 @@ void WebAppTabHelper::DOMContentLoaded(
 
   // There is no way to reliably know if |app_id_| is for a System Web App
   // during startup, so we always call MaybeUpdateFileHandlingOriginTrialExpiry.
-  provider_->file_handler_manager().MaybeUpdateFileHandlingOriginTrialExpiry(
+  provider_->os_integration_manager().MaybeUpdateFileHandlingOriginTrialExpiry(
       web_contents(), app_id_);
 }
 
@@ -137,7 +144,7 @@ void WebAppTabHelper::OnWebAppInstalled(const AppId& installed_app_id) {
   SetAppId(app_id);
 
   // TODO(crbug.com/1053371): Clean up where we install file handlers.
-  provider_->file_handler_manager().MaybeUpdateFileHandlingOriginTrialExpiry(
+  provider_->os_integration_manager().MaybeUpdateFileHandlingOriginTrialExpiry(
       web_contents(), installed_app_id);
 }
 
@@ -155,12 +162,19 @@ void WebAppTabHelper::OnAppRegistrarDestroyed() {
 }
 
 void WebAppTabHelper::ResetAppId() {
+  if (app_id_.empty())
+    return;
+
+  AppId previous_app_id = app_id_;
   app_id_.clear();
 
-  OnAssociatedAppChanged();
+  OnAssociatedAppChanged(previous_app_id, app_id_);
 }
 
-void WebAppTabHelper::OnAssociatedAppChanged() {
+void WebAppTabHelper::OnAssociatedAppChanged(const AppId& previous_app_id,
+                                             const AppId& new_app_id) {
+  provider_->ui_manager().NotifyOnAssociatedAppChanged(
+      web_contents(), previous_app_id, new_app_id);
   UpdateAudioFocusGroupId();
 }
 

@@ -10,15 +10,18 @@
 #include "base/metrics/histogram_functions.h"
 #include "base/strings/stringprintf.h"
 #include "base/task_runner_util.h"
+#include "build/build_config.h"
 #include "chrome/browser/media/feeds/media_feeds_service.h"
 #include "chrome/browser/media/history/media_history_feed_items_table.h"
 #include "chrome/browser/media/history/media_history_feeds_table.h"
 #include "chrome/browser/media/history/media_history_images_table.h"
+#include "chrome/browser/media/history/media_history_kaleidoscope_data_table.h"
 #include "chrome/browser/media/history/media_history_origin_table.h"
 #include "chrome/browser/media/history/media_history_playback_table.h"
 #include "chrome/browser/media/history/media_history_session_images_table.h"
 #include "chrome/browser/media/history/media_history_session_table.h"
 #include "content/public/browser/media_player_watch_time.h"
+#include "net/cookies/cookie_change_dispatcher.h"
 #include "services/media_session/public/cpp/media_image.h"
 #include "services/media_session/public/cpp/media_position.h"
 #include "sql/recovery.h"
@@ -26,9 +29,13 @@
 #include "sql/transaction.h"
 #include "url/origin.h"
 
+#if !defined(OS_ANDROID)
+#include "chrome/browser/media/feeds/media_feeds_service.h"
+#endif  // !defined(OS_ANDROID)
+
 namespace {
 
-constexpr int kCurrentVersionNumber = 1;
+constexpr int kCurrentVersionNumber = 4;
 constexpr int kCompatibleVersionNumber = 1;
 
 constexpr base::FilePath::CharType kMediaHistoryDatabaseName[] =
@@ -67,6 +74,82 @@ base::FilePath GetDBPath(Profile* profile) {
   return profile->GetPath().Append(kMediaHistoryDatabaseName);
 }
 
+int MigrateFrom1To2(sql::Database* db, sql::MetaTable* meta_table) {
+  // Version 2 adds a new column to mediaFeed.
+  const int target_version = 2;
+
+  // The mediaFeed table might not exist if the feature is disabled.
+  if (!db->DoesTableExist("mediaFeed")) {
+    meta_table->SetVersionNumber(target_version);
+    return target_version;
+  }
+
+  static const char k1To2Sql[] =
+      "ALTER TABLE mediaFeed ADD COLUMN cookie_name_filter TEXT;";
+  sql::Transaction transaction(db);
+  if (transaction.Begin() && db->Execute(k1To2Sql) && transaction.Commit()) {
+    meta_table->SetVersionNumber(target_version);
+    return target_version;
+  }
+  return 1;
+}
+
+int MigrateFrom2To3(sql::Database* db, sql::MetaTable* meta_table) {
+  // Version 3 drops the mediaFeedAssociatedOrigin table.
+  const int target_version = 3;
+
+  // The mediaFeedAssociatedOrigin table might not exist if the feature is
+  // disabled.
+  if (!db->DoesTableExist("mediaFeedAssociatedOrigin")) {
+    meta_table->SetVersionNumber(target_version);
+    return target_version;
+  }
+
+  static const char k2To3Sql[] = "DROP TABLE mediaFeedAssociatedOrigin;";
+  sql::Transaction transaction(db);
+  if (transaction.Begin() && db->Execute(k2To3Sql) && transaction.Commit()) {
+    meta_table->SetVersionNumber(target_version);
+    return target_version;
+  }
+  return 2;
+}
+
+int MigrateFrom3To4(sql::Database* db, sql::MetaTable* meta_table) {
+  // Version 4 adds a new column to mediaFeed.
+  const int target_version = 3;
+
+  // The mediaFeed table might not exist if the feature is disabled.
+  if (!db->DoesTableExist("mediaFeed")) {
+    meta_table->SetVersionNumber(target_version);
+    return target_version;
+  }
+
+  static const char k3To4Sql[] =
+      "ALTER TABLE mediaFeed ADD COLUMN safe_search_result INTEGER DEFAULT 0;";
+  sql::Transaction transaction(db);
+  if (transaction.Begin() && db->Execute(k3To4Sql) && transaction.Commit()) {
+    meta_table->SetVersionNumber(target_version);
+    return target_version;
+  }
+  return 3;
+}
+
+bool IsCauseFromExpiration(const net::CookieChangeCause& cause) {
+  return cause == net::CookieChangeCause::UNKNOWN_DELETION ||
+         cause == net::CookieChangeCause::EXPIRED ||
+         cause == net::CookieChangeCause::EXPIRED_OVERWRITE ||
+         cause == net::CookieChangeCause::EXPLICIT ||
+         cause == net::CookieChangeCause::EVICTED;
+}
+
+bool IsMediaFeedsEnabled() {
+#if defined(OS_ANDROID)
+  return false;
+#else
+  return media_feeds::MediaFeedsService::IsEnabled();
+#endif  // defined(OS_ANDROID)
+}
+
 }  // namespace
 
 int GetCurrentVersion() {
@@ -77,6 +160,9 @@ namespace media_history {
 
 const char MediaHistoryStore::kInitResultHistogramName[] =
     "Media.History.Init.Result";
+
+const char MediaHistoryStore::kInitResultAfterDeleteHistogramName[] =
+    "Media.History.Init.ResultAfterDelete";
 
 const char MediaHistoryStore::kPlaybackWriteResultHistogramName[] =
     "Media.History.Playback.WriteResult";
@@ -92,19 +178,30 @@ MediaHistoryStore::MediaHistoryStore(
     scoped_refptr<base::UpdateableSequencedTaskRunner> db_task_runner)
     : db_task_runner_(db_task_runner),
       db_path_(GetDBPath(profile)),
+      db_(std::make_unique<sql::Database>()),
+      meta_table_(std::make_unique<sql::MetaTable>()),
       origin_table_(new MediaHistoryOriginTable(db_task_runner_)),
       playback_table_(new MediaHistoryPlaybackTable(db_task_runner_)),
       session_table_(new MediaHistorySessionTable(db_task_runner_)),
       session_images_table_(
           new MediaHistorySessionImagesTable(db_task_runner_)),
       images_table_(new MediaHistoryImagesTable(db_task_runner_)),
-      feeds_table_(media_feeds::MediaFeedsService::IsEnabled()
+      feeds_table_(IsMediaFeedsEnabled()
                        ? new MediaHistoryFeedsTable(db_task_runner_)
                        : nullptr),
-      feed_items_table_(media_feeds::MediaFeedsService::IsEnabled()
+      feed_items_table_(IsMediaFeedsEnabled()
                             ? new MediaHistoryFeedItemsTable(db_task_runner_)
                             : nullptr),
-      initialization_successful_(false) {}
+      kaleidoscope_table_(
+          new MediaHistoryKaleidoscopeDataTable(db_task_runner_)),
+      initialization_successful_(false) {
+  db_->set_histogram_tag("MediaHistory");
+  db_->set_exclusive_locking();
+
+  // To recover from corruption.
+  db_->set_error_callback(
+      base::BindRepeating(&DatabaseErrorCallback, db_.get(), db_path_));
+}
 
 MediaHistoryStore::~MediaHistoryStore() {
   // The connection pointer needs to be deleted on the DB sequence since there
@@ -121,7 +218,7 @@ sql::Database* MediaHistoryStore::DB() {
 }
 
 void MediaHistoryStore::SavePlayback(
-    const content::MediaPlayerWatchTime& watch_time) {
+    std::unique_ptr<content::MediaPlayerWatchTime> watch_time) {
   DCHECK(db_task_runner_->RunsTasksInCurrentSequence());
   if (!CanAccessDatabase())
     return;
@@ -137,8 +234,16 @@ void MediaHistoryStore::SavePlayback(
   }
 
   // TODO(https://crbug.com/1052436): Remove the separate origin.
-  auto origin = url::Origin::Create(watch_time.origin);
-  CHECK_EQ(origin, url::Origin::Create(watch_time.url));
+  auto origin = url::Origin::Create(watch_time->origin);
+  if (origin != url::Origin::Create(watch_time->url)) {
+    DB()->RollbackTransaction();
+
+    base::UmaHistogramEnumeration(
+        MediaHistoryStore::kPlaybackWriteResultHistogramName,
+        MediaHistoryStore::PlaybackWriteResult::kFailedToWriteBadOrigin);
+
+    return;
+  }
 
   if (!CreateOriginId(origin)) {
     DB()->RollbackTransaction();
@@ -150,7 +255,7 @@ void MediaHistoryStore::SavePlayback(
     return;
   }
 
-  if (!playback_table_->SavePlayback(watch_time)) {
+  if (!playback_table_->SavePlayback(*watch_time)) {
     DB()->RollbackTransaction();
 
     base::UmaHistogramEnumeration(
@@ -160,9 +265,9 @@ void MediaHistoryStore::SavePlayback(
     return;
   }
 
-  if (watch_time.has_audio && watch_time.has_video) {
+  if (watch_time->has_audio && watch_time->has_video) {
     if (!origin_table_->IncrementAggregateAudioVideoWatchTime(
-            origin, watch_time.cumulative_watch_time)) {
+            origin, watch_time->cumulative_watch_time)) {
       DB()->RollbackTransaction();
 
       base::UmaHistogramEnumeration(
@@ -209,20 +314,23 @@ void MediaHistoryStore::Initialize(const bool should_reset) {
 
   base::UmaHistogramEnumeration(MediaHistoryStore::kInitResultHistogramName,
                                 result);
+
+  // In some edge cases the DB might be corrupted and unrecoverable so we should
+  // delete the database and recreate it.
+  if (result != InitResult::kSuccess) {
+    db_ = std::make_unique<sql::Database>();
+    meta_table_ = std::make_unique<sql::MetaTable>();
+
+    sql::Database::Delete(db_path_);
+
+    base::UmaHistogramEnumeration(
+        MediaHistoryStore::kInitResultAfterDeleteHistogramName,
+        InitializeInternal());
+  }
 }
 
 MediaHistoryStore::InitResult MediaHistoryStore::InitializeInternal() {
   DCHECK(db_task_runner_->RunsTasksInCurrentSequence());
-
-  db_ = std::make_unique<sql::Database>();
-  db_->set_histogram_tag("MediaHistory");
-  db_->set_exclusive_locking();
-
-  // To recover from corruption.
-  db_->set_error_callback(
-      base::BindRepeating(&DatabaseErrorCallback, db_.get(), db_path_));
-
-  meta_table_ = std::make_unique<sql::MetaTable>();
 
   if (db_path_.empty()) {
     if (IsCancelled() || !db_ || !db_->OpenInMemory()) {
@@ -245,8 +353,6 @@ MediaHistoryStore::InitResult MediaHistoryStore::InitializeInternal() {
       return MediaHistoryStore::InitResult::kFailedToOpenDatabase;
     }
   }
-
-  db_->Preload();
 
   if (IsCancelled() || !db_ || !db_->Execute("PRAGMA foreign_keys=1")) {
     LOG(ERROR) << "Failed to enable foreign keys on the media history store.";
@@ -314,11 +420,21 @@ sql::InitStatus MediaHistoryStore::CreateOrUpgradeIfNeeded() {
     return sql::INIT_TOO_NEW;
   }
 
-  LOG_IF(WARNING, cur_version < GetCurrentVersion())
-      << "Media history database version " << cur_version
-      << " is too old to handle.";
+  // Versions 0 and below are unexpected.
+  if (cur_version <= 0)
+    return sql::INIT_FAILURE;
 
-  return sql::INIT_OK;
+  // NOTE: Insert schema upgrade scripts here when required.
+  if (cur_version == 1)
+    cur_version = MigrateFrom1To2(db_.get(), meta_table_.get());
+  if (cur_version == 2)
+    cur_version = MigrateFrom2To3(db_.get(), meta_table_.get());
+  if (cur_version == 3)
+    cur_version = MigrateFrom3To4(db_.get(), meta_table_.get());
+
+  if (cur_version == kCurrentVersionNumber)
+    return sql::INIT_OK;
+  return sql::INIT_FAILURE;
 }
 
 sql::InitStatus MediaHistoryStore::InitializeTables() {
@@ -339,6 +455,8 @@ sql::InitStatus MediaHistoryStore::InitializeTables() {
     status = feeds_table_->Initialize(db_.get());
   if (feed_items_table_ && status == sql::INIT_OK)
     status = feed_items_table_->Initialize(db_.get());
+  if (status == sql::INIT_OK)
+    status = kaleidoscope_table_->Initialize(db_.get());
 
   return status;
 }
@@ -411,6 +529,12 @@ MediaHistoryStore::GetOriginRowsForDebug() {
   return origins;
 }
 
+std::vector<url::Origin> MediaHistoryStore::GetHighWatchTimeOrigins(
+    const base::TimeDelta& audio_video_watchtime_min) {
+  DCHECK(db_task_runner_->RunsTasksInCurrentSequence());
+  return origin_table_->GetHighWatchTimeOrigins(audio_video_watchtime_min);
+}
+
 std::vector<mojom::MediaHistoryPlaybackRowPtr>
 MediaHistoryStore::GetMediaHistoryPlaybackRowsForDebug() {
   DCHECK(db_task_runner_->RunsTasksInCurrentSequence());
@@ -418,6 +542,16 @@ MediaHistoryStore::GetMediaHistoryPlaybackRowsForDebug() {
     return std::vector<mojom::MediaHistoryPlaybackRowPtr>();
 
   return playback_table_->GetPlaybackRows();
+}
+
+std::vector<media_feeds::mojom::MediaFeedItemPtr>
+MediaHistoryStore::GetMediaFeedItems(
+    const MediaHistoryKeyedService::GetMediaFeedItemsRequest& request) {
+  DCHECK(db_task_runner_->RunsTasksInCurrentSequence());
+  if (!CanAccessDatabase() || !feed_items_table_)
+    return std::vector<media_feeds::mojom::MediaFeedItemPtr>();
+
+  return feed_items_table_->GetItems(request);
 }
 
 std::vector<media_feeds::mojom::MediaFeedPtr> MediaHistoryStore::GetMediaFeeds(
@@ -646,12 +780,33 @@ void MediaHistoryStore::DiscoverMediaFeed(const GURL& url) {
 }
 
 void MediaHistoryStore::StoreMediaFeedFetchResult(
-    const int64_t feed_id,
-    std::vector<media_feeds::mojom::MediaFeedItemPtr> items,
-    const media_feeds::mojom::FetchResult result,
-    const bool was_fetched_from_cache,
-    const std::vector<media_session::MediaImage>& logos,
-    const std::string& display_name) {
+    MediaHistoryKeyedService::MediaFeedFetchResult result) {
+  DCHECK(db_task_runner_->RunsTasksInCurrentSequence());
+  if (!CanAccessDatabase())
+    return;
+
+  if (!feeds_table_ || !feed_items_table_)
+    return;
+
+  auto fetch_details = feeds_table_->GetFetchDetails(result.feed_id);
+  if (!fetch_details)
+    return;
+
+  // If the reset token does not match then we should store a fetch failure.
+  if (fetch_details->reset_token != result.reset_token) {
+    MediaHistoryKeyedService::MediaFeedFetchResult new_result;
+    new_result.feed_id = result.feed_id;
+    new_result.status =
+        media_feeds::mojom::FetchResult::kFailedDueToResetWhileInflight;
+    StoreMediaFeedFetchResultInternal(std::move(new_result));
+    return;
+  }
+
+  StoreMediaFeedFetchResultInternal(std::move(result));
+}
+
+void MediaHistoryStore::StoreMediaFeedFetchResultInternal(
+    MediaHistoryKeyedService::MediaFeedFetchResult result) {
   DCHECK(db_task_runner_->RunsTasksInCurrentSequence());
   if (!CanAccessDatabase())
     return;
@@ -665,7 +820,7 @@ void MediaHistoryStore::StoreMediaFeedFetchResult(
   }
 
   // Remove all the items currently associated with this feed.
-  if (!feed_items_table_->DeleteItems(feed_id)) {
+  if (!feed_items_table_->DeleteItems(result.feed_id)) {
     DB()->RollbackTransaction();
     return;
   }
@@ -674,9 +829,9 @@ void MediaHistoryStore::StoreMediaFeedFetchResult(
   int item_content_types = 0;
   int item_safe_count = 0;
 
-  for (auto& item : items) {
+  for (auto& item : result.items) {
     // Save each item to the table.
-    if (!feed_items_table_->SaveItem(feed_id, item)) {
+    if (!feed_items_table_->SaveItem(result.feed_id, item)) {
       DB()->RollbackTransaction();
       return;
     }
@@ -698,40 +853,47 @@ void MediaHistoryStore::StoreMediaFeedFetchResult(
     item_content_types |= static_cast<int>(item->type);
   }
 
+  const media_feeds::mojom::UserIdentifier* user_identifier =
+      result.user_identifier ? result.user_identifier.get() : nullptr;
+
   // Update the metadata associated with this feed.
   if (!feeds_table_->UpdateFeedFromFetch(
-          feed_id, result, was_fetched_from_cache, items.size(),
-          item_play_next_count, item_content_types, logos, display_name,
-          item_safe_count)) {
+          result.feed_id, result.status, result.was_fetched_from_cache,
+          result.items.size(), item_play_next_count, item_content_types,
+          result.logos, user_identifier, result.display_name, item_safe_count,
+          result.cookie_name_filter)) {
     DB()->RollbackTransaction();
     return;
   }
 
+  if (result.status !=
+      media_feeds::mojom::FetchResult::kFailedDueToResetWhileInflight) {
+    if (!feeds_table_->ClearResetReason(result.feed_id)) {
+      DB()->RollbackTransaction();
+      return;
+    }
+  }
+
   DB()->CommitTransaction();
-}
-
-std::vector<media_feeds::mojom::MediaFeedItemPtr>
-MediaHistoryStore::GetItemsForMediaFeedForDebug(const int64_t feed_id) {
-  DCHECK(db_task_runner_->RunsTasksInCurrentSequence());
-
-  if (!CanAccessDatabase() || !feed_items_table_)
-    return std::vector<media_feeds::mojom::MediaFeedItemPtr>();
-
-  return feed_items_table_->GetItemsForFeed(feed_id);
 }
 
 MediaHistoryKeyedService::PendingSafeSearchCheckList
 MediaHistoryStore::GetPendingSafeSearchCheckMediaFeedItems() {
   DCHECK(db_task_runner_->RunsTasksInCurrentSequence());
 
-  if (!CanAccessDatabase() || !feed_items_table_)
+  if (!CanAccessDatabase() || !feed_items_table_ || !feeds_table_)
     return MediaHistoryKeyedService::PendingSafeSearchCheckList();
 
-  return feed_items_table_->GetPendingSafeSearchCheckItems();
+  auto items = feeds_table_->GetPendingSafeSearchCheckItems();
+  for (auto& item : feed_items_table_->GetPendingSafeSearchCheckItems())
+    items.push_back(std::move(item));
+
+  return items;
 }
 
 void MediaHistoryStore::StoreMediaFeedItemSafeSearchResults(
-    std::map<int64_t, media_feeds::mojom::SafeSearchResult> results) {
+    std::map<MediaHistoryKeyedService::SafeSearchID,
+             media_feeds::mojom::SafeSearchResult> results) {
   DCHECK(db_task_runner_->RunsTasksInCurrentSequence());
   if (!CanAccessDatabase())
     return;
@@ -746,8 +908,19 @@ void MediaHistoryStore::StoreMediaFeedItemSafeSearchResults(
 
   std::set<int64_t> feed_ids;
   for (auto& entry : results) {
-    auto feed_id =
-        feed_items_table_->StoreSafeSearchResult(entry.first, entry.second);
+    if (entry.first.first ==
+        MediaHistoryKeyedService::SafeSearchCheckedType::kFeed) {
+      if (!feeds_table_->StoreSafeSearchResult(entry.first.second,
+                                               entry.second)) {
+        DB()->RollbackTransaction();
+        return;
+      }
+
+      continue;
+    }
+
+    auto feed_id = feed_items_table_->StoreSafeSearchResult(entry.first.second,
+                                                            entry.second);
 
     if (!feed_id.has_value()) {
       DB()->RollbackTransaction();
@@ -851,6 +1024,252 @@ void MediaHistoryStore::UpdateMediaFeedDisplayTime(const int64_t feed_id) {
   }
 
   if (!feeds_table_->UpdateDisplayTime(feed_id)) {
+    DB()->RollbackTransaction();
+    return;
+  }
+
+  DB()->CommitTransaction();
+}
+
+void MediaHistoryStore::ResetMediaFeed(const url::Origin& origin,
+                                       media_feeds::mojom::ResetReason reason) {
+  if (!CanAccessDatabase())
+    return;
+
+  if (!feeds_table_ || !feed_items_table_)
+    return;
+
+  // Get the feed for |origin|.
+  base::Optional<int64_t> feed_id = feeds_table_->GetFeedForOrigin(origin);
+  if (!feed_id.has_value())
+    return;
+
+  if (!DB()->BeginTransaction()) {
+    LOG(ERROR) << "Failed to begin the transaction.";
+    return;
+  }
+
+  if (ResetMediaFeedInternal({*feed_id}, reason)) {
+    DB()->CommitTransaction();
+  } else {
+    DB()->RollbackTransaction();
+  }
+}
+
+void MediaHistoryStore::ResetMediaFeedDueToCookies(
+    const url::Origin& origin,
+    const bool include_subdomains,
+    const std::string& name,
+    const net::CookieChangeCause& cause) {
+  if (!CanAccessDatabase())
+    return;
+
+  if (!feeds_table_ || !feed_items_table_)
+    return;
+
+  // Get all the feeds for |origin| possibly including subdomains.
+  std::set<int64_t> feed_ids;
+
+  if (include_subdomains)
+    feed_ids = feeds_table_->GetFeedsForOriginSubdomain(origin);
+
+  base::Optional<int64_t> feed_id = feeds_table_->GetFeedForOrigin(origin);
+  if (feed_id.has_value())
+    feed_ids.insert(*feed_id);
+
+  if (feed_ids.empty())
+    return;
+
+  if (!DB()->BeginTransaction()) {
+    LOG(ERROR) << "Failed to begin the transaction.";
+    return;
+  }
+
+  std::set<int64_t> feed_ids_to_reset;
+  for (auto feed_id : feed_ids) {
+    auto cookie_name_filter = feeds_table_->GetCookieNameFilter(feed_id);
+
+    // If the cookie name filter is empty then we only allow feeds to be reset
+    // if the cookie change was from expiration.
+    if (cookie_name_filter.empty() && IsCauseFromExpiration(cause))
+      feed_ids_to_reset.insert(feed_id);
+
+    // If we have a cookie name filter and the current cookie matches that name
+    // then we allow any type of cookie change to reset the feed because we
+    // can be more specific.
+    if (!cookie_name_filter.empty() && cookie_name_filter == name)
+      feed_ids_to_reset.insert(feed_id);
+  }
+
+  if (ResetMediaFeedInternal(feed_ids_to_reset,
+                             media_feeds::mojom::ResetReason::kCookies)) {
+    DB()->CommitTransaction();
+  } else {
+    DB()->RollbackTransaction();
+  }
+}
+
+void MediaHistoryStore::ResetMediaFeedDueToCacheClearing(
+    const base::Time& start_time,
+    const base::Time& end_time,
+    MediaHistoryKeyedService::CacheClearingFilter filter) {
+  if (!CanAccessDatabase())
+    return;
+
+  if (!feeds_table_)
+    return;
+
+  if (!DB()->BeginTransaction()) {
+    LOG(ERROR) << "Failed to begin the transaction.";
+    return;
+  }
+
+  const auto start_time_s = start_time.ToDeltaSinceWindowsEpoch().InSeconds();
+  const auto end_time_s = end_time.ToDeltaSinceWindowsEpoch().InSeconds();
+
+  sql::Statement statement(DB()->GetCachedStatement(
+      SQL_FROM_HERE,
+      "SELECT id, url FROM mediaFeed WHERE last_fetch_time_s >= ? AND "
+      "last_fetch_time_s <= ?"));
+  statement.BindInt64(0, start_time_s);
+  statement.BindInt64(1, end_time_s);
+
+  std::set<int64_t> feed_ids;
+  while (statement.Step()) {
+    GURL url(statement.ColumnString(1));
+
+    if (!filter.is_null() && !filter.Run(url))
+      continue;
+
+    feed_ids.insert(statement.ColumnInt64(0));
+  }
+
+  if (ResetMediaFeedInternal(feed_ids,
+                             media_feeds::mojom::ResetReason::kCache)) {
+    DB()->CommitTransaction();
+  } else {
+    DB()->RollbackTransaction();
+  }
+}
+
+bool MediaHistoryStore::ResetMediaFeedInternal(
+    const std::set<int64_t>& feed_ids,
+    media_feeds::mojom::ResetReason reason) {
+  DCHECK_LT(0, DB()->transaction_nesting());
+  if (!CanAccessDatabase())
+    return false;
+
+  for (auto& feed_id : feed_ids) {
+    // Remove all the items currently associated with this feed.
+    if (!feeds_table_->Reset(feed_id, reason))
+      return false;
+
+    // Remove all the items currently associated with this feed.
+    if (!feed_items_table_->DeleteItems(feed_id))
+      return false;
+  }
+
+  return true;
+}
+
+void MediaHistoryStore::DeleteMediaFeed(const int64_t feed_id) {
+  if (!CanAccessDatabase())
+    return;
+
+  if (!feeds_table_)
+    return;
+
+  if (!DB()->BeginTransaction()) {
+    LOG(ERROR) << "Failed to begin the transaction.";
+    return;
+  }
+
+  if (!feeds_table_->Delete(feed_id)) {
+    DB()->RollbackTransaction();
+    return;
+  }
+
+  DB()->CommitTransaction();
+}
+
+base::Optional<MediaHistoryKeyedService::MediaFeedFetchDetails>
+MediaHistoryStore::GetMediaFeedFetchDetails(const int64_t feed_id) {
+  DCHECK(db_task_runner_->RunsTasksInCurrentSequence());
+  if (!CanAccessDatabase() || !feeds_table_)
+    return base::nullopt;
+
+  return feeds_table_->GetFetchDetails(feed_id);
+}
+
+void MediaHistoryStore::UpdateFeedUserStatus(
+    const int64_t feed_id,
+    media_feeds::mojom::FeedUserStatus status) {
+  if (!CanAccessDatabase())
+    return;
+
+  if (!feeds_table_)
+    return;
+
+  if (!DB()->BeginTransaction()) {
+    DLOG(ERROR) << "Failed to begin the transaction.";
+    return;
+  }
+
+  if (!feeds_table_->UpdateFeedUserStatus(feed_id, status)) {
+    DB()->RollbackTransaction();
+    return;
+  }
+
+  DB()->CommitTransaction();
+}
+
+void MediaHistoryStore::SetKaleidoscopeData(
+    media::mojom::GetCollectionsResponsePtr data,
+    const std::string& gaia_id) {
+  DCHECK(db_task_runner_->RunsTasksInCurrentSequence());
+  if (!CanAccessDatabase())
+    return;
+
+  if (!DB()->BeginTransaction()) {
+    DLOG(ERROR) << "Failed to begin the transaction.";
+    return;
+  }
+
+  if (!kaleidoscope_table_->Set(std::move(data), gaia_id)) {
+    DB()->RollbackTransaction();
+    return;
+  }
+
+  DB()->CommitTransaction();
+}
+
+media::mojom::GetCollectionsResponsePtr MediaHistoryStore::GetKaleidoscopeData(
+    const std::string& gaia_id) {
+  DCHECK(db_task_runner_->RunsTasksInCurrentSequence());
+  if (!CanAccessDatabase())
+    return nullptr;
+
+  if (!DB()->BeginTransaction()) {
+    DLOG(ERROR) << "Failed to begin the transaction.";
+    return nullptr;
+  }
+
+  auto out = kaleidoscope_table_->Get(gaia_id);
+  DB()->CommitTransaction();
+  return out;
+}
+
+void MediaHistoryStore::DeleteKaleidoscopeData() {
+  DCHECK(db_task_runner_->RunsTasksInCurrentSequence());
+  if (!CanAccessDatabase())
+    return;
+
+  if (!DB()->BeginTransaction()) {
+    DLOG(ERROR) << "Failed to begin the transaction.";
+    return;
+  }
+
+  if (!kaleidoscope_table_->Delete()) {
     DB()->RollbackTransaction();
     return;
   }

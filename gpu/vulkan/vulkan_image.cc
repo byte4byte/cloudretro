@@ -8,6 +8,7 @@
 
 #include <algorithm>
 
+#include "base/logging.h"
 #include "base/macros.h"
 #include "base/optional.h"
 #include "base/stl_util.h"
@@ -49,7 +50,7 @@ std::unique_ptr<VulkanImage> VulkanImage::Create(
     VkImageTiling image_tiling,
     void* vk_image_create_info_next,
     void* vk_memory_allocation_info_next) {
-  auto image = std::make_unique<VulkanImage>(util::PassKey<VulkanImage>());
+  auto image = std::make_unique<VulkanImage>(base::PassKey<VulkanImage>());
   if (!image->Initialize(device_queue, size, format, usage, flags, image_tiling,
                          vk_image_create_info_next,
                          vk_memory_allocation_info_next,
@@ -67,7 +68,7 @@ std::unique_ptr<VulkanImage> VulkanImage::CreateWithExternalMemory(
     VkImageUsageFlags usage,
     VkImageCreateFlags flags,
     VkImageTiling image_tiling) {
-  auto image = std::make_unique<VulkanImage>(util::PassKey<VulkanImage>());
+  auto image = std::make_unique<VulkanImage>(base::PassKey<VulkanImage>());
   if (!image->InitializeWithExternalMemory(device_queue, size, format, usage,
                                            flags, image_tiling)) {
     return nullptr;
@@ -84,7 +85,7 @@ std::unique_ptr<VulkanImage> VulkanImage::CreateFromGpuMemoryBufferHandle(
     VkImageUsageFlags usage,
     VkImageCreateFlags flags,
     VkImageTiling image_tiling) {
-  auto image = std::make_unique<VulkanImage>(util::PassKey<VulkanImage>());
+  auto image = std::make_unique<VulkanImage>(base::PassKey<VulkanImage>());
   if (!image->InitializeFromGpuMemoryBufferHandle(
           device_queue, std::move(gmb_handle), size, format, usage, flags,
           image_tiling)) {
@@ -103,8 +104,10 @@ std::unique_ptr<VulkanImage> VulkanImage::Create(
     VkImageTiling image_tiling,
     VkDeviceSize device_size,
     uint32_t memory_type_index,
-    base::Optional<VulkanYCbCrInfo>& ycbcr_info) {
-  auto image = std::make_unique<VulkanImage>(util::PassKey<VulkanImage>());
+    base::Optional<VulkanYCbCrInfo>& ycbcr_info,
+    VkImageUsageFlags usage,
+    VkImageCreateFlags flags) {
+  auto image = std::make_unique<VulkanImage>(base::PassKey<VulkanImage>());
   image->device_queue_ = device_queue;
   image->image_ = vk_image;
   image->device_memory_ = vk_device_memory;
@@ -114,10 +117,12 @@ std::unique_ptr<VulkanImage> VulkanImage::Create(
   image->device_size_ = device_size;
   image->memory_type_index_ = memory_type_index;
   image->ycbcr_info_ = ycbcr_info;
+  image->usage_ = usage;
+  image->flags_ = flags;
   return image;
 }
 
-VulkanImage::VulkanImage(util::PassKey<VulkanImage> pass_key) {}
+VulkanImage::VulkanImage(base::PassKey<VulkanImage> pass_key) {}
 
 VulkanImage::~VulkanImage() {
   DCHECK(!device_queue_);
@@ -178,6 +183,7 @@ bool VulkanImage::Initialize(VulkanDeviceQueue* device_queue,
   device_queue_ = device_queue;
   size_ = size;
   format_ = format;
+  usage_ = usage;
   flags_ = flags;
   image_tiling_ = image_tiling;
 
@@ -203,7 +209,7 @@ bool VulkanImage::Initialize(VulkanDeviceQueue* device_queue,
       vkCreateImage(vk_device, &create_info, nullptr /* pAllocator */, &image_);
   if (result != VK_SUCCESS) {
     DLOG(ERROR) << "vkCreateImage failed result:" << result;
-    device_queue_ = VK_NULL_HANDLE;
+    device_queue_ = nullptr;
     return false;
   }
 

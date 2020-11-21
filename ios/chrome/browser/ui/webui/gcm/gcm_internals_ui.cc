@@ -8,7 +8,7 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/values.h"
@@ -98,8 +98,9 @@ void GcmInternalsUIMessageHandler::RequestAllInfo(const base::ListValue* args) {
     ReturnResults(browser_state->GetPrefs(), nullptr, nullptr);
   } else {
     profile_service->driver()->GetGCMStatistics(
-        base::Bind(&GcmInternalsUIMessageHandler::RequestGCMStatisticsFinished,
-                   weak_ptr_factory_.GetWeakPtr()),
+        base::BindOnce(
+            &GcmInternalsUIMessageHandler::RequestGCMStatisticsFinished,
+            weak_ptr_factory_.GetWeakPtr()),
         clear_activity_logs);
   }
 }
@@ -126,8 +127,9 @@ void GcmInternalsUIMessageHandler::SetRecording(const base::ListValue* args) {
   }
   // Get fresh stats after changing recording setting.
   profile_service->driver()->SetGCMRecording(
-      base::Bind(&GcmInternalsUIMessageHandler::RequestGCMStatisticsFinished,
-                 weak_ptr_factory_.GetWeakPtr()),
+      base::BindRepeating(
+          &GcmInternalsUIMessageHandler::RequestGCMStatisticsFinished,
+          weak_ptr_factory_.GetWeakPtr()),
       recording);
 }
 
@@ -156,8 +158,8 @@ void GcmInternalsUIMessageHandler::RegisterMessages() {
 
 }  // namespace
 
-GCMInternalsUI::GCMInternalsUI(web::WebUIIOS* web_ui)
-    : web::WebUIIOSController(web_ui) {
+GCMInternalsUI::GCMInternalsUI(web::WebUIIOS* web_ui, const std::string& host)
+    : web::WebUIIOSController(web_ui, host) {
   // Set up the chrome://gcm-internals source.
   web::WebUIIOSDataSource* html_source =
       web::WebUIIOSDataSource::Create(kChromeUIGCMInternalsHost);

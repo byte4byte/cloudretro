@@ -8,12 +8,13 @@ import android.text.TextWatcher;
 import android.view.ActionMode;
 
 import androidx.annotation.IntDef;
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 
 import org.chromium.base.Callback;
 import org.chromium.chrome.browser.WindowDelegate;
 import org.chromium.chrome.browser.omnibox.UrlBar.ScrollType;
 import org.chromium.chrome.browser.omnibox.UrlBar.UrlBarDelegate;
-import org.chromium.chrome.browser.omnibox.UrlBar.UrlDirectionListener;
 import org.chromium.chrome.browser.omnibox.UrlBar.UrlTextChangeListener;
 import org.chromium.ui.modelutil.PropertyModel;
 import org.chromium.ui.modelutil.PropertyModelChangeProcessor;
@@ -36,27 +37,44 @@ public class UrlBarCoordinator implements UrlBarEditingTextStateProvider {
         int SELECT_END = 1;
     }
 
-    private final UrlBar mUrlBar;
-    private final UrlBarMediator mMediator;
+    private UrlBar mUrlBar;
+    private UrlBarMediator mMediator;
 
     /**
      * Constructs a coordinator for the given UrlBar view.
+     *
+     * @param urlBar The {@link UrlBar} view this coordinator encapsulates.
+     * @param windowDelegate Delegate for accessing and mutating window properties, e.g. soft input
+     *         mode.
+     * @param actionModeCallback Callback to handle changes in contextual action Modes.
+     * @param focusChangeCallback The callback that will be notified when focus changes on the
+     *         UrlBar.
+     * @param delegate The primary delegate for the UrlBar view.
      */
-    public UrlBarCoordinator(UrlBar urlBar) {
+    public UrlBarCoordinator(@NonNull UrlBar urlBar, @Nullable WindowDelegate windowDelegate,
+            @NonNull ActionMode.Callback actionModeCallback,
+            @NonNull Callback<Boolean> focusChangeCallback, @NonNull UrlBarDelegate delegate) {
         mUrlBar = urlBar;
 
-        PropertyModel model = new PropertyModel(UrlBarProperties.ALL_KEYS);
+        PropertyModel model =
+                new PropertyModel.Builder(UrlBarProperties.ALL_KEYS)
+                        .with(UrlBarProperties.ACTION_MODE_CALLBACK, actionModeCallback)
+                        .with(UrlBarProperties.WINDOW_DELEGATE, windowDelegate)
+                        .with(UrlBarProperties.DELEGATE, delegate)
+                        .build();
         PropertyModelChangeProcessor.create(model, urlBar, UrlBarViewBinder::bind);
 
-        mMediator = new UrlBarMediator(model);
+        mMediator = new UrlBarMediator(model, focusChangeCallback);
     }
 
-    /** @see UrlBarMediator#setDelegate(UrlBarDelegate) */
-    public void setDelegate(UrlBarDelegate delegate) {
-        mMediator.setDelegate(delegate);
+    public void destroy() {
+        mMediator.destroy();
+        mMediator = null;
+        mUrlBar.destroy();
+        mUrlBar = null;
     }
 
-    /** @see UrlBarMediator#setDelegate(UrlBarDelegate) */
+    /** @see UrlBarMediator#addUrlTextChangeListener(UrlTextChangeListener) */
     public void addUrlTextChangeListener(UrlTextChangeListener listener) {
         mMediator.addUrlTextChangeListener(listener);
     }
@@ -87,24 +105,9 @@ public class UrlBarCoordinator implements UrlBarEditingTextStateProvider {
         mMediator.setAllowFocus(allowFocus);
     }
 
-    /** @see UrlBarMediator#setUrlDirectionListener(UrlDirectionListener) */
-    public void setUrlDirectionListener(UrlDirectionListener listener) {
+    /** @see UrlBarMediator#setUrlDirectionListener(Callback<Integer>) */
+    public void setUrlDirectionListener(Callback<Integer> listener) {
         mMediator.setUrlDirectionListener(listener);
-    }
-
-    /** @see UrlBarMediator#setOnFocusChangedCallback(Callback) */
-    public void setOnFocusChangedCallback(Callback<Boolean> callback) {
-        mMediator.setOnFocusChangedCallback(callback);
-    }
-
-    /** @see UrlBarMediator#setWindowDelegate(WindowDelegate) */
-    public void setWindowDelegate(WindowDelegate windowDelegate) {
-        mMediator.setWindowDelegate(windowDelegate);
-    }
-
-    /** @see UrlBarMediator#setActionModeCallback(android.view.ActionMode.Callback) */
-    public void setActionModeCallback(ActionMode.Callback callback) {
-        mMediator.setActionModeCallback(callback);
     }
 
     /** Selects all of the text of the UrlBar. */

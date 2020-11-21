@@ -10,7 +10,7 @@ namespace blink {
 
 WorkletModuleScriptFetcher::WorkletModuleScriptFetcher(
     WorkletModuleResponsesMap* module_responses_map,
-    util::PassKey<ModuleScriptLoader> pass_key)
+    base::PassKey<ModuleScriptLoader> pass_key)
     : ModuleScriptFetcher(pass_key),
       module_responses_map_(module_responses_map) {}
 
@@ -44,7 +44,7 @@ void WorkletModuleScriptFetcher::NotifyFinished(Resource* resource) {
   ClearResource();
 
   base::Optional<ModuleScriptCreationParams> params;
-  ScriptResource* script_resource = ToScriptResource(resource);
+  auto* script_resource = To<ScriptResource>(resource);
   HeapVector<Member<ConsoleMessage>> error_messages;
   ModuleScriptCreationParams::ModuleType module_type;
   if (WasModuleLoadSuccessful(script_resource, &error_messages, &module_type)) {

@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "content/browser/cookie_store/cookie_change_subscriptions.pb.h"
+#include "services/network/public/cpp/is_potentially_trustworthy.h"
 
 namespace content {
 
@@ -168,8 +169,12 @@ bool CookieChangeSubscription::ShouldObserveChangeTo(
   net_options.set_same_site_cookie_context(
       net::CookieOptions::SameSiteCookieContext::MakeInclusive());
 
-  return cookie.IncludeForRequestURL(url_, net_options, access_semantics)
-      .IsInclude();
+  return cookie
+      .IncludeForRequestURL(
+          url_, net_options,
+          net::CookieAccessParams{access_semantics,
+                                  network::IsUrlPotentiallyTrustworthy(url_)})
+      .status.IsInclude();
 }
 
 bool operator==(const CookieChangeSubscription& lhs,

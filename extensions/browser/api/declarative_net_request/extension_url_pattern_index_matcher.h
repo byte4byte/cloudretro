@@ -21,18 +21,16 @@ class ExtensionUrlPatternIndexMatcher final : public RulesetMatcherBase {
  public:
   using UrlPatternIndexList = flatbuffers::Vector<
       flatbuffers::Offset<url_pattern_index::flat::UrlPatternIndex>>;
-  ExtensionUrlPatternIndexMatcher(
-      const ExtensionId& extension_id,
-      api::declarative_net_request::SourceType source_type,
-      const UrlPatternIndexList* index_list,
-      const ExtensionMetadataList* metadata_list);
+  ExtensionUrlPatternIndexMatcher(const ExtensionId& extension_id,
+                                  RulesetID ruleset_id,
+                                  const UrlPatternIndexList* index_list,
+                                  const ExtensionMetadataList* metadata_list);
 
   // RulesetMatcherBase override:
   ~ExtensionUrlPatternIndexMatcher() override;
-  uint8_t GetRemoveHeadersMask(
+  std::vector<RequestAction> GetModifyHeadersActions(
       const RequestParams& params,
-      uint8_t excluded_remove_headers_mask,
-      std::vector<RequestAction>* remove_headers_actions) const override;
+      base::Optional<uint64_t> min_priority) const override;
   bool IsExtraHeadersMatcher() const override {
     return is_extra_headers_matcher_;
   }
@@ -57,6 +55,10 @@ class ExtensionUrlPatternIndexMatcher final : public RulesetMatcherBase {
       flat::IndexType index,
       UrlPatternIndexMatcher::FindRuleStrategy strategy =
           UrlPatternIndexMatcher::FindRuleStrategy::kAny) const;
+
+  std::vector<const url_pattern_index::flat::UrlRule*> GetAllMatchingRules(
+      const RequestParams& params,
+      flat::IndexType index) const;
 
   const ExtensionMetadataList* const metadata_list_;
 

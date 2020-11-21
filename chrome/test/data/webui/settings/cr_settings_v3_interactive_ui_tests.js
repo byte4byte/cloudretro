@@ -7,6 +7,8 @@
 // Polymer BrowserTest fixture.
 GEN_INCLUDE(['//chrome/test/data/webui/polymer_interactive_ui_test.js']);
 
+GEN('#include "content/public/test/browser_test.h"');
+
 /** Test fixture for shared Polymer 3 elements. */
 // eslint-disable-next-line no-var
 var CrSettingsV3InteractiveUITest = class extends PolymerInteractiveUITest {
@@ -34,6 +36,19 @@ var CrSettingsAnimatedPagesV3Test =
 };
 
 TEST_F('CrSettingsAnimatedPagesV3Test', 'All', function() {
+  mocha.run();
+});
+
+// eslint-disable-next-line no-var
+var CrSettingsPaymentsSectionV3Test =
+    class extends CrSettingsV3InteractiveUITest {
+  /** @override */
+  get browsePreload() {
+    return 'chrome://settings/test_loader.html?module=settings/payments_section_interactive_test.js';
+  }
+};
+
+TEST_F('CrSettingsPaymentsSectionV3Test', 'All', function() {
   mocha.run();
 });
 
@@ -70,11 +85,33 @@ var SettingsUIV3InteractiveTest = class extends CrSettingsV3InteractiveUITest {
 };
 
 // Times out on Mac. See https://crbug.com/1060981.
-GEN('#if defined(OS_MACOSX)');
-GEN('#define MAYBE_SettingsUIV3 DISABLED_SettingsUIV3');
+GEN('#if defined(OS_MAC)');
+GEN('#define MAYBE_SettingsUIToolbarAndDrawer DISABLED_SettingsUIToolbarAndDrawer');
 GEN('#else');
-GEN('#define MAYBE_SettingsUIV3 SettingsUIV3');
+GEN('#define MAYBE_SettingsUIToolbarAndDrawer SettingsUIToolbarAndDrawer');
 GEN('#endif');
-TEST_F('SettingsUIV3InteractiveTest', 'MAYBE_SettingsUIV3', function() {
-  mocha.run();
+TEST_F(
+    'SettingsUIV3InteractiveTest', 'MAYBE_SettingsUIToolbarAndDrawer',
+    function() {
+      runMochaSuite('SettingsUIToolbarAndDrawer');
+    });
+
+// Times out on Mac. See https://crbug.com/1060981.
+GEN('#if defined(OS_MAC)');
+GEN('#define MAYBE_SettingsUIAdvanced DISABLED_SettingsUIAdvanced');
+GEN('#else');
+GEN('#define MAYBE_SettingsUIAdvanced SettingsUIAdvanced');
+GEN('#endif');
+TEST_F('SettingsUIV3InteractiveTest', 'MAYBE_SettingsUIAdvanced', function() {
+  runMochaSuite('SettingsUIAdvanced');
+});
+
+// Times out on Mac. See https://crbug.com/1060981.
+GEN('#if defined(OS_MAC)');
+GEN('#define MAYBE_SettingsUISearch DISABLED_SettingsUISearch');
+GEN('#else');
+GEN('#define MAYBE_SettingsUISearch SettingsUISearch');
+GEN('#endif');
+TEST_F('SettingsUIV3InteractiveTest', 'MAYBE_SettingsUISearch', function() {
+  runMochaSuite('SettingsUISearch');
 });

@@ -796,11 +796,9 @@ void GCMClientImpl::DefaultStoreCallback(bool success) {
 void GCMClientImpl::IgnoreWriteResultCallback(
     const std::string& operation_suffix_for_uma,
     bool success) {
-  // TODO(tschumann): Implement proper error handling.
+  // TODO(crbug.com/1081149): Implement proper error handling.
   // TODO(fgorski): Ignoring the write result for now to make sure
   // sync_intergration_tests are not broken.
-  base::UmaHistogramBoolean(
-      "GCM.IgnoredWriteResult." + operation_suffix_for_uma, success);
 }
 
 void GCMClientImpl::DestroyStoreCallback(bool success) {
@@ -934,9 +932,6 @@ void GCMClientImpl::Register(
         senders.append(",");
       senders.append(*iter);
     }
-    UMA_HISTOGRAM_COUNTS_1M("GCM.RegistrationSenderIdCount",
-                            gcm_registration_info->sender_ids.size());
-
     request_handler.reset(new GCMRegistrationRequestHandler(senders));
     source_to_record = senders;
   }

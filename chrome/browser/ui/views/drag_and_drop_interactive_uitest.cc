@@ -10,6 +10,7 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/files/file_path.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/sequenced_task_runner.h"
@@ -32,6 +33,7 @@
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/content_browser_test_utils.h"
@@ -40,6 +42,7 @@
 #include "content/public/test/test_navigation_observer.h"
 #include "content/public/test/test_utils.h"
 #include "net/base/escape.h"
+#include "net/base/filename_util.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -106,6 +109,17 @@ class DragAndDropSimulator {
   bool SimulateDragEnter(const gfx::Point& location, const GURL& url) {
     os_exchange_data_ = std::make_unique<ui::OSExchangeData>();
     os_exchange_data_->SetURL(url, base::UTF8ToUTF16(url.spec()));
+    return SimulateDragEnter(location, *os_exchange_data_);
+  }
+
+  // Simulates notification that |file| was dragged from outside of the browser,
+  // into the specified |location| inside |web_contents|.
+  // |location| is relative to |web_contents|.
+  // Returns true upon success.
+  bool SimulateDragEnter(const gfx::Point& location,
+                         const base::FilePath& file) {
+    os_exchange_data_ = std::make_unique<ui::OSExchangeData>();
+    os_exchange_data_->SetFilename(file);
     return SimulateDragEnter(location, *os_exchange_data_);
   }
 
@@ -263,7 +277,7 @@ class DragStartWaiter : public aura::client::DragDropClient {
                        aura::Window* source_window,
                        const gfx::Point& screen_location,
                        int operation,
-                       ui::DragDropTypes::DragEventSource source) override {
+                       ui::mojom::DragEventSource source) override {
     DCHECK(!drag_started_);
     if (!drag_started_) {
       drag_started_ = true;
@@ -685,6 +699,11 @@ class DragAndDropBrowserTest : public InProcessBrowserTest,
     return drag_simulator_->SimulateDragEnter(kMiddleOfRightFrame, url);
   }
 
+  bool SimulateDragEnterToRightFrame(const base::FilePath& file) {
+    AssertTestPageIsLoaded();
+    return drag_simulator_->SimulateDragEnter(kMiddleOfRightFrame, file);
+  }
+
   bool SimulateDropInRightFrame() {
     AssertTestPageIsLoaded();
     return drag_simulator_->SimulateDrop(kMiddleOfRightFrame);
@@ -756,7 +775,8 @@ class DragAndDropBrowserTest : public InProcessBrowserTest,
 
   content::RenderFrameHost* GetFrameByName(const std::string& name_to_find) {
     return content::FrameMatchingPredicate(
-        web_contents(), base::Bind(&content::FrameMatchesName, name_to_find));
+        web_contents(),
+        base::BindRepeating(&content::FrameMatchesName, name_to_find));
   }
 
   void AssertTestPageIsLoaded() {
@@ -768,15 +788,9 @@ class DragAndDropBrowserTest : public InProcessBrowserTest,
   DISALLOW_COPY_AND_ASSIGN(DragAndDropBrowserTest);
 };
 
-#if defined(OS_WIN)
-// Flaky: https://crbug.com/988938
-#define MAYBE_DropTextFromOutside DISABLED_DropTextFromOutside
-#else
-#define MAYBE_DropTextFromOutside DropTextFromOutside
-#endif
 // Scenario: drag text from outside the browser and drop to the right frame.
 // Test coverage: dragover, drop DOM events.
-IN_PROC_BROWSER_TEST_P(DragAndDropBrowserTest, MAYBE_DropTextFromOutside) {
+IN_PROC_BROWSER_TEST_P(DragAndDropBrowserTest, DropTextFromOutside) {
   std::string frame_site = use_cross_site_subframe() ? "b.com" : "a.com";
   ASSERT_TRUE(NavigateToTestPage("a.com"));
   ASSERT_TRUE(NavigateRightFrame(frame_site, "drop_target.html"));
@@ -810,17 +824,15 @@ IN_PROC_BROWSER_TEST_P(DragAndDropBrowserTest, MAYBE_DropTextFromOutside) {
   }
 }
 
-#if defined(OS_WIN)
-// Flaky: https://crbug.com/988938
-#define MAYBE_DropValidUrlFromOutside DISABLED_DropValidUrlFromOutside
-#else
-#define MAYBE_DropValidUrlFromOutside DropValidUrlFromOutside
-#endif
-// Scenario: drag URL from outside the browser and drop to the right frame.
-// Mostly focuses on covering 1) the navigation path, 2) focus behavior.  This
-// test explicitly does not cover the dragover and/or drop DOM events - they are
-// already covered via the DropTextFromOutside test above.
-IN_PROC_BROWSER_TEST_P(DragAndDropBrowserTest, MAYBE_DropValidUrlFromOutside) {
+// Scenario: drag URL from outside the browser and drop to the right frame
+// (e.g. this is similar to a drag that starts from the bookmarks bar, except
+// that here there is no drag start event - as-if the drag was started in
+// another application).
+//
+// This test mostly focuses on covering 1) the navigation path, 2) focus
+// behavior.  This test explicitly does not cover the dragover and/or drop DOM
+// events - they are already covered via the DropTextFromOutside test above.
+IN_PROC_BROWSER_TEST_P(DragAndDropBrowserTest, DropValidUrlFromOutside) {
   std::string frame_site = use_cross_site_subframe() ? "b.com" : "a.com";
   ASSERT_TRUE(NavigateToTestPage("a.com"));
   ASSERT_TRUE(NavigateRightFrame(frame_site, "title1.html"));
@@ -828,6 +840,8 @@ IN_PROC_BROWSER_TEST_P(DragAndDropBrowserTest, MAYBE_DropValidUrlFromOutside) {
       browser()->tab_strip_model()->GetActiveWebContents();
   content::NavigationController& controller = web_contents->GetController();
   int initial_history_count = controller.GetEntryCount();
+  GURL initial_url = web_contents->GetMainFrame()->GetLastCommittedURL();
+  ASSERT_EQ(1, browser()->tab_strip_model()->count());
 
   // Focus the omnibox.
   chrome::FocusLocationBar(browser());
@@ -838,23 +852,83 @@ IN_PROC_BROWSER_TEST_P(DragAndDropBrowserTest, MAYBE_DropValidUrlFromOutside) {
   GURL dragged_url = embedded_test_server()->GetURL("d.com", "/title2.html");
   ASSERT_TRUE(SimulateDragEnterToRightFrame(dragged_url));
 
-  // Drop into the right frame - this should initiate navigating the main frame
-  // to |dragged_url|.
-  content::TestNavigationObserver nav_observer(web_contents, 1);
+  ui_test_utils::TabAddedWaiter wait_for_new_tab(browser());
+
+  // Drop into the right frame.
   ASSERT_TRUE(SimulateDropInRightFrame());
 
-  // Verify that the main frame got navigated to |dragged_url|.
-  nav_observer.Wait();
-  EXPECT_EQ(dragged_url, web_contents->GetMainFrame()->GetLastCommittedURL());
-  EXPECT_EQ(initial_history_count + 1, controller.GetEntryCount());
+  // Verify that dropping |dragged_url| creates a new tab and navigates it to
+  // that URL.
+  wait_for_new_tab.Wait();
+  EXPECT_EQ(2, browser()->tab_strip_model()->count());
+  content::WebContents* new_web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  content::TestNavigationObserver(new_web_contents, 1).Wait();
+  EXPECT_EQ(dragged_url,
+            new_web_contents->GetMainFrame()->GetLastCommittedURL());
+
+  // Verify that the initial tab didn't navigate.
+  EXPECT_EQ(initial_url, web_contents->GetMainFrame()->GetLastCommittedURL());
+  EXPECT_EQ(initial_history_count, controller.GetEntryCount());
 
   // Verify that the focus moved from the omnibox to the tab contents.
   EXPECT_FALSE(ui_test_utils::IsViewFocused(browser(), VIEW_ID_OMNIBOX));
   EXPECT_TRUE(ui_test_utils::IsViewFocused(browser(), VIEW_ID_TAB_CONTAINER));
 }
 
-#if defined(OS_WIN) || defined(OS_LINUX) || defined(THREAD_SANITIZER)
-// Win/Linux Flaky: https://crbug.com/988938
+// Scenario: drag a file from outside the browser and drop to the right frame
+// (e.g. starting a drag in a separate file explorer application, like Nemo on
+// gLinux).
+//
+// This test mostly focuses on covering 1) the navigation path, 2) focus
+// behavior.  This test explicitly does not cover the dragover and/or drop DOM
+// events - they are already covered via the DropTextFromOutside test above.
+IN_PROC_BROWSER_TEST_P(DragAndDropBrowserTest, DropFileFromOutside) {
+  std::string frame_site = use_cross_site_subframe() ? "b.com" : "a.com";
+  ASSERT_TRUE(NavigateToTestPage("a.com"));
+  ASSERT_TRUE(NavigateRightFrame(frame_site, "title1.html"));
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  content::NavigationController& controller = web_contents->GetController();
+  int initial_history_count = controller.GetEntryCount();
+  GURL initial_url = web_contents->GetMainFrame()->GetLastCommittedURL();
+  ASSERT_EQ(1, browser()->tab_strip_model()->count());
+
+  // Focus the omnibox.
+  chrome::FocusLocationBar(browser());
+  EXPECT_TRUE(ui_test_utils::IsViewFocused(browser(), VIEW_ID_OMNIBOX));
+  EXPECT_FALSE(ui_test_utils::IsViewFocused(browser(), VIEW_ID_TAB_CONTAINER));
+
+  // Drag a file from outside the browser into/over the right frame.
+  base::FilePath dragged_file = ui_test_utils::GetTestFilePath(
+      base::FilePath(), base::FilePath().AppendASCII("title3.html"));
+  ASSERT_TRUE(SimulateDragEnterToRightFrame(dragged_file));
+
+  ui_test_utils::TabAddedWaiter wait_for_new_tab(browser());
+
+  // Drop into the right frame.
+  ASSERT_TRUE(SimulateDropInRightFrame());
+
+  // Verify that dropping |dragged_file| creates a new tab and navigates it to
+  // the corresponding file: URL.
+  wait_for_new_tab.Wait();
+  EXPECT_EQ(2, browser()->tab_strip_model()->count());
+  content::WebContents* new_web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  content::TestNavigationObserver(new_web_contents, 1).Wait();
+  EXPECT_EQ(net::FilePathToFileURL(dragged_file),
+            new_web_contents->GetMainFrame()->GetLastCommittedURL());
+
+  // Verify that the initial tab didn't navigate.
+  EXPECT_EQ(initial_url, web_contents->GetMainFrame()->GetLastCommittedURL());
+  EXPECT_EQ(initial_history_count, controller.GetEntryCount());
+
+  // Verify that the focus moved from the omnibox to the tab contents.
+  EXPECT_FALSE(ui_test_utils::IsViewFocused(browser(), VIEW_ID_OMNIBOX));
+  EXPECT_TRUE(ui_test_utils::IsViewFocused(browser(), VIEW_ID_TAB_CONTAINER));
+}
+
+#if defined(THREAD_SANITIZER)
 // TSAN Race condition: crbug.com/1005095
 #define MAYBE_DropForbiddenUrlFromOutside DISABLED_DropForbiddenUrlFromOutside
 #else
@@ -898,15 +972,9 @@ IN_PROC_BROWSER_TEST_P(DragAndDropBrowserTest,
   EXPECT_EQ(initial_history_count, controller.GetEntryCount());
 }
 
-#if !defined(NDEBUG) || defined(OS_WIN)
-// Flaky: https://crbug.com/988938
-#define MAYBE_DragStartInFrame DISABLED_DragStartInFrame
-#else
-#define MAYBE_DragStartInFrame DragStartInFrame
-#endif
 // Scenario: starting a drag in left frame
 // Test coverage: dragstart DOM event, dragstart data passed to the OS.
-IN_PROC_BROWSER_TEST_P(DragAndDropBrowserTest, MAYBE_DragStartInFrame) {
+IN_PROC_BROWSER_TEST_P(DragAndDropBrowserTest, DragStartInFrame) {
   std::string frame_site = use_cross_site_subframe() ? "b.com" : "a.com";
   ASSERT_TRUE(NavigateToTestPage("a.com"));
   ASSERT_TRUE(NavigateLeftFrame(frame_site, "image_source.html"));
@@ -969,7 +1037,7 @@ IN_PROC_BROWSER_TEST_P(DragAndDropBrowserTest, MAYBE_DragStartInFrame) {
 // There is no known way to execute test-controlled tasks during
 // a drag-and-drop loop run by Windows OS.
 #define MAYBE_DragImageBetweenFrames DISABLED_DragImageBetweenFrames
-#elif defined(OS_LINUX)
+#elif defined(OS_LINUX) || defined(OS_CHROMEOS)
 #define MAYBE_DragImageBetweenFrames DISABLED_DragImageBetweenFrames
 #else
 #define MAYBE_DragImageBetweenFrames DragImageBetweenFrames

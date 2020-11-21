@@ -6,7 +6,6 @@
 #define CHROME_BROWSER_WEB_APPLICATIONS_EXTENSIONS_BOOKMARK_APP_INSTALL_FINALIZER_H_
 
 #include "base/callback.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/web_applications/components/externally_installed_web_app_prefs.h"
@@ -29,15 +28,15 @@ class BookmarkAppInstallFinalizer : public web_app::InstallFinalizer {
   // Constructs a BookmarkAppInstallFinalizer that will install the Bookmark App
   // in |profile|.
   explicit BookmarkAppInstallFinalizer(Profile* profile);
+  BookmarkAppInstallFinalizer(const BookmarkAppInstallFinalizer&) = delete;
+  BookmarkAppInstallFinalizer& operator=(const BookmarkAppInstallFinalizer&) =
+      delete;
   ~BookmarkAppInstallFinalizer() override;
 
   // InstallFinalizer:
   void FinalizeInstall(const WebApplicationInfo& web_app_info,
                        const FinalizeOptions& options,
                        InstallFinalizedCallback callback) override;
-  void FinalizeFallbackInstallAfterSync(
-      const web_app::AppId& app_id,
-      InstallFinalizedCallback callback) override;
   void FinalizeUninstallAfterSync(const web_app::AppId& app_id,
                                   UninstallWebAppCallback callback) override;
   void FinalizeUpdate(const WebApplicationInfo& web_app_info,
@@ -67,15 +66,17 @@ class BookmarkAppInstallFinalizer : public web_app::InstallFinalizer {
   void UninstallExtension(const web_app::AppId& app_id,
                           UninstallWebAppCallback);
 
-  void OnExtensionInstalled(const GURL& app_url,
+  void OnExtensionInstalled(const GURL& start_url,
                             LaunchType launch_type,
+                            bool enable_experimental_tabbed_window,
                             bool is_locally_installed,
-                            bool is_system_app,
                             InstallFinalizedCallback callback,
                             scoped_refptr<CrxInstaller> crx_installer,
                             const base::Optional<CrxInstallError>& error);
 
   void OnExtensionUpdated(const web_app::AppId& expected_app_id,
+                          const std::string& old_name,
+                          const WebApplicationInfo& web_app_info,
                           InstallFinalizedCallback callback,
                           scoped_refptr<CrxInstaller> crx_installer,
                           const base::Optional<CrxInstallError>& error);
@@ -87,7 +88,6 @@ class BookmarkAppInstallFinalizer : public web_app::InstallFinalizer {
 
   base::WeakPtrFactory<BookmarkAppInstallFinalizer> weak_ptr_factory_{this};
 
-  DISALLOW_COPY_AND_ASSIGN(BookmarkAppInstallFinalizer);
 };
 
 }  // namespace extensions

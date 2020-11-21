@@ -84,6 +84,20 @@ void AppListTestViewDelegate::SetSearchEngineIsGoogle(bool is_google) {
   search_model_->SetSearchEngineIsGoogle(is_google);
 }
 
+void AppListTestViewDelegate::SetIsTabletModeEnabled(bool is_tablet_mode) {
+  is_tablet_mode_ = is_tablet_mode;
+}
+
+void AppListTestViewDelegate::SetShouldShowAssistantPrivacyInfo(
+    bool should_show) {
+  should_show_assistant_privacy_info_ = should_show;
+}
+
+void AppListTestViewDelegate::SetShouldShowSuggestedContentInfo(
+    bool should_show) {
+  should_show_suggested_content_info_ = should_show;
+}
+
 const std::vector<SkColor>&
 AppListTestViewDelegate::GetWallpaperProminentColors() {
   return wallpaper_prominent_colors_;
@@ -125,11 +139,6 @@ void AppListTestViewDelegate::ShowWallpaperContextMenu(
   ++show_wallpaper_context_menu_count_;
 }
 
-bool AppListTestViewDelegate::ProcessHomeLauncherGesture(
-    ui::GestureEvent* event) {
-  return false;
-}
-
 bool AppListTestViewDelegate::CanProcessEventsOnApplistViews() {
   return true;
 }
@@ -138,10 +147,6 @@ bool AppListTestViewDelegate::ShouldDismissImmediately() {
   return false;
 }
 
-void AppListTestViewDelegate::GetNavigableContentsFactory(
-    mojo::PendingReceiver<content::mojom::NavigableContentsFactory> receiver) {
-  fake_navigable_contents_factory_.BindReceiver(std::move(receiver));
-}
 int AppListTestViewDelegate::GetTargetYForAppListHide(
     aura::Window* root_window) {
   return 0;
@@ -172,20 +177,32 @@ void AppListTestViewDelegate::NotifySearchResultsForLogging(
     const ash::SearchResultIdWithPositionIndices& results,
     int position_index) {}
 
+void AppListTestViewDelegate::MaybeIncreasePrivacyInfoShownCounts() {}
+
 bool AppListTestViewDelegate::IsAssistantAllowedAndEnabled() const {
   return false;
 }
 
 bool AppListTestViewDelegate::ShouldShowAssistantPrivacyInfo() const {
-  return false;
+  return should_show_assistant_privacy_info_;
 }
 
-void AppListTestViewDelegate::MaybeIncreaseAssistantPrivacyInfoShownCount() {}
+void AppListTestViewDelegate::MarkAssistantPrivacyInfoDismissed() {
+  should_show_assistant_privacy_info_ = false;
+}
 
-void AppListTestViewDelegate::MarkAssistantPrivacyInfoDismissed() {}
+bool AppListTestViewDelegate::ShouldShowSuggestedContentInfo() const {
+  return should_show_suggested_content_info_;
+}
+
+void AppListTestViewDelegate::MarkSuggestedContentInfoDismissed() {
+  should_show_suggested_content_info_ = false;
+}
 
 void AppListTestViewDelegate::OnStateTransitionAnimationCompleted(
     ash::AppListViewState state) {}
+
+void AppListTestViewDelegate::OnViewStateChanged(AppListViewState state) {}
 
 void AppListTestViewDelegate::GetAppLaunchedMetricParams(
     AppLaunchedMetricParams* metric_params) {}
@@ -199,6 +216,18 @@ int AppListTestViewDelegate::GetShelfSize() {
   // TODO(mmourgos): change this to 48 once shelf-hotseat flag is enabled.
   // Return the height of the shelf when clamshell mode is active.
   return 56;
+}
+
+bool AppListTestViewDelegate::AppListTargetVisibility() const {
+  return true;
+}
+
+bool AppListTestViewDelegate::IsInTabletMode() {
+  return is_tablet_mode_;
+}
+
+AppListNotifier* AppListTestViewDelegate::GetNotifier() {
+  return nullptr;
 }
 
 void AppListTestViewDelegate::RecordAppLaunched(

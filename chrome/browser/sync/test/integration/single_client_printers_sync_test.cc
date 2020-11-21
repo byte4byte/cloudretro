@@ -11,6 +11,7 @@
 #include "chrome/browser/sync/test/integration/sync_test.h"
 #include "chrome/browser/sync/test/integration/updated_progress_marker_checker.h"
 #include "chromeos/printing/printer_configuration.h"
+#include "content/public/test/browser_test.h"
 
 using printers_helper::AddPrinter;
 using printers_helper::CreateTestPrinter;
@@ -28,10 +29,12 @@ namespace {
 class SingleClientPrintersSyncTest : public SyncTest {
  public:
   SingleClientPrintersSyncTest() : SyncTest(SINGLE_CLIENT) {}
-  ~SingleClientPrintersSyncTest() override {}
+  ~SingleClientPrintersSyncTest() override = default;
 
- private:
-  DISALLOW_COPY_AND_ASSIGN(SingleClientPrintersSyncTest);
+  bool UseVerifier() override {
+    // TODO(crbug.com/1137770): rewrite tests to not use verifier.
+    return true;
+  }
 };
 
 // Verify that printers aren't added with a sync call.

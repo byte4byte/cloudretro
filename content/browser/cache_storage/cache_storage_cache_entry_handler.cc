@@ -7,6 +7,7 @@
 #include "base/callback_helpers.h"
 #include "base/guid.h"
 #include "base/optional.h"
+#include "components/services/storage/public/mojom/blob_storage_context.mojom.h"
 #include "content/browser/background_fetch/storage/cache_entry_handler_impl.h"
 #include "content/browser/cache_storage/cache_storage_manager.h"
 #include "content/browser/cache_storage/legacy/legacy_cache_storage.h"
@@ -17,7 +18,6 @@
 #include "storage/browser/blob/blob_data_builder.h"
 #include "storage/browser/blob/blob_impl.h"
 #include "storage/browser/blob/blob_storage_context.h"
-#include "storage/browser/blob/mojom/blob_storage_context.mojom.h"
 #include "third_party/blink/public/common/blob/blob_utils.h"
 
 namespace content {
@@ -174,7 +174,7 @@ class EntryReaderImpl : public storage::mojom::BlobDataItemReader {
 }  // namespace
 
 CacheStorageCacheEntryHandler::DiskCacheBlobEntry::DiskCacheBlobEntry(
-    util::PassKey<CacheStorageCacheEntryHandler> key,
+    base::PassKey<CacheStorageCacheEntryHandler> key,
     base::WeakPtr<CacheStorageCacheEntryHandler> entry_handler,
     CacheStorageCacheHandle cache_handle,
     disk_cache::ScopedEntryPtr disk_cache_entry)
@@ -326,7 +326,7 @@ CacheStorageCacheEntryHandler::CreateDiskCacheBlobEntry(
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   auto blob_entry =
       base::MakeRefCounted<CacheStorageCacheEntryHandler::DiskCacheBlobEntry>(
-          util::PassKey<CacheStorageCacheEntryHandler>(), GetWeakPtr(),
+          base::PassKey<CacheStorageCacheEntryHandler>(), GetWeakPtr(),
           std::move(cache_handle), std::move(disk_cache_entry));
   DCHECK_EQ(blob_entries_.count(blob_entry.get()), 0u);
   blob_entries_.insert(blob_entry.get());

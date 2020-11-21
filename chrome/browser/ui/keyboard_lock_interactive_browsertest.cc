@@ -13,12 +13,13 @@
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_features.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "ui/base/ui_base_features.h"
 
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
 #include "ui/base/test/scoped_fake_nswindow_fullscreen.h"
 #endif
 
@@ -107,7 +108,7 @@ class KeyboardLockInteractiveBrowserTest
   base::test::ScopedFeatureList scoped_feature_list_;
   net::EmbeddedTestServer https_test_server_;
 
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
   ui::test::ScopedFakeNSWindowFullscreen fake_fullscreen_;
 #endif
 
@@ -258,8 +259,17 @@ IN_PROC_BROWSER_TEST_F(KeyboardLockInteractiveBrowserTest,
   ASSERT_EQ(initial_browser_count + 1, GetBrowserCount());
 }
 
+// https://crbug.com/1108391 Flakey on ChromeOS.
+// https://crbug.com/1121172 Also flaky on Lacros.
+#if defined(OS_CHROMEOS) || BUILDFLAG(IS_LACROS)
+#define MAYBE_SubsequentLockCallSupersedesPreviousCall \
+  DISABLED_SubsequentLockCallSupersedesPreviousCall
+#else
+#define MAYBE_SubsequentLockCallSupersedesPreviousCall \
+  SubsequentLockCallSupersedesPreviousCall
+#endif
 IN_PROC_BROWSER_TEST_F(KeyboardLockInteractiveBrowserTest,
-                       SubsequentLockCallSupersedesPreviousCall) {
+                       MAYBE_SubsequentLockCallSupersedesPreviousCall) {
   ASSERT_NO_FATAL_FAILURE(StartFullscreenLockPage());
   ASSERT_TRUE(DisablePreventDefaultOnTestPage());
 
@@ -327,7 +337,7 @@ IN_PROC_BROWSER_TEST_F(KeyboardLockInteractiveBrowserTest,
   ASSERT_FALSE(IsKeyboardLockActive());
 }
 
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
 // TODO(crbug.com/837438): Enable once browser fullscreen is reliable in tests.
 #define MAYBE_RequestedButNotActiveInBrowserFullscreen \
   DISABLED_RequestedButNotActiveInBrowserFullscreen
@@ -429,7 +439,7 @@ IN_PROC_BROWSER_TEST_F(KeyboardLockInteractiveBrowserTest,
   ASSERT_FALSE(IsKeyboardLockActive());
 }
 
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
 // BringBrowserWindowToFront hangs on Linux: http://crbug.com/163931
 #define MAYBE_GainAndLoseFocusInWindowMode DISABLED_GainAndLoseFocusInWindowMode
 #else
@@ -490,7 +500,7 @@ IN_PROC_BROWSER_TEST_F(KeyboardLockInteractiveBrowserTest,
   ASSERT_FALSE(IsKeyboardLockActive());
 }
 
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
 // BringBrowserWindowToFront hangs on Linux: http://crbug.com/163931
 #define MAYBE_GainAndLoseFocusInFullscreen DISABLED_GainAndLoseFocusInFullscreen
 #else

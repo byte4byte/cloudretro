@@ -15,7 +15,6 @@ import androidx.annotation.Nullable;
 import androidx.annotation.VisibleForTesting;
 
 import org.chromium.base.CollectionUtil;
-import org.chromium.chrome.browser.ChromeVersionInfo;
 import org.chromium.chrome.browser.compositor.bottombar.contextualsearch.ContextualSearchPanel;
 import org.chromium.chrome.browser.contextualsearch.ContextualSearchFieldTrial.ContextualSearchSetting;
 import org.chromium.chrome.browser.contextualsearch.ContextualSearchFieldTrial.ContextualSearchSwitch;
@@ -23,17 +22,19 @@ import org.chromium.chrome.browser.contextualsearch.ContextualSearchSelectionCon
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.preferences.ChromePreferenceKeys;
 import org.chromium.chrome.browser.preferences.SharedPreferencesManager;
-import org.chromium.chrome.browser.privacy.settings.PrivacyPreferencesManager;
+import org.chromium.chrome.browser.privacy.settings.PrivacyPreferencesManagerImpl;
+import org.chromium.chrome.browser.profiles.Profile;
+import org.chromium.chrome.browser.search_engines.TemplateUrlServiceFactory;
+import org.chromium.chrome.browser.signin.UnifiedConsentServiceBridge;
+import org.chromium.chrome.browser.version.ChromeVersionInfo;
 import org.chromium.components.embedder_support.util.UrlConstants;
 
 import java.net.URL;
 import java.util.HashSet;
-import java.util.List;
-import java.util.Locale;
 import java.util.regex.Pattern;
 
 /**
- * Handles policy decisions for the {@code ContextualSearchManager}.
+ * Handles business decision policy for the {@code ContextualSearchManager}.
  */
 class ContextualSearchPolicy {
     private static final Pattern CONTAINS_WHITESPACE_PATTERN = Pattern.compile("\\s");
@@ -74,10 +75,6 @@ class ContextualSearchPolicy {
     public void setContextualSearchPanel(ContextualSearchPanel panel) {
         mSearchPanel = panel;
     }
-
-    // TODO(donnd): Consider adding a test-only constructor that uses dependency injection of a
-    // preference manager and PrefServiceBridge.  Currently this is not possible because the
-    // PrefServiceBridge is final.
 
     /**
      * @return The number of additional times to show the promo on tap, 0 if it should not be shown,
@@ -130,14 +127,16 @@ class ContextualSearchPolicy {
      */
     boolean shouldPrefetchSearchResult() {
         if (isMandatoryPromoAvailable()
-                || !PrivacyPreferencesManager.getInstance().getNetworkPredictionEnabled()) {
+                || !PrivacyPreferencesManagerImpl.getInstance().getNetworkPredictionEnabled()) {
             return false;
         }
 
-        // We never preload on a regular long-press so users can cut & paste without hitting the
-        // servers.
-        return mSelectionController.getSelectionType() == SelectionType.TAP
-                || mSelectionController.getSelectionType() == SelectionType.RESOLVING_LONG_PRESS;
+        // We never preload unless we have sent page context (done through a Resolve request).
+        // Only some gestures can resolve, and only when resolve privacy rules are met.
+        return (mSelectionController.getSelectionType() == SelectionType.TAP
+                       || mSelectionController.getSelectionType()
+                               == SelectionType.RESOLVING_LONG_PRESS)
+                && shouldPreviousGestureResolve();
     }
 
     /**
@@ -150,7 +149,8 @@ class ContextualSearchPolicy {
             return false;
         }
 
-        return isPromoAvailable() ? isBasePageHTTP(mNetworkCommunicator.getBasePageUrl()) : true;
+        // The user must have decided on privacy to resolve page content on HTTPS.
+        return !isUserUndecided() || doesLegacyHttpPolicyApply();
     }
 
     /** @return Whether a long-press gesture can resolve. */
@@ -166,7 +166,8 @@ class ContextualSearchPolicy {
     boolean canSendSurroundings() {
         if (mDidOverrideDecidedStateForTesting) return mDecidedStateForTesting;
 
-        return isPromoAvailable() ? isBasePageHTTP(mNetworkCommunicator.getBasePageUrl()) : true;
+        // The user must have decided on privacy to send page content on HTTPS.
+        return !isUserUndecided() || doesLegacyHttpPolicyApply();
     }
 
     /**
@@ -269,6 +270,19 @@ class ContextualSearchPolicy {
     }
 
     /**
+     * Determines the policy for sending page content when on plain HTTP pages.
+     * Checks a Feature to use our legacy HTTP policy instead of treating HTTP just like HTTPS.
+     * See https://crbug.com/1129969 for details.
+     * @return whether the legacy policy for plain HTTP pages currently applies.
+     */
+    private boolean doesLegacyHttpPolicyApply() {
+        if (!isBasePageHTTP(mNetworkCommunicator.getBasePageUrl())) return false;
+
+        // Check if the legacy behavior is enabled through a feature.
+        return ChromeFeatureList.isEnabled(ChromeFeatureList.CONTEXTUAL_SEARCH_LEGACY_HTTP_POLICY);
+    }
+
+    /**
      * Determines whether an error from a search term resolution request should
      * be shown to the user, or not.
      */
@@ -319,16 +333,37 @@ class ContextualSearchPolicy {
     }
 
     /**
-     * Whether sending the URL of the base page to the server may be done for policy reasons.
-     * NOTE: There may be additional privacy reasons why the base page URL should not be sent.
-     * TODO(donnd): Update this API to definitively determine if it's OK to send the URL,
-     * by merging the checks in the native contextual_search_delegate here.
-     * @return {@code true} if the URL may be sent for policy reasons.
-     *         Note that a return value of {@code true} may still require additional checks
-     *         to see if all privacy-related conditions are met to send the base page URL.
+     * Whether this request should include sending the URL of the base page to the server.
+     * Several conditions are checked to make sure it's OK to send the URL, but primarily this is
+     * based on whether the user has checked the setting for "Make searches and browsing better".
+     * @return {@code true} if the URL should be sent.
      */
-    boolean maySendBasePageUrl() {
-        return !isUserUndecided();
+    boolean doSendBasePageUrl() {
+        if (isUserUndecided()) return false;
+
+        // Check whether there is a Field Trial setting preventing us from sending the page URL.
+        if (ContextualSearchFieldTrial.getSwitch(
+                    ContextualSearchSwitch.IS_SEND_BASE_PAGE_URL_DISABLED)) {
+            return false;
+        }
+
+        // Ensure that the default search provider is Google.
+        if (!TemplateUrlServiceFactory.get().isDefaultSearchEngineGoogle()) return false;
+
+        // Only allow HTTP or HTTPS URLs.
+        URL url = mNetworkCommunicator.getBasePageUrl();
+        String urlProtocol = url != null ? url.getProtocol() : "";
+        if (!(urlProtocol.equals(UrlConstants.HTTP_SCHEME)
+                    || urlProtocol.equals(UrlConstants.HTTPS_SCHEME))) {
+            return false;
+        }
+
+        // Check whether the user has enabled anonymous URL-keyed data collection.
+        // This is surfaced on the relatively new "Make searches and browsing better" user setting.
+        // In case an experiment is active for the legacy UI call through the unified consent
+        // service.
+        return UnifiedConsentServiceBridge.isUrlKeyedAnonymizedDataCollectionEnabled(
+                Profile.getLastUsedRegularProfile());
     }
 
     /**
@@ -405,60 +440,6 @@ class ContextualSearchPolicy {
                 ChromePreferenceKeys.CONTEXTUAL_SEARCH_TAP_SINCE_OPEN_COUNT);
     }
 
-    // --------------------------------------------------------------------------------------------
-    // Translation support.
-    // --------------------------------------------------------------------------------------------
-
-    /**
-     * Determines whether translation is needed between the given languages.
-     * @param sourceLanguage The source language code; language we're translating from.
-     * @param targetLanguages A list of target language codes; languages we might translate to.
-     * @return Whether translation is needed or not.
-     */
-    boolean needsTranslation(String sourceLanguage, List<String> targetLanguages) {
-        // For now, we just look for a language match.
-        for (String targetLanguage : targetLanguages) {
-            if (TextUtils.equals(sourceLanguage, targetLanguage)) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    /**
-     * @return The best target language from the ordered list, or the empty string if
-     *         none is available.
-     */
-    String bestTargetLanguage(List<String> targetLanguages) {
-        return bestTargetLanguage(targetLanguages, Locale.getDefault().getCountry());
-    }
-
-    /**
-     * Determines the best language to convert into, given the ordered list of languages the user
-     * knows, and the UX language.
-     * @param targetLanguages The list of languages to consider converting to.
-     * @param countryOfUx The country of the UX.
-     * @return the best language or an empty string.
-     */
-    @VisibleForTesting
-    String bestTargetLanguage(List<String> targetLanguages, String countryOfUx) {
-        // For now, we just return the first language, unless it's English
-        // (due to over-usage).
-        // TODO(donnd): Improve this logic. Determining the right language seems non-trivial.
-        // E.g. If this language doesn't match the user's server preferences, they might see a page
-        // in one language and the one box translation in another, which might be confusing.
-        // Also this logic should only apply on Android, where English setup is overused.
-        if (targetLanguages.size() > 1
-                && TextUtils.equals(targetLanguages.get(0), Locale.ENGLISH.getLanguage())
-                && !PREDOMINENTLY_ENGLISH_SPEAKING_COUNTRIES.contains(countryOfUx)) {
-            return targetLanguages.get(1);
-        } else if (targetLanguages.size() > 0) {
-            return targetLanguages.get(0);
-        } else {
-            return "";
-        }
-    }
-
     /**
      * @return The ISO country code for the user's home country, or an empty string if not
      *         available or privacy-enabled.
@@ -483,7 +464,6 @@ class ContextualSearchPolicy {
      *         on enabling or disabling the feature.
      */
     boolean isUserUndecided() {
-        // TODO(donnd) use dependency injection for the PrefServiceBridge instead!
         if (mDidOverrideDecidedStateForTesting) return !mDecidedStateForTesting;
 
         return ContextualSearchManager.isContextualSearchUninitialized();
@@ -495,6 +475,22 @@ class ContextualSearchPolicy {
      */
     boolean isBasePageHTTP(@Nullable URL url) {
         return url != null && UrlConstants.HTTP_SCHEME.equals(url.getProtocol());
+    }
+
+    // --------------------------------------------------------------------------------------------
+    // Related Searches Support.
+    // --------------------------------------------------------------------------------------------
+
+    /**
+     * @return Whether the experimental Feature for Related Searches is enabled.
+     */
+    boolean isRelatedSearchesEnabled() {
+        return ChromeFeatureList.isEnabled(ChromeFeatureList.RELATED_SEARCHES);
+    }
+
+    /** @return whether doing Related Searches should be part of processing the current request. */
+    boolean doRelatedSearches() {
+        return isRelatedSearchesEnabled();
     }
 
     // --------------------------------------------------------------------------------------------

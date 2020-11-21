@@ -10,10 +10,13 @@
 #include "base/optional.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "services/network/public/cpp/is_potentially_trustworthy.h"
+#include "services/network/public/cpp/trust_token_parameterization.h"
 #include "services/network/public/mojom/trust_tokens.mojom-forward.h"
 #include "services/network/trust_tokens/in_memory_trust_token_persister.h"
 #include "services/network/trust_tokens/proto/public.pb.h"
 #include "services/network/trust_tokens/proto/storage.pb.h"
+#include "services/network/trust_tokens/suitable_trust_token_origin.h"
+#include "services/network/trust_tokens/trust_token_key_commitment_getter.h"
 #include "services/network/trust_tokens/trust_token_parameterization.h"
 #include "services/network/trust_tokens/types.h"
 #include "third_party/protobuf/src/google/protobuf/repeated_field.h"
@@ -22,36 +25,36 @@
 namespace network {
 
 namespace {
-// Until the underlying BoringSSL functionality is implemented to extract
-// expiry timestamps from Signed Redemption Record bodies, default to
-// never expiring stored SRRs.
 class NeverExpiringExpiryDelegate
     : public TrustTokenStore::RecordExpiryDelegate {
  public:
-  bool IsRecordExpired(
-      const SignedTrustTokenRedemptionRecord& record) override {
+  bool IsRecordExpired(const TrustTokenRedemptionRecord& record,
+                       const SuitableTrustTokenOrigin& issuer) override {
     return false;
   }
 };
-}  // namespace
 
-TrustTokenStore::TrustTokenStore(std::unique_ptr<TrustTokenPersister> persister)
-    : TrustTokenStore(std::move(persister),
-                      std::make_unique<NeverExpiringExpiryDelegate>()) {}
+}  // namespace
 
 TrustTokenStore::TrustTokenStore(
     std::unique_ptr<TrustTokenPersister> persister,
-    std::unique_ptr<RecordExpiryDelegate> expiry_delegate_for_testing)
+    std::unique_ptr<RecordExpiryDelegate> expiry_delegate)
     : persister_(std::move(persister)),
-      record_expiry_delegate_(std::move(expiry_delegate_for_testing)) {
+      record_expiry_delegate_(std::move(expiry_delegate)) {
   DCHECK(persister_);
 }
 
 TrustTokenStore::~TrustTokenStore() = default;
 
-std::unique_ptr<TrustTokenStore> TrustTokenStore::CreateInMemory() {
-  return std::make_unique<TrustTokenStore>(
-      std::make_unique<InMemoryTrustTokenPersister>());
+std::unique_ptr<TrustTokenStore> TrustTokenStore::CreateForTesting(
+    std::unique_ptr<TrustTokenPersister> persister,
+    std::unique_ptr<RecordExpiryDelegate> expiry_delegate) {
+  if (!persister)
+    persister = std::make_unique<InMemoryTrustTokenPersister>();
+  if (!expiry_delegate)
+    expiry_delegate = std::make_unique<NeverExpiringExpiryDelegate>();
+  return std::make_unique<TrustTokenStore>(std::move(persister),
+                                           std::move(expiry_delegate));
 }
 
 void TrustTokenStore::RecordIssuance(const SuitableTrustTokenOrigin& issuer) {
@@ -241,15 +244,15 @@ void TrustTokenStore::DeleteToken(const SuitableTrustTokenOrigin& issuer,
 void TrustTokenStore::SetRedemptionRecord(
     const SuitableTrustTokenOrigin& issuer,
     const SuitableTrustTokenOrigin& top_level,
-    const SignedTrustTokenRedemptionRecord& record) {
+    const TrustTokenRedemptionRecord& record) {
   auto config = persister_->GetIssuerToplevelPairConfig(issuer, top_level);
   if (!config)
     config = std::make_unique<TrustTokenIssuerToplevelPairConfig>();
-  *config->mutable_signed_redemption_record() = record;
+  *config->mutable_redemption_record() = record;
   persister_->SetIssuerToplevelPairConfig(issuer, top_level, std::move(config));
 }
 
-base::Optional<SignedTrustTokenRedemptionRecord>
+base::Optional<TrustTokenRedemptionRecord>
 TrustTokenStore::RetrieveNonstaleRedemptionRecord(
     const SuitableTrustTokenOrigin& issuer,
     const SuitableTrustTokenOrigin& top_level) {
@@ -257,14 +260,14 @@ TrustTokenStore::RetrieveNonstaleRedemptionRecord(
   if (!config)
     return base::nullopt;
 
-  if (!config->has_signed_redemption_record())
+  if (!config->has_redemption_record())
     return base::nullopt;
 
-  if (record_expiry_delegate_->IsRecordExpired(
-          config->signed_redemption_record()))
+  if (record_expiry_delegate_->IsRecordExpired(config->redemption_record(),
+                                               issuer))
     return base::nullopt;
 
-  return config->signed_redemption_record();
+  return config->redemption_record();
 }
 
 bool TrustTokenStore::ClearDataForFilter(mojom::ClearDataFilterPtr filter) {

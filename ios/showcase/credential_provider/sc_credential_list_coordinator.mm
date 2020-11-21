@@ -51,8 +51,23 @@ NSArray<id<Credential>>* suggestedPasswords = @[
   [[SCCredential alloc] initWithServiceName:@"domain.com"
                           serviceIdentifier:@"www.domain.com"
                                        user:@"janesmythe"],
+  [[SCCredential alloc] initWithServiceName:@"domain.com"
+                          serviceIdentifier:@"www.domain.com"
+                                       user:@"johnsmith"],
+  [[SCCredential alloc] initWithServiceName:@"domain.com"
+                          serviceIdentifier:@"www.domain.com"
+                                       user:@"janesmythe"],
 ];
 NSArray<id<Credential>>* allPasswords = @[
+  [[SCCredential alloc] initWithServiceName:@"domain1.com"
+                          serviceIdentifier:@"www.domain1.com"
+                                       user:@"jsmythe@fazebook.com"],
+  [[SCCredential alloc] initWithServiceName:@"domain2.com"
+                          serviceIdentifier:@"www.domain2.com"
+                                       user:@"jasmith@twitcher.com"],
+  [[SCCredential alloc] initWithServiceName:@"domain3.com"
+                          serviceIdentifier:@"www.domain3.com"
+                                       user:@"HughZername"],
   [[SCCredential alloc] initWithServiceName:@"domain1.com"
                           serviceIdentifier:@"www.domain1.com"
                                        user:@"jsmythe@fazebook.com"],
@@ -68,8 +83,6 @@ NSArray<id<Credential>>* allPasswords = @[
 @interface SCCredentialListCoordinator () <CredentialDetailsConsumerDelegate,
                                            CredentialListConsumerDelegate>
 @property(nonatomic, strong) CredentialListViewController* viewController;
-@property(nonatomic, strong)
-    CredentialDetailsViewController* detailsViewController;
 @end
 
 @implementation SCCredentialListCoordinator
@@ -81,10 +94,6 @@ NSArray<id<Credential>>* allPasswords = @[
   self.viewController.delegate = self;
   [self.baseViewController setHidesBarsOnSwipe:NO];
   [self.baseViewController pushViewController:self.viewController animated:YES];
-
-  self.detailsViewController = [[CredentialDetailsViewController alloc] init];
-  self.detailsViewController.title = @"CPE Password Details";
-  self.detailsViewController.delegate = self;
 
   [self.viewController presentSuggestedPasswords:suggestedPasswords
                                     allPasswords:allPasswords];
@@ -115,9 +124,15 @@ NSArray<id<Credential>>* allPasswords = @[
   [self.viewController presentSuggestedPasswords:suggested allPasswords:all];
 }
 
+- (void)userSelectedCredential:(id<Credential>)credential {
+}
+
 - (void)showDetailsForCredential:(id<Credential>)credential {
-  [self.detailsViewController presentCredential:credential];
-  [self.baseViewController pushViewController:self.detailsViewController
+  CredentialDetailsViewController* detailsViewController =
+      [[CredentialDetailsViewController alloc] init];
+  detailsViewController.delegate = self;
+  [detailsViewController presentCredential:credential];
+  [self.baseViewController pushViewController:detailsViewController
                                      animated:YES];
 }
 

@@ -8,8 +8,8 @@
 #include <string>
 
 #include "base/bind.h"
+#include "base/check.h"
 #include "base/guid.h"
-#include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
@@ -17,13 +17,16 @@
 #include "components/autofill/core/browser/personal_data_manager.h"
 #include "components/history/core/browser/history_service.h"
 #include "components/keyed_service/core/service_access_type.h"
-#include "components/metrics/test/demographic_metrics_test_utils.h"
+#include "components/metrics/demographics/demographic_metrics_test_utils.h"
 #include "components/sync/base/pref_names.h"
 #include "components/sync/driver/profile_sync_service.h"
 #include "components/sync/driver/sync_service.h"
+#include "components/sync/engine_impl/loopback_server/loopback_server_entity.h"
+#include "components/sync/nigori/nigori_test_utils.h"
 #include "components/sync/test/fake_server/entity_builder_factory.h"
 #include "components/sync/test/fake_server/fake_server.h"
 #include "components/sync/test/fake_server/fake_server_network_resources.h"
+#include "components/sync/test/fake_server/fake_server_nigori_helper.h"
 #include "components/sync/test/fake_server/fake_server_verifier.h"
 #include "components/sync/test/fake_server/sessions_hierarchy.h"
 #include "components/sync_device_info/device_info.h"
@@ -62,9 +65,23 @@ void OverrideSyncNetwork(const syncer::CreateHttpPostProviderFactory&
   service->OverrideNetworkForTest(create_http_post_provider_factory_cb);
 }
 
+// Returns a bookmark server entity based on |title| and |url|.
+std::unique_ptr<syncer::LoopbackServerEntity> CreateBookmarkServerEntity(
+    const std::string& title,
+    const GURL& url) {
+  fake_server::EntityBuilderFactory entity_builder_factory;
+  fake_server::BookmarkEntityBuilder bookmark_builder =
+      entity_builder_factory.NewBookmarkEntityBuilder(title);
+  return bookmark_builder.BuildBookmark(url);
+}
+
 }  // namespace
 
 namespace chrome_test_util {
+
+bool IsFakeSyncServerSetUp() {
+  return gSyncFakeServer;
+}
 
 void SetUpFakeSyncServer() {
   DCHECK(!gSyncFakeServer);
@@ -87,6 +104,10 @@ void StartSync() {
   SyncSetupService* sync_setup_service =
       SyncSetupServiceFactory::GetForBrowserState(browser_state);
   sync_setup_service->SetSyncEnabled(true);
+  syncer::ProfileSyncService* sync_service =
+      ProfileSyncServiceFactory::GetAsProfileSyncServiceForBrowserState(
+          browser_state);
+  sync_service->TriggerPoliciesLoadedForTest();
 }
 
 void StopSync() {
@@ -277,7 +298,7 @@ void AddTypedURLToClient(const GURL& url) {
 
   historyService->AddPage(url, base::Time::Now(), nullptr, 1, GURL(),
                           history::RedirectList(), ui::PAGE_TRANSITION_TYPED,
-                          history::SOURCE_BROWSED, false);
+                          history::SOURCE_BROWSED, false, false);
 }
 
 void AddTypedURLToFakeSyncServer(const std::string& url) {
@@ -372,6 +393,19 @@ void DeleteTypedUrlFromFakeSyncServer(std::string url) {
         syncer::PersistentTombstoneEntity::CreateNew(entity_id, std::string());
     gSyncFakeServer->InjectEntity(std::move(entity));
   }
+}
+
+void AddBookmarkWithSyncPassphrase(const std::string& sync_passphrase) {
+  syncer::KeyParamsForTesting key_params = {
+      syncer::KeyDerivationParams::CreateForPbkdf2(), sync_passphrase};
+  std::unique_ptr<syncer::LoopbackServerEntity> server_entity =
+      CreateBookmarkServerEntity("PBKDF2-encrypted bookmark",
+                                 GURL("http://example.com/doesnt-matter"));
+  server_entity->SetSpecifics(GetEncryptedBookmarkEntitySpecifics(
+      server_entity->GetSpecifics().bookmark(), key_params));
+  gSyncFakeServer->InjectEntity(std::move(server_entity));
+  fake_server::SetNigoriInFakeServer(CreateCustomPassphraseNigori(key_params),
+                                     gSyncFakeServer);
 }
 
 }  // namespace chrome_test_util

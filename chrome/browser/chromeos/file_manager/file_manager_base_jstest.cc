@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "chrome/browser/chromeos/file_manager/file_manager_jstest_base.h"
+#include "content/public/test/browser_test.h"
 
 class FileManagerBaseJsTest : public FileManagerJsTestBase {
  protected:
@@ -12,5 +13,5 @@ class FileManagerBaseJsTest : public FileManagerJsTestBase {
 };
 
 IN_PROC_BROWSER_TEST_F(FileManagerBaseJsTest, VolumeManagerTypesTest) {
-  RunTestURL("volume_manager_types_unittest_gen.html");
+  RunTestURL("volume_manager_types_unittest.m_gen.html");
 }

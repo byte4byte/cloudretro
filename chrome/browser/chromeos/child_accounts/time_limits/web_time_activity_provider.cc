@@ -88,14 +88,13 @@ void WebTimeActivityProvider::OnWebActivityChanged(
 
   // The browser window is not active. This may happen when a navigation
   // finishes in the background.
-  if (!base::Contains(browser_activity_, browser))
+  if (!base::Contains(active_browsers_, browser))
     return;
 
   // Navigation finished in a background tab. Return.
   if (browser->tab_strip_model()->GetActiveWebContents() != info.web_contents)
     return;
 
-  browser_activity_[browser] = info.web_contents;
   MaybeNotifyStateChange(base::Time::Now());
 }
 
@@ -115,7 +114,7 @@ void WebTimeActivityProvider::OnTabStripModelChanged(
   const Browser* browser = GetBrowserForTabStripModel(tab_strip_model);
 
   // If the Browser is not the active browser, simply return.
-  if (!base::Contains(browser_activity_, browser))
+  if (!base::Contains(active_browsers_, browser))
     return;
 
   // Let's check if the active tab changed, or the content::WebContents in the
@@ -127,7 +126,6 @@ void WebTimeActivityProvider::OnTabStripModelChanged(
   if (!(active_tab_changed || web_content_replaced))
     return;
 
-  browser_activity_[browser] = tab_strip_model->GetActiveWebContents();
   MaybeNotifyStateChange(base::Time::Now());
 }
 
@@ -136,9 +134,9 @@ void WebTimeActivityProvider::OnBrowserAdded(Browser* browser) {
 }
 
 void WebTimeActivityProvider::OnBrowserRemoved(Browser* browser) {
-  if (!base::Contains(browser_activity_, browser))
+  if (!base::Contains(active_browsers_, browser))
     return;
-  browser_activity_.erase(browser);
+  active_browsers_.erase(browser);
   MaybeNotifyStateChange(base::Time::Now());
 }
 
@@ -152,8 +150,7 @@ void WebTimeActivityProvider::OnAppActive(const AppId& app_id,
   if (!browser)
     return;
 
-  browser_activity_[browser] =
-      browser->tab_strip_model()->GetActiveWebContents();
+  active_browsers_.insert(browser);
   MaybeNotifyStateChange(timestamp);
 }
 
@@ -167,10 +164,10 @@ void WebTimeActivityProvider::OnAppInactive(const AppId& app_id,
   if (!browser)
     return;
 
-  if (!base::Contains(browser_activity_, browser))
+  if (!base::Contains(active_browsers_, browser))
     return;
 
-  browser_activity_.erase(browser);
+  active_browsers_.erase(browser);
   MaybeNotifyStateChange(timestamp);
 }
 
@@ -206,22 +203,24 @@ void WebTimeActivityProvider::MaybeNotifyStateChange(base::Time timestamp) {
 ChromeAppActivityState
 WebTimeActivityProvider::CalculateChromeAppActivityState() const {
   int active_count = 0;
-  int active_whitelisted_count = 0;
+  int active_allowlisted_count = 0;
 
-  for (const std::pair<const Browser* const, content::WebContents*>& elem :
-       browser_activity_) {
-    if (!elem.second)
+  for (const Browser* browser : active_browsers_) {
+    const content::WebContents* contents =
+        browser->tab_strip_model()->GetActiveWebContents();
+    // If the active web content is null, return.
+    if (!contents)
       continue;
 
     const WebTimeNavigationObserver* observer =
-        WebTimeNavigationObserver::FromWebContents(elem.second);
+        WebTimeNavigationObserver::FromWebContents(contents);
 
     // If |observer| is not instantiated, that means that
     // WebTimeNavigationObserver::MaybeCreateForWebContents didn't create it.
     // This means that WebTimeLimitEnforcer::IsEnabled returned false.
-    // Mark it as active whitelisted.
+    // Mark it as active allowlisted.
     if (!observer) {
-      active_whitelisted_count++;
+      active_allowlisted_count++;
       continue;
     }
 
@@ -236,8 +235,8 @@ WebTimeActivityProvider::CalculateChromeAppActivityState() const {
       continue;
 
     WebTimeLimitEnforcer* enforcer = app_time_controller_->web_time_enforcer();
-    if (info->is_error || enforcer->IsURLWhitelisted(info->url)) {
-      active_whitelisted_count++;
+    if (info->is_error || enforcer->IsURLAllowlisted(info->url)) {
+      active_allowlisted_count++;
       continue;
     }
 
@@ -246,8 +245,8 @@ WebTimeActivityProvider::CalculateChromeAppActivityState() const {
 
   if (active_count > 0)
     return ChromeAppActivityState::kActive;
-  if (active_whitelisted_count > 0)
-    return ChromeAppActivityState::kActiveWhitelisted;
+  if (active_allowlisted_count > 0)
+    return ChromeAppActivityState::kActiveAllowlisted;
   return ChromeAppActivityState::kInactive;
 }
 

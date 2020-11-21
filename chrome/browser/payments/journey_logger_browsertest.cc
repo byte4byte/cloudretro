@@ -7,6 +7,7 @@
 #include "chrome/test/payments/payment_request_platform_browsertest_base.h"
 #include "components/payments/core/journey_logger.h"
 #include "components/ukm/test_ukm_recorder.h"
+#include "content/public/test/browser_test.h"
 #include "services/metrics/public/cpp/ukm_builders.h"
 
 namespace payments {
@@ -60,12 +61,14 @@ class JourneyLoggerTest : public PaymentRequestPlatformBrowserTestBase {
 
 IN_PROC_BROWSER_TEST_F(JourneyLoggerTest, NoPaymentMethodSupported) {
   base::HistogramTester histogram_tester;
+  GURL merchant_url = https_server()->GetURL("/payment_handler.html");
+  ASSERT_TRUE(content::NavigateToURL(GetActiveWebContents(), merchant_url));
 
-  ResetEventWaiterForSingleEvent(TestEvent::kShowAppsReady);
-  EXPECT_TRUE(content::ExecJs(GetActiveWebContents(), "testBasicCard()"));
+  // Launch the payment request without installing the payment app.
+  ResetEventWaiterForSingleEvent(TestEvent::kNotSupportedError);
+  EXPECT_EQ("success", content::EvalJs(GetActiveWebContents(),
+                                       "launchWithoutWaitForResponse()"));
   WaitForObservedEvent();
-
-  EXPECT_TRUE(content::ExecJs(GetActiveWebContents(), "abort()"));
 
   std::vector<base::Bucket> buckets =
       histogram_tester.GetAllSamples("PaymentRequest.Events");
@@ -74,13 +77,30 @@ IN_PROC_BROWSER_TEST_F(JourneyLoggerTest, NoPaymentMethodSupported) {
                JourneyLogger::EVENT_AVAILABLE_METHOD_BASIC_CARD);
   EXPECT_FALSE(buckets[0].min & JourneyLogger::EVENT_AVAILABLE_METHOD_GOOGLE);
   EXPECT_FALSE(buckets[0].min & JourneyLogger::EVENT_AVAILABLE_METHOD_OTHER);
+
+  // Verify recorded checkout steps.
+  histogram_tester.ExpectBucketCount(
+      "PaymentRequest.CheckoutFunnel",
+      JourneyLogger::CheckoutFunnelStep::kInitiated, 1U);
+  histogram_tester.ExpectBucketCount(
+      "PaymentRequest.CheckoutFunnel",
+      JourneyLogger::CheckoutFunnelStep::kShowCalled, 1U);
+  histogram_tester.ExpectBucketCount(
+      "PaymentRequest.CheckoutFunnel",
+      JourneyLogger::CheckoutFunnelStep::kPaymentRequestTriggered, 0U);
+  histogram_tester.ExpectBucketCount(
+      "PaymentRequest.CheckoutFunnel",
+      JourneyLogger::CheckoutFunnelStep::kPaymentHandlerInvoked, 0U);
+  histogram_tester.ExpectBucketCount(
+      "PaymentRequest.CheckoutFunnel",
+      JourneyLogger::CheckoutFunnelStep::kCompleted, 0U);
 }
 
 IN_PROC_BROWSER_TEST_F(JourneyLoggerTest, BasicCardOnly) {
   CreateAndAddCreditCardForProfile(CreateAndAddAutofillProfile());
   base::HistogramTester histogram_tester;
 
-  ResetEventWaiterForSingleEvent(TestEvent::kShowAppsReady);
+  ResetEventWaiterForSingleEvent(TestEvent::kAppListReady);
   EXPECT_TRUE(content::ExecJs(GetActiveWebContents(), "testBasicCard()"));
   WaitForObservedEvent();
 
@@ -109,6 +129,23 @@ IN_PROC_BROWSER_TEST_F(JourneyLoggerTest, GooglePaymentApp) {
                JourneyLogger::EVENT_AVAILABLE_METHOD_BASIC_CARD);
   EXPECT_TRUE(buckets[0].min & JourneyLogger::EVENT_AVAILABLE_METHOD_GOOGLE);
   EXPECT_FALSE(buckets[0].min & JourneyLogger::EVENT_AVAILABLE_METHOD_OTHER);
+
+  // Verify recorded checkout steps.
+  histogram_tester.ExpectBucketCount(
+      "PaymentRequest.CheckoutFunnel",
+      JourneyLogger::CheckoutFunnelStep::kInitiated, 1U);
+  histogram_tester.ExpectBucketCount(
+      "PaymentRequest.CheckoutFunnel",
+      JourneyLogger::CheckoutFunnelStep::kShowCalled, 1U);
+  histogram_tester.ExpectBucketCount(
+      "PaymentRequest.CheckoutFunnel",
+      JourneyLogger::CheckoutFunnelStep::kPaymentRequestTriggered, 1U);
+  histogram_tester.ExpectBucketCount(
+      "PaymentRequest.CheckoutFunnel",
+      JourneyLogger::CheckoutFunnelStep::kPaymentHandlerInvoked, 1U);
+  histogram_tester.ExpectBucketCount(
+      "PaymentRequest.CheckoutFunnel",
+      JourneyLogger::CheckoutFunnelStep::kCompleted, 1U);
 }
 
 // Make sure the UKM was logged correctly.
@@ -190,7 +227,7 @@ IN_PROC_BROWSER_TEST_F(
     UKMCheckoutEventsNotRecordedForAppOriginWhenNoAppInvoked) {
   CreateAndAddCreditCardForProfile(CreateAndAddAutofillProfile());
 
-  ResetEventWaiterForSingleEvent(TestEvent::kShowAppsReady);
+  ResetEventWaiterForSingleEvent(TestEvent::kAppListReady);
   EXPECT_TRUE(content::ExecJs(GetActiveWebContents(), "testBasicCard()"));
   WaitForObservedEvent();
 

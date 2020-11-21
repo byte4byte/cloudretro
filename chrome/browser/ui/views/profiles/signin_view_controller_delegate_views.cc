@@ -12,16 +12,19 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_avatar_icon_util.h"
 #include "chrome/browser/signin/reauth_result.h"
-#include "chrome/browser/signin/reauth_tab_helper.h"
+#include "chrome/browser/signin/reauth_util.h"
 #include "chrome/browser/signin/signin_promo.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/signin_view_controller.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/webui/signin/sync_confirmation_ui.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/common/webui_url_constants.h"
 #include "components/constrained_window/constrained_window_views.h"
+#include "components/signin/public/base/signin_metrics.h"
 #include "components/web_modal/web_contents_modal_dialog_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
@@ -31,6 +34,7 @@
 #include "ui/views/bubble/bubble_frame_view.h"
 #include "ui/views/controls/webview/webview.h"
 #include "ui/views/widget/widget.h"
+#include "url/gurl.h"
 
 namespace {
 
@@ -38,8 +42,8 @@ const int kModalDialogWidth = 448;
 const int kSyncConfirmationDialogWidth = 512;
 const int kSyncConfirmationDialogHeight = 487;
 const int kSigninErrorDialogHeight = 164;
-const int kReauthDialogWidth = 625;
-const int kReauthDialogHeight = 625;
+const int kReauthDialogWidth = 540;
+const int kReauthDialogHeight = 520;
 
 int GetSyncConfirmationDialogPreferredHeight(Profile* profile) {
   // If sync is disabled, then the sync confirmation dialog looks like an error
@@ -49,137 +53,6 @@ int GetSyncConfirmationDialogPreferredHeight(Profile* profile) {
              : kSigninErrorDialogHeight;
 }
 
-void CompleteReauthFlow(Browser* browser,
-                        base::OnceCallback<void(signin::ReauthResult)> callback,
-                        signin::ReauthResult result) {
-  browser->signin_view_controller()->CloseModalSignin();
-  std::move(callback).Run(result);
-}
-
-// The view displaying a fake modal reauth dialog. The fake dialog has OK and
-// CANCEL buttons. The class invokes a callback when the user clicks one of the
-// buttons or dismisses the dialog.
-// TODO(crbug.com/1045515): remove this class once the real implementation is
-// done.
-class SigninViewControllerFakeReauthDelegateView
-    : public views::DialogDelegateView,
-      public SigninViewControllerDelegate {
- public:
-  SigninViewControllerFakeReauthDelegateView(
-      SigninViewController* signin_view_controller,
-      Browser* browser,
-      base::OnceCallback<void(signin::ReauthResult)> reauth_callback);
-
-  // SigninViewControllerDelegate:
-  void CloseModalSignin() override;
-  void ResizeNativeView(int height) override;
-  content::WebContents* GetWebContents() override;
-
-  // views::DialogDelegateView:
-  void DeleteDelegate() override;
-  ui::ModalType GetModalType() const override;
-  base::string16 GetWindowTitle() const override;
-
- private:
-  void DisplayModal();
-
-  void OnAccept();
-  void OnCancel();
-  void OnClose();
-
-  void ResetSigninViewControllerDelegate();
-
-  SigninViewController* signin_view_controller_;
-  Browser* browser_;
-  base::OnceCallback<void(signin::ReauthResult)> reauth_callback_;
-  views::Widget* widget_ = nullptr;
-};
-
-SigninViewControllerFakeReauthDelegateView::
-    SigninViewControllerFakeReauthDelegateView(
-        SigninViewController* signin_view_controller,
-        Browser* browser,
-        base::OnceCallback<void(signin::ReauthResult)> reauth_callback)
-    : signin_view_controller_(signin_view_controller),
-      browser_(browser),
-      reauth_callback_(std::move(reauth_callback)) {
-  DialogDelegate::SetButtons(ui::DIALOG_BUTTON_OK | ui::DIALOG_BUTTON_CANCEL);
-  DialogDelegate::SetAcceptCallback(
-      base::BindOnce(&SigninViewControllerFakeReauthDelegateView::OnAccept,
-                     base::Unretained(this)));
-  DialogDelegate::SetCancelCallback(
-      base::BindOnce(&SigninViewControllerFakeReauthDelegateView::OnCancel,
-                     base::Unretained(this)));
-  DialogDelegate::SetCloseCallback(
-      base::BindOnce(&SigninViewControllerFakeReauthDelegateView::OnClose,
-                     base::Unretained(this)));
-  DisplayModal();
-}
-
-void SigninViewControllerFakeReauthDelegateView::CloseModalSignin() {
-  ResetSigninViewControllerDelegate();
-  if (widget_)
-    widget_->Close();
-}
-
-void SigninViewControllerFakeReauthDelegateView::ResizeNativeView(int height) {}
-
-content::WebContents*
-SigninViewControllerFakeReauthDelegateView::GetWebContents() {
-  return nullptr;
-}
-
-void SigninViewControllerFakeReauthDelegateView::DeleteDelegate() {
-  ResetSigninViewControllerDelegate();
-  delete this;
-}
-
-ui::ModalType SigninViewControllerFakeReauthDelegateView::GetModalType() const {
-  return ui::MODAL_TYPE_WINDOW;
-}
-
-base::string16 SigninViewControllerFakeReauthDelegateView::GetWindowTitle()
-    const {
-  return base::ASCIIToUTF16("Reauth fake dialog");
-}
-
-void SigninViewControllerFakeReauthDelegateView::DisplayModal() {
-  content::WebContents* host_web_contents =
-      browser_->tab_strip_model()->GetActiveWebContents();
-
-  if (!host_web_contents) {
-    OnClose();
-    return;
-  }
-
-  widget_ = constrained_window::CreateBrowserModalDialogViews(
-      this, host_web_contents->GetTopLevelNativeWindow());
-  widget_->Show();
-}
-
-void SigninViewControllerFakeReauthDelegateView::OnAccept() {
-  if (reauth_callback_)
-    std::move(reauth_callback_).Run(signin::ReauthResult::kSuccess);
-}
-
-void SigninViewControllerFakeReauthDelegateView::OnCancel() {
-  if (reauth_callback_)
-    std::move(reauth_callback_).Run(signin::ReauthResult::kCancelled);
-}
-
-void SigninViewControllerFakeReauthDelegateView::OnClose() {
-  if (reauth_callback_)
-    std::move(reauth_callback_).Run(signin::ReauthResult::kCancelled);
-}
-
-void SigninViewControllerFakeReauthDelegateView::
-    ResetSigninViewControllerDelegate() {
-  if (signin_view_controller_) {
-    signin_view_controller_->ResetModalSigninDelegate();
-    signin_view_controller_ = nullptr;
-  }
-}
-
 }  // namespace
 
 // static
@@ -187,7 +60,7 @@ std::unique_ptr<views::WebView>
 SigninViewControllerDelegateViews::CreateSyncConfirmationWebView(
     Browser* browser) {
   return CreateDialogWebView(
-      browser, chrome::kChromeUISyncConfirmationURL,
+      browser, GURL(chrome::kChromeUISyncConfirmationURL),
       GetSyncConfirmationDialogPreferredHeight(browser->profile()),
       kSyncConfirmationDialogWidth);
 }
@@ -195,34 +68,18 @@ SigninViewControllerDelegateViews::CreateSyncConfirmationWebView(
 // static
 std::unique_ptr<views::WebView>
 SigninViewControllerDelegateViews::CreateSigninErrorWebView(Browser* browser) {
-  return CreateDialogWebView(browser, chrome::kChromeUISigninErrorURL,
+  return CreateDialogWebView(browser, GURL(chrome::kChromeUISigninErrorURL),
                              kSigninErrorDialogHeight, base::nullopt);
 }
 
 // static
 std::unique_ptr<views::WebView>
-SigninViewControllerDelegateViews::CreateReauthWebView(
+SigninViewControllerDelegateViews::CreateReauthConfirmationWebView(
     Browser* browser,
-    base::OnceCallback<void(signin::ReauthResult)> reauth_callback) {
-  auto web_view = std::make_unique<views::WebView>(browser->profile());
-  const GURL& reauth_url = GaiaUrls::GetInstance()->reauth_url();
-  web_view->LoadInitialURL(reauth_url);
-
-  gfx::Size max_size = browser->window()
-                           ->GetWebContentsModalDialogHost()
-                           ->GetMaximumDialogSize();
-  web_view->SetPreferredSize(
-      gfx::Size(std::min(kReauthDialogWidth, max_size.width()),
-                std::min(kReauthDialogHeight, max_size.height())));
-
-  content::WebContents* web_contents = web_view->GetWebContents();
-
-  signin::ReauthTabHelper::CreateForWebContents(
-      web_contents, reauth_url, true,
-      base::BindOnce(&CompleteReauthFlow, base::Unretained(browser),
-                     std::move(reauth_callback)));
-
-  return web_view;
+    signin_metrics::ReauthAccessPoint access_point) {
+  return CreateDialogWebView(browser,
+                             signin::GetReauthConfirmationURL(access_point),
+                             kReauthDialogHeight, kReauthDialogWidth);
 }
 
 views::View* SigninViewControllerDelegateViews::GetContentsView() {
@@ -238,7 +95,7 @@ const views::Widget* SigninViewControllerDelegateViews::GetWidget() const {
 }
 
 void SigninViewControllerDelegateViews::DeleteDelegate() {
-  ResetSigninViewControllerDelegate();
+  NotifyModalSigninClosed();
   delete this;
 }
 
@@ -251,13 +108,7 @@ bool SigninViewControllerDelegateViews::ShouldShowCloseButton() const {
 }
 
 void SigninViewControllerDelegateViews::CloseModalSignin() {
-  signin::ReauthTabHelper* reauth_tab_helper =
-      signin::ReauthTabHelper::FromWebContents(web_contents_);
-  if (reauth_tab_helper) {
-    reauth_tab_helper->CompleteReauth(signin::ReauthResult::kCancelled);
-  }
-
-  ResetSigninViewControllerDelegate();
+  NotifyModalSigninClosed();
   if (modal_signin_widget_)
     modal_signin_widget_->Close();
 }
@@ -282,6 +133,14 @@ content::WebContents* SigninViewControllerDelegateViews::GetWebContents() {
   return web_contents_;
 }
 
+void SigninViewControllerDelegateViews::SetWebContents(
+    content::WebContents* web_contents) {
+  DCHECK(web_contents);
+  content_view_->SetWebContents(web_contents);
+  web_contents_ = web_contents;
+  web_contents_->SetDelegate(this);
+}
+
 bool SigninViewControllerDelegateViews::HandleContextMenu(
     content::RenderFrameHost* render_frame_host,
     const content::ContextMenuParams& params) {
@@ -301,20 +160,31 @@ bool SigninViewControllerDelegateViews::HandleKeyboardEvent(
       event, GetFocusManager());
 }
 
+void SigninViewControllerDelegateViews::AddNewContents(
+    content::WebContents* source,
+    std::unique_ptr<content::WebContents> new_contents,
+    const GURL& target_url,
+    WindowOpenDisposition disposition,
+    const gfx::Rect& initial_rect,
+    bool user_gesture,
+    bool* was_blocked) {
+  // Allows the Gaia reauth page to open links in a new tab.
+  chrome::AddWebContents(browser_, source, std::move(new_contents), target_url,
+                         disposition, initial_rect);
+}
+
 web_modal::WebContentsModalDialogHost*
 SigninViewControllerDelegateViews::GetWebContentsModalDialogHost() {
   return browser()->window()->GetWebContentsModalDialogHost();
 }
 
 SigninViewControllerDelegateViews::SigninViewControllerDelegateViews(
-    SigninViewController* signin_view_controller,
     std::unique_ptr<views::WebView> content_view,
     Browser* browser,
     ui::ModalType dialog_modal_type,
     bool wait_for_size,
     bool should_show_close_button)
-    : signin_view_controller_(signin_view_controller),
-      web_contents_(content_view->GetWebContents()),
+    : web_contents_(content_view->GetWebContents()),
       browser_(browser),
       content_view_(content_view.release()),
       modal_signin_widget_(nullptr),
@@ -325,7 +195,7 @@ SigninViewControllerDelegateViews::SigninViewControllerDelegateViews(
   DCHECK(browser_->tab_strip_model()->GetActiveWebContents())
       << "A tab must be active to present the sign-in modal dialog.";
 
-  DialogDelegate::SetButtons(ui::DIALOG_BUTTON_NONE);
+  SetButtons(ui::DIALOG_BUTTON_NONE);
 
   web_contents_->SetDelegate(this);
 
@@ -343,12 +213,12 @@ SigninViewControllerDelegateViews::~SigninViewControllerDelegateViews() =
 std::unique_ptr<views::WebView>
 SigninViewControllerDelegateViews::CreateDialogWebView(
     Browser* browser,
-    const std::string& url,
+    const GURL& url,
     int dialog_height,
     base::Optional<int> opt_width) {
   int dialog_width = opt_width.value_or(kModalDialogWidth);
   views::WebView* web_view = new views::WebView(browser->profile());
-  web_view->LoadInitialURL(GURL(url));
+  web_view->LoadInitialURL(url);
   // To record metrics using javascript, extensions are needed.
   extensions::ChromeExtensionWebContentsObserver::CreateForWebContents(
       web_view->GetWebContents());
@@ -365,13 +235,6 @@ SigninViewControllerDelegateViews::CreateDialogWebView(
       gfx::Size(dialog_width, std::min(dialog_height, max_height)));
 
   return std::unique_ptr<views::WebView>(web_view);
-}
-
-void SigninViewControllerDelegateViews::ResetSigninViewControllerDelegate() {
-  if (signin_view_controller_) {
-    signin_view_controller_->ResetModalSigninDelegate();
-    signin_view_controller_ = nullptr;
-  }
 }
 
 void SigninViewControllerDelegateViews::DisplayModal() {
@@ -415,47 +278,28 @@ void SigninViewControllerDelegateViews::DisplayModal() {
 
 // static
 SigninViewControllerDelegate*
-SigninViewControllerDelegate::CreateSyncConfirmationDelegate(
-    SigninViewController* signin_view_controller,
-    Browser* browser) {
+SigninViewControllerDelegate::CreateSyncConfirmationDelegate(Browser* browser) {
   return new SigninViewControllerDelegateViews(
-      signin_view_controller,
       SigninViewControllerDelegateViews::CreateSyncConfirmationWebView(browser),
       browser, ui::MODAL_TYPE_WINDOW, true, false);
 }
 
 // static
 SigninViewControllerDelegate*
-SigninViewControllerDelegate::CreateSigninErrorDelegate(
-    SigninViewController* signin_view_controller,
-    Browser* browser) {
+SigninViewControllerDelegate::CreateSigninErrorDelegate(Browser* browser) {
   return new SigninViewControllerDelegateViews(
-      signin_view_controller,
       SigninViewControllerDelegateViews::CreateSigninErrorWebView(browser),
       browser, ui::MODAL_TYPE_WINDOW, true, false);
 }
 
 // static
 SigninViewControllerDelegate*
-SigninViewControllerDelegate::CreateReauthDelegate(
-    SigninViewController* signin_view_controller,
+SigninViewControllerDelegate::CreateReauthConfirmationDelegate(
     Browser* browser,
     const CoreAccountId& account_id,
-    base::OnceCallback<void(signin::ReauthResult)> reauth_callback) {
+    signin_metrics::ReauthAccessPoint access_point) {
   return new SigninViewControllerDelegateViews(
-      signin_view_controller,
-      SigninViewControllerDelegateViews::CreateReauthWebView(
-          browser, std::move(reauth_callback)),
+      SigninViewControllerDelegateViews::CreateReauthConfirmationWebView(
+          browser, access_point),
       browser, ui::MODAL_TYPE_CHILD, false, true);
-}
-
-// static
-SigninViewControllerDelegate*
-SigninViewControllerDelegate::CreateFakeReauthDelegate(
-    SigninViewController* signin_view_controller,
-    Browser* browser,
-    const CoreAccountId& account_id,
-    base::OnceCallback<void(signin::ReauthResult)> reauth_callback) {
-  return new SigninViewControllerFakeReauthDelegateView(
-      signin_view_controller, browser, std::move(reauth_callback));
 }

@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "base/command_line.h"
+#include "build/build_config.h"
 #include "chrome/browser/serial/serial_chooser_context.h"
 #include "chrome/browser/serial/serial_chooser_context_factory.h"
 #include "chrome/browser/ui/browser.h"
@@ -11,6 +12,7 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
@@ -50,7 +52,15 @@ class SerialTest : public InProcessBrowserTest {
   SerialChooserContext* context_;
 };
 
-IN_PROC_BROWSER_TEST_F(SerialTest, NavigateWithChooserCrossOrigin) {
+// TODO(crbug/1069695): Flaky on linux-chromeos-chrome.
+// TODO(crbug/1116072): Flaky on Linux Ozone Tester (X11).
+#if defined(OS_CHROMEOS) || defined(USE_OZONE)
+#define MAYBE_NavigateWithChooserCrossOrigin \
+  DISABLED_NavigateWithChooserCrossOrigin
+#else
+#define MAYBE_NavigateWithChooserCrossOrigin NavigateWithChooserCrossOrigin
+#endif
+IN_PROC_BROWSER_TEST_F(SerialTest, MAYBE_NavigateWithChooserCrossOrigin) {
   content::WebContents* web_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
 
@@ -86,7 +96,7 @@ IN_PROC_BROWSER_TEST_F(SerialTest, RemovePort) {
         removedPromise = new Promise(resolve => {
           navigator.serial.addEventListener(
               'disconnect', e => {
-                resolve(e.port === ports[0]);
+                resolve(e.target === ports[0]);
               }, { once: true });
         });
         return true;

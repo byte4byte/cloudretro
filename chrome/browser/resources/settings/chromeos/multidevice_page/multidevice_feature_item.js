@@ -33,6 +33,13 @@ Polymer({
      * @type {URLSearchParams|undefined}
      */
     subpageRouteUrlSearchParams: Object,
+
+    /** Whether if the feature is a sub-feature */
+    isSubFeature: {
+      type: Boolean,
+      value: false,
+      reflectToAttribute: true,
+    },
   },
 
   /** settings.RouteOriginBehavior override */
@@ -40,6 +47,25 @@ Polymer({
 
   ready() {
     this.addFocusConfig_(this.subpageRoute, '#subpageButton');
+  },
+
+  /** @override */
+  focus() {
+    const slot = this.$$('slot[name="feature-controller"]');
+    const elems = slot.assignedElements({flatten: true});
+    assert(elems.length > 0);
+    // Elems contains any elements that override the feature controller. If none
+    // exist, contains the default toggle elem.
+    elems[0].focus();
+  },
+
+  /**
+   * @return {boolean}
+   * @private
+   */
+  isRowClickable_() {
+    return this.hasSubpageClickHandler_() ||
+        this.isFeatureStateEditable(this.feature);
   },
 
   /**
@@ -52,13 +78,19 @@ Polymer({
 
   /** @private */
   handleItemClick_(event) {
-    if (!this.hasSubpageClickHandler_()) {
-      return;
-    }
-
     // We do not navigate away if the click was on a link.
     if (event.path[0].tagName === 'A') {
       event.stopPropagation();
+      return;
+    }
+
+    if (!this.hasSubpageClickHandler_()) {
+      if (this.isFeatureStateEditable(this.feature)) {
+        // Toggle the editable feature if the feature is editable and does not
+        // link to a subpage.
+        this.shadowRoot.querySelector('settings-multidevice-feature-toggle')
+            .toggleFeature();
+      }
       return;
     }
 

@@ -8,12 +8,13 @@ import static android.view.ViewGroup.LayoutParams.MATCH_PARENT;
 import static android.view.ViewGroup.LayoutParams.WRAP_CONTENT;
 
 import android.app.Activity;
-import android.support.test.filters.MediumTest;
-import android.support.test.filters.SmallTest;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.widget.FrameLayout;
 import android.widget.TextView;
+
+import androidx.test.filters.MediumTest;
+import androidx.test.filters.SmallTest;
 
 import org.junit.Assert;
 import org.junit.Test;
@@ -134,7 +135,7 @@ public class MoreProgressButtonTest extends DummyUiActivityTestCase {
     public void testStateAfterBindAction() {
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             boolean buttonShownBefore = mActivity.findViewById(R.id.action_button).isShown();
-            boolean spinnerShownBefore = mActivity.findViewById(R.id.action_button).isShown();
+            boolean spinnerShownBefore = mActivity.findViewById(R.id.progress_spinner).isShown();
 
             mMoreProgressButton.setOnClickRunnable(() -> changeTextView(""));
 

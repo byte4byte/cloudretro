@@ -27,16 +27,20 @@ namespace autofill {
 VirtualCardSelectionDialogViewImpl::VirtualCardSelectionDialogViewImpl(
     VirtualCardSelectionDialogController* controller)
     : controller_(controller) {
-  DialogDelegate::SetButtonLabel(ui::DIALOG_BUTTON_OK,
-                                   controller_->GetOkButtonLabel());
-  DialogDelegate::SetButtonLabel(ui::DIALOG_BUTTON_CANCEL,
-                                   controller_->GetCancelButtonLabel());
-  DialogDelegate::SetAcceptCallback(
+  SetShowTitle(true);
+  SetButtonLabel(ui::DIALOG_BUTTON_OK, controller_->GetOkButtonLabel());
+  SetButtonLabel(ui::DIALOG_BUTTON_CANCEL, controller_->GetCancelButtonLabel());
+  SetAcceptCallback(
       base::BindOnce(&VirtualCardSelectionDialogController::OnOkButtonClicked,
                      base::Unretained(controller_)));
-  DialogDelegate::SetCancelCallback(base::BindOnce(
+  SetCancelCallback(base::BindOnce(
       &VirtualCardSelectionDialogController::OnCancelButtonClicked,
       base::Unretained(controller_)));
+
+  SetModalType(ui::MODAL_TYPE_CHILD);
+  SetShowCloseButton(false);
+  set_fixed_width(views::LayoutProvider::Get()->GetDistanceMetric(
+      views::DISTANCE_MODAL_DIALOG_PREFERRED_WIDTH));
 }
 
 VirtualCardSelectionDialogViewImpl::~VirtualCardSelectionDialogViewImpl() {
@@ -67,12 +71,6 @@ void VirtualCardSelectionDialogViewImpl::Hide() {
   GetWidget()->Close();
 }
 
-gfx::Size VirtualCardSelectionDialogViewImpl::CalculatePreferredSize() const {
-  const int width = ChromeLayoutProvider::Get()->GetDistanceMetric(
-      DISTANCE_MODAL_DIALOG_PREFERRED_WIDTH);
-  return gfx::Size(width, GetHeightForWidth(width));
-}
-
 void VirtualCardSelectionDialogViewImpl::AddedToWidget() {
   // TODO(crbug.com/1020740): The header image is not ready. Implement it later.
 }
@@ -81,10 +79,6 @@ bool VirtualCardSelectionDialogViewImpl::IsDialogButtonEnabled(
     ui::DialogButton button) const {
   return button == ui::DIALOG_BUTTON_OK ? controller_->IsOkButtonEnabled()
                                         : true;
-}
-
-ui::ModalType VirtualCardSelectionDialogViewImpl::GetModalType() const {
-  return ui::MODAL_TYPE_CHILD;
 }
 
 views::View* VirtualCardSelectionDialogViewImpl::GetContentsView() {
@@ -99,8 +93,8 @@ views::View* VirtualCardSelectionDialogViewImpl::GetContentsView() {
           views::TEXT, views::CONTROL)));
 
   auto* instructions = AddChildView(std::make_unique<views::Label>(
-      controller_->GetContentExplanation(), CONTEXT_BODY_TEXT_LARGE,
-      views::style::STYLE_SECONDARY));
+      controller_->GetContentExplanation(),
+      views::style::CONTEXT_DIALOG_BODY_TEXT, views::style::STYLE_SECONDARY));
   instructions->SetMultiLine(true);
   instructions->SetHorizontalAlignment(gfx::ALIGN_LEFT);
 
@@ -111,14 +105,6 @@ views::View* VirtualCardSelectionDialogViewImpl::GetContentsView() {
 
 base::string16 VirtualCardSelectionDialogViewImpl::GetWindowTitle() const {
   return controller_->GetContentTitle();
-}
-
-bool VirtualCardSelectionDialogViewImpl::ShouldShowWindowTitle() const {
-  return true;
-}
-
-bool VirtualCardSelectionDialogViewImpl::ShouldShowCloseButton() const {
-  return false;
 }
 
 }  // namespace autofill

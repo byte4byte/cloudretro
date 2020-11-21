@@ -10,7 +10,7 @@
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
-#include "third_party/blink/public/mojom/renderer_preferences.mojom.h"
+#include "third_party/blink/public/common/renderer_preferences/renderer_preferences.h"
 #include "ui/aura/window.h"
 #include "ui/views/controls/webview/web_contents_set_background_color.h"
 #include "ui/views/controls/webview/webview.h"
@@ -39,7 +39,7 @@ gfx::NativeView AssistantWebViewImpl::GetNativeView() {
 }
 
 void AssistantWebViewImpl::ChildPreferredSizeChanged(views::View* child) {
-  DCHECK_EQ(web_view_.get(), child);
+  DCHECK_EQ(web_view_, child);
   SetPreferredSize(web_view_->GetPreferredSize());
 }
 
@@ -160,14 +160,6 @@ void AssistantWebViewImpl::NavigationEntriesDeleted() {
   UpdateCanGoBack();
 }
 
-void AssistantWebViewImpl::DidAttachInterstitialPage() {
-  UpdateCanGoBack();
-}
-
-void AssistantWebViewImpl::DidDetachInterstitialPage() {
-  UpdateCanGoBack();
-}
-
 void AssistantWebViewImpl::InitWebContents(Profile* profile) {
   web_contents_ =
       content::WebContents::Create(content::WebContents::CreateParams(
@@ -189,11 +181,8 @@ void AssistantWebViewImpl::InitWebContents(Profile* profile) {
 }
 
 void AssistantWebViewImpl::InitLayout(Profile* profile) {
-  // Web view.
-  web_view_ = std::make_unique<views::WebView>(profile);
-  web_view_->set_owned_by_client();
+  web_view_ = AddChildView(std::make_unique<views::WebView>(profile));
   web_view_->SetWebContents(web_contents_.get());
-  AddChildView(web_view_.get());
 }
 
 void AssistantWebViewImpl::NotifyDidSuppressNavigation(

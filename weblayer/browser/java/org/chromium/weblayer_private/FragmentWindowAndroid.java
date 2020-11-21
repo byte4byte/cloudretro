@@ -10,8 +10,10 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentSender;
 import android.os.Build;
+import android.view.View;
 
 import org.chromium.ui.base.ActivityKeyboardVisibilityDelegate;
+import org.chromium.ui.base.ImmutableWeakReference;
 import org.chromium.ui.base.IntentWindowAndroid;
 import org.chromium.ui.modaldialog.ModalDialogManager;
 
@@ -24,6 +26,10 @@ import java.lang.ref.WeakReference;
 public class FragmentWindowAndroid extends IntentWindowAndroid {
     private BrowserFragmentImpl mFragment;
     private ModalDialogManager mModalDialogManager;
+
+    // This WeakReference is purely to avoid gc churn of creating a new WeakReference in
+    // every getActivity call. It is not needed for correctness.
+    private ImmutableWeakReference<Activity> mActivityWeakRefHolder;
 
     FragmentWindowAndroid(Context context, BrowserFragmentImpl fragment) {
         super(context);
@@ -46,7 +52,11 @@ public class FragmentWindowAndroid extends IntentWindowAndroid {
 
     @Override
     public final WeakReference<Activity> getActivity() {
-        return new WeakReference<>(mFragment.getActivity());
+        if (mActivityWeakRefHolder == null
+                || mActivityWeakRefHolder.get() != mFragment.getActivity()) {
+            mActivityWeakRefHolder = new ImmutableWeakReference<>(mFragment.getActivity());
+        }
+        return mActivityWeakRefHolder;
     }
 
     @Override
@@ -54,8 +64,19 @@ public class FragmentWindowAndroid extends IntentWindowAndroid {
         return mModalDialogManager;
     }
 
+    @Override
+    public View getReadbackView() {
+        BrowserViewController viewController = getBrowser().getPossiblyNullViewController();
+        if (viewController == null) return null;
+        return viewController.getViewForMagnifierReadback();
+    }
+
     public void setModalDialogManager(ModalDialogManager modalDialogManager) {
         mModalDialogManager = modalDialogManager;
+    }
+
+    public BrowserImpl getBrowser() {
+        return mFragment.getBrowser();
     }
 
     @Override

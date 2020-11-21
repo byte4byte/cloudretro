@@ -22,7 +22,6 @@ class Label;
 namespace ash {
 
 class AppListViewDelegate;
-class PaginationModel;
 class SearchResult;
 
 // A tile view that displays a search result. It hosts view for search result
@@ -32,7 +31,6 @@ class APP_LIST_EXPORT SearchResultTileItemView
       public views::ContextMenuController {
  public:
   SearchResultTileItemView(AppListViewDelegate* view_delegate,
-                           PaginationModel* pagination_model,
                            bool show_in_apps_page);
   ~SearchResultTileItemView() override;
 
@@ -53,14 +51,9 @@ class APP_LIST_EXPORT SearchResultTileItemView
     return group_index_in_container_view_;
   }
 
-  // Overridden from views::ButtonListener:
-  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
-
   // Overridden from views::Button:
   void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
   bool OnKeyPressed(const ui::KeyEvent& event) override;
-  void OnFocus() override;
-  void OnBlur() override;
   void StateChanged(ButtonState old_state) override;
   void PaintButtonContents(gfx::Canvas* canvas) override;
 
@@ -87,6 +80,8 @@ class APP_LIST_EXPORT SearchResultTileItemView
   // The callback used when a menu closes.
   void OnMenuClosed();
 
+  void OnButtonPressed(const ui::Event& event);
+
   void SetIcon(const gfx::ImageSkia& icon);
   void SetBadgeIcon(const gfx::ImageSkia& badge_icon);
   void SetTitle(const base::string16& title);
@@ -112,7 +107,6 @@ class APP_LIST_EXPORT SearchResultTileItemView
   base::string16 GetTooltipText(const gfx::Point& p) const override;
 
   AppListViewDelegate* const view_delegate_;           // Owned by AppListView.
-  PaginationModel* const pagination_model_;            // Owned by AppsGridView.
 
   views::ImageView* icon_ = nullptr;         // Owned by views hierarchy.
   views::ImageView* badge_ = nullptr;        // Owned by views hierarchy.
@@ -128,10 +122,12 @@ class APP_LIST_EXPORT SearchResultTileItemView
   // suggestion window: Installed apps, play store apps, play store reinstalled
   // app.
   int group_index_in_container_view_;
-
-  const bool is_play_store_app_search_enabled_;
   const bool is_app_reinstall_recommendation_enabled_;
   const bool show_in_apps_page_;  // True if shown in app list's apps page.
+
+  // Whether the result view moved into selected state only because a context
+  // menu was shown.
+  bool selected_for_context_menu_ = false;
 
   std::unique_ptr<AppListMenuModelAdapter> context_menu_;
 

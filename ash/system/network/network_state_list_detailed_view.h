@@ -14,6 +14,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/timer/timer.h"
 #include "chromeos/services/network_config/public/mojom/cros_network_config.mojom-forward.h"
+#include "chromeos/services/network_config/public/mojom/network_types.mojom-forward.h"
 
 namespace views {
 class Button;
@@ -72,8 +73,6 @@ class ASH_EXPORT NetworkStateListDetailedView
 
   // TrayDetailedView:
   void HandleViewClicked(views::View* view) override;
-  void HandleButtonPressed(views::Button* sender,
-                           const ui::Event& event) override;
   void CreateExtraTitleRowButtons() override;
 
   // Implementation of 'HandleViewClicked' once networks are received.

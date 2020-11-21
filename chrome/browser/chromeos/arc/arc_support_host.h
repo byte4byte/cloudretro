@@ -39,11 +39,44 @@ class ArcSupportHost : public arc::ArcSupportMessageHost::Observer,
     NETWORK_UNAVAILABLE_ERROR,
     SERVER_COMMUNICATION_ERROR,
     SIGN_IN_BAD_AUTHENTICATION_ERROR,
-    SIGN_IN_CLOUD_PROVISION_FLOW_FAIL_ERROR,
+    // Cloud provision flow errors require the error arg to be passed
+    // in ErrorInfo struct where the value of arg is error code received
+    // from ARC.
+    SIGN_IN_CLOUD_PROVISION_FLOW_ACCOUNT_MISSING_ERROR,
+    SIGN_IN_CLOUD_PROVISION_FLOW_DOMAIN_JOIN_FAIL_ERROR,
+    SIGN_IN_CLOUD_PROVISION_FLOW_NETWORK_ERROR,
+    SIGN_IN_CLOUD_PROVISION_FLOW_TRANSIENT_ERROR,
+    SIGN_IN_CLOUD_PROVISION_FLOW_PERMANENT_ERROR,
+    SIGN_IN_CLOUD_PROVISION_FLOW_INTERRUPTED_ERROR,
+    SIGN_IN_CLOUD_PROVISION_FLOW_ENROLLMENT_TOKEN_INVALID,
     SIGN_IN_GMS_NOT_AVAILABLE_ERROR,
     SIGN_IN_NETWORK_ERROR,
     SIGN_IN_SERVICE_UNAVAILABLE_ERROR,
+    // This error requires error arg to be passed in ErrorInfo struct
+    // where the value of arg indicates the specific provisioning result
+    // for which this error message is shown.
     SIGN_IN_UNKNOWN_ERROR,
+    LOW_DISK_SPACE_ERROR
+  };
+
+  // A struct to represent the error to display on the screen.
+  struct ErrorInfo {
+    explicit ErrorInfo(Error error);
+    ErrorInfo(Error error, const base::Optional<int>& arg);
+    ErrorInfo(const ErrorInfo&);
+    ErrorInfo& operator=(const ErrorInfo&);
+
+    // The error message to show.
+    Error error;
+
+    // Some messages show an error code with the error string
+    // e.g. Something went wrong. Error code: 7
+    // The value of error code for such errors can be passsed
+    // using this arg.
+    // For SIGN_IN_UNKNOWN_ERROR the arg should be specific provisioning result
+    // code. For SIGN_IN_CLOUD_PROVISION_FLOW_* errors the arg should be error
+    // code received from ARC.
+    base::Optional<int> arg;
   };
 
   // Delegate to handle authentication related events. Currently used for Active
@@ -104,7 +137,8 @@ class ArcSupportHost : public arc::ArcSupportMessageHost::Observer,
     virtual ~ErrorDelegate() = default;
   };
 
-  using RequestOpenAppCallback = base::Callback<void(Profile* profile)>;
+  using RequestOpenAppCallback =
+      base::RepeatingCallback<void(Profile* profile)>;
 
   explicit ArcSupportHost(Profile* profile);
   ~ArcSupportHost() override;
@@ -147,7 +181,7 @@ class ArcSupportHost : public arc::ArcSupportMessageHost::Observer,
                                const std::string& device_management_url_prefix);
 
   // Requests to show the error page
-  void ShowError(Error error, bool should_show_send_feedback);
+  void ShowError(ErrorInfo error_info, bool should_show_send_feedback);
 
   void SetMetricsPreferenceCheckbox(bool is_enabled, bool is_managed);
   void SetBackupAndRestorePreferenceCheckbox(bool is_enabled, bool is_managed);
@@ -219,7 +253,7 @@ class ArcSupportHost : public arc::ArcSupportMessageHost::Observer,
   UIPage ui_page_ = UIPage::NO_PAGE;
 
   // These have valid values iff ui_page_ == ERROR.
-  Error error_;
+  base::Optional<ErrorInfo> error_info_;
   bool should_show_send_feedback_;
 
   bool is_arc_managed_ = false;

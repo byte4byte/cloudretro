@@ -36,7 +36,9 @@ class CONTENT_EXPORT ConversionPolicy {
   static std::unique_ptr<ConversionPolicy> CreateForTesting(
       std::unique_ptr<NoiseProvider> noise_provider);
 
-  ConversionPolicy();
+  // |debug_mode| indicates whether the API is currently running in a mode where
+  // it should not use noise.
+  explicit ConversionPolicy(bool debug_mode = false);
   ConversionPolicy(const ConversionPolicy& other) = delete;
   ConversionPolicy& operator=(const ConversionPolicy& other) = delete;
   virtual ~ConversionPolicy();
@@ -57,9 +59,18 @@ class CONTENT_EXPORT ConversionPolicy {
       const base::Optional<base::TimeDelta>& declared_expiry,
       base::Time impression_time) const;
 
+  // Delays reports that should have been sent while the browser was not open by
+  // given them a noisy report time to help disassociate them from other
+  // reports.
+  virtual base::Time GetReportTimeForExpiredReportAtStartup(
+      base::Time now) const;
+
  private:
   // For testing only.
   explicit ConversionPolicy(std::unique_ptr<NoiseProvider> noise_provider);
+
+  // Whether the API is running in debug mode. No noise or delay should be used.
+  const bool debug_mode_;
 
   std::unique_ptr<NoiseProvider> noise_provider_;
 };

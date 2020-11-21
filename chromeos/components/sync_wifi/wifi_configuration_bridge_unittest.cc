@@ -5,15 +5,21 @@
 #include "chromeos/components/sync_wifi/wifi_configuration_bridge.h"
 
 #include <map>
+#include <memory>
 #include <set>
 #include <utility>
 
 #include "base/bind.h"
+#include "base/containers/flat_map.h"
 #include "base/run_loop.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "base/test/task_environment.h"
 #include "chromeos/components/sync_wifi/fake_local_network_collector.h"
+#include "chromeos/components/sync_wifi/fake_timer_factory.h"
 #include "chromeos/components/sync_wifi/network_identifier.h"
+#include "chromeos/components/sync_wifi/network_test_helper.h"
+#include "chromeos/components/sync_wifi/synced_network_metrics_logger.h"
 #include "chromeos/components/sync_wifi/synced_network_updater.h"
 #include "chromeos/components/sync_wifi/test_data_generator.h"
 #include "chromeos/dbus/shill/shill_clients.h"
@@ -24,10 +30,10 @@
 #include "components/sync/model/data_batch.h"
 #include "components/sync/model/entity_change.h"
 #include "components/sync/model/metadata_batch.h"
-#include "components/sync/model/mock_model_type_change_processor.h"
-#include "components/sync/model/model_type_store_test_util.h"
 #include "components/sync/model_impl/in_memory_metadata_change_list.h"
 #include "components/sync/protocol/model_type_state.pb.h"
+#include "components/sync/test/model/mock_model_type_change_processor.h"
+#include "components/sync/test/model/model_type_store_test_util.h"
 #include "components/sync/test/test_matchers.h"
 #include "components/sync_preferences/testing_pref_service_syncable.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -55,6 +61,7 @@ const char kSsidWoof[] = "woof";
 const char kSsidHonk[] = "honk";
 const char kSyncPsk[] = "sync_psk";
 const char kLocalPsk[] = "local_psk";
+const char kIsFirstRun[] = "sync_wifi.is_first_run";
 
 syncer::EntityData GenerateWifiEntityData(
     const sync_pb::WifiConfigurationSpecifics& data) {
@@ -102,7 +109,14 @@ class TestSyncedNetworkUpdater : public SyncedNetworkUpdater {
 
   const std::vector<NetworkIdentifier>& remove_calls() { return remove_calls_; }
 
- private:
+  void set_update_in_progress(const std::string& network_guid, bool value) {
+    if (value)
+      guid_update_in_progress_.insert(network_guid);
+    else
+      guid_update_in_progress_.erase(network_guid);
+  }
+
+  // SyncedNetworkUpdater:
   void AddOrUpdateNetwork(
       const sync_pb::WifiConfigurationSpecifics& specifics) override {
     add_update_calls_.push_back(specifics);
@@ -112,45 +126,65 @@ class TestSyncedNetworkUpdater : public SyncedNetworkUpdater {
     remove_calls_.push_back(id);
   }
 
+  bool IsUpdateInProgress(const std::string& network_guid) override {
+    return guid_update_in_progress_.contains(network_guid);
+  }
+
+ private:
   std::vector<sync_pb::WifiConfigurationSpecifics> add_update_calls_;
   std::vector<NetworkIdentifier> remove_calls_;
+  base::flat_set<std::string> guid_update_in_progress_;
 };
 
 class WifiConfigurationBridgeTest : public testing::Test {
  protected:
   WifiConfigurationBridgeTest()
-      : store_(syncer::ModelTypeStoreTestUtil::CreateInMemoryStoreForTest()) {}
+      : store_(syncer::ModelTypeStoreTestUtil::CreateInMemoryStoreForTest()) {
+    network_test_helper_ = std::make_unique<NetworkTestHelper>();
+  }
 
   void SetUp() override {
-    shill_clients::InitializeFakes();
-    NetworkHandler::Initialize();
+    network_test_helper_->SetUp();
 
     ON_CALL(mock_processor_, IsTrackingMetadata()).WillByDefault(Return(true));
+    timer_factory_ = std::make_unique<FakeTimerFactory>();
     synced_network_updater_ = std::make_unique<TestSyncedNetworkUpdater>();
     local_network_collector_ = std::make_unique<FakeLocalNetworkCollector>();
-
+    metrics_logger_ = std::make_unique<SyncedNetworkMetricsLogger>(
+        /*network_state_handler=*/nullptr,
+        /*network_connection_handler=*/nullptr);
     user_prefs_ =
         std::make_unique<sync_preferences::TestingPrefServiceSyncable>();
     device_prefs_ = std::make_unique<TestingPrefServiceSimple>();
     NetworkMetadataStore::RegisterPrefs(user_prefs_->registry());
     NetworkMetadataStore::RegisterPrefs(device_prefs_->registry());
+
+    user_prefs_->registry()->RegisterBooleanPref(kIsFirstRun, true);
+
     network_metadata_store_ = std::make_unique<NetworkMetadataStore>(
         /*network_configuration_handler=*/nullptr,
         /*network_connection_handler=*/nullptr,
-        /*network_state_handler=*/nullptr, user_prefs_.get(),
-        device_prefs_.get());
+        network_test_helper_->network_state_helper().network_state_handler(),
+        user_prefs_.get(), device_prefs_.get(),
+        /*is_enterprise_enrolled=*/false);
 
+    base::HistogramTester histogram_tester;
     bridge_ = std::make_unique<WifiConfigurationBridge>(
         synced_network_updater(), local_network_collector(),
-        /*network_configuration_handler=*/nullptr,
+        /*network_configuration_handler=*/nullptr, metrics_logger_.get(),
+        timer_factory_.get(), user_prefs_.get(),
         mock_processor_.CreateForwardingProcessor(),
         syncer::ModelTypeStoreTestUtil::MoveStoreToFactory(std::move(store_)));
     bridge_->SetNetworkMetadataStore(network_metadata_store_->GetWeakPtr());
+    base::RunLoop().RunUntilIdle();
+
+    // Assert that an incorrect metric was not logged.
+    histogram_tester.ExpectTotalCount(kTotalCountHistogram, 0);
   }
 
   void TearDown() override {
+    // TODO(cvandermerwe) Put the shutdown logic into network_test_helper.
     NetworkHandler::Shutdown();
-    shill_clients::Shutdown();
   }
 
   void DisableBridge() {
@@ -195,6 +229,14 @@ class WifiConfigurationBridgeTest : public testing::Test {
     return local_network_collector_.get();
   }
 
+  FakeTimerFactory* timer_factory() { return timer_factory_.get(); }
+  NetworkMetadataStore* network_metadata_store() {
+    return network_metadata_store_.get();
+  }
+  NetworkTestHelper* network_test_helper() {
+    return network_test_helper_.get();
+  }
+
   const NetworkIdentifier& woof_network_id() const { return woof_network_id_; }
   const NetworkIdentifier& meow_network_id() const { return meow_network_id_; }
   const NetworkIdentifier& honk_network_id() const { return honk_network_id_; }
@@ -206,9 +248,12 @@ class WifiConfigurationBridgeTest : public testing::Test {
   std::unique_ptr<WifiConfigurationBridge> bridge_;
   std::unique_ptr<TestSyncedNetworkUpdater> synced_network_updater_;
   std::unique_ptr<FakeLocalNetworkCollector> local_network_collector_;
+  std::unique_ptr<FakeTimerFactory> timer_factory_;
   std::unique_ptr<TestingPrefServiceSimple> device_prefs_;
   std::unique_ptr<sync_preferences::TestingPrefServiceSyncable> user_prefs_;
   std::unique_ptr<NetworkMetadataStore> network_metadata_store_;
+  std::unique_ptr<SyncedNetworkMetricsLogger> metrics_logger_;
+  std::unique_ptr<NetworkTestHelper> network_test_helper_;
 
   const NetworkIdentifier woof_network_id_ = GeneratePskNetworkId(kSsidWoof);
   const NetworkIdentifier meow_network_id_ = GeneratePskNetworkId(kSsidMeow);
@@ -218,6 +263,7 @@ class WifiConfigurationBridgeTest : public testing::Test {
 };
 
 TEST_F(WifiConfigurationBridgeTest, InitWithTwoNetworksFromServer) {
+  base::HistogramTester histogram_tester;
   syncer::EntityChangeList remote_input;
 
   WifiConfigurationSpecifics meow_network =
@@ -246,6 +292,7 @@ TEST_F(WifiConfigurationBridgeTest, InitWithTwoNetworksFromServer) {
   EXPECT_EQ(2u, networks.size());
   EXPECT_TRUE(VectorContainsProto(networks, meow_network));
   EXPECT_TRUE(VectorContainsProto(networks, woof_network));
+  histogram_tester.ExpectTotalCount(kTotalCountHistogram, 1);
 }
 
 TEST_F(WifiConfigurationBridgeTest, ApplySyncChangesAddTwoSpecifics) {
@@ -328,6 +375,7 @@ TEST_F(WifiConfigurationBridgeTest, ApplySyncChangesOneDeletion) {
 }
 
 TEST_F(WifiConfigurationBridgeTest, MergeSyncData) {
+  base::HistogramTester histogram_tester;
   auto metadata_change_list =
       std::make_unique<syncer::InMemoryMetadataChangeList>();
   syncer::EntityChangeList entity_data;
@@ -379,9 +427,58 @@ TEST_F(WifiConfigurationBridgeTest, MergeSyncData) {
   EXPECT_TRUE(VectorContainsProto(sync_networks, meow_local));
   EXPECT_TRUE(VectorContainsProto(sync_networks, woof_sync));
   EXPECT_TRUE(VectorContainsProto(sync_networks, honk_sync));
+  histogram_tester.ExpectTotalCount(kTotalCountHistogram, 1);
+}
+
+TEST_F(WifiConfigurationBridgeTest, LocalConfigured) {
+  WifiConfigurationSpecifics meow_local =
+      GenerateTestWifiSpecifics(meow_network_id(), kSyncPsk, /*timestamp=*/0);
+  local_network_collector()->AddNetwork(meow_local);
+
+  std::string storage_key;
+  EXPECT_CALL(*processor(), Put(_, _, _))
+      .WillOnce(testing::SaveArg<0>(&storage_key));
+  std::string guid = meow_network_id().SerializeToString();
+  bridge()->OnNetworkCreated(guid);
+  base::RunLoop().RunUntilIdle();
+
+  timer_factory()->FireAll();
+  base::RunLoop().RunUntilIdle();
+}
+
+TEST_F(WifiConfigurationBridgeTest, LocalConfigured_BadPassword) {
+  WifiConfigurationSpecifics meow_local =
+      GenerateTestWifiSpecifics(meow_network_id(), kSyncPsk, /*timestamp=*/0);
+
+  std::string storage_key;
+  EXPECT_CALL(*processor(), Put(_, _, _)).Times(testing::Exactly(0));
+
+  std::string guid = meow_network_id().SerializeToString();
+  bridge()->OnNetworkCreated(guid);
+  base::RunLoop().RunUntilIdle();
+
+  timer_factory()->FireAll();
+  base::RunLoop().RunUntilIdle();
+}
+
+TEST_F(WifiConfigurationBridgeTest, LocalConfigured_FromSync) {
+  WifiConfigurationSpecifics meow_local =
+      GenerateTestWifiSpecifics(meow_network_id(), kSyncPsk, /*timestamp=*/0);
+  local_network_collector()->AddNetwork(meow_local);
+
+  EXPECT_CALL(*processor(), Put(_, _, _)).Times(testing::Exactly(0));
+
+  std::string guid = meow_network_id().SerializeToString();
+  bridge()->OnNetworkCreated(guid);
+  network_metadata_store()->SetIsConfiguredBySync(guid);
+  base::RunLoop().RunUntilIdle();
+
+  timer_factory()->FireAll();
+  base::RunLoop().RunUntilIdle();
 }
 
 TEST_F(WifiConfigurationBridgeTest, LocalFirstConnect) {
+  base::HistogramTester histogram_tester;
   WifiConfigurationSpecifics meow_local =
       GenerateTestWifiSpecifics(meow_network_id(), kSyncPsk, /*timestamp=*/100);
   local_network_collector()->AddNetwork(meow_local);
@@ -392,6 +489,7 @@ TEST_F(WifiConfigurationBridgeTest, LocalFirstConnect) {
   bridge()->OnFirstConnectionToNetwork(meow_network_id().SerializeToString());
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(storage_key, meow_network_id().SerializeToString());
+  histogram_tester.ExpectTotalCount(kTotalCountHistogram, 1);
 }
 
 TEST_F(WifiConfigurationBridgeTest, LocalUpdate) {
@@ -410,6 +508,7 @@ TEST_F(WifiConfigurationBridgeTest, LocalUpdate) {
 }
 
 TEST_F(WifiConfigurationBridgeTest, LocalUpdate_UntrackedField) {
+  base::HistogramTester histogram_tester;
   WifiConfigurationSpecifics meow_local =
       GenerateTestWifiSpecifics(meow_network_id(), kSyncPsk, /*timestamp=*/100);
   local_network_collector()->AddNetwork(meow_local);
@@ -420,9 +519,28 @@ TEST_F(WifiConfigurationBridgeTest, LocalUpdate_UntrackedField) {
   set_properties.SetString(shill::kUIDataProperty, "random_change");
   bridge()->OnNetworkUpdate(guid, &set_properties);
   base::RunLoop().RunUntilIdle();
+  histogram_tester.ExpectTotalCount(kTotalCountHistogram, 0);
+}
+
+TEST_F(WifiConfigurationBridgeTest, LocalUpdate_FromSync) {
+  base::HistogramTester histogram_tester;
+  WifiConfigurationSpecifics meow_local =
+      GenerateTestWifiSpecifics(meow_network_id(), kSyncPsk, /*timestamp=*/100);
+  std::string guid = meow_network_id().SerializeToString();
+  local_network_collector()->AddNetwork(meow_local);
+  synced_network_updater()->set_update_in_progress(guid, true);
+
+  EXPECT_CALL(*processor(), Put(_, _, _)).Times(testing::Exactly(0));
+
+  base::DictionaryValue set_properties;
+  set_properties.SetBoolean(shill::kAutoConnectProperty, true);
+  bridge()->OnNetworkUpdate(guid, &set_properties);
+  base::RunLoop().RunUntilIdle();
+  histogram_tester.ExpectTotalCount(kTotalCountHistogram, 0);
 }
 
 TEST_F(WifiConfigurationBridgeTest, LocalRemove) {
+  base::HistogramTester histogram_tester;
   WifiConfigurationSpecifics meow_local =
       GenerateTestWifiSpecifics(meow_network_id(), kSyncPsk, /*timestamp=*/100);
   local_network_collector()->AddNetwork(meow_local);
@@ -439,6 +557,7 @@ TEST_F(WifiConfigurationBridgeTest, LocalRemove) {
   bridge()->OnConfigurationRemoved("service_path", guid);
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(storage_key, meow_network_id().SerializeToString());
+  histogram_tester.ExpectTotalCount(kTotalCountHistogram, 1);
 }
 
 }  // namespace

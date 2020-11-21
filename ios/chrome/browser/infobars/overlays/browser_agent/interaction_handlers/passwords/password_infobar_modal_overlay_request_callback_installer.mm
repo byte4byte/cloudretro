@@ -4,11 +4,11 @@
 
 #import "ios/chrome/browser/infobars/overlays/browser_agent/interaction_handlers/passwords/password_infobar_modal_overlay_request_callback_installer.h"
 
-#include "base/logging.h"
+#include "base/check.h"
 #include "ios/chrome/browser/infobars/infobar_ios.h"
 #include "ios/chrome/browser/infobars/infobar_manager_impl.h"
 #import "ios/chrome/browser/infobars/overlays/browser_agent/interaction_handlers/passwords/password_infobar_modal_interaction_handler.h"
-#include "ios/chrome/browser/infobars/overlays/overlay_request_infobar_util.h"
+#include "ios/chrome/browser/infobars/overlays/infobar_overlay_util.h"
 #import "ios/chrome/browser/overlays/public/infobar_modal/password_infobar_modal_overlay_request_config.h"
 #import "ios/chrome/browser/overlays/public/infobar_modal/password_infobar_modal_overlay_responses.h"
 #include "ios/chrome/browser/overlays/public/overlay_callback_manager.h"
@@ -24,11 +24,13 @@ using password_infobar_modal_responses::PresentPasswordSettings;
 
 PasswordInfobarModalOverlayRequestCallbackInstaller::
     PasswordInfobarModalOverlayRequestCallbackInstaller(
-        PasswordInfobarModalInteractionHandler* interaction_handler)
+        PasswordInfobarModalInteractionHandler* interaction_handler,
+        password_modal::PasswordAction action_type)
     : InfobarModalOverlayRequestCallbackInstaller(
           PasswordInfobarModalOverlayRequestConfig::RequestSupport(),
           interaction_handler),
-      interaction_handler_(interaction_handler) {
+      interaction_handler_(interaction_handler),
+      password_action_(action_type) {
   DCHECK(interaction_handler_);
 }
 
@@ -41,8 +43,16 @@ void PasswordInfobarModalOverlayRequestCallbackInstaller::
     UpdateCredentialsCallback(OverlayRequest* request,
                               OverlayResponse* response) {
   InfoBarIOS* infobar = GetOverlayRequestInfobar(request);
-  if (!infobar)
+  if (!infobar) {
     return;
+  }
+  // Since this installer is used for both Save and Update password overlays,
+  // the callback will be executed for both types. Return early if the request
+  // is not the same type.
+  if (request->GetConfig<PasswordInfobarModalOverlayRequestConfig>()
+          ->action() != password_action_) {
+    return;
+  }
   UpdateCredentialsInfo* info = response->GetInfo<UpdateCredentialsInfo>();
   interaction_handler_->UpdateCredentials(GetOverlayRequestInfobar(request),
                                           info->username(), info->password());
@@ -52,8 +62,16 @@ void PasswordInfobarModalOverlayRequestCallbackInstaller::
     NeverSaveCredentialsCallback(OverlayRequest* request,
                                  OverlayResponse* response) {
   InfoBarIOS* infobar = GetOverlayRequestInfobar(request);
-  if (!infobar)
+  if (!infobar) {
     return;
+  }
+  // Since this installer is used for both Save and Update password overlays,
+  // the callback will be executed for both types. Return early if the request
+  // is not the same type.
+  if (request->GetConfig<PasswordInfobarModalOverlayRequestConfig>()
+          ->action() != password_action_) {
+    return;
+  }
   // Inform the interaction handler to never save credentials, then add the
   // infobar removal callback as a completion.  This causes the infobar and its
   // badge to be removed once the infobar modal's dismissal finishes.
@@ -67,6 +85,13 @@ void PasswordInfobarModalOverlayRequestCallbackInstaller::
 void PasswordInfobarModalOverlayRequestCallbackInstaller::
     PresentPasswordsSettingsCallback(OverlayRequest* request,
                                      OverlayResponse* response) {
+  // Since this installer is used for both Save and Update password overlays,
+  // the callback will be executed for both types. Return early if the request
+  // is not the same type.
+  if (request->GetConfig<PasswordInfobarModalOverlayRequestConfig>()
+          ->action() != password_action_) {
+    return;
+  }
   // Add a completion callback to trigger the presentation of the password
   // settings view once the infobar modal's dismissal finishes.
   request->GetCallbackManager()->AddCompletionCallback(
@@ -79,8 +104,16 @@ void PasswordInfobarModalOverlayRequestCallbackInstaller::
     RemoveInfobarCompletionCallback(OverlayRequest* request,
                                     OverlayResponse* response) {
   InfoBarIOS* infobar = GetOverlayRequestInfobar(request);
-  if (!infobar)
+  if (!infobar) {
     return;
+  }
+  // Since this installer is used for both Save and Update password overlays,
+  // the callback will be executed for both types. Return early if the request
+  // is not the same type.
+  if (request->GetConfig<PasswordInfobarModalOverlayRequestConfig>()
+          ->action() != password_action_) {
+    return;
+  }
   InfoBarManagerImpl::FromWebState(request->GetQueueWebState())
       ->RemoveInfoBar(infobar);
 }
@@ -89,8 +122,12 @@ void PasswordInfobarModalOverlayRequestCallbackInstaller::
     PresentPasswordSettingsCompletionCallback(OverlayRequest* request,
                                               OverlayResponse* response) {
   InfoBarIOS* infobar = GetOverlayRequestInfobar(request);
-  if (!infobar)
+  if (!infobar) {
     return;
+  }
+  DCHECK_EQ(
+      request->GetConfig<PasswordInfobarModalOverlayRequestConfig>()->action(),
+      password_action_);
   interaction_handler_->PresentPasswordsSettings(infobar);
 }
 

@@ -9,7 +9,6 @@
 #include "base/bind.h"
 #include "base/guid.h"
 #include "base/logging.h"
-#include "base/task/post_task.h"
 #include "chrome/android/chrome_jni_headers/PartnerBookmarksReader_jni.h"
 #include "chrome/browser/android/bookmarks/partner_bookmarks_shim.h"
 #include "chrome/browser/browser_process.h"
@@ -19,7 +18,6 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "components/favicon/core/favicon_service.h"
 #include "components/favicon/core/large_icon_service_impl.h"
-#include "components/favicon_base/favicon_types.h"
 #include "components/image_fetcher/core/image_fetcher.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
@@ -90,8 +88,8 @@ void PrepareAndSetFavicon(jbyte* icon_bytes,
 
   base::WaitableEvent event(base::WaitableEvent::ResetPolicy::AUTOMATIC,
                             base::WaitableEvent::InitialState::NOT_SIGNALED);
-  base::PostTask(FROM_HERE, {BrowserThread::UI},
-                 base::BindOnce(&SetFaviconCallback, profile, node->url(),
+  content::GetUIThreadTaskRunner({})->PostTask(
+      FROM_HERE, base::BindOnce(&SetFaviconCallback, profile, node->url(),
                                 fake_icon_url, image_data, icon_type, &event));
   // TODO(aruslan): http://b/6397072 If possible - avoid using favicon service
   event.Wait();
@@ -109,7 +107,8 @@ const BookmarkNode* GetNodeByID(const BookmarkNode* parent, int64_t id) {
 }
 
 std::unique_ptr<BookmarkNode> CreatePartnerBookmarksRoot(int id) {
-  return std::make_unique<BookmarkNode>(id, base::GenerateGUID(), GURL());
+  return std::make_unique<BookmarkNode>(id, base::GUID::GenerateRandomV4(),
+                                        GURL());
 }
 
 }  // namespace
@@ -169,7 +168,7 @@ jlong PartnerBookmarksReader::AddPartnerBookmark(
   jlong node_id = 0;
   if (wip_partner_bookmarks_root_.get()) {
     std::unique_ptr<BookmarkNode> node = std::make_unique<BookmarkNode>(
-        wip_next_available_id_++, base::GenerateGUID(), GURL(url));
+        wip_next_available_id_++, base::GUID::GenerateRandomV4(), GURL(url));
     node->SetTitle(title);
 
     // Handle favicon and touchicon
@@ -228,8 +227,8 @@ void PartnerBookmarksReader::GetFavicon(const GURL& page_url,
                                         bool fallback_to_server,
                                         int desired_favicon_size_px,
                                         FaviconFetchedCallback callback) {
-  base::PostTask(FROM_HERE, {BrowserThread::UI},
-                 base::BindOnce(&PartnerBookmarksReader::GetFaviconImpl,
+  content::GetUIThreadTaskRunner({})->PostTask(
+      FROM_HERE, base::BindOnce(&PartnerBookmarksReader::GetFaviconImpl,
                                 base::Unretained(this), page_url, profile,
                                 fallback_to_server, desired_favicon_size_px,
                                 std::move(callback)));

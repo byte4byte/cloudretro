@@ -8,7 +8,7 @@
 #include <string>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/macros.h"
@@ -54,10 +54,10 @@ const char k10ByteData[] = "10 bytes..";
 const char k20ByteData[] = "20 bytes............";
 
 const PolicyDetails kPolicyDetails[] = {
-//  is_deprecated  is_device_policy  id    max_external_data_size
-  { false,         false,             1,                        0 },
-  { false,         false,             2,                       10 },
-  { false,         false,             3,                       20 },
+    // deprecated  future, device_policy  id    max_external_data_size
+    {  false,      false,  false,         1,    0},
+    {  false,      false,  false,         2,    10},
+    {  false,      false,  false,         3,    20},
 };
 
 const char kCacheKey[] = "data";
@@ -73,12 +73,10 @@ class CloudExternalDataManagerBaseTest : public testing::Test {
 
   void SetUpExternalDataManager();
 
-  std::unique_ptr<base::DictionaryValue> ConstructMetadata(
-      const std::string& url,
-      const std::string& hash);
-  void SetExternalDataReference(
-      const std::string& policy,
-      std::unique_ptr<base::DictionaryValue> metadata);
+  base::Value ConstructMetadata(const std::string& url,
+                                const std::string& hash);
+  void SetExternalDataReference(const std::string& policy,
+                                base::Value metadata);
 
   ExternalDataFetcher::FetchCallback ConstructFetchCallback(int id);
   void ResetCallbackData();
@@ -120,10 +118,9 @@ void CloudExternalDataManagerBaseTest::SetUp() {
   SetUpExternalDataManager();
 
   // Set |kStringPolicy| to a string value.
-  cloud_policy_store_.policy_map_.Set(
-      kStringPolicy, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
-      POLICY_SOURCE_CLOUD, std::make_unique<base::Value>(std::string()),
-      nullptr);
+  cloud_policy_store_.policy_map_.Set(kStringPolicy, POLICY_LEVEL_MANDATORY,
+                                      POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD,
+                                      base::Value(std::string()), nullptr);
   // Make |k10BytePolicy| reference 10 bytes of external data.
   SetExternalDataReference(
       k10BytePolicy,
@@ -162,19 +159,19 @@ void CloudExternalDataManagerBaseTest::SetUpExternalDataManager() {
   external_data_manager_->SetPolicyStore(&cloud_policy_store_);
 }
 
-std::unique_ptr<base::DictionaryValue>
-CloudExternalDataManagerBaseTest::ConstructMetadata(const std::string& url,
-                                                    const std::string& hash) {
-  std::unique_ptr<base::DictionaryValue> metadata(new base::DictionaryValue);
-  metadata->SetKey("url", base::Value(url));
-  metadata->SetKey("hash",
-                   base::Value(base::HexEncode(hash.c_str(), hash.size())));
+base::Value CloudExternalDataManagerBaseTest::ConstructMetadata(
+    const std::string& url,
+    const std::string& hash) {
+  base::Value metadata(base::Value::Type::DICTIONARY);
+  metadata.SetStringKey("url", url);
+  metadata.SetStringKey("hash", base::HexEncode(hash.c_str(), hash.size()));
   return metadata;
 }
 
 void CloudExternalDataManagerBaseTest::SetExternalDataReference(
     const std::string& policy,
-    std::unique_ptr<base::DictionaryValue> metadata) {
+    base::Value metadata) {
+  DCHECK(metadata.is_dict());
   cloud_policy_store_.policy_map_.Set(
       policy, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD,
       std::move(metadata),

@@ -73,10 +73,6 @@ class DiscardsGraphDumpImpl : public discards::mojom::GraphDump,
   // Ignored.
   void OnFrameLifecycleStateChanged(
       const performance_manager::FrameNode* frame_node) override {}
-  // Ignored.
-  void OnOriginTrialFreezePolicyChanged(
-      const performance_manager::FrameNode* frame_node,
-      const InterventionPolicy& previous_value) override {}
   void OnURLChanged(const performance_manager::FrameNode* frame_node,
                     const GURL& previous_value) override;
   // Ignored.
@@ -94,19 +90,33 @@ class DiscardsGraphDumpImpl : public discards::mojom::GraphDump,
   // Ignored.
   void OnPriorityAndReasonChanged(
       const performance_manager::FrameNode* frame_node,
-      const PriorityAndReason& previous_value) override {}
+      const performance_manager::PriorityAndReason& previous_value) override {}
   // Ignored.
   void OnHadFormInteractionChanged(
+      const performance_manager::FrameNode* frame_node) override {}
+  // Ignored.
+  void OnIsAudibleChanged(
       const performance_manager::FrameNode* frame_node) override {}
   // Ignored.
   void OnFirstContentfulPaint(
       const performance_manager::FrameNode* frame_node,
       base::TimeDelta time_since_navigation_start) override {}
+  // Ignored.
+  void OnViewportIntersectionChanged(
+      const performance_manager::FrameNode* frame_node) override {}
+  // Ignored.
+  void OnFrameVisibilityChanged(
+      const performance_manager::FrameNode* frame_node,
+      performance_manager::FrameNode::Visibility previous_value) override {}
 
   // PageNodeObserver implementation:
   void OnPageNodeAdded(const performance_manager::PageNode* page_node) override;
   void OnBeforePageNodeRemoved(
       const performance_manager::PageNode* page_node) override;
+  void OnOpenerFrameNodeChanged(
+      const performance_manager::PageNode* page_node,
+      const performance_manager::FrameNode* previous_opener,
+      OpenedType previous_opened_type) override;
   void OnIsVisibleChanged(
       const performance_manager::PageNode* page_node) override {}  // Ignored.
   void OnIsAudibleChanged(
@@ -117,9 +127,6 @@ class DiscardsGraphDumpImpl : public discards::mojom::GraphDump,
       const performance_manager::PageNode* page_node) override {}  // Ignored.
   // Ignored.
   void OnPageLifecycleStateChanged(
-      const performance_manager::PageNode* page_node) override {}
-  // Ignored.
-  void OnPageOriginTrialFreezePolicyChanged(
       const performance_manager::PageNode* page_node) override {}
   // Ignored.
   void OnPageIsHoldingWebLockChanged(
@@ -146,9 +153,6 @@ class DiscardsGraphDumpImpl : public discards::mojom::GraphDump,
       const performance_manager::ProcessNode* process_node) override;
   void OnBeforeProcessNodeRemoved(
       const performance_manager::ProcessNode* process_node) override;
-  void OnExpectedTaskQueueingDurationSample(
-      const performance_manager::ProcessNode* process_node) override {
-  }  // Ignored.
   // Ignored.
   void OnMainThreadTaskLoadIsLow(
       const performance_manager::ProcessNode* process_node) override {}
@@ -177,6 +181,10 @@ class DiscardsGraphDumpImpl : public discards::mojom::GraphDump,
   void OnBeforeClientWorkerRemoved(
       const performance_manager::WorkerNode* worker_node,
       const performance_manager::WorkerNode* client_worker_node) override;
+  // Ignored.
+  void OnPriorityAndReasonChanged(
+      const performance_manager::WorkerNode* worker_node,
+      const performance_manager::PriorityAndReason& previous_value) override {}
 
  private:
   // The favicon requests happen on the UI thread. This helper class
@@ -186,7 +194,8 @@ class DiscardsGraphDumpImpl : public discards::mojom::GraphDump,
 
   void AddNode(const performance_manager::Node* node);
   void RemoveNode(const performance_manager::Node* node);
-  int64_t GetNodeId(const performance_manager::Node* node);
+  bool HasNode(const performance_manager::Node* node) const;
+  int64_t GetNodeId(const performance_manager::Node* node) const;
 
   FaviconRequestHelper* EnsureFaviconRequestHelper();
 
@@ -194,6 +203,7 @@ class DiscardsGraphDumpImpl : public discards::mojom::GraphDump,
   void StartFrameFaviconRequest(
       const performance_manager::FrameNode* frame_node);
 
+  void SendNotificationToAllNodes(bool created);
   void SendFrameNotification(const performance_manager::FrameNode* frame,
                              bool created);
   void SendPageNotification(const performance_manager::PageNode* page,
@@ -207,9 +217,6 @@ class DiscardsGraphDumpImpl : public discards::mojom::GraphDump,
       int64_t serialization_id,
       scoped_refptr<base::RefCountedMemory> bitmap_data);
 
-  static void BindOnPMSequence(
-      mojo::PendingReceiver<discards::mojom::GraphDump> receiver,
-      performance_manager::Graph* graph);
   static void OnConnectionError(DiscardsGraphDumpImpl* impl);
 
   performance_manager::Graph* graph_ = nullptr;

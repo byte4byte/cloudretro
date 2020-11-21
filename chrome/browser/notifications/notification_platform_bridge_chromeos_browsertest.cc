@@ -4,11 +4,11 @@
 
 #include "chrome/browser/notifications/notification_platform_bridge_chromeos.h"
 
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/notifications/notification_display_service.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/test/base/in_process_browser_test.h"
+#include "content/public/test/browser_test.h"
 #include "ui/message_center/public/cpp/notification.h"
 #include "ui/message_center/public/cpp/notification_delegate.h"
 
@@ -17,6 +17,10 @@ class NotificationPlatformBridgeChromeOsBrowserTest
       public message_center::NotificationObserver {
  public:
   NotificationPlatformBridgeChromeOsBrowserTest() = default;
+  NotificationPlatformBridgeChromeOsBrowserTest(
+      const NotificationPlatformBridgeChromeOsBrowserTest&) = delete;
+  NotificationPlatformBridgeChromeOsBrowserTest& operator=(
+      const NotificationPlatformBridgeChromeOsBrowserTest&) = delete;
   ~NotificationPlatformBridgeChromeOsBrowserTest() override {
     EXPECT_EQ(expected_close_count_, close_count_);
   }
@@ -30,9 +34,6 @@ class NotificationPlatformBridgeChromeOsBrowserTest
 
   base::WeakPtrFactory<NotificationPlatformBridgeChromeOsBrowserTest>
       weak_ptr_factory_{this};
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(NotificationPlatformBridgeChromeOsBrowserTest);
 };
 
 // Tests that a notification delegate is informed of the notification closing

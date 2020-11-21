@@ -38,10 +38,9 @@ SelectToSpeakTray::SelectToSpeakTray(Shelf* shelf)
   const int horizontal_padding = (kTrayItemSize - inactive_image_.width()) / 2;
   icon_->SetBorder(views::CreateEmptyBorder(
       gfx::Insets(vertical_padding, horizontal_padding)));
-  icon_->set_tooltip_text(l10n_util::GetStringUTF16(
+  icon_->SetTooltipText(l10n_util::GetStringUTF16(
       IDS_ASH_STATUS_TRAY_ACCESSIBILITY_SELECT_TO_SPEAK));
   tray_container()->AddChildView(icon_);
-  CheckStatusAndUpdateIcon();
 
   // Observe the accessibility controller state changes to know when Select to
   // Speak state is updated or when it is disabled/enabled.
@@ -52,9 +51,19 @@ SelectToSpeakTray::~SelectToSpeakTray() {
   Shell::Get()->accessibility_controller()->RemoveObserver(this);
 }
 
+void SelectToSpeakTray::Initialize() {
+  TrayBackgroundView::Initialize();
+  CheckStatusAndUpdateIcon();
+}
+
 base::string16 SelectToSpeakTray::GetAccessibleNameForTray() {
   return l10n_util::GetStringUTF16(
       IDS_ASH_SELECT_TO_SPEAK_TRAY_ACCESSIBLE_NAME);
+}
+
+void SelectToSpeakTray::HandleLocaleChange() {
+  icon_->SetTooltipText(l10n_util::GetStringUTF16(
+      IDS_ASH_STATUS_TRAY_ACCESSIBILITY_SELECT_TO_SPEAK));
 }
 
 const char* SelectToSpeakTray::GetClassName() const {
@@ -89,7 +98,7 @@ void SelectToSpeakTray::UpdateIconsForSession() {
 }
 
 void SelectToSpeakTray::CheckStatusAndUpdateIcon() {
-  if (!Shell::Get()->accessibility_controller()->select_to_speak_enabled()) {
+  if (!Shell::Get()->accessibility_controller()->select_to_speak().enabled()) {
     SetVisiblePreferred(false);
     return;
   }

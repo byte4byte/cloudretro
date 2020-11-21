@@ -1,0 +1,90 @@
+// Copyright 2020 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+#include "ash/clipboard/views/clipboard_history_text_item_view.h"
+
+#include "ash/clipboard/clipboard_history_controller_impl.h"
+#include "ash/clipboard/clipboard_history_resource_manager.h"
+#include "ash/clipboard/clipboard_history_util.h"
+#include "ash/clipboard/views/clipboard_history_label.h"
+#include "ash/shell.h"
+#include "base/metrics/histogram_macros.h"
+#include "ui/views/layout/box_layout.h"
+#include "ui/views/view_class_properties.h"
+
+namespace {
+
+// The margins of the delete button.
+constexpr gfx::Insets kDeleteButtonMargins =
+    gfx::Insets(/*top=*/0, /*left=*/8, /*bottom=*/0, /*right=*/4);
+}  // namespace
+
+namespace ash {
+
+////////////////////////////////////////////////////////////////////////////////
+// ClipboardHistoryTextItemView::TextContentsView
+
+class ClipboardHistoryTextItemView::TextContentsView
+    : public ClipboardHistoryTextItemView::ContentsView {
+ public:
+  explicit TextContentsView(ClipboardHistoryTextItemView* container)
+      : ContentsView(container) {
+    auto* layout = SetLayoutManager(std::make_unique<views::BoxLayout>(
+        views::BoxLayout::Orientation::kHorizontal));
+    layout->set_cross_axis_alignment(
+        views::BoxLayout::CrossAxisAlignment::kCenter);
+
+    auto* label =
+        AddChildView(std::make_unique<ClipboardHistoryLabel>(container->text_));
+    layout->SetFlexForView(label, /*flex_weight=*/1);
+    label->SetEnabled(container->IsItemEnabled());
+
+    InstallDeleteButton();
+  }
+  TextContentsView(const TextContentsView& rhs) = delete;
+  TextContentsView& operator=(const TextContentsView& rhs) = delete;
+  ~TextContentsView() override = default;
+
+ private:
+  // ContentsView:
+  DeleteButton* CreateDeleteButton() override {
+    auto delete_button = std::make_unique<DeleteButton>(container());
+    delete_button->SetVisible(false);
+    delete_button->SetProperty(views::kMarginsKey, kDeleteButtonMargins);
+    return AddChildView(std::move(delete_button));
+  }
+
+  const char* GetClassName() const override {
+    return "ClipboardHistoryTextItemView::TextContentsView";
+  }
+};
+
+////////////////////////////////////////////////////////////////////////////////
+// ClipboardHistoryTextItemView
+
+ClipboardHistoryTextItemView::ClipboardHistoryTextItemView(
+    const ClipboardHistoryItem* clipboard_history_item,
+    views::MenuItemView* container)
+    : ClipboardHistoryItemView(clipboard_history_item, container),
+      text_(Shell::Get()
+                ->clipboard_history_controller()
+                ->resource_manager()
+                ->GetLabel(*clipboard_history_item)) {}
+
+ClipboardHistoryTextItemView::~ClipboardHistoryTextItemView() = default;
+
+std::unique_ptr<ClipboardHistoryTextItemView::ContentsView>
+ClipboardHistoryTextItemView::CreateContentsView() {
+  return std::make_unique<TextContentsView>(this);
+}
+
+base::string16 ClipboardHistoryTextItemView::GetAccessibleName() const {
+  return text_;
+}
+
+const char* ClipboardHistoryTextItemView::GetClassName() const {
+  return "ClipboardHistoryTextItemView";
+}
+
+}  // namespace ash

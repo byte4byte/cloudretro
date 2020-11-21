@@ -19,10 +19,9 @@ class CORE_EXPORT NGMathFractionLayoutAlgorithm
  private:
   scoped_refptr<const NGLayoutResult> Layout() final;
 
-  MinMaxSizes ComputeMinMaxSizes(const MinMaxSizesInput&) const final;
+  MinMaxSizesResult ComputeMinMaxSizes(const MinMaxSizesInput&) final;
 
   void GatherChildren(NGBlockNode* numerator, NGBlockNode* denominator);
-  const NGBoxStrut border_scrollbar_padding_;
 };
 
 }  // namespace blink

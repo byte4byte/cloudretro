@@ -51,8 +51,8 @@ JavaScriptDialogPresenter* WebStateDelegate::GetJavaScriptDialogPresenter(
 void WebStateDelegate::OnAuthRequired(WebState* source,
                                       NSURLProtectionSpace* protection_space,
                                       NSURLCredential* proposed_credential,
-                                      const AuthCallback& callback) {
-  callback.Run(nil, nil);
+                                      AuthCallback callback) {
+  std::move(callback).Run(nil, nil);
 }
 
 bool WebStateDelegate::ShouldPreviewLink(WebState* source,
@@ -69,6 +69,10 @@ UIViewController* WebStateDelegate::GetPreviewingViewController(
 void WebStateDelegate::CommitPreviewingViewController(
     WebState* source,
     UIViewController* previewing_view_controller) {}
+
+UIView* WebStateDelegate::GetWebViewContainer(WebState* source) {
+  return nil;
+}
 
 void WebStateDelegate::Attach(WebState* source) {
   DCHECK(attached_states_.find(source) == attached_states_.end());

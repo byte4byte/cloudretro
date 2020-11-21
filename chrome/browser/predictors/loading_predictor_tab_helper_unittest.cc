@@ -31,6 +31,7 @@ using ::testing::Eq;
 using ::testing::Invoke;
 using ::testing::Mock;
 using ::testing::NiceMock;
+using ::testing::Return;
 using ::testing::SaveArg;
 using ::testing::StrictMock;
 using ::testing::WithArg;
@@ -66,10 +67,9 @@ class MockOptimizationGuideKeyedService : public OptimizationGuideKeyedService {
       : OptimizationGuideKeyedService(browser_context) {}
   ~MockOptimizationGuideKeyedService() override = default;
 
-  MOCK_METHOD2(
-      RegisterOptimizationTypesAndTargets,
-      void(const std::vector<optimization_guide::proto::OptimizationType>&,
-           const std::vector<optimization_guide::proto::OptimizationTarget>&));
+  MOCK_METHOD1(
+      RegisterOptimizationTypes,
+      void(const std::vector<optimization_guide::proto::OptimizationType>&));
   MOCK_METHOD3(CanApplyOptimizationAsync,
                void(content::NavigationHandle*,
                     optimization_guide::proto::OptimizationType,
@@ -379,9 +379,7 @@ TEST_F(LoadingPredictorTabHelperOptimizationGuideDeciderTest,
   url::Origin main_frame_origin = url::Origin::Create(GURL("http://test.org"));
   PreconnectPrediction preconnect_prediction = CreatePreconnectPrediction(
       "", false,
-      {{url::Origin::Create(GURL("http://test.org")), 1,
-        net::NetworkIsolationKey(main_frame_origin, main_frame_origin)},
-       {url::Origin::Create(GURL("http://other.org")), 1,
+      {{url::Origin::Create(GURL("http://other.org")), 1,
         net::NetworkIsolationKey(main_frame_origin, main_frame_origin)}});
   prediction->preconnect_prediction = preconnect_prediction;
   prediction->predicted_subresources = {GURL("http://test.org/resource1"),
@@ -439,9 +437,7 @@ TEST_F(LoadingPredictorTabHelperOptimizationGuideDeciderTest,
   url::Origin main_frame_origin = url::Origin::Create(GURL("http://test.org"));
   PreconnectPrediction preconnect_prediction = CreatePreconnectPrediction(
       "", false,
-      {{url::Origin::Create(GURL("http://test.org")), 1,
-        net::NetworkIsolationKey(main_frame_origin, main_frame_origin)},
-       {url::Origin::Create(GURL("http://other.org")), 1,
+      {{url::Origin::Create(GURL("http://other.org")), 1,
         net::NetworkIsolationKey(main_frame_origin, main_frame_origin)}});
   prediction->preconnect_prediction = preconnect_prediction;
   prediction->predicted_subresources = {GURL("http://test.org/resource1"),
@@ -484,11 +480,13 @@ TEST_F(LoadingPredictorTabHelperOptimizationGuideDeciderTest,
       *mock_optimization_guide_keyed_service_,
       CanApplyOptimizationAsync(_, optimization_guide::proto::LOADING_PREDICTOR,
                                 base::test::IsNotNullCallback()))
+      .Times(3)
       .WillOnce(WithArg<2>(
           Invoke([&](optimization_guide::OptimizationGuideDecisionCallback
                          got_callback) -> void {
             callback = std::move(got_callback);
-          })));
+          })))
+      .WillRepeatedly(Return());
   navigation->Start();
   navigation->Redirect(GURL("http://test2.org"));
   navigation->Redirect(GURL("http://test3.org"));
@@ -691,6 +689,86 @@ TEST_F(
 
   // Histogram should still be recorded even though no predictions were
   // returned.
+  histogram_tester.ExpectUniqueSample(
+      "LoadingPredictor.OptimizationHintsReceiveStatus",
+      OptimizationHintsReceiveStatus::kBeforeNavigationFinish, 1);
+}
+
+class LoadingPredictorTabHelperOptimizationGuideDeciderWithPrefetchTest
+    : public LoadingPredictorTabHelperOptimizationGuideDeciderTest {
+ public:
+  LoadingPredictorTabHelperOptimizationGuideDeciderWithPrefetchTest() {
+    scoped_feature_list_.InitWithFeatures(
+        {features::kLoadingPredictorUseOptimizationGuide,
+         features::kLoadingPredictorPrefetch,
+         // Need to add otherwise GetForProfile() returns null.
+         optimization_guide::features::kOptimizationHints},
+        {});
+  }
+
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
+};
+
+// Tests that document on load completed is recorded with correct navigation
+// id and optimization guide prediction.
+TEST_F(LoadingPredictorTabHelperOptimizationGuideDeciderWithPrefetchTest,
+       DocumentOnLoadCompletedOptimizationGuide) {
+  base::HistogramTester histogram_tester;
+
+  optimization_guide::OptimizationMetadata optimization_metadata;
+  optimization_guide::proto::LoadingPredictorMetadata lp_metadata;
+  lp_metadata.add_subresources()->set_url("http://test.org/resource1");
+  lp_metadata.add_subresources()->set_url("http://other.org/resource2");
+  lp_metadata.add_subresources()->set_url("http://other.org/resource3");
+  auto* preconnect_only_resource = lp_metadata.add_subresources();
+  preconnect_only_resource->set_url("http://preconnectonly.com/");
+  preconnect_only_resource->set_preconnect_only(true);
+  optimization_metadata.set_loading_predictor_metadata(lp_metadata);
+  EXPECT_CALL(
+      *mock_optimization_guide_keyed_service_,
+      CanApplyOptimizationAsync(_, optimization_guide::proto::LOADING_PREDICTOR,
+                                base::test::IsNotNullCallback()))
+      .WillOnce(base::test::RunOnceCallback<2>(
+          optimization_guide::OptimizationGuideDecision::kTrue,
+          ByRef(optimization_metadata)));
+  NavigateAndCommitInMainFrameAndVerifyMetrics("http://test.org");
+  auto navigation_id =
+      CreateNavigationID(GetTabID(), "http://test.org",
+                         web_contents()->GetMainFrame()->GetPageUkmSourceId());
+
+  // Adding subframe navigation to ensure that the committed main frame url will
+  // be used.
+  auto* subframe =
+      content::RenderFrameHostTester::For(main_rfh())->AppendChild("subframe");
+  NavigateAndCommitInFrame("http://sub.test.org", subframe);
+
+  base::Optional<OptimizationGuidePrediction> prediction =
+      OptimizationGuidePrediction();
+  prediction->decision = optimization_guide::OptimizationGuideDecision::kTrue;
+  url::Origin main_frame_origin = url::Origin::Create(GURL("http://test.org"));
+  net::NetworkIsolationKey network_isolation_key(main_frame_origin,
+                                                 main_frame_origin);
+  network::mojom::RequestDestination destination =
+      network::mojom::RequestDestination::kEmpty;
+  PreconnectPrediction preconnect_prediction = CreatePreconnectPrediction(
+      "", false,
+      {{url::Origin::Create(GURL("http://preconnectonly.com/")), 1,
+        network_isolation_key}});
+  preconnect_prediction.prefetch_requests.emplace_back(
+      GURL("http://test.org/resource1"), network_isolation_key, destination);
+  preconnect_prediction.prefetch_requests.emplace_back(
+      GURL("http://other.org/resource1"), network_isolation_key, destination);
+  preconnect_prediction.prefetch_requests.emplace_back(
+      GURL("http://other.org/resource2"), network_isolation_key, destination);
+  prediction->preconnect_prediction = preconnect_prediction;
+  prediction->predicted_subresources = {
+      GURL("http://test.org/resource1"), GURL("http://other.org/resource2"),
+      GURL("http://other.org/resource3"), GURL("http://preconnectonly.com/")};
+  EXPECT_CALL(*mock_collector_,
+              RecordMainFrameLoadComplete(navigation_id, prediction));
+  tab_helper_->DocumentOnLoadCompletedInMainFrame();
+
   histogram_tester.ExpectUniqueSample(
       "LoadingPredictor.OptimizationHintsReceiveStatus",
       OptimizationHintsReceiveStatus::kBeforeNavigationFinish, 1);

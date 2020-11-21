@@ -41,8 +41,10 @@ bool ShouldIncludeForRequestUrl(NSHTTPCookie* cookie, const GURL& url) {
   // of rewriting the checks here, the function converts the NSHTTPCookie to
   // canonical cookie and provide it with dummy CookieOption, so when iOS starts
   // to support cookieOptions this function can be modified to support that.
-  net::CanonicalCookie canonical_cookie =
+  std::unique_ptr<net::CanonicalCookie> canonical_cookie =
       net::CanonicalCookieFromSystemCookie(cookie, base::Time());
+  if (!canonical_cookie)
+    return false;
   // Cookies handled by this method are app specific cookies, so it's safe to
   // use strict same site context.
   net::CookieOptions options = net::CookieOptions::MakeAllInclusive();
@@ -54,9 +56,12 @@ bool ShouldIncludeForRequestUrl(NSHTTPCookie* cookie, const GURL& url) {
     // and not secure will not be included), and legacy mode.
     cookie_access_semantics = net::CookieAccessSemantics::UNKNOWN;
   }
-  return canonical_cookie
-      .IncludeForRequestURL(url, options, cookie_access_semantics)
-      .IsInclude();
+  // No extra trustworthy URLs.
+  bool delegate_treats_url_as_trustworthy = false;
+  net::CookieAccessParams params = {cookie_access_semantics,
+                                    delegate_treats_url_as_trustworthy};
+  return canonical_cookie->IncludeForRequestURL(url, options, params)
+      .status.IsInclude();
 }
 
 }  // namespace

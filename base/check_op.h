@@ -14,7 +14,7 @@
 // This header defines the (DP)CHECK_EQ etc. macros.
 //
 // (DP)CHECK_EQ(x, y) is similar to (DP)CHECK(x == y) but will also log the
-// values of x and y if the condition doesn't old. This works for basic types
+// values of x and y if the condition doesn't hold. This works for basic types
 // and types with an operator<< or .ToString() method.
 //
 // The operands are evaluated exactly once, and even in build modes where e.g.
@@ -24,6 +24,10 @@
 // To support the stringification of the check operands, this header is
 // *significantly* larger than base/check.h, so it should be avoided in common
 // headers.
+//
+// This header also provides the (DP)CHECK macros (by including check.h), so if
+// you use e.g. both CHECK_EQ and CHECK, including this header is enough. If you
+// only use CHECK however, please include the smaller check.h instead.
 
 namespace logging {
 
@@ -44,6 +48,12 @@ BASE_EXPORT char* StreamValToStr(const void* v,
                                  void (*stream_func)(std::ostream&,
                                                      const void*));
 
+#ifdef __has_builtin
+#define SUPPORTS_BUILTIN_ADDRESSOF (__has_builtin(__builtin_addressof))
+#else
+#define SUPPORTS_BUILTIN_ADDRESSOF 0
+#endif
+
 template <typename T>
 inline typename std::enable_if<
     base::internal::SupportsOstreamOperator<const T&>::value &&
@@ -57,7 +67,7 @@ CheckOpValueStr(const T& v) {
   // operator& might be overloaded, so do the std::addressof dance.
   // __builtin_addressof is preferred since it also handles Obj-C ARC pointers.
   // Some casting is still needed, because T might be volatile.
-#if defined(__has_builtin) && __has_builtin(__builtin_addressof)
+#if SUPPORTS_BUILTIN_ADDRESSOF
   const void* vp = const_cast<const void*>(
       reinterpret_cast<const volatile void*>(__builtin_addressof(v)));
 #else
@@ -66,6 +76,8 @@ CheckOpValueStr(const T& v) {
 #endif
   return StreamValToStr(vp, f);
 }
+
+#undef SUPPORTS_BUILTIN_ADDRESSOF
 
 // Overload for types that have no operator<< but do have .ToString() defined.
 template <typename T>
@@ -107,7 +119,7 @@ CheckOpValueStr(const T& v) {
 class CheckOpResult {
  public:
   // An empty result signals success.
-  constexpr CheckOpResult() = default;
+  constexpr CheckOpResult() {}
 
   // A non-success result. expr_str is something like "foo != bar". v1_str and
   // v2_str are the stringified run-time values of foo and bar. Takes ownership
@@ -149,9 +161,13 @@ class CheckOpResult {
 
 #endif
 
-// The int-int overload avoids address-taking static int members.
+// The second overload avoids address-taking of static members for
+// fundamental types.
 #define DEFINE_CHECK_OP_IMPL(name, op)                                         \
-  template <typename T, typename U>                                            \
+  template <typename T, typename U,                                            \
+            std::enable_if_t<!std::is_fundamental<T>::value ||                 \
+                                 !std::is_fundamental<U>::value,               \
+                             int> = 0>                                         \
   constexpr ::logging::CheckOpResult Check##name##Impl(                        \
       const T& v1, const U& v2, const char* expr_str) {                        \
     if (ANALYZER_ASSUME_TRUE(v1 op v2))                                        \
@@ -159,7 +175,11 @@ class CheckOpResult {
     return ::logging::CheckOpResult(expr_str, CheckOpValueStr(v1),             \
                                     CheckOpValueStr(v2));                      \
   }                                                                            \
-  constexpr ::logging::CheckOpResult Check##name##Impl(int v1, int v2,         \
+  template <typename T, typename U,                                            \
+            std::enable_if_t<std::is_fundamental<T>::value &&                  \
+                                 std::is_fundamental<U>::value,                \
+                             int> = 0>                                         \
+  constexpr ::logging::CheckOpResult Check##name##Impl(T v1, U v2,             \
                                                        const char* expr_str) { \
     if (ANALYZER_ASSUME_TRUE(v1 op v2))                                        \
       return ::logging::CheckOpResult();                                       \

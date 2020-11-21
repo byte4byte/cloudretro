@@ -14,10 +14,11 @@
 #include "ios/chrome/browser/infobars/infobar_metrics_recorder.h"
 #import "ios/chrome/browser/infobars/infobar_type.h"
 #import "ios/chrome/browser/infobars/overlays/infobar_overlay_request_inserter.h"
-#include "ios/chrome/browser/infobars/overlays/overlay_request_infobar_util.h"
+#include "ios/chrome/browser/infobars/overlays/infobar_overlay_util.h"
 #include "ios/chrome/browser/main/browser.h"
 #import "ios/chrome/browser/overlays/public/overlay_presenter.h"
 #import "ios/chrome/browser/overlays/public/overlay_presenter_observer_bridge.h"
+#include "ios/chrome/browser/overlays/public/overlay_request_queue.h"
 #import "ios/chrome/browser/ui/badges/badge_button.h"
 #import "ios/chrome/browser/ui/badges/badge_consumer.h"
 #import "ios/chrome/browser/ui/badges/badge_item.h"
@@ -397,8 +398,14 @@ const char kInfobarOverflowBadgeShownUserAction[] =
     InfoBarIOS* infobar = [self infobarWithType:infobarType];
     DCHECK(infobar);
     InfobarOverlayRequestInserter::CreateForWebState(self.webState);
+    InsertParams params(infobar);
+    params.overlay_type = InfobarOverlayType::kModal;
+    params.insertion_index = OverlayRequestQueue::FromWebState(
+                                 self.webState, OverlayModality::kInfobarModal)
+                                 ->size();
+    params.source = InfobarOverlayInsertionSource::kBadge;
     InfobarOverlayRequestInserter::FromWebState(self.webState)
-        ->AddOverlayRequest(infobar, InfobarOverlayType::kModal);
+        ->InsertOverlayRequest(params);
   } else {
     [self.dispatcher displayModalInfobar:infobarType];
   }

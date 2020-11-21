@@ -12,19 +12,13 @@ import org.chromium.base.annotations.JNINamespace;
 import org.chromium.base.annotations.MainDex;
 import org.chromium.base.annotations.NativeMethods;
 
-/** Java API for recording UMA histograms. */
+/**
+ * Java API for recording UMA histograms. Note that when updating this file, please also update
+ * {@link ShadowRecordHistogram} so that it correctly shadows all the methods.
+ * */
 @JNINamespace("base::android")
 @MainDex
 public class RecordHistogram {
-    /**
-     * Tests may need to disable metrics. The value should be reset after the test done, to avoid
-     * carrying over state to unrelated tests.
-     */
-    @VisibleForTesting
-    public static void setDisabledForTests(boolean disabled) {
-        UmaRecorderHolder.setDisabledForTests(disabled);
-    }
-
     /**
      * Records a sample in a boolean UMA histogram of the given name. Boolean histogram has two
      * buckets, corresponding to success (true) and failure (false). This is the Java equivalent of

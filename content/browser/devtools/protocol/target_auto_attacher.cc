@@ -8,10 +8,10 @@
 #include "content/browser/devtools/devtools_renderer_channel.h"
 #include "content/browser/devtools/render_frame_devtools_agent_host.h"
 #include "content/browser/devtools/service_worker_devtools_agent_host.h"
-#include "content/browser/frame_host/frame_tree.h"
-#include "content/browser/frame_host/frame_tree_node.h"
-#include "content/browser/frame_host/navigation_request.h"
-#include "content/browser/frame_host/render_frame_host_impl.h"
+#include "content/browser/renderer_host/frame_tree.h"
+#include "content/browser/renderer_host/frame_tree_node.h"
+#include "content/browser/renderer_host/navigation_request.h"
+#include "content/browser/renderer_host/render_frame_host_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 
 namespace content {
@@ -104,8 +104,7 @@ base::flat_set<GURL> GetFrameUrls(RenderFrameHostImpl* render_frame_host) {
 
   base::flat_set<GURL> frame_urls;
   if (render_frame_host) {
-    for (FrameTreeNode* node :
-         render_frame_host->frame_tree_node()->frame_tree()->Nodes()) {
+    for (FrameTreeNode* node : render_frame_host->frame_tree()->Nodes()) {
       frame_urls.insert(node->current_url());
       // We use both old and new frame urls to support [3], where we attach while
       // navigation is still ongoing.
@@ -128,7 +127,7 @@ TargetAutoAttacher::TargetAutoAttacher(
       auto_attach_(false),
       wait_for_debugger_on_start_(false) {}
 
-TargetAutoAttacher::~TargetAutoAttacher() {}
+TargetAutoAttacher::~TargetAutoAttacher() = default;
 
 void TargetAutoAttacher::SetRenderFrameHost(
     RenderFrameHostImpl* render_frame_host) {

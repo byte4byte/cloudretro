@@ -62,18 +62,19 @@
 #include "components/prefs/pref_service.h"
 #include "components/prefs/scoped_user_pref_update.h"
 #include "components/signin/public/identity_manager/account_info.h"
+#include "components/signin/public/identity_manager/consent_level.h"
 #include "components/signin/public/identity_manager/identity_test_utils.h"
 #include "components/user_manager/scoped_user_manager.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_image/user_image.h"
 #include "components/user_manager/user_manager.h"
+#include "content/public/test/browser_test.h"
 #include "crypto/rsa_private_key.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "net/test/embedded_test_server/controllable_http_response.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
-#include "net/url_request/url_request_status.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/layout.h"
@@ -208,7 +209,7 @@ class UserImageManagerTestBase : public LoginManagerTest,
       run_loop_->Quit();
   }
 
-  // Logs in |account_id|.
+  // Logs in `account_id`.
   void LogIn(const AccountId& account_id) {
     user_manager::UserManager::Get()->UserLoggedIn(
         account_id, account_id.GetUserEmail(), false /* browser_restart */,
@@ -237,8 +238,8 @@ class UserImageManagerTestBase : public LoginManagerTest,
     EXPECT_EQ(image_path.value(), actual_image_path);
   }
 
-  // Verifies that there is no image info for |account_id| in dictionary
-  // |images_pref|.
+  // Verifies that there is no image info for `account_id` in dictionary
+  // `images_pref`.
   void ExpectNoUserImageInfo(const base::DictionaryValue* images_pref,
                              const AccountId& account_id) {
     ASSERT_TRUE(images_pref);
@@ -248,7 +249,7 @@ class UserImageManagerTestBase : public LoginManagerTest,
     ASSERT_FALSE(image_properties);
   }
 
-  // Returns the image path for user |account_id| with specified |extension|.
+  // Returns the image path for user `account_id` with specified `extension`.
   base::FilePath GetUserImagePath(const AccountId& account_id,
                                   const std::string& extension) {
     return user_data_dir_.Append(account_id.GetUserEmail())
@@ -257,9 +258,11 @@ class UserImageManagerTestBase : public LoginManagerTest,
 
   void UpdatePrimaryAccountInfo(Profile* profile) {
     auto* identity_manager = IdentityManagerFactory::GetForProfile(profile);
-    signin::SetRefreshTokenForPrimaryAccount(identity_manager,
-                                             kRandomTokenStrForTesting);
-    CoreAccountInfo core_info = identity_manager->GetPrimaryAccountInfo();
+    // Sync consent level doesn't matter here.
+    CoreAccountInfo core_info = identity_manager->GetPrimaryAccountInfo(
+        signin::ConsentLevel::kNotRequired);
+    signin::SetRefreshTokenForAccount(identity_manager, core_info.account_id,
+                                      kRandomTokenStrForTesting);
     AccountInfo account_info;
     account_info.email = core_info.email;
     account_info.gaia = core_info.gaia;
@@ -295,7 +298,7 @@ class UserImageManagerTestBase : public LoginManagerTest,
     const user_manager::User* user =
         user_manager::UserManager::Get()->GetActiveUser();
     ASSERT_TRUE(user);
-    UserImageManagerImpl* uim = reinterpret_cast<UserImageManagerImpl*>(
+    UserImageManagerImpl* uim = static_cast<UserImageManagerImpl*>(
         ChromeUserManager::Get()->GetUserImageManager(user->GetAccountId()));
     if (uim->job_.get()) {
       run_loop_.reset(new base::RunLoop);
@@ -502,15 +505,7 @@ IN_PROC_BROWSER_TEST_F(UserImageManagerTest, SaveUserImageFromFile) {
 
 // Verifies that SaveUserImageFromProfileImage() correctly downloads, sets and
 // persists the chosen user image.
-// TODO(crbug.com/998369): Flaky on Linux TSAN and ASAN.
-#if defined(OS_CHROMEOS)
-#define MAYBE_SaveUserImageFromProfileImage \
-  DISABLED_SaveUserImageFromProfileImage
-#else
-#define MAYBE_SaveUserImageFromProfileImage SaveUserImageFromProfileImage
-#endif
-IN_PROC_BROWSER_TEST_F(UserImageManagerTest,
-                       MAYBE_SaveUserImageFromProfileImage) {
+IN_PROC_BROWSER_TEST_F(UserImageManagerTest, SaveUserImageFromProfileImage) {
   const user_manager::User* user =
       user_manager::UserManager::Get()->FindUser(test_account_id1_);
   ASSERT_TRUE(user);
@@ -584,11 +579,7 @@ class UserImageManagerPolicyTest : public UserImageManagerTestBase,
     std::vector<uint8_t> user_key_bits;
     ASSERT_TRUE(user_policy_.GetSigningKey()->ExportPublicKey(&user_key_bits));
     ASSERT_TRUE(base::CreateDirectory(user_key_file.DirName()));
-    ASSERT_EQ(
-        base::WriteFile(user_key_file,
-                        reinterpret_cast<const char*>(user_key_bits.data()),
-                        user_key_bits.size()),
-        static_cast<int>(user_key_bits.size()));
+    ASSERT_TRUE(base::WriteFile(user_key_file, user_key_bits));
     user_policy_.policy_data().set_username(
         enterprise_account_id_.GetUserEmail());
     user_policy_.policy_data().set_gaia_id(enterprise_account_id_.GetGaiaId());

@@ -2,9 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/chromeos/file_manager/file_manager_browsertest_base.h"
-
 #include "base/test/scoped_feature_list.h"
+#include "chrome/browser/chromeos/file_manager/file_manager_browsertest_base.h"
+#include "content/public/test/browser_test.h"
 #include "media/base/media_switches.h"
 
 namespace file_manager {
@@ -15,7 +15,11 @@ class AudioPlayerBrowserTestBase : public FileManagerBrowserTestBase {
   AudioPlayerBrowserTestBase() = default;
 
  protected:
-  GuestMode GetGuestMode() const override { return MODE; }
+  Options GetOptions() const override {
+    Options opts;
+    opts.guest_mode = MODE;
+    return opts;
+  }
 
   const char* GetTestCaseName() const override {
     return test_case_name_.c_str();

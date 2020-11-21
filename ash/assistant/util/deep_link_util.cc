@@ -11,7 +11,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
-#include "chromeos/services/assistant/public/mojom/assistant.mojom.h"
+#include "chromeos/services/assistant/public/cpp/assistant_service.h"
 #include "net/base/escape.h"
 #include "net/base/url_util.h"
 #include "url/gurl.h"
@@ -22,8 +22,8 @@ namespace util {
 
 namespace {
 
-using chromeos::assistant::mojom::AssistantEntryPoint;
-using chromeos::assistant::mojom::AssistantQuerySource;
+using chromeos::assistant::AssistantEntryPoint;
+using chromeos::assistant::AssistantQuerySource;
 
 // Supported deep link param keys. These values must be kept in sync with the
 // server. See more details at go/cros-assistant-deeplink.
@@ -46,7 +46,9 @@ constexpr char kVeIdParamKey[] = "veId";
 
 // Supported alarm/timer action deep link param values.
 constexpr char kAddTimeToTimer[] = "addTimeToTimer";
-constexpr char kRemoveAlarmTimer[] = "removeAlarmTimer";
+constexpr char kPauseTimer[] = "pauseTimer";
+constexpr char kRemoveAlarmOrTimer[] = "removeAlarmOrTimer";
+constexpr char kResumeTimer[] = "resumeTimer";
 
 // Supported proactive suggestions action deep link param values.
 constexpr char kCardClick[] = "cardClick";
@@ -78,6 +80,21 @@ constexpr char kAssistantWhatsOnMyScreenPrefix[] =
     "googleassistant://whats-on-my-screen";
 
 // Helpers ---------------------------------------------------------------------
+
+std::string GetAlarmTimerActionParamValue(AlarmTimerAction action) {
+  switch (action) {
+    case AlarmTimerAction::kAddTimeToTimer:
+      return kAddTimeToTimer;
+    case AlarmTimerAction::kPauseTimer:
+      return kPauseTimer;
+    case AlarmTimerAction::kRemoveAlarmOrTimer:
+      return kRemoveAlarmOrTimer;
+    case AlarmTimerAction::kResumeTimer:
+      return kResumeTimer;
+  }
+  NOTREACHED();
+  return std::string();
+}
 
 std::string GetDeepLinkParamKey(DeepLinkParam param) {
   switch (param) {
@@ -146,24 +163,24 @@ base::Optional<GURL> CreateAlarmTimerDeepLink(
     AlarmTimerAction action,
     base::Optional<std::string> alarm_timer_id,
     base::Optional<base::TimeDelta> duration) {
-  GURL url = GURL(kAssistantAlarmTimerPrefix);
-
   switch (action) {
     case assistant::util::AlarmTimerAction::kAddTimeToTimer:
       DCHECK(alarm_timer_id.has_value() && duration.has_value());
       if (!alarm_timer_id.has_value() || !duration.has_value())
         return base::nullopt;
-      url = net::AppendOrReplaceQueryParameter(url, kActionParamKey,
-                                               kAddTimeToTimer);
       break;
-    case assistant::util::AlarmTimerAction::kRemove:
+    case assistant::util::AlarmTimerAction::kPauseTimer:
+    case assistant::util::AlarmTimerAction::kRemoveAlarmOrTimer:
+    case assistant::util::AlarmTimerAction::kResumeTimer:
       DCHECK(alarm_timer_id.has_value() && !duration.has_value());
       if (!alarm_timer_id.has_value() || duration.has_value())
         return base::nullopt;
-      url = net::AppendOrReplaceQueryParameter(url, kActionParamKey,
-                                               kRemoveAlarmTimer);
       break;
   }
+
+  GURL url = net::AppendOrReplaceQueryParameter(
+      GURL(kAssistantAlarmTimerPrefix), kActionParamKey,
+      GetAlarmTimerActionParamValue(action));
 
   if (alarm_timer_id.has_value()) {
     url = net::AppendOrReplaceQueryParameter(url, kIdParamKey,
@@ -236,8 +253,14 @@ base::Optional<AlarmTimerAction> GetDeepLinkParamAsAlarmTimerAction(
   if (action_string_value.value() == kAddTimeToTimer)
     return AlarmTimerAction::kAddTimeToTimer;
 
-  if (action_string_value.value() == kRemoveAlarmTimer)
-    return AlarmTimerAction::kRemove;
+  if (action_string_value.value() == kPauseTimer)
+    return AlarmTimerAction::kPauseTimer;
+
+  if (action_string_value.value() == kRemoveAlarmOrTimer)
+    return AlarmTimerAction::kRemoveAlarmOrTimer;
+
+  if (action_string_value.value() == kResumeTimer)
+    return AlarmTimerAction::kResumeTimer;
 
   return base::nullopt;
 }
@@ -441,9 +464,14 @@ GURL GetChromeSettingsUrl(const base::Optional<std::string>& page) {
   // top-level Chrome OS Settings. We may wish to allow deep linking into
   // Browser Settings at some point in the future at which point we will define
   // an analogous collection of |kAllowedBrowserPages|.
+  // These values are copied from
+  // chrome/browser/ui/webui/settings/chromeos/constants/routes.mojom.
+  // We can not reuse the generated defines as we can not depend on //chrome.
+  // TODO(b/168138594): use generated defines once that header has been moved to
+  // chromeos.
   static const std::map<std::string, std::string> kAllowedOsPages = {
       {/*page=*/"googleAssistant", /*os_page=*/"googleAssistant"},
-      {/*page=*/"languages", /*os_page=*/"languages/details"}};
+      {/*page=*/"languages", /*os_page=*/"osLanguages/details"}};
 
   return page && base::Contains(kAllowedOsPages, page.value())
              ? GURL(kChromeOsSettingsUrl + kAllowedOsPages.at(page.value()))

@@ -14,6 +14,7 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "build/build_config.h"
+#include "chrome/browser/extensions/media_router_extension_access_logger_impl.h"
 #include "chrome/browser/extensions/user_script_listener.h"
 #include "extensions/browser/extensions_browser_client.h"
 #include "extensions/browser/kiosk/kiosk_delegate.h"
@@ -104,8 +105,7 @@ class ChromeExtensionsBrowserClient : public ExtensionsBrowserClient {
   bool IsLoggedInAsPublicAccount() override;
   ExtensionSystemProvider* GetExtensionSystemFactory() override;
   void RegisterBrowserInterfaceBindersForFrame(
-      service_manager::BinderMapWithContext<content::RenderFrameHost*>*
-          binder_map,
+      mojo::BinderMapWithContext<content::RenderFrameHost*>* binder_map,
       content::RenderFrameHost* render_frame_host,
       const Extension* extension) const override;
   std::unique_ptr<RuntimeAPIDelegate> CreateRuntimeAPIDelegate(
@@ -149,10 +149,20 @@ class ChromeExtensionsBrowserClient : public ExtensionsBrowserClient {
   std::string GetUserAgent() const override;
   bool ShouldSchemeBypassNavigationChecks(
       const std::string& scheme) const override;
-  bool ShouldForceWebRequestExtraHeaders(
-      content::BrowserContext* context) const override;
+  base::FilePath GetSaveFilePath(content::BrowserContext* context) override;
+  void SetLastSaveFilePath(content::BrowserContext* context,
+                           const base::FilePath& path) override;
+  const MediaRouterExtensionAccessLogger* GetMediaRouterAccessLogger()
+      const override;
+  bool HasIsolatedStorage(const std::string& extension_id,
+                          content::BrowserContext* context) override;
+  bool IsScreenshotRestricted(
+      content::WebContents* web_contents) const override;
 
   static void set_did_chrome_update_for_testing(bool did_update);
+
+  static void SetMediaRouterAccessLoggerForTesting(
+      MediaRouterExtensionAccessLogger* media_router_access_logger);
 
  private:
   friend struct base::LazyInstanceTraitsBase<ChromeExtensionsBrowserClient>;
@@ -170,6 +180,8 @@ class ChromeExtensionsBrowserClient : public ExtensionsBrowserClient {
   std::unique_ptr<KioskDelegate> kiosk_delegate_;
 
   UserScriptListener user_script_listener_;
+
+  MediaRouterExtensionAccessLoggerImpl media_router_access_logger_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeExtensionsBrowserClient);
 };

@@ -30,6 +30,8 @@ class TestMediaController : public ash::MediaController {
       const base::flat_map<AccountId, ash::MediaCaptureState>& capture_states)
       override {}
 
+  void NotifyVmCaptureState(ash::MediaCaptureState capture_states) override {}
+
   bool force_media_client_key_handling() const {
     return force_media_client_key_handling_;
   }
@@ -109,7 +111,7 @@ class MediaClientTest : public BrowserWithTestWindowTest {
 
   TestMediaController* controller() { return test_media_controller_.get(); }
 
-  Profile* alt_profile() { return profile()->GetOffTheRecordProfile(); }
+  Profile* alt_profile() { return profile()->GetPrimaryOTRProfile(); }
 
   Browser* alt_browser() { return alt_browser_.get(); }
 

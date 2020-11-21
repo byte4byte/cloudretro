@@ -4,7 +4,7 @@
 
 #include "components/subresource_filter/content/browser/subresource_filter_observer_test_utils.h"
 
-#include "base/logging.h"
+#include "base/check.h"
 #include "components/subresource_filter/core/mojom/subresource_filter.mojom.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_frame_host.h"
@@ -12,19 +12,18 @@
 namespace subresource_filter {
 
 TestSubresourceFilterObserver::TestSubresourceFilterObserver(
-    content::WebContents* web_contents)
-    : scoped_observer_(this) {
+    content::WebContents* web_contents) {
   auto* manager =
       SubresourceFilterObserverManager::FromWebContents(web_contents);
   DCHECK(manager);
-  scoped_observer_.Add(manager);
+  scoped_observation_.Observe(manager);
   Observe(web_contents);
 }
 
 TestSubresourceFilterObserver::~TestSubresourceFilterObserver() {}
 
 void TestSubresourceFilterObserver::OnSubresourceFilterGoingAway() {
-  scoped_observer_.RemoveAll();
+  scoped_observation_.RemoveObservation();
 }
 
 void TestSubresourceFilterObserver::OnPageActivationComputed(

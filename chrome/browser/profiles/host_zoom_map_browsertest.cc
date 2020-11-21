@@ -19,6 +19,8 @@
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
+#include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_impl.h"
 #include "chrome/browser/signin/signin_promo.h"
@@ -37,6 +39,7 @@
 #include "components/zoom/page_zoom.h"
 #include "components/zoom/zoom_event_manager.h"
 #include "content/public/browser/host_zoom_map.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/test_utils.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
@@ -144,7 +147,7 @@ class HostZoomMapBrowserTest : public InProcessBrowserTest {
 
   // BrowserTestBase:
   void SetUpOnMainThread() override {
-    embedded_test_server()->RegisterRequestHandler(base::Bind(
+    embedded_test_server()->RegisterRequestHandler(base::BindRepeating(
         &HostZoomMapBrowserTest::HandleRequest, base::Unretained(this)));
     ASSERT_TRUE(embedded_test_server()->Start());
     host_resolver()->AddRule("*", "127.0.0.1");
@@ -183,8 +186,7 @@ class HostZoomMapBrowserTestWithPrefs : public HostZoomMapBrowserTest {
         .AppendASCII(TestingProfile::kTestUserProfileDir)
         .Append(chrome::kPreferencesFilename);
     base::CreateDirectory(path_to_prefs.DirName());
-    base::WriteFile(
-        path_to_prefs, prefs_data_.c_str(), prefs_data_.size());
+    base::WriteFile(path_to_prefs, prefs_data_);
     return true;
   }
 
@@ -244,7 +246,7 @@ IN_PROC_BROWSER_TEST_F(HostZoomMapBrowserTest, ZoomEventsWorkForOffTheRecord) {
                                 test_scheme, test_host));
 }
 
-#if !defined(OS_CHROMEOS)
+#if !BUILDFLAG(IS_CHROMEOS_ASH)
 IN_PROC_BROWSER_TEST_F(
     HostZoomMapBrowserTest,
     WebviewBasedSigninUsesDefaultStoragePartitionForEmbedder) {
@@ -332,7 +334,7 @@ IN_PROC_BROWSER_TEST_F(HostZoomMapBrowserTest,
 
   Profile* parent_profile = browser()->profile();
   Profile* child_profile =
-      static_cast<ProfileImpl*>(parent_profile)->GetOffTheRecordProfile();
+      static_cast<ProfileImpl*>(parent_profile)->GetPrimaryOTRProfile();
   HostZoomMap* parent_zoom_map =
       HostZoomMap::GetDefaultForBrowserContext(parent_profile);
   ASSERT_TRUE(parent_zoom_map);
@@ -377,7 +379,7 @@ IN_PROC_BROWSER_TEST_F(HostZoomMapBrowserTest,
                        ParentDefaultZoomPropagatesToIncognitoChild) {
   Profile* parent_profile = browser()->profile();
   Profile* child_profile =
-      static_cast<ProfileImpl*>(parent_profile)->GetOffTheRecordProfile();
+      static_cast<ProfileImpl*>(parent_profile)->GetPrimaryOTRProfile();
 
   double new_default_zoom_level =
       parent_profile->GetZoomLevelPrefs()->GetDefaultZoomLevelPref() + 1.f;
@@ -395,7 +397,13 @@ IN_PROC_BROWSER_TEST_F(HostZoomMapBrowserTest,
   EXPECT_EQ(new_default_zoom_level, child_host_zoom_map->GetDefaultZoomLevel());
 }
 
-IN_PROC_BROWSER_TEST_F(HostZoomMapBrowserTest, PageScaleIsOneChanged) {
+// TODO(1115597): Flaky on linux and cros.
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
+#define MAYBE_PageScaleIsOneChanged DISABLED_PageScaleIsOneChanged
+#else
+#define MAYBE_PageScaleIsOneChanged PageScaleIsOneChanged
+#endif
+IN_PROC_BROWSER_TEST_F(HostZoomMapBrowserTest, MAYBE_PageScaleIsOneChanged) {
   GURL test_url(url::kAboutBlankURL);
   std::string test_host(test_url.host());
 

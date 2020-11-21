@@ -2,8 +2,11 @@ include_rules = [
   "+chrome/common",
   "+chrome/installer/launcher_support",
   "+chrome/installer/util",
+  "+chrome/updater/protos",
   "+components/crash",
+  "+components/policy/proto",
   "+google_apis",
+  "+net",
   "+third_party/boringssl/src/include",
   "+third_party/re2",
 ]

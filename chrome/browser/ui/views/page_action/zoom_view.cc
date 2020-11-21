@@ -33,7 +33,7 @@ void ZoomView::UpdateImpl() {
 }
 
 bool ZoomView::ShouldBeVisible(bool can_show_bubble) const {
-  if (delegate()->IsLocationBarUserInputInProgress())
+  if (delegate()->ShouldHidePageActionIcons())
     return false;
 
   if (can_show_bubble)
@@ -100,7 +100,7 @@ void ZoomView::OnExecuting(PageActionIconView::ExecuteSource source) {
   ZoomBubbleView::ShowBubble(GetWebContents(), ZoomBubbleView::USER_GESTURE);
 }
 
-views::BubbleDialogDelegateView* ZoomView::GetBubble() const {
+views::BubbleDialogDelegate* ZoomView::GetBubble() const {
   return ZoomBubbleView::GetZoomBubble();
 }
 

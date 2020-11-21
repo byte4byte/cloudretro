@@ -33,6 +33,7 @@ class APP_LIST_MODEL_EXPORT SearchResult {
  public:
   using ResultType = ash::AppListSearchResultType;
   using DisplayType = ash::SearchResultDisplayType;
+  using MetricsType = ash::SearchResultType;
   using Tag = ash::SearchResultTag;
   using Tags = ash::SearchResultTags;
   using Action = ash::SearchResultAction;
@@ -107,6 +108,11 @@ class APP_LIST_MODEL_EXPORT SearchResult {
     metadata_->result_type = result_type;
   }
 
+  MetricsType metrics_type() const { return metadata_->metrics_type; }
+  void set_metrics_type(MetricsType metrics_type) {
+    metadata_->metrics_type = metrics_type;
+  }
+
   DisplayIndex display_index() const { return metadata_->display_index; }
   void set_display_index(DisplayIndex display_index) {
     metadata_->display_index = display_index;
@@ -122,19 +128,8 @@ class APP_LIST_MODEL_EXPORT SearchResult {
     metadata_->result_subtype = result_subtype;
   }
 
-  int distance_from_origin() { return distance_from_origin_; }
-  void set_distance_from_origin(int distance) {
-    distance_from_origin_ = distance;
-  }
-
   const Actions& actions() const { return metadata_->actions; }
   void SetActions(const Actions& sets);
-
-  bool is_installing() const { return is_installing_; }
-  void SetIsInstalling(bool is_installing);
-
-  int percent_downloaded() const { return percent_downloaded_; }
-  void SetPercentDownloaded(int percent_downloaded);
 
   bool notify_visibility_change() const {
     return metadata_->notify_visibility_change;
@@ -156,8 +151,6 @@ class APP_LIST_MODEL_EXPORT SearchResult {
   void set_is_recommendation(bool is_recommendation) {
     metadata_->is_recommendation = is_recommendation;
   }
-
-  void NotifyItemInstalled();
 
   void AddObserver(SearchResultObserver* observer);
   void RemoveObserver(SearchResultObserver* observer);
@@ -182,12 +175,6 @@ class APP_LIST_MODEL_EXPORT SearchResult {
   // Opens the result. Clients should use AppListViewDelegate::OpenSearchResult.
   virtual void Open(int event_flags);
 
-  // The Manhattan distance from the origin of all search results to this
-  // result. This is logged for UMA.
-  int distance_from_origin_ = -1;
-
-  bool is_installing_ = false;
-  int percent_downloaded_ = 0;
   bool is_visible_ = true;
 
   std::unique_ptr<SearchResultMetadata> metadata_;

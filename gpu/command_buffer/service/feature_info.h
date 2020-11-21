@@ -37,10 +37,9 @@ class GPU_GLES2_EXPORT FeatureInfo : public base::RefCounted<FeatureInfo> {
     FeatureFlags();
 
     GpuMemoryBufferFormatSet gpu_memory_buffer_formats = {
-        gfx::BufferFormat::BGR_565,      gfx::BufferFormat::RGBA_4444,
-        gfx::BufferFormat::RGBA_8888,    gfx::BufferFormat::RGBX_8888,
-        gfx::BufferFormat::YVU_420,      gfx::BufferFormat::RGBA_1010102,
-        gfx::BufferFormat::BGRA_1010102,
+        gfx::BufferFormat::BGR_565,   gfx::BufferFormat::RGBA_4444,
+        gfx::BufferFormat::RGBA_8888, gfx::BufferFormat::RGBX_8888,
+        gfx::BufferFormat::YVU_420,   gfx::BufferFormat::YUV_420_BIPLANAR,
     };
     // Use glBlitFramebuffer() and glRenderbufferStorageMultisample() with
     // GL_EXT_framebuffer_multisample-style semantics (as opposed to
@@ -91,7 +90,6 @@ class GPU_GLES2_EXPORT FeatureInfo : public base::RefCounted<FeatureInfo> {
     bool ext_discard_framebuffer = false;
     bool angle_depth_texture = false;
     bool is_swiftshader_for_webgl = false;
-    bool is_swiftshader = false;
     bool chromium_texture_filtering_hint = false;
     bool angle_texture_usage = false;
     bool ext_texture_storage = false;
@@ -152,6 +150,8 @@ class GPU_GLES2_EXPORT FeatureInfo : public base::RefCounted<FeatureInfo> {
     bool webgl_multi_draw_instanced_base_vertex_base_instance = false;
     bool ext_texture_compression_bptc = false;
     bool ext_texture_compression_rgtc = false;
+    bool oes_draw_buffers_indexed = false;
+    bool ext_yuv_target = false;
   };
 
   FeatureInfo();
@@ -214,6 +214,7 @@ class GPU_GLES2_EXPORT FeatureInfo : public base::RefCounted<FeatureInfo> {
   void EnableEXTColorBufferFloat();
   void EnableEXTColorBufferHalfFloat();
   void EnableEXTTextureFilterAnisotropic();
+  void EnableOESDrawBuffersIndexed();
   void EnableOESFboRenderMipmap();
   void EnableOESTextureFloatLinear();
   void EnableOESTextureHalfFloatLinear();
@@ -248,6 +249,9 @@ class GPU_GLES2_EXPORT FeatureInfo : public base::RefCounted<FeatureInfo> {
   void InitializeBasicState(const base::CommandLine* command_line);
   void InitializeFeatures();
   void InitializeFloatAndHalfFloatFeatures(const gfx::ExtensionSet& extensions);
+
+  void EnableANGLEInstancedArrayIfPossible(const gfx::ExtensionSet& extensions);
+  void EnableWEBGLMultiDrawIfPossible(const gfx::ExtensionSet& extensions);
 
   bool initialized_ = false;
 

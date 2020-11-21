@@ -189,7 +189,6 @@ TEST(JSONReaderTest, Doubles) {
   auto value_with_error =
       JSONReader::ReadAndReturnValueWithError("1e1000", JSON_PARSE_RFC);
   ASSERT_FALSE(value_with_error.value);
-  ASSERT_NE(value_with_error.error_code, JSONReader::JSON_NO_ERROR);
 }
 
 TEST(JSONReaderTest, FractionalNumbers) {
@@ -647,10 +646,10 @@ TEST(JSONReaderTest, ReadFromFile) {
   std::string input;
   ASSERT_TRUE(ReadFileToString(path.AppendASCII("bom_feff.json"), &input));
 
-  JSONReader reader;
-  Optional<Value> root(reader.ReadToValue(input));
-  ASSERT_TRUE(root) << reader.GetErrorMessage();
-  EXPECT_TRUE(root->is_dict());
+  JSONReader::ValueWithError root =
+      JSONReader::ReadAndReturnValueWithError(input);
+  ASSERT_TRUE(root.value) << root.error_message;
+  EXPECT_TRUE(root.value->is_dict());
 }
 
 // Tests that the root of a JSON object can be deleted safely while its
@@ -736,19 +735,21 @@ TEST(JSONReaderTest, InvalidSanity) {
   };
 
   for (size_t i = 0; i < base::size(kInvalidJson); ++i) {
-    JSONReader reader;
     LOG(INFO) << "Sanity test " << i << ": <" << kInvalidJson[i] << ">";
-    EXPECT_FALSE(reader.ReadToValue(kInvalidJson[i]));
-    EXPECT_NE("", reader.GetErrorMessage());
+    JSONReader::ValueWithError root =
+        JSONReader::ReadAndReturnValueWithError(kInvalidJson[i]);
+    EXPECT_FALSE(root.value);
+    EXPECT_NE("", root.error_message);
   }
 }
 
 TEST(JSONReaderTest, IllegalTrailingNull) {
   const char json[] = {'"', 'n', 'u', 'l', 'l', '"', '\0'};
   std::string json_string(json, sizeof(json));
-  JSONReader reader;
-  EXPECT_FALSE(reader.ReadToValue(json_string));
-  EXPECT_NE("", reader.GetErrorMessage());
+  JSONReader::ValueWithError root =
+      JSONReader::ReadAndReturnValueWithError(json_string);
+  EXPECT_FALSE(root.value);
+  EXPECT_NE("", root.error_message);
 }
 
 TEST(JSONReaderTest, ASCIIControlCodes) {
@@ -833,10 +834,18 @@ TEST(JSONReaderTest, DecodeNegativeEscapeSequence) {
 
 // Verifies invalid code points are replaced.
 TEST(JSONReaderTest, ReplaceInvalidCharacters) {
-  // U+D800 is a lone surrogate.
-  const std::string invalid = "\"\xED\xA0\x80\"";
+  // U+D800 is a lone high surrogate.
+  const std::string invalid_high = "\"\xED\xA0\x80\"";
   Optional<Value> value =
-      JSONReader::Read(invalid, JSON_REPLACE_INVALID_CHARACTERS);
+      JSONReader::Read(invalid_high, JSON_REPLACE_INVALID_CHARACTERS);
+  ASSERT_TRUE(value);
+  ASSERT_TRUE(value->is_string());
+  // Expect three U+FFFD (one for each UTF-8 byte in the invalid code point).
+  EXPECT_EQ("\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD", value->GetString());
+
+  // U+DFFF is a lone low surrogate.
+  const std::string invalid_low = "\"\xED\xBF\xBF\"";
+  value = JSONReader::Read(invalid_low, JSON_REPLACE_INVALID_CHARACTERS);
   ASSERT_TRUE(value);
   ASSERT_TRUE(value->is_string());
   // Expect three U+FFFD (one for each UTF-8 byte in the invalid code point).
@@ -844,10 +853,17 @@ TEST(JSONReaderTest, ReplaceInvalidCharacters) {
 }
 
 TEST(JSONReaderTest, ReplaceInvalidUTF16EscapeSequence) {
-  // U+D800 is a lone surrogate.
-  const std::string invalid = "\"_\\uD800_\"";
+  // U+D800 is a lone high surrogate.
+  const std::string invalid_high = "\"_\\uD800_\"";
   Optional<Value> value =
-      JSONReader::Read(invalid, JSON_REPLACE_INVALID_CHARACTERS);
+      JSONReader::Read(invalid_high, JSON_REPLACE_INVALID_CHARACTERS);
+  ASSERT_TRUE(value);
+  ASSERT_TRUE(value->is_string());
+  EXPECT_EQ("_\xEF\xBF\xBD_", value->GetString());
+
+  // U+DFFF is a lone low surrogate.
+  const std::string invalid_low = "\"_\\uDFFF_\"";
+  value = JSONReader::Read(invalid_low, JSON_REPLACE_INVALID_CHARACTERS);
   ASSERT_TRUE(value);
   ASSERT_TRUE(value->is_string());
   EXPECT_EQ("_\xEF\xBF\xBD_", value->GetString());
@@ -921,6 +937,79 @@ TEST(JSONReaderTest, UnterminatedInputs) {
     StringPiece input = MakeNotNullTerminatedInput(test_case, &input_owner);
 
     EXPECT_FALSE(JSONReader::Read(input));
+  }
+}
+
+TEST(JSONReaderTest, LineColumnCounting) {
+  const struct {
+    const char* input;
+    int error_line;
+    int error_column;
+  } kCases[] = {
+      // For all but the "q_is_not_etc" case, the error (indicated by ^ in the
+      // comments) is seeing a digit when expecting ',' or ']'.
+      {
+          // Line and column counts are 1-based, not 0-based.
+          "q_is_not_the_start_of_any_valid_JSON_token",
+          1,
+          1,
+      },
+      {
+          "[2,4,6 8",
+          // -----^
+          1,
+          8,
+      },
+      {
+          "[2,4,6\t8",
+          // ------^
+          1,
+          8,
+      },
+      {
+          "[2,4,6\n8",
+          // ------^
+          2,
+          1,
+      },
+      {
+          "[\n0,\n1,\n2,\n3,4,5,6 7,\n8,\n9\n]",
+          // ---------------------^
+          5,
+          9,
+      },
+      {
+          // Same as the previous example, but with "\r\n"s instead of "\n"s.
+          "[\r\n0,\r\n1,\r\n2,\r\n3,4,5,6 7,\r\n8,\r\n9\r\n]",
+          // -----------------------------^
+          5,
+          9,
+      },
+      // The JSON spec forbids unescaped ASCII control characters (including
+      // line breaks) within a string, but our implementation is more lenient.
+      {
+          "[\"3\n1\" 4",
+          // --------^
+          2,
+          4,
+      },
+      {
+          "[\"3\r\n1\" 4",
+          // ----------^
+          2,
+          4,
+      },
+  };
+
+  for (unsigned int i = 0; i < base::size(kCases); ++i) {
+    auto test_case = kCases[i];
+    SCOPED_TRACE(StringPrintf("case %u: \"%s\"", i, test_case.input));
+
+    JSONReader::ValueWithError root = JSONReader::ReadAndReturnValueWithError(
+        test_case.input, JSON_PARSE_RFC);
+    EXPECT_FALSE(root.value);
+    EXPECT_EQ(test_case.error_line, root.error_line);
+    EXPECT_EQ(test_case.error_column, root.error_column);
   }
 }
 

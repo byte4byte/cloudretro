@@ -185,7 +185,7 @@ base::File::Error AsyncFileTestHelper::CreateFileWithData(
   if (!dir.CreateUniqueTempDir())
     return base::File::FILE_ERROR_FAILED;
   base::FilePath local_path = dir.GetPath().AppendASCII("tmp");
-  if (buf_size != base::WriteFile(local_path, buf, buf_size))
+  if (!base::WriteFile(local_path, base::StringPiece(buf, buf_size)))
     return base::File::FILE_ERROR_FAILED;
   base::File::Error result = base::File::FILE_ERROR_FAILED;
   base::RunLoop run_loop;
@@ -267,6 +267,20 @@ blink::mojom::QuotaStatusCode AsyncFileTestHelper::GetUsageAndQuota(
                      run_loop.QuitWhenIdleClosure()));
   run_loop.Run();
   return status;
+}
+
+base::File::Error AsyncFileTestHelper::TouchFile(
+    FileSystemContext* context,
+    const FileSystemURL& url,
+    const base::Time& last_access_time,
+    const base::Time& last_modified_time) {
+  base::File::Error result = base::File::FILE_ERROR_FAILED;
+  base::RunLoop run_loop;
+  context->operation_runner()->TouchFile(
+      url, last_access_time, last_modified_time,
+      AssignAndQuitCallback(&run_loop, &result));
+  run_loop.Run();
+  return result;
 }
 
 }  // namespace storage

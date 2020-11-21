@@ -7,10 +7,14 @@
 
 #include "base/callback.h"
 #include "base/files/file_path.h"
+#include "storage/browser/file_system/file_system_url.h"
+#include "third_party/abseil-cpp/absl/types/variant.h"
 
 class Profile;
 
 namespace plugin_vm {
+
+base::FilePath ChromeOSBaseDirectory();
 
 // Ensure default shared dir <cryptohome>/MyFiles/PluginVm exists. Invokes
 // |callback| with dir and true if dir is successfully created or already
@@ -18,6 +22,26 @@ namespace plugin_vm {
 void EnsureDefaultSharedDirExists(
     Profile* profile,
     base::OnceCallback<void(const base::FilePath&, bool)> callback);
+
+enum class LaunchPluginVmAppResult {
+  SUCCESS,
+  FAILED,
+  FAILED_DIRECTORY_NOT_SHARED,
+  FAILED_FILE_ON_EXTERNAL_DRIVE,
+};
+
+using LaunchArg = absl::variant<storage::FileSystemURL, std::string>;
+
+using LaunchPluginVmAppCallback =
+    base::OnceCallback<void(LaunchPluginVmAppResult result,
+                            const std::string& failure_reason)>;
+
+// Launch a Plugin VM App with a given set of files, given as cracked urls in
+// the VM. Will start Plugin VM if it is not already running.
+void LaunchPluginVmApp(Profile* profile,
+                       std::string app_id,
+                       const std::vector<LaunchArg>& files,
+                       LaunchPluginVmAppCallback callback);
 
 }  // namespace plugin_vm
 

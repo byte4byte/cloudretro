@@ -38,7 +38,11 @@ void ConstructMap() {
   (*GetIdMap())[c_id] = resource_id_list[next_id++];
 #define DECLARE_RESOURCE_ID(c_id, java_id) \
   (*GetIdMap())[c_id] = resource_id_list[next_id++];
+#include "components/resources/android/blocked_content_resource_id.h"
+#include "components/resources/android/page_info_resource_id.h"
 #include "components/resources/android/permissions_resource_id.h"
+#include "components/resources/android/sms_resource_id.h"
+#include "components/resources/android/webxr_resource_id.h"
 #undef LINK_RESOURCE_ID
 #undef DECLARE_RESOURCE_ID
   // Make sure ID list sizes match up.
@@ -58,6 +62,10 @@ int MapToJavaDrawableId(int resource_id) {
   }
 
   // The resource couldn't be found.
+  // If you've landed here, please ensure that the header that declares the
+  // mapping of your native resource to Java resource is listed both in
+  // ResourceId.tempalate and in this file, next to other *resource_id.h
+  // headers.
   NOTREACHED();
   return 0;
 }

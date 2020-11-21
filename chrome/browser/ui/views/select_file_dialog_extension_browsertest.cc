@@ -8,8 +8,7 @@
 
 #include "ash/public/cpp/keyboard/keyboard_switches.h"
 #include "ash/public/cpp/test/shell_test_api.h"
-#include "ash/public/cpp/window_properties.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/logging.h"
@@ -34,9 +33,11 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "chromeos/constants/chromeos_features.h"
+#include "chromeos/ui/base/window_properties.h"
 #include "components/prefs/pref_service.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_view_host.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/browser/extension_registry.h"
@@ -624,13 +625,14 @@ IN_PROC_BROWSER_TEST_P(SelectFileDialogExtensionFlagTest, DialogColoredTitle) {
       dialog_->GetRenderViewHost()->GetMainFrame();
   aura::Window* dialog_window =
       frame_host->GetNativeView()->GetToplevelWindow();
-  SkColor active_color = dialog_window->GetProperty(ash::kFrameActiveColorKey);
+  SkColor active_color =
+      dialog_window->GetProperty(chromeos::kFrameActiveColorKey);
   SkColor inactive_color =
-      dialog_window->GetProperty(ash::kFrameInactiveColorKey);
+      dialog_window->GetProperty(chromeos::kFrameInactiveColorKey);
 
-  constexpr SkColor kFilesNgTitleColor = SkColorSetRGB(0xDB, 0xE2, 0xED);
+  constexpr SkColor kFilesNgTitleColor = gfx::kGoogleGrey200;
   if (GetParam()) {
-    // FilesNG enabled the title should be blue-ish grey.
+    // FilesNG enabled the title should be Google Grey 200.
     EXPECT_EQ(active_color, kFilesNgTitleColor);
     // Active and Inactive should have the same color.
     EXPECT_EQ(active_color, inactive_color);

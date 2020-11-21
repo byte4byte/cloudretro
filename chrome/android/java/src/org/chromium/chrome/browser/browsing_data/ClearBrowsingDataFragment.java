@@ -32,9 +32,10 @@ import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.historyreport.AppIndexingReporter;
 import org.chromium.chrome.browser.multiwindow.MultiWindowUtils;
 import org.chromium.chrome.browser.preferences.Pref;
-import org.chromium.chrome.browser.preferences.PrefServiceBridge;
+import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.components.browser_ui.settings.SettingsUtils;
 import org.chromium.components.browser_ui.settings.SpinnerPreference;
+import org.chromium.components.user_prefs.UserPrefs;
 import org.chromium.ui.widget.ButtonCompat;
 
 import java.lang.annotation.Retention;
@@ -317,8 +318,8 @@ public abstract class ClearBrowsingDataFragment extends PreferenceFragmentCompat
      * Requests the browsing data corresponding to the given dialog options to be deleted.
      * @param options The dialog options whose corresponding data should be deleted.
      */
-    private void clearBrowsingData(Set<Integer> options, @Nullable String[] blacklistedDomains,
-            @Nullable int[] blacklistedDomainReasons, @Nullable String[] ignoredDomains,
+    private void clearBrowsingData(Set<Integer> options, @Nullable String[] excludedDomains,
+            @Nullable int[] excludedDomainReasons, @Nullable String[] ignoredDomains,
             @Nullable int[] ignoredDomainReasons) {
         onClearBrowsingData();
         showProgressDialog();
@@ -350,9 +351,9 @@ public abstract class ClearBrowsingDataFragment extends PreferenceFragmentCompat
         int timePeriod = ((TimePeriodSpinnerOption) spinnerSelection).getTimePeriod();
         // TODO(bsazonov): Change integerListToIntArray to handle Collection<Integer>.
         int[] dataTypesArray = CollectionUtil.integerListToIntArray(new ArrayList<>(dataTypes));
-        if (blacklistedDomains != null && blacklistedDomains.length != 0) {
+        if (excludedDomains != null && excludedDomains.length != 0) {
             BrowsingDataBridge.getInstance().clearBrowsingDataExcludingDomains(this, dataTypesArray,
-                    timePeriod, blacklistedDomains, blacklistedDomainReasons, ignoredDomains,
+                    timePeriod, excludedDomains, excludedDomainReasons, ignoredDomains,
                     ignoredDomainReasons);
         } else {
             BrowsingDataBridge.getInstance().clearBrowsingData(this, dataTypesArray, timePeriod);
@@ -533,8 +534,8 @@ public abstract class ClearBrowsingDataFragment extends PreferenceFragmentCompat
 
             // It is possible to disable the deletion of browsing history.
             if (option == DialogOption.CLEAR_HISTORY
-                    && !PrefServiceBridge.getInstance().getBoolean(
-                            Pref.ALLOW_DELETING_BROWSER_HISTORY)) {
+                    && !UserPrefs.get(Profile.getLastUsedRegularProfile())
+                                .getBoolean(Pref.ALLOW_DELETING_BROWSER_HISTORY)) {
                 enabled = false;
                 BrowsingDataBridge.getInstance().setBrowsingDataDeletionPreference(
                         getDataType(DialogOption.CLEAR_HISTORY), ClearBrowsingDataTab.BASIC, false);
@@ -590,7 +591,7 @@ public abstract class ClearBrowsingDataFragment extends PreferenceFragmentCompat
 
         // Add button to bottom of the preferences view.
         ButtonCompat clearButton =
-                (ButtonCompat) inflater.inflate(R.xml.clear_browsing_data_button, view, false);
+                (ButtonCompat) inflater.inflate(R.layout.clear_browsing_data_button, view, false);
         clearButton.setOnClickListener((View v) -> onClearButtonClicked());
         view.addView(clearButton);
 

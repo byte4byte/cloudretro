@@ -2,10 +2,12 @@
      Use of this source code is governed by a BSD-style license that can be
      found in the LICENSE file. -->
 
+<link rel="import" href="/components/oobe_i18n_behavior.html">
+<link rel="import" href="/components/oobe_dialog.html">
+
 <dom-module id="assistant-third-party">
   <template>
-    <link rel="stylesheet" href="../login/oobe_dialog_host.css">
-    <link rel="stylesheet" href="../login/oobe_flex_layout.css">
+    <style include="oobe-dialog-host"></style>
     <link rel="stylesheet" href="assistant_shared_styles.css">
     <link rel="stylesheet" href="assistant_third_party.css">
     <oobe-dialog id="third-party-dialog" role="dialog" has-buttons hide-shadow
@@ -22,7 +24,7 @@
       </div>
       <div slot="bottom-buttons" class="flex layout horizontal">
         <div class="flex"></div>
-        <oobe-next-button id="next-button" inverse on-tap="onNextTap_"
+        <oobe-next-button id="next-button" inverse on-click="onNextTap_"
             disabled="[[buttonsDisabled]]" hidden="[[moreContents]]">
           <div id="next-button-text" slot="text"></div>
         </oobe-next-button>

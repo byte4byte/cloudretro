@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef FUCHSIA_ENGINE_CONTEXT_SWITCHES_H_
-#define FUCHSIA_ENGINE_CONTEXT_SWITCHES_H_
+#ifndef FUCHSIA_ENGINE_SWITCHES_H_
+#define FUCHSIA_ENGINE_SWITCHES_H_
 
 // Switches used by the ContextProviderImpl to configure each Context process.
 namespace switches {
@@ -41,6 +41,26 @@ extern const char kAllowRunningInsecureContent[];
 // Enables use of the fuchsia.legacymetrics.MetricsRecorder service for
 // telemetry.
 extern const char kUseLegacyMetricsService[];
+
+// Specifies a comma-separated list of HTTP headers to exempt from CORS checks.
+extern const char kCorsExemptHeaders[];
+
+// Enables the Cast Streaming Receiver.
+// TODO(crbug.com/1078919): Consider removing this flag when we have a better
+// way of enabling this feature.
+extern const char kEnableCastStreamingReceiver[];
+
+// Data directory to be used for CDM user data.
+extern const char kCdmDataDirectory[];
+
+// Quota to apply to the CDM user data directory, in bytes.
+extern const char kCdmDataQuotaBytes[];
+
+// Enables reporting of an Android-like User Agent string.
+extern const char kUseLegacyAndroidUserAgent[];
+
+// Soft quota to apply to the Context's persistent data directory, in bytes.
+extern const char kDataQuotaBytes[];
 
 }  // namespace switches
 

@@ -8,7 +8,9 @@
 // We only want to use ViewEventTestBase in test targets which properly
 // isolate each test case by running each test in a separate process.
 // This way if a test hangs the test launcher can reliably terminate it.
-#if defined(HAS_OUT_OF_PROC_TEST_RUNNER)
+#if !defined(HAS_OUT_OF_PROC_TEST_RUNNER)
+#error Can't reliably terminate hanging event tests without OOP test runner.
+#endif
 
 #include <memory>
 
@@ -19,7 +21,7 @@
 #include "build/build_config.h"
 #include "chrome/test/views/chrome_views_test_base.h"
 
-#if defined(USE_AURA) && !defined(OS_CHROMEOS) && !defined(USE_X11)
+#if defined(USE_AURA) && !defined(OS_CHROMEOS)
 namespace display {
 class Screen;
 }
@@ -120,7 +122,7 @@ class ViewEventTestBase : public ChromeViewsTestBase {
   // failures invokes Done.
   void RunTestMethod(base::OnceClosure task);
 
-#if defined(USE_AURA) && !defined(OS_CHROMEOS) && !defined(USE_X11)
+#if defined(USE_AURA) && !defined(OS_CHROMEOS)
   std::unique_ptr<display::Screen> screen_;
 #endif
 
@@ -135,7 +137,5 @@ class ViewEventTestBase : public ChromeViewsTestBase {
 // of ViewEventTestBase for details.
 #define VIEW_TEST(test_class, name) \
   TEST_F(test_class, name) { StartMessageLoopAndRunTest(); }
-
-#endif  // defined(HAS_OUT_OF_PROC_TEST_RUNNER)
 
 #endif  // CHROME_BROWSER_UI_VIEWS_TEST_VIEW_EVENT_TEST_BASE_H_

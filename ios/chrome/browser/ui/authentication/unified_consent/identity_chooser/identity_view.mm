@@ -4,7 +4,7 @@
 
 #import "ios/chrome/browser/ui/authentication/unified_consent/identity_chooser/identity_view.h"
 
-#include "base/logging.h"
+#include "base/check.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
 #import "ios/chrome/common/ui/colors/UIColor+cr_semantic_colors.h"
 #import "ios/chrome/common/ui/util/constraints_ui_util.h"
@@ -62,6 +62,7 @@ const CGFloat kVerticalMargin = 12.;
 
     // Title.
     _title = [[UILabel alloc] init];
+    _title.adjustsFontForContentSizeCategory = YES;
     _title.translatesAutoresizingMaskIntoConstraints = NO;
     _title.numberOfLines = 0;
     _title.textColor = UIColor.cr_labelColor;
@@ -70,6 +71,7 @@ const CGFloat kVerticalMargin = 12.;
 
     // Subtitle.
     _subtitle = [[UILabel alloc] init];
+    _subtitle.adjustsFontForContentSizeCategory = YES;
     _subtitle.translatesAutoresizingMaskIntoConstraints = NO;
     _subtitle.numberOfLines = 0;
     _subtitle.textColor = UIColor.cr_secondaryLabelColor;

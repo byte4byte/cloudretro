@@ -9,11 +9,11 @@
 #include "base/command_line.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
+#include "chrome/browser/app_mode/app_mode_utils.h"
 #include "chrome/browser/ui/views/exclusive_access_bubble_views.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/fullscreen_control/fullscreen_control_view.h"
 #include "chrome/common/channel_info.h"
-#include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_switches.h"
 #include "components/version_info/channel.h"
 #include "content/public/common/content_features.h"
@@ -63,15 +63,14 @@ constexpr base::TimeDelta kTouchPopupTimeout = base::TimeDelta::FromSeconds(10);
 constexpr base::TimeDelta kKeyPressPopupDelay = base::TimeDelta::FromSeconds(1);
 
 bool IsExitUiEnabled() {
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
   // Exit UI is unnecessary, since Mac uses the OS fullscreen such that window
   // menu and controls reveal when the cursor is moved to the top.
   return false;
 #else
   // Kiosk mode is a fullscreen experience, which makes the exit UI
   // inappropriate.
-  return !base::CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kKioskMode);
+  return !chrome::IsRunningInAppMode();
 #endif
 }
 

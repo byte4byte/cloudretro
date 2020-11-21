@@ -18,9 +18,11 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "chromeos/printing/printer_configuration.h"
+#include "content/public/test/browser_test.h"
 #include "extensions/test/result_catcher.h"
 #include "printing/backend/print_backend.h"
 #include "printing/backend/test_print_backend.h"
+#include "printing/mojom/print.mojom.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace extensions {
@@ -50,8 +52,8 @@ std::unique_ptr<printing::PrinterSemanticCapsAndDefaults>
 ConstructPrinterCapabilities() {
   auto capabilities =
       std::make_unique<printing::PrinterSemanticCapsAndDefaults>();
-  capabilities->color_model = printing::COLOR;
-  capabilities->duplex_modes.push_back(printing::SIMPLEX);
+  capabilities->color_model = printing::mojom::ColorModel::kColor;
+  capabilities->duplex_modes.push_back(printing::mojom::DuplexMode::kSimplex);
   capabilities->copies_max = 2;
   capabilities->dpis.push_back(gfx::Size(kHorizontalDpi, kVerticalDpi));
   printing::PrinterSemanticCapsAndDefaults::Paper paper;
@@ -74,12 +76,11 @@ class PrintingApiTest : public ExtensionApiTest {
 
  protected:
   void SetUpInProcessBrowserTestFixture() override {
-    will_create_browser_context_services_subscription_ =
+    create_services_subscription_ =
         BrowserContextDependencyManager::GetInstance()
-            ->RegisterWillCreateBrowserContextServicesCallbackForTesting(
-                base::BindRepeating(
-                    &PrintingApiTest::OnWillCreateBrowserContextServices,
-                    base::Unretained(this)));
+            ->RegisterCreateServicesCallbackForTesting(base::BindRepeating(
+                &PrintingApiTest::OnWillCreateBrowserContextServices,
+                base::Unretained(this)));
     chromeos::PrinterConfigurer::SetPrinterConfigurerForTesting(
         std::make_unique<chromeos::TestPrinterConfigurer>());
     test_print_backend_ = base::MakeRefCounted<printing::TestPrintBackend>();
@@ -106,7 +107,8 @@ class PrintingApiTest : public ExtensionApiTest {
     chromeos::Printer printer = chromeos::Printer(printer_id);
     GetPrintersManager()->AddPrinter(printer,
                                      chromeos::PrinterClass::kEnterprise);
-    test_print_backend_->AddValidPrinter(printer_id, std::move(capabilities));
+    test_print_backend_->AddValidPrinter(printer_id, std::move(capabilities),
+                                         nullptr);
   }
 
  private:
@@ -118,8 +120,8 @@ class PrintingApiTest : public ExtensionApiTest {
   }
 
   std::unique_ptr<
-      base::CallbackList<void(content::BrowserContext*)>::Subscription>
-      will_create_browser_context_services_subscription_;
+      BrowserContextDependencyManager::CreateServicesCallbackList::Subscription>
+      create_services_subscription_;
 
   scoped_refptr<printing::TestPrintBackend> test_print_backend_;
 };
@@ -156,6 +158,9 @@ IN_PROC_BROWSER_TEST_F(PrintingApiTest, SubmitJob) {
       ->SetPrintJobControllerForTesting(
           std::make_unique<FakePrintJobController>(GetPrintJobManager(),
                                                    GetPrintersManager()));
+  base::AutoReset<bool> skip_confirmation_dialog_reset(
+      PrintJobSubmitter::SkipConfirmationDialogForTesting());
+
   ASSERT_TRUE(RunExtensionSubtest("printing", "submit_job.html"));
 }
 
@@ -170,6 +175,8 @@ IN_PROC_BROWSER_TEST_F(PrintingApiTest, CancelJob) {
       ->SetPrintJobControllerForTesting(
           std::make_unique<FakePrintJobController>(GetPrintJobManager(),
                                                    GetPrintersManager()));
+  base::AutoReset<bool> skip_confirmation_dialog_reset(
+      PrintJobSubmitter::SkipConfirmationDialogForTesting());
 
   ASSERT_TRUE(RunExtensionSubtest("printing", "cancel_job.html"));
 }

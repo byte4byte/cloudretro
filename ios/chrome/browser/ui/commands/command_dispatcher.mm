@@ -8,7 +8,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include "base/logging.h"
+#include "base/check.h"
 #include "base/strings/sys_string_conversions.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -110,7 +110,7 @@
 
 - (CommandDispatcher*)strictCallableForProtocol:(Protocol*)protocol {
   CHECK([self dispatchingForProtocol:protocol])
-      << "Dispatcher failed protocol confromance";
+      << "Dispatcher failed protocol conformance";
   return self;
 }
 

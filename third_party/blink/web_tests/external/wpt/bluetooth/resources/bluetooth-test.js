@@ -19,20 +19,6 @@ function loadScript(path) {
 }
 
 /**
- * Loads the scripts in |paths|.
- * @param {string[]} paths
- * @returns {Promise<void>} A promise chain that resolves when all scripts have
- *     finished loading.
- */
-function loadScripts(paths) {
-  let chain = Promise.resolve();
-  for (let path of paths) {
-    chain = chain.then(() => loadScript(path));
-  }
-  return chain;
-}
-
-/**
  * Performs the Chromium specific setup necessary to run the tests in the
  * Chromium browser. This test file is shared between Web Platform Tests and
  * Blink Web Tests, so this method figures out the correct paths to use for
@@ -42,50 +28,47 @@ function loadScripts(paths) {
  * Bluetooth Blink Web Tests have been migrated into this repository.
  * @returns {Promise<void>} Resolves when Chromium specific setup is complete.
  */
-function performChromiumSetup() {
-  // Make sure we are actually on Chromium with Mojo enabled.
-  if (typeof Mojo === 'undefined') {
+async function performChromiumSetup() {
+  const chromiumResources = [
+    '/gen/content/test/data/mojo_web_test_helper_test.mojom.js',
+    '/gen/device/bluetooth/public/mojom/uuid.mojom.js',
+    '/gen/url/mojom/origin.mojom.js',
+    '/gen/device/bluetooth/public/mojom/test/fake_bluetooth.mojom.js',
+    '/gen/content/web_test/common/fake_bluetooth_chooser.mojom.js',
+  ];
+  // Determine path prefixes.
+  let resPrefix = '/resources';
+  let extra = ['/resources/chromium/web-bluetooth-test.js'];
+  const pathname = window.location.pathname;
+  if (pathname.includes('/web_tests/')) {
+    let root = pathname.match(/.*(?:web_tests)/);
+    resPrefix = `${root}/external/wpt/resources`;
+    extra = [
+      `${root}/external/wpt/resources/chromium/web-bluetooth-test.js`,
+      `${root}/resources/bluetooth/bluetooth-fake-adapter.js`,
+    ];
+  }
+
+  await loadScript(`${resPrefix}/test-only-api.js`);
+  if (!isChromiumBased) {
     return;
   }
 
-  // Load the Chromium-specific resources.
-  let prefix = '/resources/chromium';
-  let genPrefix = '/gen';
-  let extra = [];
-  const pathname = window.location.pathname;
-  if (pathname.includes('/LayoutTests/') || pathname.includes('/web_tests/')) {
-    let root = pathname.match(/.*(?:LayoutTests|web_tests)/);
-    prefix = `${root}/external/wpt/resources/chromium`;
-    extra = [
-      `${root}/resources/bluetooth/bluetooth-fake-adapter.js`,
-    ];
-    genPrefix = 'file:///gen';
-  } else if (window.location.pathname.startsWith('/bluetooth/https/')) {
-    extra = [
-      '/js-test-resources/bluetooth/bluetooth-fake-adapter.js',
-    ];
+  await loadMojoResources(chromiumResources);
+  for (const path of extra) {
+    await loadScript(path);
   }
-  return loadScripts([
-           `${genPrefix}/layout_test_data/mojo/public/js/mojo_bindings.js`,
-           `${genPrefix}/content/test/data/mojo_web_test_helper_test.mojom.js`,
-           `${genPrefix}/device/bluetooth/public/mojom/uuid.mojom.js`,
-           `${genPrefix}/url/mojom/origin.mojom.js`,
-           `${genPrefix}/device/bluetooth/public/mojom/test/fake_bluetooth.mojom.js`,
-           `${genPrefix}/content/shell/common/web_test/fake_bluetooth_chooser.mojom.js`,
-           `${prefix}/web-bluetooth-test.js`,
-         ].concat(extra))
-      // Call setBluetoothFakeAdapter() to clean up any fake adapters left over
-      // by legacy tests.
-      // Legacy tests that use setBluetoothFakeAdapter() sometimes fail to clean
-      // their fake adapter. This is not a problem for these tests because the
-      // next setBluetoothFakeAdapter() will clean it up anyway but it is a
-      // problem for the new tests that do not use setBluetoothFakeAdapter().
-      // TODO(https://crbug.com/569709): Remove once setBluetoothFakeAdapter is
-      // no longer used.
-      .then(
-          () => typeof setBluetoothFakeAdapter === 'undefined' ?
-              undefined :
-              setBluetoothFakeAdapter(''));
+
+  // Call setBluetoothFakeAdapter() to clean up any fake adapters left over by
+  // legacy tests. Legacy tests that use setBluetoothFakeAdapter() sometimes
+  // fail to clean their fake adapter. This is not a problem for these tests
+  // because the next setBluetoothFakeAdapter() will clean it up anyway but it
+  // is a problem for the new tests that do not use setBluetoothFakeAdapter().
+  // TODO(https://crbug.com/569709): Remove once setBluetoothFakeAdapter is no
+  // longer used.
+  if (typeof setBluetoothFakeAdapter !== 'undefined') {
+    setBluetoothFakeAdapter('');
+  }
 }
 
 /**
@@ -99,16 +82,15 @@ function performChromiumSetup() {
  *     rejects if the test failed.
  */
 function bluetooth_test(test_function, name, properties) {
-  Promise.resolve().then(
-      () => promise_test(
-          t => Promise
-                   .resolve()
-                   // Trigger Chromium-specific setup.
-                   .then(performChromiumSetup)
-                   .then(() => test_function(t))
-                   .then(() => navigator.bluetooth.test.allResponsesConsumed())
-                   .then(consumed => assert_true(consumed)),
-          name, properties));
+  return promise_test(async (t) => {
+    assert_implements(navigator.bluetooth, 'missing navigator.bluetooth');
+    // Trigger Chromium-specific setup.
+    await performChromiumSetup();
+    assert_implements(navigator.bluetooth.test, 'missing navigator.bluetooth.test');
+    await test_function(t);
+    let consumed = await navigator.bluetooth.test.allResponsesConsumed();
+    assert_true(consumed);
+  }, name, properties);
 }
 
 /**
@@ -138,22 +120,21 @@ function waitForDocumentReady() {
  * @returns {Promise<*>} Resolves when the user activation has been simulated
  *     with the result of |callback|.
  */
-function callWithTrustedClick(callback) {
-  return waitForDocumentReady().then(() => new Promise(resolve => {
-                                       let button =
-                                           document.createElement('button');
-                                       button.textContent =
-                                           'click to continue test';
-                                       button.style.display = 'block';
-                                       button.style.fontSize = '20px';
-                                       button.style.padding = '10px';
-                                       button.onclick = () => {
-                                         document.body.removeChild(button);
-                                         resolve(callback());
-                                       };
-                                       document.body.appendChild(button);
-                                       test_driver.click(button);
-                                     }));
+async function callWithTrustedClick(callback) {
+  await waitForDocumentReady();
+  return new Promise(resolve => {
+    let button = document.createElement('button');
+    button.textContent = 'click to continue test';
+    button.style.display = 'block';
+    button.style.fontSize = '20px';
+    button.style.padding = '10px';
+    button.onclick = () => {
+      document.body.removeChild(button);
+      resolve(callback());
+    };
+    document.body.appendChild(button);
+    test_driver.click(button);
+  });
 }
 
 /**
@@ -356,7 +337,7 @@ function assert_promise_resolves_after_event(
  * @returns {Promise<void>} Resolves if no events were fired.
  */
 function assert_no_events(object, event_name) {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     let event_listener = (e) => {
       object.removeEventListener(event_name, event_listener);
       assert_unreached('Object should not fire an event.');
@@ -380,5 +361,19 @@ function assert_no_events(object, event_name) {
 function assert_properties_equal(properties, expected_properties) {
   for (let key in expected_properties) {
     assert_equals(properties[key], expected_properties[key]);
+  }
+}
+
+/**
+ * Asserts that |data_map| contains |expected_key|, and that the uint8 values
+ * for |expected_key| matches |expected_value|.
+ */
+function assert_data_maps_equal(data_map, expected_key, expected_value) {
+  assert_true(data_map.has(expected_key));
+
+  const value = new Uint8Array(data_map.get(expected_key).buffer);
+  assert_equals(value.length, expected_value.length);
+  for (let i = 0; i < value.length; ++i) {
+    assert_equals(value[i], expected_value[i]);
   }
 }

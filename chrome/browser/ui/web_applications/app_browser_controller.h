@@ -9,12 +9,13 @@
 #include <string>
 
 #include "base/callback_forward.h"
-#include "base/macros.h"
 #include "base/optional.h"
 #include "base/strings/string16.h"
 #include "chrome/browser/themes/theme_service.h"
+#include "chrome/browser/ui/page_action/page_action_icon_type.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
 #include "chrome/browser/web_applications/components/web_app_id.h"
+#include "components/url_formatter/url_formatter.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "third_party/skia/include/core/SkColor.h"
 
@@ -44,6 +45,8 @@ class AppBrowserController : public TabStripModelObserver,
                              public content::WebContentsObserver,
                              public BrowserThemeProviderDelegate {
  public:
+  AppBrowserController(const AppBrowserController&) = delete;
+  AppBrowserController& operator=(const AppBrowserController&) = delete;
   ~AppBrowserController() override;
 
   static std::unique_ptr<AppBrowserController> MaybeCreateWebAppController(
@@ -53,9 +56,20 @@ class AppBrowserController : public TabStripModelObserver,
   // Convenience wrapper for checking IsForExperimentalWebAppBrowser() on
   // |browser|'s HostedAppBrowserController if it exists.
   static bool IsForWebAppBrowser(const Browser* browser);
+  static bool IsForWebAppBrowser(const Browser* browser, const AppId& app_id);
 
   // Renders |url|'s origin as Unicode.
-  static base::string16 FormatUrlOrigin(const GURL& url);
+  static base::string16 FormatUrlOrigin(
+      const GURL& url,
+      url_formatter::FormatUrlTypes format_types =
+          url_formatter::kFormatUrlOmitUsernamePassword |
+          url_formatter::kFormatUrlOmitHTTPS |
+          url_formatter::kFormatUrlOmitHTTP |
+          url_formatter::kFormatUrlOmitTrailingSlashOnBareHostname |
+          url_formatter::kFormatUrlOmitTrivialSubdomains);
+
+  // Initialise, must be called after construction (requires virtual dispatch).
+  void Init();
 
   // Returns a theme built from the current page or app's theme color.
   const ui::ThemeProvider* GetThemeProvider() const;
@@ -78,6 +92,9 @@ class AppBrowserController : public TabStripModelObserver,
   // Whether to show content settings in the titlebar toolbar.
   virtual bool HasTitlebarContentSettings() const;
 
+  // Returns which PageActionIconTypes should appear in the titlebar toolbar.
+  virtual std::vector<PageActionIconType> GetTitleBarPageActions() const;
+
   // Whether to show the Back and Refresh buttons in the web app toolbar.
   virtual bool HasMinimalUiButtons() const = 0;
 
@@ -90,18 +107,21 @@ class AppBrowserController : public TabStripModelObserver,
   // Returns the color of the title bar.
   virtual base::Optional<SkColor> GetThemeColor() const;
 
+  // Returns the background color of the page.
+  virtual base::Optional<SkColor> GetBackgroundColor() const;
+
   // Returns the title to be displayed in the window title bar.
   virtual base::string16 GetTitle() const;
 
   // Gets the short name of the app.
-  virtual std::string GetAppShortName() const = 0;
+  virtual base::string16 GetAppShortName() const = 0;
 
   // Gets the origin of the app start url suitable for display (e.g
   // example.com.au).
   virtual base::string16 GetFormattedUrlOrigin() const = 0;
 
-  // Gets the launch url for the app.
-  virtual GURL GetAppLaunchURL() const = 0;
+  // Gets the start_url for the app.
+  virtual GURL GetAppStartUrl() const = 0;
 
   // Determines whether the specified url is 'inside' the app |this| controls.
   virtual bool IsUrlInAppScope(const GURL& url) const = 0;
@@ -119,6 +139,8 @@ class AppBrowserController : public TabStripModelObserver,
 
   virtual std::unique_ptr<TabMenuModelFactory> GetTabMenuModelFactory() const;
 
+  virtual bool IsWindowControlsOverlayEnabled() const;
+
   // Updates the custom tab bar's visibility based on whether it should be
   // currently visible or not. If |animate| is set, the change will be
   // animated.
@@ -126,6 +148,11 @@ class AppBrowserController : public TabStripModelObserver,
 
   // Returns true if this controller is for a System Web App.
   bool is_for_system_web_app() const { return system_app_type_.has_value(); }
+
+  // Returns the SystemAppType for this controller.
+  const base::Optional<SystemAppType>& system_app_type() const {
+    return system_app_type_;
+  }
 
   // Returns true if AppId is non-null
   bool HasAppId() const { return app_id_.has_value(); }
@@ -150,6 +177,7 @@ class AppBrowserController : public TabStripModelObserver,
   void DidStartNavigation(content::NavigationHandle* handle) override;
   void DOMContentLoaded(content::RenderFrameHost* render_frame_host) override;
   void DidChangeThemeColor() override;
+  void OnBackgroundColorChanged() override;
 
   // TabStripModelObserver:
   void OnTabStripModelChanged(
@@ -187,12 +215,12 @@ class AppBrowserController : public TabStripModelObserver,
   scoped_refptr<BrowserThemePack> theme_pack_;
   std::unique_ptr<ui::ThemeProvider> theme_provider_;
   base::Optional<SkColor> last_theme_color_;
+  base::Optional<SkColor> last_background_color_;
 
   base::Optional<SystemAppType> system_app_type_;
 
   const bool has_tab_strip_;
 
-  DISALLOW_COPY_AND_ASSIGN(AppBrowserController);
 };
 
 }  // namespace web_app

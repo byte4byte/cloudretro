@@ -5,7 +5,6 @@
 #include "content/browser/conversions/conversion_policy.h"
 
 #include "base/format_macros.h"
-#include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/rand_util.h"
 #include "base/strings/stringprintf.h"
@@ -41,12 +40,14 @@ std::unique_ptr<ConversionPolicy> ConversionPolicy::CreateForTesting(
       new ConversionPolicy(std::move(noise_provider)));
 }
 
-ConversionPolicy::ConversionPolicy()
-    : noise_provider_(std::make_unique<NoiseProvider>()) {}
+ConversionPolicy::ConversionPolicy(bool debug_mode)
+    : debug_mode_(debug_mode),
+      noise_provider_(debug_mode ? nullptr
+                                 : std::make_unique<NoiseProvider>()) {}
 
 ConversionPolicy::ConversionPolicy(
     std::unique_ptr<ConversionPolicy::NoiseProvider> noise_provider)
-    : noise_provider_(std::move(noise_provider)) {}
+    : debug_mode_(false), noise_provider_(std::move(noise_provider)) {}
 
 ConversionPolicy::~ConversionPolicy() = default;
 
@@ -55,7 +56,8 @@ std::string ConversionPolicy::GetSanitizedConversionData(
   // Add noise to the conversion when the value is first sanitized from a
   // conversion registration event. This noised data will be used for all
   // associated impressions that convert.
-  conversion_data = noise_provider_->GetNoisedConversionData(conversion_data);
+  if (noise_provider_)
+    conversion_data = noise_provider_->GetNoisedConversionData(conversion_data);
 
   // Allow at most 3 bits of entropy in conversion data. base::StringPrintf() is
   // used over base::HexEncode() because HexEncode() returns a hex string with
@@ -82,6 +84,21 @@ base::Time ConversionPolicy::GetExpiryTimeForImpression(
 
   // If the impression specified its own expiry, clamp it to the maximum.
   return impression_time + std::min(expiry, kDefaultImpressionExpiry);
+}
+
+base::Time ConversionPolicy::GetReportTimeForExpiredReportAtStartup(
+    base::Time now) const {
+  // Do not use any delay in debug mode.
+  if (debug_mode_)
+    return now;
+
+  // Add uniform random noise in the range of [0, 5 minutes] to the report time.
+  // TODO(https://crbug.com/1075600): This delay is very conservative. Consider
+  // increasing this delay once we can be sure reports are still sent at
+  // reasonable times, and not delayed for many browser sessions due to short
+  // session up-times.
+  return now +
+         base::TimeDelta::FromMilliseconds(base::RandInt(0, 5 * 60 * 1000));
 }
 
 }  // namespace content

@@ -26,8 +26,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_DOM_ELEMENT_H_
 
 #include "third_party/blink/public/common/input/pointer_id.h"
-#include "third_party/blink/public/mojom/input/focus_type.mojom-blink.h"
-#include "third_party/blink/renderer/bindings/core/v8/v8_focus_options.h"
+#include "third_party/blink/public/common/metrics/document_update_reason.h"
 #include "third_party/blink/renderer/core/animation/animatable.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/css_primitive_value.h"
@@ -43,6 +42,7 @@
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/wtf/hash_set.h"
+#include "third_party/blink/renderer/platform/wtf/text/atomic_string_table.h"
 
 namespace blink {
 
@@ -65,13 +65,15 @@ class ElementRareData;
 class ExceptionState;
 class FloatQuad;
 class FloatSize;
+class FocusOptions;
+class SetInnerHTMLOptions;
+class GetInnerHTMLOptions;
 class HTMLTemplateElement;
 class Image;
 class InputDeviceCapabilities;
 class Locale;
 class MutableCSSPropertyValueSet;
 class NamedNodeMap;
-class PaintLayerScrollableArea;
 class PointerLockOptions;
 class PseudoElement;
 class PseudoElementStyleRequest;
@@ -91,7 +93,9 @@ class V0CustomElementDefinition;
 enum class CSSPropertyID;
 enum class CSSValueID;
 enum class DisplayLockActivationReason;
-enum class DisplayLockLifecycleTarget;
+enum class DocumentUpdateReason;
+
+struct FocusParams;
 
 using ScrollOffset = FloatSize;
 
@@ -131,33 +135,6 @@ enum class NamedItemType {
   kNameOrIdWithName,
 };
 
-enum class InvisibleState {
-  kMissing,
-  kStatic,
-  kInvisible,
-};
-
-struct FocusParams {
-  STACK_ALLOCATED();
-
- public:
-  FocusParams() : options(FocusOptions::Create()) {}
-  FocusParams(SelectionBehaviorOnFocus selection,
-              mojom::blink::FocusType focus_type,
-              InputDeviceCapabilities* capabilities,
-              const FocusOptions* focus_options = FocusOptions::Create())
-      : selection_behavior(selection),
-        type(focus_type),
-        source_capabilities(capabilities),
-        options(focus_options) {}
-
-  SelectionBehaviorOnFocus selection_behavior =
-      SelectionBehaviorOnFocus::kRestore;
-  mojom::blink::FocusType type = mojom::blink::FocusType::kNone;
-  InputDeviceCapabilities* source_capabilities = nullptr;
-  const FocusOptions* options = nullptr;
-};
-
 typedef HeapVector<Member<Attr>> AttrNodeList;
 
 typedef HashMap<AtomicString, SpecificTrustedType> AttrNameToTrustedType;
@@ -177,6 +154,7 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   DEFINE_ATTRIBUTE_EVENT_LISTENER(beforecut, kBeforecut)
   DEFINE_ATTRIBUTE_EVENT_LISTENER(beforepaste, kBeforepaste)
   DEFINE_ATTRIBUTE_EVENT_LISTENER(search, kSearch)
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(beforematch, kBeforematch)
 
   bool hasAttribute(const QualifiedName&) const;
   const AtomicString& getAttribute(const QualifiedName&) const;
@@ -244,18 +222,28 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   // Ignores namespace.
   bool HasAttributeIgnoringNamespace(const AtomicString& local_name) const;
 
-  const AtomicString& getAttribute(const AtomicString& name) const;
+  const AtomicString& getAttribute(const AtomicString& local_name) const {
+    return GetAttributeHinted(local_name, WeakLowercaseIfNecessary(local_name));
+  }
+
   const AtomicString& getAttributeNS(const AtomicString& namespace_uri,
                                      const AtomicString& local_name) const;
 
   void setAttribute(const AtomicString& name,
-                    const AtomicString& value,
-                    ExceptionState& = ASSERT_NO_EXCEPTION);
+                    AtomicString value,
+                    ExceptionState& exception_state = ASSERT_NO_EXCEPTION) {
+    SetAttributeHinted(name, WeakLowercaseIfNecessary(name), value,
+                       exception_state);
+  }
 
   // Trusted Types variant for explicit setAttribute() use.
-  void setAttribute(const AtomicString&,
-                    const StringOrTrustedHTMLOrTrustedScriptOrTrustedScriptURL&,
-                    ExceptionState&);
+  void setAttribute(const AtomicString& name,
+                    const StringOrTrustedHTMLOrTrustedScriptOrTrustedScriptURL&
+                        string_or_trusted,
+                    ExceptionState& exception_state) {
+    SetAttributeHinted(name, WeakLowercaseIfNecessary(name), string_or_trusted,
+                       exception_state);
+  }
 
   // Returns attributes that should be checked against Trusted Types
   virtual const AttrNameToTrustedType& GetCheckedAttributeTypes() const;
@@ -286,6 +274,8 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   //   document, then set qualifiedName to qualifiedName in ASCII lowercase.
   //   https://dom.spec.whatwg.org/#concept-element-attributes-get-by-name
   AtomicString LowercaseIfNecessary(const AtomicString&) const;
+  WTF::AtomicStringTable::WeakResult WeakLowercaseIfNecessary(
+      const StringView&) const;
 
   // NoncedElement implementation: this is only used by HTMLElement and
   // SVGElement, but putting the implementation here allows us to use
@@ -304,8 +294,7 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   // return value should be cached for performance.
   AttributeCollection Attributes() const;
   // This variant will not update the potentially invalid attributes. To be used
-  // when not interested in style attribute or one of the SVG animation
-  // attributes.
+  // when not interested in style attribute or one of the SVG attributes.
   AttributeCollection AttributesWithoutUpdate() const;
 
   void scrollIntoView(ScrollIntoViewOptionsOrBoolean);
@@ -328,16 +317,14 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   double scrollTop();
   void setScrollLeft(double);
   void setScrollTop(double);
-  int scrollWidth();
-  int scrollHeight();
+  virtual int scrollWidth();
+  virtual int scrollHeight();
 
   void scrollBy(double x, double y);
   void scrollBy(const ScrollToOptions*);
   void scrollTo(double x, double y);
   void scrollTo(const ScrollToOptions*);
-  // This will return the |GetScrollableArea| of correspond LayoutBox. For
-  // LayoutTextControlSingleLine, it will return its |InnerEditorElement|'s.
-  virtual PaintLayerScrollableArea* GetScrollableArea() const;
+  LayoutBox* GetLayoutBoxForScrolling() const override;
 
   IntRect BoundsInViewport() const;
   // Returns an intersection rectangle of the bounds rectangle and the visual
@@ -345,6 +332,8 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   // Applies ancestors' frames' clipping, but does not (yet) apply (overflow)
   // element clipping (crbug.com/889840).
   IntRect VisibleBoundsInVisualViewport() const;
+  Vector<IntRect> OutlineRectsInVisualViewport(
+      DocumentUpdateReason reason = DocumentUpdateReason::kUnknown) const;
 
   DOMRectList* getClientRects();
   DOMRect* getBoundingClientRect();
@@ -355,18 +344,11 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   AccessibleNode* ExistingAccessibleNode() const;
   AccessibleNode* accessibleNode();
 
-  InvisibleState Invisible() const;
-  bool HasInvisibleAttribute() const;
-
-  void DispatchActivateInvisibleEventIfNeeded();
-  bool IsInsideInvisibleSubtree() const;
-  bool IsInsideInvisibleStaticSubtree() const;
-
-  void DefaultEventHandler(Event&) override;
-
   void DidMoveToNewDocument(Document&) override;
 
-  void removeAttribute(const AtomicString& name);
+  void removeAttribute(const AtomicString& name) {
+    RemoveAttributeHinted(name, WeakLowercaseIfNecessary(name));
+  }
   void removeAttributeNS(const AtomicString& namespace_uri,
                          const AtomicString& local_name);
 
@@ -656,7 +638,8 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   // delegatesFocus flag.
   bool DelegatesFocus() const;
   Element* GetFocusableArea() const;
-  virtual void focus(const FocusParams& = FocusParams());
+  virtual void focus(const FocusParams&);
+  void focus();
   void focus(const FocusOptions*);
 
   void UpdateFocusAppearance(SelectionBehaviorOnFocus);
@@ -715,7 +698,10 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   String innerHTML() const;
   String outerHTML() const;
   void setInnerHTML(const String&, ExceptionState& = ASSERT_NO_EXCEPTION);
-  String getInnerHTML(bool include_shadow_roots) const;
+  void setInnerHTMLWithOptions(const String&,
+                               const SetInnerHTMLOptions*,
+                               ExceptionState& = ASSERT_NO_EXCEPTION);
+  String getInnerHTML(const GetInnerHTMLOptions* options) const;
   void setOuterHTML(const String&, ExceptionState& = ASSERT_NO_EXCEPTION);
 
   void setPointerCapture(PointerId poinetr_id, ExceptionState&);
@@ -798,6 +784,7 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   virtual bool IsClearButtonElement() const { return false; }
   virtual bool IsScriptElement() const { return false; }
   virtual bool IsVTTCueBackgroundBox() const { return false; }
+  virtual bool IsSliderThumbElement() const { return false; }
 
   // Elements that may have an insertion mode other than "in body" should
   // override this and return true.
@@ -815,7 +802,8 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   // descendants. Note that even if this element returns true, it's not implied
   // that all descendants will return the same. Once an element needs to force
   // legacy layout, though, the layout engine knows that it will have to perform
-  // legacy layout on the entire subtree.
+  // legacy layout on the entire subtree, unless this is overridden by
+  // ShouldForceNGLayout().
   bool ShouldForceLegacyLayout() const {
     if (TypeShouldForceLegacyLayout())
       return true;
@@ -837,6 +825,7 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   void SetDidAttachInternals();
   bool DidAttachInternals() const;
   ElementInternals& EnsureElementInternals();
+  const ElementInternals* GetElementInternals() const;
 
   bool ContainsFullScreenElement() const {
     return HasElementFlag(ElementFlags::kContainsFullScreenElement);
@@ -861,8 +850,7 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   bool IsSpellCheckingEnabled() const;
 
   // FIXME: public for LayoutTreeBuilder, we shouldn't expose this though.
-  scoped_refptr<ComputedStyle> StyleForLayoutObject(
-      bool calc_invisible = false);
+  scoped_refptr<ComputedStyle> StyleForLayoutObject();
 
   bool HasID() const;
   bool HasClass() const;
@@ -887,10 +875,15 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   ElementAnimations& EnsureElementAnimations();
   bool HasAnimations() const;
 
-  void SynchronizeAttribute(const AtomicString& local_name) const;
+  void SynchronizeAttribute(const AtomicString& local_name) const {
+    SynchronizeAttributeHinted(local_name,
+                               WeakLowercaseIfNecessary(local_name));
+  }
 
   MutableCSSPropertyValueSet& EnsureMutableInlineStyle();
   void ClearMutableInlineStyleIfEmpty();
+
+  CSSPropertyValueSet* CreatePresentationAttributeStyle();
 
   void setTabIndex(int);
   int tabIndex() const;
@@ -910,7 +903,7 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
       const char element[],
       const AttributeModificationParams&);
 
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
 
   SpellcheckAttributeState GetSpellcheckAttributeState() const;
 
@@ -925,7 +918,7 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   DisplayLockContext* GetDisplayLockContext() const;
   DisplayLockContext& EnsureDisplayLockContext();
 
-  bool StyleRecalcBlockedByDisplayLock(DisplayLockLifecycleTarget) const;
+  bool ChildStyleRecalcBlockedByDisplayLock() const;
 
   // Activates all activatable (for a given reason) locked ancestors for this
   // element. Return true if we activated at least one previously locked
@@ -939,9 +932,16 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   // been determined to be from an ad. Returns false by default.
   virtual bool IsAdRelated() const { return false; }
 
+  void NotifyInlineStyleMutation();
+
  protected:
   const ElementData* GetElementData() const { return element_data_.Get(); }
   UniqueElementData& EnsureUniqueElementData();
+
+  bool IsViewportScrollElement();
+  void RecordScrollbarSizeForStudy(int measurement,
+                                   bool is_width,
+                                   bool is_offset);
 
   void AddPropertyToPresentationAttributeStyle(MutableCSSPropertyValueSet*,
                                                CSSPropertyID,
@@ -984,10 +984,13 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   // create layout objects is completed (e.g. in display-locked trees).
   bool IsFocusableStyleAfterUpdate() const;
 
-  // classAttributeChanged() exists to share code between
-  // parseAttribute (called via setAttribute()) and
-  // svgAttributeChanged (called when element.className.baseValue is set)
+  // ClassAttributeChanged() and UpdateClassList() exist to share code between
+  // ParseAttribute (called via setAttribute()) and SvgAttributeChanged (called
+  // when element.className.baseVal is set or when the 'class' attribute is
+  // animated by SMIL).
   void ClassAttributeChanged(const AtomicString& new_class_string);
+  void UpdateClassList(const AtomicString& old_class_string,
+                       const AtomicString& new_class_string);
 
   static bool AttributeValueIsJavaScriptURL(const Attribute&);
 
@@ -1008,6 +1011,12 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   // This function clears the "nonce" attribute whenever conditions (1) and (2)
   // are met.
   void HideNonce();
+
+  // Adjust the state of legacy layout forcing for this element (and its
+  // subtree). Input is the state inherited from the parent element. Output will
+  // be modified if required by this element.
+  void AdjustForceLegacyLayout(const ComputedStyle*,
+                               bool* should_force_legacy_layout);
 
  private:
   friend class AXObject;
@@ -1042,9 +1051,6 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
 
   void InlineStyleChanged();
   void SetInlineStyleFromString(const AtomicString&);
-
-  void InvisibleAttributeChanged(const AtomicString& old_value,
-                                 const AtomicString& new_value);
 
   // If the only inherited changes in the parent element are independent,
   // these changes can be directly propagated to this element (the child).
@@ -1121,16 +1127,42 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
                                SynchronizationOfLazyAttribute);
   void RemoveAttributeInternal(wtf_size_t index,
                                SynchronizationOfLazyAttribute);
-  std::pair<wtf_size_t, const QualifiedName> LookupAttributeQNameInternal(
-      const AtomicString& local_name) const;
   SpecificTrustedType ExpectedTrustedTypeForAttribute(
       const QualifiedName&) const;
+
+  // These Hinted versions of the functions are subtle hot path
+  // optimizations designed to reduce the number of unnecessary AtomicString
+  // creations, AtomicStringTable lookups, and LowerCaseIfNecessary calls.
+  //
+  // The `hint` is the result of a WeakLowercaseIfNecessary() call unless it is
+  // known that the the incoming string already has the right case. Then
+  // the `hint` can be constructed from calling AtomicString::Impl().
+  const AtomicString& GetAttributeHinted(
+      const AtomicString& name,
+      WTF::AtomicStringTable::WeakResult hint) const;
+  void RemoveAttributeHinted(const AtomicString& name,
+                             WTF::AtomicStringTable::WeakResult hint);
+  void SynchronizeAttributeHinted(
+      const AtomicString& name,
+      WTF::AtomicStringTable::WeakResult hint) const;
+  void SetAttributeHinted(const AtomicString& name,
+                          WTF::AtomicStringTable::WeakResult hint,
+                          const AtomicString& value,
+                          ExceptionState& = ASSERT_NO_EXCEPTION);
+  void SetAttributeHinted(
+      const AtomicString& name,
+      WTF::AtomicStringTable::WeakResult hint,
+      const StringOrTrustedHTMLOrTrustedScriptOrTrustedScriptURL&,
+      ExceptionState&);
+  std::pair<wtf_size_t, const QualifiedName> LookupAttributeQNameHinted(
+      const AtomicString& name,
+      WTF::AtomicStringTable::WeakResult hint) const;
 
   void CancelFocusAppearanceUpdate();
   virtual int DefaultTabIndex() const;
 
   const ComputedStyle* VirtualEnsureComputedStyle(
-      PseudoId pseudo_element_specifier = kPseudoIdNone) override {
+      PseudoId pseudo_element_specifier = kPseudoIdNone) final {
     return EnsureComputedStyle(pseudo_element_specifier);
   }
 
@@ -1156,6 +1188,10 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   bool ShouldInvalidateDistributionWhenAttributeChanged(ShadowRoot&,
                                                         const QualifiedName&,
                                                         const AtomicString&);
+
+  void SetInnerHTMLInternal(const String&,
+                            const SetInnerHTMLOptions*,
+                            ExceptionState&);
 
   ElementRareData* GetElementRareData() const;
   ElementRareData& EnsureElementRareData();

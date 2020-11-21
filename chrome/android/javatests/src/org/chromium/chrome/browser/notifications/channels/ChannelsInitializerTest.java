@@ -18,10 +18,10 @@ import android.app.NotificationManager;
 import android.content.Context;
 import android.os.Build;
 import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.SmallTest;
+
+import androidx.test.filters.SmallTest;
 
 import org.junit.Before;
-import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
@@ -33,7 +33,7 @@ import org.chromium.chrome.browser.notifications.NotificationSettingsBridge;
 import org.chromium.components.browser_ui.notifications.NotificationManagerProxy;
 import org.chromium.components.browser_ui.notifications.NotificationManagerProxyImpl;
 import org.chromium.components.browser_ui.notifications.channels.ChannelsInitializer;
-import org.chromium.content_public.browser.test.NativeLibraryTestRule;
+import org.chromium.content_public.browser.test.NativeLibraryTestUtils;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -52,15 +52,12 @@ public class ChannelsInitializerTest {
     private NotificationManagerProxy mNotificationManagerProxy;
     private Context mContext;
 
-    @Rule
-    public NativeLibraryTestRule mNativeLibraryTestRule = new NativeLibraryTestRule();
-
     @Before
     @TargetApi(Build.VERSION_CODES.O)
     public void setUp() {
         // Not initializing the browser process is safe because
         // UrlFormatter.formatUrlForSecurityDisplay() is stand-alone.
-        mNativeLibraryTestRule.loadNativeLibraryNoBrowserProcess();
+        NativeLibraryTestUtils.loadNativeLibraryNoBrowserProcess();
 
         mContext = InstrumentationRegistry.getTargetContext();
         mNotificationManagerProxy = new NotificationManagerProxyImpl(mContext);
@@ -115,7 +112,7 @@ public class ChannelsInitializerTest {
                 containsInAnyOrder(ChromeChannelDefinitions.ChannelId.BROWSER,
                         ChromeChannelDefinitions.ChannelId.DOWNLOADS,
                         ChromeChannelDefinitions.ChannelId.INCOGNITO,
-                        ChromeChannelDefinitions.ChannelId.MEDIA));
+                        ChromeChannelDefinitions.ChannelId.MEDIA_PLAYBACK));
     }
 
     @Test
@@ -208,13 +205,14 @@ public class ChannelsInitializerTest {
     @TargetApi(Build.VERSION_CODES.O)
     @Feature({"Browser", "Notifications"})
     public void testEnsureInitialized_mediaChannel() {
-        mChannelsInitializer.ensureInitialized(ChromeChannelDefinitions.ChannelId.MEDIA);
+        mChannelsInitializer.ensureInitialized(ChromeChannelDefinitions.ChannelId.MEDIA_PLAYBACK);
 
         assertThat(getChannelsIgnoringDefault(), hasSize(1));
         NotificationChannel channel = getChannelsIgnoringDefault().get(0);
-        assertThat(channel.getId(), is(ChromeChannelDefinitions.ChannelId.MEDIA));
+        assertThat(channel.getId(), is(ChromeChannelDefinitions.ChannelId.MEDIA_PLAYBACK));
         assertThat(channel.getName().toString(),
-                is(mContext.getString(org.chromium.chrome.R.string.notification_category_media)));
+                is(mContext.getString(
+                        org.chromium.chrome.R.string.notification_category_media_playback)));
         assertThat(channel.getImportance(), is(NotificationManager.IMPORTANCE_LOW));
         assertThat(channel.getGroup(), is(ChromeChannelDefinitions.ChannelGroupId.GENERAL));
     }
@@ -320,7 +318,7 @@ public class ChannelsInitializerTest {
                 CollectionUtil.newHashSet(ChromeChannelDefinitions.ChannelGroupId.SITES,
                         ChromeChannelDefinitions.ChannelGroupId.GENERAL);
         Collection<String> channelIds =
-                CollectionUtil.newHashSet(ChromeChannelDefinitions.ChannelId.MEDIA,
+                CollectionUtil.newHashSet(ChromeChannelDefinitions.ChannelId.MEDIA_PLAYBACK,
                         ChromeChannelDefinitions.ChannelId.BROWSER);
         mChannelsInitializer.ensureInitialized(groupIds, channelIds);
         assertThat(getChannelsIgnoringDefault(), hasSize(2));

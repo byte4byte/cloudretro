@@ -67,7 +67,6 @@ class PLATFORM_EXPORT ResourceLoader final
       protected WebURLLoaderClient,
       protected mojom::blink::ProgressClient,
       private ResponseBodyLoaderClient {
-  USING_GARBAGE_COLLECTED_MIXIN(ResourceLoader);
   USING_PRE_FINALIZER(ResourceLoader, Dispose);
 
  public:
@@ -78,7 +77,7 @@ class PLATFORM_EXPORT ResourceLoader final
                  ResourceRequestBody request_body = ResourceRequestBody(),
                  uint32_t inflight_keepalive_bytes = 0);
   ~ResourceLoader() override;
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
 
   void Start();
 
@@ -120,7 +119,8 @@ class PLATFORM_EXPORT ResourceLoader final
                           network::mojom::ReferrerPolicy new_referrer_policy,
                           const WebString& new_method,
                           const WebURLResponse& passed_redirect_response,
-                          bool& report_raw_headers) override;
+                          bool& report_raw_headers,
+                          std::vector<std::string>* removed_headers) override;
   void DidSendData(uint64_t bytes_sent,
                    uint64_t total_bytes_to_be_sent) override;
   void DidReceiveResponse(const WebURLResponse&) override;
@@ -195,16 +195,12 @@ class PLATFORM_EXPORT ResourceLoader final
   void OnProgress(uint64_t delta) override;
   void FinishedCreatingBlob(const scoped_refptr<BlobDataHandle>&);
 
-  bool GetCorsFlag() const { return resource_->Options().cors_flag; }
-
   base::Optional<ResourceRequestBlockedReason> CheckResponseNosniff(
-      mojom::RequestContextType,
+      mojom::blink::RequestContextType,
       const ResourceResponse&);
 
   // Processes Data URL in ResourceLoader instead of using |loader_|.
   void HandleDataUrl();
-
-  bool ShouldCheckCorsInResourceLoader() const;
 
   std::unique_ptr<WebURLLoader> loader_;
   ResourceLoadScheduler::ClientId scheduler_client_id_;

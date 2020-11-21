@@ -16,6 +16,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/policy/core/common/mock_configuration_policy_provider.h"
+#include "content/public/test/browser_test.h"
 #include "extensions/test/extension_test_message_listener.h"
 #include "extensions/test/result_catcher.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -52,12 +53,11 @@ class PrintingMetricsApiTest : public ExtensionApiTest {
     policy_provider_.SetAutoRefresh();
     policy::BrowserPolicyConnector::SetPolicyProviderForTesting(
         &policy_provider_);
-    will_create_browser_context_services_subscription_ =
+    create_services_subscription_ =
         BrowserContextDependencyManager::GetInstance()
-            ->RegisterWillCreateBrowserContextServicesCallbackForTesting(
-                base::BindRepeating(
-                    &PrintingMetricsApiTest::OnWillCreateBrowserContextServices,
-                    base::Unretained(this)));
+            ->RegisterCreateServicesCallbackForTesting(base::BindRepeating(
+                &PrintingMetricsApiTest::OnWillCreateBrowserContextServices,
+                base::Unretained(this)));
     ExtensionApiTest::SetUpInProcessBrowserTestFixture();
   }
 
@@ -70,8 +70,8 @@ class PrintingMetricsApiTest : public ExtensionApiTest {
   }
 
   std::unique_ptr<
-      base::CallbackList<void(content::BrowserContext*)>::Subscription>
-      will_create_browser_context_services_subscription_;
+      BrowserContextDependencyManager::CreateServicesCallbackList::Subscription>
+      create_services_subscription_;
 
   DISALLOW_COPY_AND_ASSIGN(PrintingMetricsApiTest);
 };

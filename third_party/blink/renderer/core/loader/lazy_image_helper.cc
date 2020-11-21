@@ -8,6 +8,7 @@
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/frame/frame_owner.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/html/html_image_element.h"
@@ -72,13 +73,13 @@ void LazyImageHelper::StartMonitoring(blink::Element* element) {
   using DeferralMessage = LazyLoadImageObserver::DeferralMessage;
   auto deferral_message = DeferralMessage::kNone;
   if (auto* html_image = DynamicTo<HTMLImageElement>(element)) {
-    LoadingAttributeValue loading_attr = GetLoadingAttributeValue(
+    LoadingAttributeValue effective_loading_attr = GetLoadingAttributeValue(
         html_image->FastGetAttribute(html_names::kLoadingAttr));
-    DCHECK_NE(loading_attr, LoadingAttributeValue::kEager);
-    if (loading_attr == LoadingAttributeValue::kAuto) {
+    DCHECK_NE(effective_loading_attr, LoadingAttributeValue::kEager);
+    if (effective_loading_attr == LoadingAttributeValue::kAuto) {
       deferral_message = DeferralMessage::kLoadEventsDeferred;
     } else if (!IsDimensionAbsoluteLarge(*html_image)) {
-      DCHECK_EQ(loading_attr, LoadingAttributeValue::kLazy);
+      DCHECK_EQ(effective_loading_attr, LoadingAttributeValue::kLazy);
       deferral_message = DeferralMessage::kMissingDimensionForLazy;
     }
   }
@@ -103,7 +104,7 @@ LazyImageHelper::DetermineEligibilityAndTrackVisibilityMetrics(
 
   // Do not lazyload image elements when JavaScript is disabled, regardless of
   // the `loading` attribute.
-  if (!frame.GetDocument()->CanExecuteScripts(kNotAboutToExecuteScript))
+  if (!frame.DomWindow()->CanExecuteScripts(kNotAboutToExecuteScript))
     return LazyImageHelper::Eligibility::kDisabled;
 
   const auto lazy_load_image_setting = frame.GetLazyLoadImageSetting();
@@ -122,8 +123,7 @@ LazyImageHelper::DetermineEligibilityAndTrackVisibilityMetrics(
     }
   }
 
-  if (loading_attr == LoadingAttributeValue::kEager &&
-      !frame.GetDocument()->IsLazyLoadPolicyEnforced()) {
+  if (loading_attr == LoadingAttributeValue::kEager) {
     UseCounter::Count(frame.GetDocument(),
                       WebFeature::kLazyLoadImageLoadingAttributeEager);
     return LazyImageHelper::Eligibility::kDisabled;

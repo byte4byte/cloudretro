@@ -5,8 +5,8 @@
 #ifndef IOS_WEB_WEB_STATE_POLICY_DECISION_STATE_TRACKER_H_
 #define IOS_WEB_WEB_STATE_POLICY_DECISION_STATE_TRACKER_H_
 
-#include "base/bind_helpers.h"
 #include "base/callback.h"
+#include "base/callback_helpers.h"
 #include "base/memory/weak_ptr.h"
 #import "ios/web/public/navigation/web_state_policy_decider.h"
 
@@ -19,7 +19,9 @@ namespace web {
 // also Allow. If at least one decision is PolicyDecision::Cancel, the final
 // result is Cancel. Otherwise, if at least one decision is
 // CancelAndDisplayError, the final result is also CancelAndDisplayError, with
-// the error associated with the first such decision.
+// the error associated with the first such decision. If this is destroyed
+// before all decisions have been received and the callback has not yet been
+// invoked, the callback is invoked with PolicyDecision::Cancel.
 class PolicyDecisionStateTracker
     : public base::SupportsWeakPtr<PolicyDecisionStateTracker> {
  public:

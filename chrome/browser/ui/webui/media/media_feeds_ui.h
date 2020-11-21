@@ -35,13 +35,21 @@ class MediaFeedsUI : public ui::MojoWebUIController,
   void GetItemsForMediaFeed(int64_t feed_id,
                             GetItemsForMediaFeedCallback callback) override;
   void FetchMediaFeed(int64_t feed_id,
-                      const GURL& url,
                       FetchMediaFeedCallback callback) override;
+  void GetDebugInformation(GetDebugInformationCallback callback) override;
+  void SetSafeSearchEnabledPref(
+      bool value,
+      SetSafeSearchEnabledPrefCallback callback) override;
+  void SetBackgroundFetchingPref(
+      bool value,
+      SetBackgroundFetchingPrefCallback callback) override;
 
  private:
   media_history::MediaHistoryKeyedService* GetMediaHistoryService();
 
   media_feeds::MediaFeedsService* GetMediaFeedsService();
+
+  Profile* GetProfile();
 
   mojo::ReceiverSet<media_feeds::mojom::MediaFeedsStore> receiver_;
 

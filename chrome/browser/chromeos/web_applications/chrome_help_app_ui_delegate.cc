@@ -4,21 +4,32 @@
 
 #include "chrome/browser/chromeos/web_applications/chrome_help_app_ui_delegate.h"
 
+#include <string>
+
 #include "ash/public/cpp/assistant/assistant_state.h"
 #include "ash/public/cpp/tablet_mode.h"
-#include "ash/public/mojom/assistant_state_controller.mojom.h"
 #include "base/system/sys_info.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/arc/arc_util.h"
 #include "chrome/browser/chromeos/assistant/assistant_util.h"
 #include "chrome/browser/chromeos/login/quick_unlock/quick_unlock_utils.h"
+#include "chrome/browser/policy/profile_policy_connector.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/chrome_pages.h"
+#include "chrome/browser/ui/settings_window_manager_chromeos.h"
+#include "chrome/browser/ui/webui/settings/chromeos/constants/routes.mojom.h"
+#include "chrome/common/channel_info.h"
+#include "chrome/common/chrome_constants.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/grit/generated_resources.h"
 #include "chromeos/components/help_app_ui/url_constants.h"
+#include "chromeos/constants/chromeos_features.h"
 #include "chromeos/services/multidevice_setup/public/cpp/prefs.h"
 #include "chromeos/system/statistics_provider.h"
 #include "components/prefs/pref_service.h"
+#include "components/user_manager/user_manager.h"
 #include "content/public/browser/web_ui_data_source.h"
+#include "ui/chromeos/devicetype_utils.h"
 #include "ui/events/devices/device_data_manager.h"
 #include "url/gurl.h"
 
@@ -27,23 +38,26 @@ ChromeHelpAppUIDelegate::ChromeHelpAppUIDelegate(content::WebUI* web_ui)
 
 base::Optional<std::string> ChromeHelpAppUIDelegate::OpenFeedbackDialog() {
   Profile* profile = Profile::FromWebUI(web_ui_);
-  // TODO(crbug/1045222): Additional strings are blank right now while we decide
-  // on the language and relevant information we want feedback to include.
-  // Note that category_tag is the name of the listnr bucket we want our
-  // reports to end up in. I.e DESKTOP_TAB_GROUPS.
-  chrome::ShowFeedbackPage(
-      GURL(chromeos::kChromeUIHelpAppURL), profile,
-      chrome::kFeedbackSourceHelpApp, std::string() /* description_template */,
-      std::string() /* description_placeholder_text */,
-      std::string() /* category_tag */, std::string() /* extra_diagnostics */);
+  constexpr char kHelpAppFeedbackCategoryTag[] = "FromHelpApp";
+  // We don't change the default description, or add extra diagnostics so those
+  // are empty strings.
+  chrome::ShowFeedbackPage(GURL(chromeos::kChromeUIHelpAppURL), profile,
+                           chrome::kFeedbackSourceHelpApp,
+                           std::string() /* description_template */,
+                           std::string() /* description_placeholder_text */,
+                           kHelpAppFeedbackCategoryTag /* category_tag */,
+                           std::string() /* extra_diagnostics */);
   return base::nullopt;
 }
 
 void ChromeHelpAppUIDelegate::PopulateLoadTimeData(
     content::WebUIDataSource* source) {
+  source->AddString("appLocale", g_browser_process->GetApplicationLocale());
   // Add strings that can be pulled in.
   source->AddString("boardName", base::SysInfo::GetLsbReleaseBoard());
   source->AddString("chromeOSVersion", base::SysInfo::OperatingSystemVersion());
+  source->AddString("chromeVersion", chrome::kChromeVersion);
+  source->AddInteger("channel", static_cast<int>(chrome::GetChannel()));
   std::string customization_id;
   std::string hwid;
   chromeos::system::StatisticsProvider* provider =
@@ -54,7 +68,14 @@ void ChromeHelpAppUIDelegate::PopulateLoadTimeData(
                                 &customization_id);
   provider->GetMachineStatistic(chromeos::system::kHardwareClassKey, &hwid);
   source->AddString("customizationId", customization_id);
+  source->AddString("deviceName", ui::GetChromeOSDeviceName());
   source->AddString("hwid", hwid);
+
+  // Add any features that have been enabled.
+  source->AddBoolean("HelpAppReleaseNotes", true);
+  source->AddBoolean("HelpAppSearchServiceIntegration",
+                     base::FeatureList::IsEnabled(
+                         chromeos::features::kHelpAppSearchServiceIntegration));
 
   Profile* profile = Profile::FromWebUI(web_ui_);
   PrefService* pref_service = profile->GetPrefs();
@@ -63,6 +84,9 @@ void ChromeHelpAppUIDelegate::PopulateLoadTimeData(
   source->AddBoolean(
       "shouldShowGetStarted",
       pref_service->GetBoolean(prefs::kHelpAppShouldShowGetStarted));
+  source->AddBoolean(
+      "shouldShowParentalControl",
+      pref_service->GetBoolean(prefs::kHelpAppShouldShowParentalControl));
   source->AddBoolean(
       "tabletModeDuringOOBE",
       pref_service->GetBoolean(prefs::kHelpAppTabletModeDuringOobe));
@@ -76,14 +100,14 @@ void ChromeHelpAppUIDelegate::PopulateLoadTimeData(
   // Checks if there are active touch screens.
   source->AddBoolean(
       "hasTouchScreen",
-      ui::DeviceDataManager::GetInstance()->GetTouchscreenDevices().empty());
+      !ui::DeviceDataManager::GetInstance()->GetTouchscreenDevices().empty());
   // Checks if the Google Assistant is allowed on this device by going through
   // policies.
-  ash::mojom::AssistantAllowedState assistant_allowed_state =
+  chromeos::assistant::AssistantAllowedState assistant_allowed_state =
       assistant::IsAssistantAllowedForProfile(profile);
-  source->AddBoolean(
-      "assistantAllowed",
-      assistant_allowed_state == ash::mojom::AssistantAllowedState::ALLOWED);
+  source->AddBoolean("assistantAllowed",
+                     assistant_allowed_state ==
+                         chromeos::assistant::AssistantAllowedState::ALLOWED);
   source->AddBoolean(
       "assistantEnabled",
       ash::AssistantState::Get()->settings_enabled().value_or(false));
@@ -91,4 +115,23 @@ void ChromeHelpAppUIDelegate::PopulateLoadTimeData(
                      arc::IsArcPlayStoreEnabledForProfile(profile));
   source->AddBoolean("pinEnabled",
                      chromeos::quick_unlock::IsPinEnabled(pref_service));
+
+  // Data about what type of account/login this is.
+  user_manager::UserManager* user_manager = user_manager::UserManager::Get();
+  source->AddBoolean("isManagedDevice",
+                     profile->GetProfilePolicyConnector()->IsManaged());
+  source->AddInteger("userType", user_manager->GetActiveUser()->GetType());
+  source->AddBoolean("isEphemeralUser",
+                     user_manager->IsCurrentUserNonCryptohomeDataEphemeral());
+}
+
+void ChromeHelpAppUIDelegate::ShowParentalControls() {
+  Profile* profile = Profile::FromWebUI(web_ui_);
+  // The "People" section of OS Settings contains parental controls.
+  chrome::SettingsWindowManager::GetInstance()->ShowOSSettings(
+      profile, chromeos::settings::mojom::kPeopleSectionPath);
+}
+
+PrefService* ChromeHelpAppUIDelegate::GetLocalState() {
+  return g_browser_process->local_state();
 }

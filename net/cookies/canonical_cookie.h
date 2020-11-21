@@ -14,8 +14,11 @@
 #include "base/optional.h"
 #include "base/time/time.h"
 #include "net/base/net_export.h"
+#include "net/cookies/cookie_access_result.h"
 #include "net/cookies/cookie_constants.h"
+#include "net/cookies/cookie_inclusion_status.h"
 #include "net/cookies/cookie_options.h"
+#include "url/third_party/mozilla/url_parse.h"
 
 class GURL;
 
@@ -24,16 +27,29 @@ namespace net {
 class ParsedCookie;
 class CanonicalCookie;
 
-struct CookieWithStatus;
-struct CookieAndLineWithStatus;
+struct CookieWithAccessResult;
+struct CookieAndLineWithAccessResult;
 
 using CookieList = std::vector<CanonicalCookie>;
-using CookieStatusList = std::vector<CookieWithStatus>;
-using CookieAndLineStatusList = std::vector<CookieAndLineWithStatus>;
+using CookieAndLineAccessResultList =
+    std::vector<CookieAndLineWithAccessResult>;
+using CookieAccessResultList = std::vector<CookieWithAccessResult>;
+
+struct NET_EXPORT CookieAccessParams {
+  CookieAccessParams() = delete;
+  CookieAccessParams(CookieAccessSemantics access_semantics,
+                     bool delegate_treats_url_as_trustworthy);
+
+  // |access_semantics| is the access mode of the cookie access check.
+  CookieAccessSemantics access_semantics = CookieAccessSemantics::UNKNOWN;
+  // |delegate_treats_url_as_trustworthy| should be true iff the
+  // CookieAccessDelegate has authorized access to secure cookies from URLs
+  // which might not otherwise be able to do so.
+  bool delegate_treats_url_as_trustworthy = false;
+};
 
 class NET_EXPORT CanonicalCookie {
  public:
-  class CookieInclusionStatus;
   using UniqueCookieKey = std::tuple<std::string, std::string, std::string>;
 
   CanonicalCookie();
@@ -45,19 +61,20 @@ class NET_EXPORT CanonicalCookie {
   // themselves.
   // NOTE: Prefer using CreateSanitizedCookie() over directly using this
   // constructor.
-  CanonicalCookie(
-      const std::string& name,
-      const std::string& value,
-      const std::string& domain,
-      const std::string& path,
-      const base::Time& creation,
-      const base::Time& expiration,
-      const base::Time& last_access,
-      bool secure,
-      bool httponly,
-      CookieSameSite same_site,
-      CookiePriority priority,
-      CookieSourceScheme scheme_secure = CookieSourceScheme::kUnset);
+  CanonicalCookie(const std::string& name,
+                  const std::string& value,
+                  const std::string& domain,
+                  const std::string& path,
+                  const base::Time& creation,
+                  const base::Time& expiration,
+                  const base::Time& last_access,
+                  bool secure,
+                  bool httponly,
+                  CookieSameSite same_site,
+                  CookiePriority priority,
+                  bool same_party,
+                  CookieSourceScheme scheme_secure = CookieSourceScheme::kUnset,
+                  int source_port = url::PORT_UNSPECIFIED);
 
   ~CanonicalCookie();
 
@@ -102,7 +119,31 @@ class NET_EXPORT CanonicalCookie {
       bool secure,
       bool http_only,
       CookieSameSite same_site,
-      CookiePriority priority);
+      CookiePriority priority,
+      bool same_party);
+
+  // FromStorage is a factory method which is meant for creating a new
+  // CanonicalCookie using properties of a previously existing cookie
+  // that was already ingested into the cookie store.
+  // This should NOT be used to create a new CanonicalCookie that was not
+  // already in the store.
+  // Returns nullptr if the resulting cookie is not canonical,
+  // i.e. cc->IsCanonical() returns false.
+  static std::unique_ptr<CanonicalCookie> FromStorage(
+      const std::string& name,
+      const std::string& value,
+      const std::string& domain,
+      const std::string& path,
+      const base::Time& creation,
+      const base::Time& expiration,
+      const base::Time& last_access,
+      bool secure,
+      bool httponly,
+      CookieSameSite same_site,
+      CookiePriority priority,
+      bool same_party,
+      CookieSourceScheme source_scheme,
+      int source_port);
 
   const std::string& Name() const { return name_; }
   const std::string& Value() const { return value_; }
@@ -120,10 +161,17 @@ class NET_EXPORT CanonicalCookie {
   bool IsHttpOnly() const { return httponly_; }
   CookieSameSite SameSite() const { return same_site_; }
   CookiePriority Priority() const { return priority_; }
-  // Returns an enum indicating the source scheme that set this cookie. This is
-  // not part of the cookie spec but is being used to collect metrics for a
-  // potential change to the cookie spec.
+  bool IsSameParty() const { return same_party_; }
+
+  // Returns an enum indicating the scheme of the origin that
+  // set this cookie. This is not part of the cookie spec but is being used to
+  // collect metrics for a potential change to the cookie spec
+  // (https://tools.ietf.org/html/draft-west-cookie-incrementalism-01#section-3.4)
   CookieSourceScheme SourceScheme() const { return source_scheme_; }
+  // Returns the port of the origin that originally set this cookie (the
+  // source port). This is not part of the cookie spec but is being used to
+  // collect metrics for a potential change to the cookie spec.
+  int SourcePort() const { return source_port_; }
   bool IsDomainCookie() const {
     return !domain_.empty() && domain_[0] == '.'; }
   bool IsHostCookie() const { return !IsDomainCookie(); }
@@ -195,6 +243,11 @@ class NET_EXPORT CanonicalCookie {
   void SetSourceScheme(CookieSourceScheme source_scheme) {
     source_scheme_ = source_scheme;
   }
+
+  // Set the source port value. Performs a range check and sets the port to
+  // url::PORT_INVALID if value isn't in [0,65535] or url::PORT_UNSPECIFIED.
+  void SetSourcePort(int port);
+
   void SetLastAccessDate(const base::Time& date) {
     last_access_date_ = date;
   }
@@ -226,20 +279,21 @@ class NET_EXPORT CanonicalCookie {
 
   // Returns if the cookie should be included (and if not, why) for the given
   // request |url| using the CookieInclusionStatus enum. HTTP only cookies can
-  // be filter by using appropriate cookie |options|. PLEASE NOTE that this
-  // method does not check whether a cookie is expired or not!
-  CookieInclusionStatus IncludeForRequestURL(
+  // be filter by using appropriate cookie |options|.
+  //
+  // PLEASE NOTE that this method does not check whether a cookie is expired or
+  // not!
+  CookieAccessResult IncludeForRequestURL(
       const GURL& url,
       const CookieOptions& options,
-      CookieAccessSemantics access_semantics =
-          CookieAccessSemantics::UNKNOWN) const;
+      const CookieAccessParams& params) const;
 
   // Returns if the cookie with given attributes can be set in context described
   // by |options|, and if no, describes why.
   // WARNING: this does not cover checking whether secure cookies are set in
   // a secure schema, since whether the schema is secure isn't part of
   // |options|.
-  CookieInclusionStatus IsSetPermittedInContext(
+  CookieAccessResult IsSetPermittedInContext(
       const CookieOptions& options,
       CookieAccessSemantics access_semantics =
           CookieAccessSemantics::UNKNOWN) const;
@@ -247,7 +301,7 @@ class NET_EXPORT CanonicalCookie {
   // Overload that updates an existing |status| rather than returning a new one.
   void IsSetPermittedInContext(const CookieOptions& options,
                                CookieAccessSemantics access_semantics,
-                               CookieInclusionStatus* status) const;
+                               CookieAccessResult* access_result) const;
 
   std::string DebugString() const;
 
@@ -294,8 +348,9 @@ class NET_EXPORT CanonicalCookie {
   // by |cookies|. The string is built in the same order as the given list.
   static std::string BuildCookieLine(const CookieList& cookies);
 
-  // Same as above but takes a CookieStatusList (ignores the statuses).
-  static std::string BuildCookieLine(const CookieStatusList& cookies);
+  // Same as above but takes a CookieAccessResultList
+  // (ignores the access result).
+  static std::string BuildCookieLine(const CookieAccessResultList& cookies);
 
  private:
   FRIEND_TEST_ALL_PREFIXES(CanonicalCookieTest, TestPrefixHistograms);
@@ -344,6 +399,16 @@ class NET_EXPORT CanonicalCookie {
   // Returns whether the cookie was created at most |age_threshold| ago.
   bool IsRecentlyCreated(base::TimeDelta age_threshold) const;
 
+  // Returns true iff the cookie does not violate any rules associated with
+  // creating a cookie with the SameParty attribute. In particular, if a cookie
+  // has SameParty, then it must be Secure and must not be SameSite=Strict.
+  static bool IsCookieSamePartyValid(const ParsedCookie& parsed_cookie);
+  static bool IsCookieSamePartyValid(bool is_same_party,
+                                     bool is_secure,
+                                     CookieSameSite same_site);
+
+  // Keep defaults here in sync with
+  // services/network/public/interfaces/cookie_manager.mojom.
   std::string name_;
   std::string value_;
   std::string domain_;
@@ -351,192 +416,45 @@ class NET_EXPORT CanonicalCookie {
   base::Time creation_date_;
   base::Time expiry_date_;
   base::Time last_access_date_;
-  bool secure_;
-  bool httponly_;
-  CookieSameSite same_site_;
-  CookiePriority priority_;
-  CookieSourceScheme source_scheme_;
-};
-
-// This class represents if a cookie was included or excluded in a cookie get or
-// set operation, and if excluded why. It holds a vector of reasons for
-// exclusion, where cookie inclusion is represented by the absence of any
-// exclusion reasons. Also marks whether a cookie should be warned about, e.g.
-// for deprecation or intervention reasons.
-// TODO(chlily): Rename/move this to just net::CookieInclusionStatus.
-class NET_EXPORT CanonicalCookie::CookieInclusionStatus {
- public:
-  // Types of reasons why a cookie might be excluded.
-  // If adding a ExclusionReason, please also update the GetDebugString()
-  // method.
-  enum ExclusionReason {
-    EXCLUDE_UNKNOWN_ERROR = 0,
-
-    EXCLUDE_HTTP_ONLY = 1,
-    EXCLUDE_SECURE_ONLY = 2,
-    EXCLUDE_DOMAIN_MISMATCH = 3,
-    EXCLUDE_NOT_ON_PATH = 4,
-    EXCLUDE_SAMESITE_STRICT = 5,
-    EXCLUDE_SAMESITE_LAX = 6,
-
-    // The following two are used for the SameSiteByDefaultCookies experiment,
-    // where if the SameSite attribute is not specified, it will be treated as
-    // SameSite=Lax by default.
-    EXCLUDE_SAMESITE_UNSPECIFIED_TREATED_AS_LAX = 7,
-    // This is used if SameSite=None is specified, but the cookie is not
-    // Secure.
-    EXCLUDE_SAMESITE_NONE_INSECURE = 8,
-    EXCLUDE_USER_PREFERENCES = 9,
-
-    // Statuses specific to setting cookies
-    EXCLUDE_FAILURE_TO_STORE = 10,
-    EXCLUDE_NONCOOKIEABLE_SCHEME = 11,
-    EXCLUDE_OVERWRITE_SECURE = 12,
-    EXCLUDE_OVERWRITE_HTTP_ONLY = 13,
-    EXCLUDE_INVALID_DOMAIN = 14,
-    EXCLUDE_INVALID_PREFIX = 15,
-
-    // This should be kept last.
-    NUM_EXCLUSION_REASONS
-  };
-
-  // Reason to warn about a cookie. If you add one, please update
-  // GetDebugString().
-  enum WarningReason {
-    // Of the following 3 SameSite warnings, there will be, at most, a single
-    // active one.
-
-    // Warn if a cookie with unspecified SameSite attribute is used in a
-    // cross-site context.
-    WARN_SAMESITE_UNSPECIFIED_CROSS_SITE_CONTEXT = 0,
-    // Warn if a cookie with SameSite=None is not Secure.
-    WARN_SAMESITE_NONE_INSECURE = 1,
-    // Warn if a cookie with unspecified SameSite attribute is defaulted into
-    // Lax and is sent on a request with unsafe method, only because it is new
-    // enough to activate the Lax-allow-unsafe intervention.
-    WARN_SAMESITE_UNSPECIFIED_LAX_ALLOW_UNSAFE = 2,
-
-    // This should be kept last.
-    NUM_WARNING_REASONS
-  };
-
-  // Makes a status that says include and should not warn.
-  CookieInclusionStatus();
-
-  // Make a status that contains the given exclusion reason.
-  explicit CookieInclusionStatus(ExclusionReason reason);
-  // Makes a status that contains the given exclusion reason and warning.
-  CookieInclusionStatus(ExclusionReason reason, WarningReason warning);
-
-  bool operator==(const CookieInclusionStatus& other) const;
-  bool operator!=(const CookieInclusionStatus& other) const;
-
-  // Whether the status is to include the cookie, and has no other reasons for
-  // exclusion.
-  bool IsInclude() const;
-
-  // Whether the given reason for exclusion is present.
-  bool HasExclusionReason(ExclusionReason status_type) const;
-
-  // Add an exclusion reason.
-  void AddExclusionReason(ExclusionReason status_type);
-
-  // Remove an exclusion reason.
-  void RemoveExclusionReason(ExclusionReason reason);
-
-  // If the cookie would have been excluded for reasons other than
-  // SAMESITE_UNSPECIFIED_TREATED_AS_LAX or SAMESITE_NONE_INSECURE, don't bother
-  // warning about it (clear the warning).
-  void MaybeClearSameSiteWarning();
-
-  // Whether the cookie should be warned about.
-  bool ShouldWarn() const;
-
-  // Whether the given reason for warning is present.
-  bool HasWarningReason(WarningReason reason) const;
-
-  // Add an warning reason.
-  void AddWarningReason(WarningReason reason);
-
-  // Remove an warning reason.
-  void RemoveWarningReason(WarningReason reason);
-
-  // Used for serialization/deserialization.
-  uint32_t exclusion_reasons() const { return exclusion_reasons_; }
-  void set_exclusion_reasons(uint32_t exclusion_reasons) {
-    exclusion_reasons_ = exclusion_reasons;
-  }
-
-  uint32_t warning_reasons() const { return warning_reasons_; }
-  void set_warning_reasons(uint32_t warning_reasons) {
-    warning_reasons_ = warning_reasons;
-  }
-
-  // Get exclusion reason(s) and warning in string format.
-  std::string GetDebugString() const;
-
-  // Checks that the underlying bit vector representation doesn't contain any
-  // extraneous bits that are not mapped to any enum values. Does not check
-  // for reasons which semantically cannot coexist.
-  bool IsValid() const;
-
-  // Checks whether the exclusion reasons are exactly the set of exclusion
-  // reasons in the vector. (Ignores warnings.)
-  bool HasExactlyExclusionReasonsForTesting(
-      std::vector<ExclusionReason> reasons) const;
-
-  // Checks whether the warning reasons are exactly the set of warning
-  // reasons in the vector. (Ignores exclusions.)
-  bool HasExactlyWarningReasonsForTesting(
-      std::vector<WarningReason> reasons) const;
-
-  // Makes a status that contains the given exclusion reasons and warning.
-  static CookieInclusionStatus MakeFromReasonsForTesting(
-      std::vector<ExclusionReason> reasons,
-      std::vector<WarningReason> warnings = std::vector<WarningReason>());
-
- private:
-  // A bit vector of the applicable exclusion reasons.
-  uint32_t exclusion_reasons_ = 0u;
-
-  // A bit vector of the applicable warning reasons.
-  uint32_t warning_reasons_ = 0u;
-};
-
-NET_EXPORT inline std::ostream& operator<<(
-    std::ostream& os,
-    const CanonicalCookie::CookieInclusionStatus status) {
-  return os << status.GetDebugString();
-}
-
-// These enable us to pass along a list of excluded cookie with the reason they
-// were excluded
-struct CookieWithStatus {
-  CanonicalCookie cookie;
-  CanonicalCookie::CookieInclusionStatus status;
+  bool secure_{false};
+  bool httponly_{false};
+  CookieSameSite same_site_{CookieSameSite::NO_RESTRICTION};
+  CookiePriority priority_{COOKIE_PRIORITY_MEDIUM};
+  bool same_party_{false};
+  CookieSourceScheme source_scheme_{CookieSourceScheme::kUnset};
+  // This can be [0,65535], PORT_UNSPECIFIED, or PORT_INVALID.
+  // PORT_UNSPECIFIED is used for cookies which already existed in the cookie
+  // store prior to this change and therefore their port is unknown.
+  // PORT_INVALID is an error for when an out of range port is provided.
+  int source_port_{url::PORT_UNSPECIFIED};
 };
 
 // Used to pass excluded cookie information when it's possible that the
 // canonical cookie object may not be available.
-struct NET_EXPORT CookieAndLineWithStatus {
-  CookieAndLineWithStatus();
-  CookieAndLineWithStatus(base::Optional<CanonicalCookie> cookie,
-                          std::string cookie_string,
-                          CanonicalCookie::CookieInclusionStatus status);
-  CookieAndLineWithStatus(
-      const CookieAndLineWithStatus& cookie_and_line_with_status);
+struct NET_EXPORT CookieAndLineWithAccessResult {
+  CookieAndLineWithAccessResult();
+  CookieAndLineWithAccessResult(base::Optional<CanonicalCookie> cookie,
+                                std::string cookie_string,
+                                CookieAccessResult access_result);
+  CookieAndLineWithAccessResult(
+      const CookieAndLineWithAccessResult& cookie_and_line_with_access_result);
 
-  CookieAndLineWithStatus& operator=(
-      const CookieAndLineWithStatus& cookie_and_line_with_status);
+  CookieAndLineWithAccessResult& operator=(
+      const CookieAndLineWithAccessResult& cookie_and_line_with_access_result);
 
-  CookieAndLineWithStatus(
-      CookieAndLineWithStatus&& cookie_and_line_with_status);
+  CookieAndLineWithAccessResult(
+      CookieAndLineWithAccessResult&& cookie_and_line_with_access_result);
 
-  ~CookieAndLineWithStatus();
+  ~CookieAndLineWithAccessResult();
 
   base::Optional<CanonicalCookie> cookie;
   std::string cookie_string;
-  CanonicalCookie::CookieInclusionStatus status;
+  CookieAccessResult access_result;
+};
+
+struct CookieWithAccessResult {
+  CanonicalCookie cookie;
+  CookieAccessResult access_result;
 };
 
 }  // namespace net

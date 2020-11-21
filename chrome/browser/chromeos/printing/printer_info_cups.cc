@@ -25,9 +25,6 @@ namespace {
 const char kPdfMimeType[] = "application/pdf";
 const char kPwgRasterMimeType[] = "image/pwg-raster";
 
-const char kPwgRasterDocumentResolutionSupported[] =
-    "Printing.CUPS.PwgRasterDocumentResolutionSupported";
-
 // List of known multi-word printer manufacturers to help with make-and-model
 // string parsing.  Keep in UPPER CASE as that's how matches are performed.
 const std::array<const char* const, 4> kMultiWordManufacturers{
@@ -146,7 +143,7 @@ QueryResult QueryPrinterImpl(const std::string& host,
   result.result =
       ::printing::GetPrinterInfo(host, port, path, encrypted,
                                  &result.printer_info, &result.printer_status);
-  if (result.result != ::printing::PrinterQueryResult::SUCCESS) {
+  if (result.result != ::printing::PrinterQueryResult::kSuccess) {
     LOG(ERROR) << "Could not retrieve printer info";
   }
 
@@ -160,7 +157,7 @@ void OnPrinterQueried(chromeos::PrinterInfoCallback callback,
   const ::printing::PrinterQueryResult& result = query_result.result;
   const ::printing::PrinterInfo& printer_info = query_result.printer_info;
   const ::printing::PrinterStatus& printer_status = query_result.printer_status;
-  if (result != ::printing::PrinterQueryResult::SUCCESS) {
+  if (result != ::printing::PrinterQueryResult::kSuccess) {
     VLOG(1) << "Could not reach printer";
     std::move(callback).Run(result, ::printing::PrinterStatus(), std::string(),
                             std::string(), std::string(), {}, false);
@@ -180,8 +177,6 @@ void OnPrinterQueried(chromeos::PrinterInfoCallback callback,
     model = make_and_model;
   }
 
-  base::UmaHistogramBoolean(kPwgRasterDocumentResolutionSupported,
-                            printer_info.supports_pwg_raster_resolution);
   DCHECK(!printer_info.ipp_versions.empty())
       << "Properly queried PrinterInfo always has at least one version";
   base::UmaHistogramEnumeration(

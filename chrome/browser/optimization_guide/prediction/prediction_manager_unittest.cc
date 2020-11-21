@@ -15,10 +15,11 @@
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "chrome/browser/optimization_guide/optimization_guide_navigation_data.h"
-#include "chrome/browser/optimization_guide/optimization_guide_util.h"
 #include "chrome/browser/optimization_guide/optimization_guide_web_contents_observer.h"
-#include "chrome/browser/optimization_guide/prediction/prediction_model.h"
+#include "chrome/browser/optimization_guide/prediction/prediction_model_download_manager.h"
 #include "chrome/browser/optimization_guide/prediction/prediction_model_fetcher.h"
+#include "chrome/services/machine_learning/public/cpp/test_support/fake_service_connection.h"
+#include "chrome/services/machine_learning/public/mojom/decision_tree.mojom.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/leveldb_proto/testing/fake_db.h"
 #include "components/optimization_guide/optimization_guide_features.h"
@@ -26,6 +27,8 @@
 #include "components/optimization_guide/optimization_guide_service.h"
 #include "components/optimization_guide/optimization_guide_store.h"
 #include "components/optimization_guide/optimization_guide_switches.h"
+#include "components/optimization_guide/optimization_guide_util.h"
+#include "components/optimization_guide/prediction_model.h"
 #include "components/optimization_guide/proto/hint_cache.pb.h"
 #include "components/optimization_guide/proto/models.pb.h"
 #include "components/optimization_guide/proto_database_provider_test_base.h"
@@ -53,7 +56,8 @@ constexpr int kUpdateFetchModelAndFeaturesTimeSecs = 24 * 60 * 60;  // 24 hours.
 
 namespace optimization_guide {
 
-std::unique_ptr<proto::PredictionModel> CreatePredictionModel() {
+std::unique_ptr<proto::PredictionModel> CreatePredictionModel(
+    bool output_model_as_download_url = false) {
   std::unique_ptr<optimization_guide::proto::PredictionModel> prediction_model =
       std::make_unique<optimization_guide::proto::PredictionModel>();
 
@@ -68,13 +72,18 @@ std::unique_ptr<proto::PredictionModel> CreatePredictionModel() {
       proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD);
   model_info->add_supported_model_types(
       proto::ModelType::MODEL_TYPE_DECISION_TREE);
-  prediction_model->mutable_model()->mutable_threshold()->set_value(5.0);
+  if (output_model_as_download_url)
+    prediction_model->mutable_model()->set_download_url(
+        "https://example.com/model");
+  else
+    prediction_model->mutable_model()->mutable_threshold()->set_value(5.0);
   return prediction_model;
 }
 
 std::unique_ptr<proto::GetModelsResponse> BuildGetModelsResponse(
     const std::vector<std::string>& hosts,
-    const std::vector<proto::ClientModelFeature>& client_model_features) {
+    const std::vector<proto::ClientModelFeature>& client_model_features,
+    bool output_model_as_download_url = false) {
   std::unique_ptr<proto::GetModelsResponse> get_models_response =
       std::make_unique<proto::GetModelsResponse>();
 
@@ -89,7 +98,7 @@ std::unique_ptr<proto::GetModelsResponse> BuildGetModelsResponse(
   }
 
   std::unique_ptr<proto::PredictionModel> prediction_model =
-      CreatePredictionModel();
+      CreatePredictionModel(output_model_as_download_url);
   for (const auto& client_model_feature : client_model_features) {
     prediction_model->mutable_model_info()->add_supported_model_features(
         client_model_feature);
@@ -158,10 +167,40 @@ class FakeTopHostProvider : public TopHostProvider {
   int num_top_hosts_called_ = 0;
 };
 
+class FakePredictionModelDownloadManager
+    : public PredictionModelDownloadManager {
+ public:
+  FakePredictionModelDownloadManager(
+      Profile* profile,
+      scoped_refptr<base::SequencedTaskRunner> task_runner)
+      : PredictionModelDownloadManager(profile, task_runner) {}
+  ~FakePredictionModelDownloadManager() override = default;
+
+  void StartDownload(const GURL& url) override {
+    last_requested_download_ = url;
+  }
+
+  GURL last_requested_download() const { return last_requested_download_; }
+
+  void CancelAllPendingDownloads() override { cancel_downloads_called_ = true; }
+  bool cancel_downloads_called() const { return cancel_downloads_called_; }
+
+  bool IsAvailableForDownloads() const override { return is_available_; }
+  void SetAvailableForDownloads(bool is_available) {
+    is_available_ = is_available;
+  }
+
+ private:
+  GURL last_requested_download_;
+  bool cancel_downloads_called_ = false;
+  bool is_available_ = true;
+};
+
 enum class PredictionModelFetcherEndState {
   kFetchFailed = 0,
   kFetchSuccessWithModelsAndHostsModelFeatures = 1,
   kFetchSuccessWithEmptyResponse = 2,
+  kFetchSuccessWithModelDownloadUrls = 3,
 };
 
 // A mock class implementation of PredictionModelFetcher.
@@ -203,6 +242,12 @@ class TestPredictionModelFetcher : public PredictionModelFetcher {
             .Run(BuildGetModelsResponse({} /* hosts */,
                                         {} /* client model features */));
         return true;
+      case PredictionModelFetcherEndState::kFetchSuccessWithModelDownloadUrls:
+        models_fetched_ = true;
+        std::move(models_fetched_callback)
+            .Run(BuildGetModelsResponse(hosts, {},
+                                        /*output_model_as_download_url=*/true));
+        return true;
     }
     return true;
   }
@@ -235,9 +280,10 @@ class TestPredictionModelFetcher : public PredictionModelFetcher {
 
 class TestOptimizationGuideStore : public OptimizationGuideStore {
  public:
-  explicit TestOptimizationGuideStore(
-      std::unique_ptr<StoreEntryProtoDatabase> database)
-      : OptimizationGuideStore(std::move(database)) {}
+  TestOptimizationGuideStore(
+      std::unique_ptr<StoreEntryProtoDatabase> database,
+      scoped_refptr<base::SequencedTaskRunner> store_task_runner)
+      : OptimizationGuideStore(std::move(database), store_task_runner) {}
 
   ~TestOptimizationGuideStore() override = default;
 
@@ -320,6 +366,7 @@ class TestOptimizationGuideStore : public OptimizationGuideStore {
   bool WasHostModelFeaturesLoaded() const {
     return host_model_features_loaded_;
   }
+
  private:
   base::OnceClosure init_callback_;
   base::OnceClosure update_host_models_callback_;
@@ -342,9 +389,10 @@ class TestPredictionManager : public PredictionManager {
       TopHostProvider* top_host_provider,
       scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
       PrefService* pref_service,
-      Profile* profile)
+      Profile* profile,
+      scoped_refptr<base::SequencedTaskRunner> task_runner)
       : PredictionManager(optimization_targets_at_initialization,
-                          CreateModelAndHostModelFeaturesStore(),
+                          CreateModelAndHostModelFeaturesStore(task_runner),
                           top_host_provider,
                           url_loader_factory,
                           pref_service,
@@ -370,13 +418,14 @@ class TestPredictionManager : public PredictionManager {
   using PredictionManager::GetHostModelFeaturesForTesting;
   using PredictionManager::GetPredictionModelForTesting;
 
-  std::unique_ptr<OptimizationGuideStore>
-  CreateModelAndHostModelFeaturesStore() {
+  std::unique_ptr<OptimizationGuideStore> CreateModelAndHostModelFeaturesStore(
+      scoped_refptr<base::SequencedTaskRunner> task_runner) {
     // Setup the fake db and the class under test.
     auto db = std::make_unique<FakeDB<StoreEntry>>(&db_store_);
 
     std::unique_ptr<OptimizationGuideStore> model_and_features_store =
-        std::make_unique<TestOptimizationGuideStore>(std::move(db));
+        std::make_unique<TestOptimizationGuideStore>(std::move(db),
+                                                     task_runner);
     return model_and_features_store;
   }
 
@@ -396,15 +445,17 @@ class TestPredictionManager : public PredictionManager {
 };
 
 class PredictionManagerTest
-    : public optimization_guide::ProtoDatabaseProviderTestBase,
-      public testing::WithParamInterface<proto::ClientModelFeature> {
+    : public optimization_guide::ProtoDatabaseProviderTestBase {
  public:
   PredictionManagerTest() = default;
   ~PredictionManagerTest() override = default;
 
+  PredictionManagerTest(const PredictionManagerTest&) = delete;
+  PredictionManagerTest& operator=(const PredictionManagerTest&) = delete;
+
   void SetUp() override {
     optimization_guide::ProtoDatabaseProviderTestBase::SetUp();
-    web_contents_factory_.reset(new content::TestWebContentsFactory);
+    web_contents_factory_ = std::make_unique<content::TestWebContentsFactory>();
 
     top_host_provider_ = std::make_unique<FakeTopHostProvider>(
         std::vector<std::string>({"example1.com", "example2.com"}));
@@ -430,7 +481,7 @@ class PredictionManagerTest
     prediction_manager_ = std::make_unique<TestPredictionManager>(
         optimization_targets_at_initialization, temp_dir(), db_provider_.get(),
         top_host_provider_.get(), url_loader_factory_, pref_service_.get(),
-        &testing_profile_);
+        &testing_profile_, task_environment_.GetMainThreadTaskRunner());
     prediction_manager_->SetClockForTesting(task_environment_.GetMockClock());
   }
 
@@ -442,7 +493,8 @@ class PredictionManagerTest
 
     prediction_manager_ = std::make_unique<TestPredictionManager>(
         optimization_targets_at_initialization, temp_dir(), db_provider_.get(),
-        nullptr, url_loader_factory_, pref_service_.get(), &testing_profile_);
+        nullptr, url_loader_factory_, pref_service_.get(), &testing_profile_,
+        task_environment_.GetMainThreadTaskRunner());
     prediction_manager_->SetClockForTesting(task_environment_.GetMockClock());
   }
 
@@ -462,14 +514,6 @@ class PredictionManagerTest
         std::make_unique<content::MockNavigationHandle>(web_contents);
     navigation_handle->set_url(url);
     return navigation_handle;
-  }
-
-  bool IsSameOriginNavigationFeature() {
-    return GetParam() == proto::CLIENT_MODEL_FEATURE_SAME_ORIGIN_NAVIGATION;
-  }
-
-  bool IsUnknownFeature() {
-    return GetParam() == proto::CLIENT_MODEL_FEATURE_UNKNOWN;
   }
 
   void TearDown() override {
@@ -508,6 +552,12 @@ class PredictionManagerTest
         prediction_manager()->prediction_model_fetcher());
   }
 
+  FakePredictionModelDownloadManager* prediction_model_download_manager()
+      const {
+    return static_cast<FakePredictionModelDownloadManager*>(
+        prediction_manager()->prediction_model_download_manager());
+  }
+
   TestOptimizationGuideStore* models_and_features_store() const {
     return static_cast<TestOptimizationGuideStore*>(
         prediction_manager()->model_and_features_store());
@@ -517,9 +567,15 @@ class PredictionManagerTest
 
   TestingPrefServiceSimple* pref_service() const { return pref_service_.get(); }
 
+  TestingProfile* profile() { return &testing_profile_; }
+
   void RunUntilIdle() {
     task_environment_.RunUntilIdle();
     base::RunLoop().RunUntilIdle();
+  }
+
+  content::BrowserTaskEnvironment* task_environment() {
+    return &task_environment_;
   }
 
  private:
@@ -533,12 +589,10 @@ class PredictionManagerTest
   TestingProfile testing_profile_;
   std::unique_ptr<TestingPrefServiceSimple> pref_service_;
   std::unique_ptr<content::TestWebContentsFactory> web_contents_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(PredictionManagerTest);
 };
 
 // No support for Mac, Windows or ChromeOS.
-#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_CHROMEOS)
+#if defined(OS_WIN) || defined(OS_MAC) || defined(OS_CHROMEOS)
 #define DISABLE_ON_WIN_MAC_CHROMEOS(x) DISABLED_##x
 #else
 #define DISABLE_ON_WIN_MAC_CHROMEOS(x) x
@@ -549,7 +603,7 @@ TEST_F(PredictionManagerTest,
   CreatePredictionManager(
       {optimization_guide::proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD});
 
-  EXPECT_TRUE(prediction_manager()->HasRegisteredOptimizationTargets());
+  EXPECT_FALSE(prediction_manager()->registered_optimization_targets().empty());
 }
 
 TEST_F(PredictionManagerTest, OptimizationTargetNotRegisteredForNavigation) {
@@ -571,9 +625,11 @@ TEST_F(PredictionManagerTest, OptimizationTargetNotRegisteredForNavigation) {
 
   EXPECT_TRUE(prediction_model_fetcher()->models_fetched());
 
-  EXPECT_EQ(OptimizationTargetDecision::kUnknown,
-            prediction_manager()->ShouldTargetNavigation(
-                navigation_handle.get(), proto::OPTIMIZATION_TARGET_UNKNOWN));
+    EXPECT_EQ(
+        OptimizationTargetDecision::kUnknown,
+        prediction_manager()->ShouldTargetNavigation(
+            navigation_handle.get(), proto::OPTIMIZATION_TARGET_UNKNOWN, {}));
+
   // OptimizationGuideNavData should not be populated.
   OptimizationGuideNavigationData* nav_data =
       OptimizationGuideNavigationData::GetFromNavigationHandle(
@@ -588,12 +644,12 @@ TEST_F(PredictionManagerTest, OptimizationTargetNotRegisteredForNavigation) {
                    .has_value());
   histogram_tester.ExpectTotalCount(
       "OptimizationGuide.PredictionModelEvaluationLatency." +
-          GetStringNameForOptimizationTarget(
+          optimization_guide::GetStringNameForOptimizationTarget(
               optimization_guide::proto::OPTIMIZATION_TARGET_UNKNOWN),
       0);
   histogram_tester.ExpectTotalCount(
       "OptimizationGuide.PredictionModelEvaluationLatency." +
-          GetStringNameForOptimizationTarget(
+          optimization_guide::GetStringNameForOptimizationTarget(
               optimization_guide::proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD),
       0);
 }
@@ -607,11 +663,11 @@ TEST_F(PredictionManagerTest,
           GURL("https://foo.com"));
 
   CreatePredictionManager({proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD});
-  EXPECT_EQ(OptimizationTargetDecision::kModelNotAvailableOnClient,
-            prediction_manager()->ShouldTargetNavigation(
-                navigation_handle.get(),
-                proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD));
 
+    EXPECT_EQ(OptimizationTargetDecision::kModelNotAvailableOnClient,
+              prediction_manager()->ShouldTargetNavigation(
+                  navigation_handle.get(),
+                  proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD, {}));
   // OptimizationGuideNavData should not be populated.
   OptimizationGuideNavigationData* nav_data =
       OptimizationGuideNavigationData::GetFromNavigationHandle(
@@ -629,7 +685,7 @@ TEST_F(PredictionManagerTest,
 
   histogram_tester.ExpectTotalCount(
       "OptimizationGuide.PredictionModelEvaluationLatency." +
-          GetStringNameForOptimizationTarget(
+          optimization_guide::GetStringNameForOptimizationTarget(
               optimization_guide::proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD),
       0);
 }
@@ -651,27 +707,26 @@ TEST_F(PredictionManagerTest, EvaluatePredictionModel) {
   SetStoreInitialized();
   EXPECT_TRUE(prediction_model_fetcher()->models_fetched());
 
-  EXPECT_EQ(OptimizationTargetDecision::kPageLoadMatches,
-            prediction_manager()->ShouldTargetNavigation(
-                navigation_handle.get(),
+    EXPECT_EQ(OptimizationTargetDecision::kPageLoadMatches,
+              prediction_manager()->ShouldTargetNavigation(
+                  navigation_handle.get(),
+                  proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD, {}));
+    TestPredictionModel* test_prediction_model =
+        static_cast<TestPredictionModel*>(
+            prediction_manager()->GetPredictionModelForTesting(
                 proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD));
-
-  TestPredictionModel* test_prediction_model =
-      static_cast<TestPredictionModel*>(
-          prediction_manager()->GetPredictionModelForTesting(
-              proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD));
-  EXPECT_TRUE(test_prediction_model);
-  EXPECT_TRUE(test_prediction_model->WasModelEvaluated());
+    EXPECT_TRUE(test_prediction_model);
+    EXPECT_TRUE(test_prediction_model->WasModelEvaluated());
 
   histogram_tester.ExpectTotalCount(
       "OptimizationGuide.PredictionModelEvaluationLatency." +
-          GetStringNameForOptimizationTarget(
+          optimization_guide::GetStringNameForOptimizationTarget(
               optimization_guide::proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD),
       1);
 
   histogram_tester.ExpectUniqueSample(
       "OptimizationGuide.IsPredictionModelValid." +
-          GetStringNameForOptimizationTarget(
+          optimization_guide::GetStringNameForOptimizationTarget(
               optimization_guide::proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD),
       true, 1);
 
@@ -680,7 +735,7 @@ TEST_F(PredictionManagerTest, EvaluatePredictionModel) {
 
   histogram_tester.ExpectTotalCount(
       "OptimizationGuide.PredictionModelValidationLatency." +
-          GetStringNameForOptimizationTarget(
+          optimization_guide::GetStringNameForOptimizationTarget(
               optimization_guide::proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD),
       1);
   histogram_tester.ExpectTotalCount(
@@ -711,6 +766,10 @@ TEST_F(PredictionManagerTest, UpdatePredictionModelsWithInvalidModel) {
 
   histogram_tester.ExpectTotalCount(
       "OptimizationGuide.PredictionModelValidationLatency", 0);
+  histogram_tester.ExpectTotalCount(
+      "OptimizationGuide.PredictionModelUpdateVersion.PainfulPageLoad", 1);
+  histogram_tester.ExpectTotalCount(
+      "OptimizationGuide.PredictionModelLoadedVersion.PainfulPageLoad", 0);
 }
 
 TEST_F(PredictionManagerTest, UpdateModelWithSameVersion) {
@@ -733,6 +792,8 @@ TEST_F(PredictionManagerTest, UpdateModelWithSameVersion) {
       get_models_response.get());
   histogram_tester.ExpectUniqueSample(
       "OptimizationGuide.PredictionManager.PredictionModelsStored", true, 1);
+  histogram_tester.ExpectUniqueSample(
+      "OptimizationGuide.PredictionModelUpdateVersion.PainfulPageLoad", 3, 1);
 
   get_models_response =
       BuildGetModelsResponse({} /* hosts */, {} /* client features */);
@@ -741,13 +802,12 @@ TEST_F(PredictionManagerTest, UpdateModelWithSameVersion) {
   prediction_manager()->UpdatePredictionModelsForTesting(
       get_models_response.get());
 
-  TestPredictionModel* stored_prediction_model =
-      static_cast<TestPredictionModel*>(
-          prediction_manager()->GetPredictionModelForTesting(
-              proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD));
-  EXPECT_TRUE(stored_prediction_model);
-  EXPECT_EQ(3, stored_prediction_model->GetVersion());
-
+    TestPredictionModel* stored_prediction_model =
+        static_cast<TestPredictionModel*>(
+            prediction_manager()->GetPredictionModelForTesting(
+                proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD));
+    EXPECT_TRUE(stored_prediction_model);
+    EXPECT_EQ(3, stored_prediction_model->GetVersion());
   histogram_tester.ExpectBucketCount("OptimizationGuide.IsPredictionModelValid",
                                      true, 2);
 }
@@ -777,19 +837,19 @@ TEST_F(PredictionManagerTest,
       proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD,
       OptimizationTargetDecision::kPageLoadMatches);
 
-  TestPredictionModel* test_prediction_model =
-      static_cast<TestPredictionModel*>(
-          prediction_manager()->GetPredictionModelForTesting(
-              proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD));
-  EXPECT_TRUE(test_prediction_model);
-
-  // Make sure the cached decision is returned and that the model was not
-  // evaluated.
-  EXPECT_EQ(OptimizationTargetDecision::kPageLoadMatches,
-            prediction_manager()->ShouldTargetNavigation(
-                navigation_handle.get(),
+    TestPredictionModel* test_prediction_model =
+        static_cast<TestPredictionModel*>(
+            prediction_manager()->GetPredictionModelForTesting(
                 proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD));
-  EXPECT_FALSE(test_prediction_model->WasModelEvaluated());
+    EXPECT_TRUE(test_prediction_model);
+
+    // Make sure the cached decision is returned and that the model was not
+    // evaluated.
+    EXPECT_EQ(OptimizationTargetDecision::kPageLoadMatches,
+              prediction_manager()->ShouldTargetNavigation(
+                  navigation_handle.get(),
+                  proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD, {}));
+    EXPECT_FALSE(test_prediction_model->WasModelEvaluated());
 }
 
 TEST_F(PredictionManagerTest,
@@ -818,19 +878,19 @@ TEST_F(PredictionManagerTest,
       proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD,
       OptimizationTargetDecision::kPageLoadDoesNotMatch);
 
-  TestPredictionModel* test_prediction_model =
-      static_cast<TestPredictionModel*>(
-          prediction_manager()->GetPredictionModelForTesting(
-              proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD));
-  EXPECT_TRUE(test_prediction_model);
-
-  // Make sure the previous decision is reused and that the model was not
-  // evaluated.
-  EXPECT_EQ(OptimizationTargetDecision::kPageLoadDoesNotMatch,
-            prediction_manager()->ShouldTargetNavigation(
-                navigation_handle.get(),
+    TestPredictionModel* test_prediction_model =
+        static_cast<TestPredictionModel*>(
+            prediction_manager()->GetPredictionModelForTesting(
                 proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD));
-  EXPECT_FALSE(test_prediction_model->WasModelEvaluated());
+    EXPECT_TRUE(test_prediction_model);
+
+    // Make sure the previous decision is reused and that the model was not
+    // evaluated.
+    EXPECT_EQ(OptimizationTargetDecision::kPageLoadDoesNotMatch,
+              prediction_manager()->ShouldTargetNavigation(
+                  navigation_handle.get(),
+                  proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD, {}));
+    EXPECT_FALSE(test_prediction_model->WasModelEvaluated());
   histogram_tester.ExpectTotalCount(
       "OptimizationGuide.ShouldTargetNavigation.PredictionModelStatus", 0);
 }
@@ -859,20 +919,83 @@ TEST_F(PredictionManagerTest,
   nav_data->SetDecisionForOptimizationTarget(
       proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD,
       OptimizationTargetDecision::kModelPredictionHoldback);
-
-  TestPredictionModel* test_prediction_model =
-      static_cast<TestPredictionModel*>(
-          prediction_manager()->GetPredictionModelForTesting(
-              proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD));
-  EXPECT_TRUE(test_prediction_model);
-
-  // Make sure the cached decision is returned and that the model was not
-  // evaluated.
-  EXPECT_EQ(OptimizationTargetDecision::kModelPredictionHoldback,
-            prediction_manager()->ShouldTargetNavigation(
-                navigation_handle.get(),
+    TestPredictionModel* test_prediction_model =
+        static_cast<TestPredictionModel*>(
+            prediction_manager()->GetPredictionModelForTesting(
                 proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD));
-  EXPECT_FALSE(test_prediction_model->WasModelEvaluated());
+    EXPECT_TRUE(test_prediction_model);
+
+    // Make sure the cached decision is returned and that the model was not
+    // evaluated.
+    EXPECT_EQ(OptimizationTargetDecision::kModelPredictionHoldback,
+              prediction_manager()->ShouldTargetNavigation(
+                  navigation_handle.get(),
+                  proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD, {}));
+    EXPECT_FALSE(test_prediction_model->WasModelEvaluated());
+}
+
+TEST_F(PredictionManagerTest, DownloadManagerUnavailableShouldNotFetch) {
+  base::HistogramTester histogram_tester;
+  std::unique_ptr<content::MockNavigationHandle> navigation_handle =
+      CreateMockNavigationHandleWithOptimizationGuideWebContentsObserver(
+          GURL("https://foo.com"));
+
+  CreatePredictionManager({});
+  prediction_manager()->SetPredictionModelFetcherForTesting(
+      BuildTestPredictionModelFetcher(
+          PredictionModelFetcherEndState::kFetchSuccessWithModelDownloadUrls));
+  prediction_manager()->SetPredictionModelDownloadManagerForTesting(
+      std::make_unique<FakePredictionModelDownloadManager>(
+          profile(), task_environment()->GetMainThreadTaskRunner()));
+  prediction_model_download_manager()->SetAvailableForDownloads(false);
+
+  prediction_manager()->RegisterOptimizationTargets(
+      {proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD});
+
+  SetStoreInitialized();
+  EXPECT_FALSE(prediction_model_fetcher()->models_fetched());
+
+  histogram_tester.ExpectUniqueSample(
+      "OptimizationGuide.PredictionManager."
+      "DownloadServiceAvailabilityBlockedFetch",
+      true, 1);
+}
+
+TEST_F(PredictionManagerTest, UpdateModelWithDownloadUrl) {
+  base::HistogramTester histogram_tester;
+  std::unique_ptr<content::MockNavigationHandle> navigation_handle =
+      CreateMockNavigationHandleWithOptimizationGuideWebContentsObserver(
+          GURL("https://foo.com"));
+
+  CreatePredictionManager({});
+  prediction_manager()->SetPredictionModelFetcherForTesting(
+      BuildTestPredictionModelFetcher(
+          PredictionModelFetcherEndState::kFetchSuccessWithModelDownloadUrls));
+  prediction_manager()->SetPredictionModelDownloadManagerForTesting(
+      std::make_unique<FakePredictionModelDownloadManager>(
+          profile(), task_environment()->GetMainThreadTaskRunner()));
+
+  prediction_manager()->RegisterOptimizationTargets(
+      {proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD});
+
+  SetStoreInitialized();
+  EXPECT_TRUE(prediction_model_fetcher()->models_fetched());
+  EXPECT_TRUE(prediction_model_download_manager()->cancel_downloads_called());
+
+  models_and_features_store()->RunUpdateHostModelFeaturesCallback();
+  histogram_tester.ExpectUniqueSample(
+      "OptimizationGuide.PredictionManager.HostModelFeaturesStored", true, 1);
+  histogram_tester.ExpectTotalCount(
+      "OptimizationGuide.PredictionManager.PredictionModelsStored", 0);
+  histogram_tester.ExpectUniqueSample(
+      "OptimizationGuide.PredictionManager."
+      "DownloadServiceAvailabilityBlockedFetch",
+      false, 1);
+  histogram_tester.ExpectUniqueSample(
+      "OptimizationGuide.PredictionManager.IsDownloadUrlValid", true, 1);
+
+  EXPECT_EQ(prediction_model_download_manager()->last_requested_download(),
+            GURL("https://example.com/model"));
 }
 
 TEST_F(PredictionManagerTest, EvaluatePredictionModelPopulatesNavData) {
@@ -906,19 +1029,19 @@ TEST_F(PredictionManagerTest, EvaluatePredictionModelPopulatesNavData) {
       proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD,
       OptimizationTargetDecision::kModelNotAvailableOnClient);
 
-  // Make sure model gets evaluated despite there already being a decision in
-  // the navigation data.
-  EXPECT_EQ(OptimizationTargetDecision::kPageLoadMatches,
-            prediction_manager()->ShouldTargetNavigation(
-                navigation_handle.get(),
-                proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD));
+    // Make sure model gets evaluated despite there already being a decision in
+    // the navigation data.
+    EXPECT_EQ(OptimizationTargetDecision::kPageLoadMatches,
+              prediction_manager()->ShouldTargetNavigation(
+                  navigation_handle.get(),
+                  proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD, {}));
 
-  TestPredictionModel* test_prediction_model =
-      static_cast<TestPredictionModel*>(
-          prediction_manager()->GetPredictionModelForTesting(
-              proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD));
-  EXPECT_TRUE(test_prediction_model);
-  EXPECT_TRUE(test_prediction_model->WasModelEvaluated());
+    TestPredictionModel* test_prediction_model =
+        static_cast<TestPredictionModel*>(
+            prediction_manager()->GetPredictionModelForTesting(
+                proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD));
+    EXPECT_TRUE(test_prediction_model);
+    EXPECT_TRUE(test_prediction_model->WasModelEvaluated());
 
   EXPECT_EQ(2, *nav_data->GetModelVersionForOptimizationTarget(
                    proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD));
@@ -928,13 +1051,13 @@ TEST_F(PredictionManagerTest, EvaluatePredictionModelPopulatesNavData) {
 
 TEST_F(PredictionManagerTest,
        EvaluatePredictionModelPopulatesNavDataEvenWithHoldback) {
-  base::HistogramTester histogram_tester;
   base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitWithFeaturesAndParameters(
-      {base::test::ScopedFeatureList::FeatureAndParams(
-          features::kOptimizationTargetPrediction,
-          {{"painful_page_load_metrics_only", "true"}})},
-      {});
+    scoped_feature_list.InitWithFeaturesAndParameters(
+        {{features::kOptimizationTargetPrediction,
+          {{"painful_page_load_metrics_only", "true"}}}},
+        {});
+
+  base::HistogramTester histogram_tester;
 
   std::unique_ptr<content::MockNavigationHandle> navigation_handle =
       CreateMockNavigationHandleWithOptimizationGuideWebContentsObserver(
@@ -953,17 +1076,17 @@ TEST_F(PredictionManagerTest,
   EXPECT_TRUE(prediction_model_fetcher()->models_fetched());
   models_and_features_store()->RunUpdateHostModelFeaturesCallback();
 
-  EXPECT_EQ(OptimizationTargetDecision::kModelPredictionHoldback,
-            prediction_manager()->ShouldTargetNavigation(
-                navigation_handle.get(),
-                proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD));
+    EXPECT_EQ(OptimizationTargetDecision::kModelPredictionHoldback,
+              prediction_manager()->ShouldTargetNavigation(
+                  navigation_handle.get(),
+                  proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD, {}));
 
-  TestPredictionModel* test_prediction_model =
-      static_cast<TestPredictionModel*>(
-          prediction_manager()->GetPredictionModelForTesting(
-              proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD));
-  EXPECT_TRUE(test_prediction_model);
-  EXPECT_TRUE(test_prediction_model->WasModelEvaluated());
+    TestPredictionModel* test_prediction_model =
+        static_cast<TestPredictionModel*>(
+            prediction_manager()->GetPredictionModelForTesting(
+                proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD));
+    EXPECT_TRUE(test_prediction_model);
+    EXPECT_TRUE(test_prediction_model->WasModelEvaluated());
 
   OptimizationGuideNavigationData* nav_data =
       OptimizationGuideNavigationData::GetFromNavigationHandle(
@@ -979,7 +1102,7 @@ TEST_F(PredictionManagerTest,
 
   histogram_tester.ExpectBucketCount(
       "OptimizationGuide.ShouldTargetNavigation.PredictionModelStatus." +
-          GetStringNameForOptimizationTarget(
+          optimization_guide::GetStringNameForOptimizationTarget(
               optimization_guide::proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD),
       PredictionManagerModelStatus::kModelAvailable, 1);
 }
@@ -998,22 +1121,21 @@ TEST_F(PredictionManagerTest, ShouldTargetNavigationStoreAvailableNoModel) {
   prediction_manager()->RegisterOptimizationTargets(
       {proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD});
 
-  SetStoreInitialized(/*load_models=*/false,
-                      /*load_host_model_features=*/true,
-                      /*have_models_in_store=)*/ false);
+  SetStoreInitialized(/* load_models= */ false,
+                      /* load_host_model_features= */ true,
+                      /* have_models_in_store= */ false);
 
   EXPECT_EQ(OptimizationTargetDecision::kModelNotAvailableOnClient,
             prediction_manager()->ShouldTargetNavigation(
                 navigation_handle.get(),
-                proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD));
-
+                proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD, {}));
   histogram_tester.ExpectBucketCount(
       "OptimizationGuide.ShouldTargetNavigation.PredictionModelStatus",
       PredictionManagerModelStatus::kStoreAvailableNoModelForTarget, 1);
 
   histogram_tester.ExpectBucketCount(
       "OptimizationGuide.ShouldTargetNavigation.PredictionModelStatus." +
-          GetStringNameForOptimizationTarget(
+          optimization_guide::GetStringNameForOptimizationTarget(
               optimization_guide::proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD),
       PredictionManagerModelStatus::kStoreAvailableNoModelForTarget, 1);
 }
@@ -1033,27 +1155,26 @@ TEST_F(PredictionManagerTest,
   prediction_manager()->RegisterOptimizationTargets(
       {proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD});
 
-  SetStoreInitialized(/*load_models=*/false,
-                      /*load_host_model_features=*/true,
-                      /*have_models_in_store=)*/ true);
+  SetStoreInitialized(/* load_models= */ false,
+                      /* load_host_model_features= */ true,
+                      /* have_models_in_store= */ true);
 
   EXPECT_EQ(OptimizationTargetDecision::kModelNotAvailableOnClient,
             prediction_manager()->ShouldTargetNavigation(
                 navigation_handle.get(),
-                proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD));
-
+                proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD, {}));
   histogram_tester.ExpectBucketCount(
       "OptimizationGuide.ShouldTargetNavigation.PredictionModelStatus",
       PredictionManagerModelStatus::kStoreAvailableModelNotLoaded, 1);
 
   histogram_tester.ExpectBucketCount(
       "OptimizationGuide.ShouldTargetNavigation.PredictionModelStatus." +
-          GetStringNameForOptimizationTarget(
+          optimization_guide::GetStringNameForOptimizationTarget(
               optimization_guide::proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD),
       PredictionManagerModelStatus::kStoreAvailableModelNotLoaded, 1);
 
   histogram_tester.ExpectTotalCount(
-      "OptimizationGuide.PredictionModelVersion.PainfulPageLoad", 0);
+      "OptimizationGuide.PredictionModelLoadedVersion.PainfulPageLoad", 0);
 }
 
 TEST_F(PredictionManagerTest,
@@ -1072,10 +1193,11 @@ TEST_F(PredictionManagerTest,
   prediction_manager()->RegisterOptimizationTargets(
       {proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD});
 
-  EXPECT_EQ(OptimizationTargetDecision::kModelNotAvailableOnClient,
-            prediction_manager()->ShouldTargetNavigation(
-                navigation_handle.get(),
-                proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD));
+
+    EXPECT_EQ(OptimizationTargetDecision::kModelNotAvailableOnClient,
+              prediction_manager()->ShouldTargetNavigation(
+                  navigation_handle.get(),
+                  proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD, {}));
 
   histogram_tester.ExpectBucketCount(
       "OptimizationGuide.ShouldTargetNavigation.PredictionModelStatus",
@@ -1083,7 +1205,7 @@ TEST_F(PredictionManagerTest,
 
   histogram_tester.ExpectBucketCount(
       "OptimizationGuide.ShouldTargetNavigation.PredictionModelStatus." +
-          GetStringNameForOptimizationTarget(
+          optimization_guide::GetStringNameForOptimizationTarget(
               optimization_guide::proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD),
       PredictionManagerModelStatus::kStoreUnavailableModelUnknown, 1);
 }
@@ -1107,15 +1229,18 @@ TEST_F(PredictionManagerTest, UpdateModelForUnregisteredTarget) {
   prediction_manager()->UpdatePredictionModelsForTesting(
       get_models_response.get());
 
-  TestPredictionModel* test_prediction_model =
-      static_cast<TestPredictionModel*>(
-          prediction_manager()->GetPredictionModelForTesting(
-              proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD));
-  EXPECT_FALSE(test_prediction_model);
+    TestPredictionModel* test_prediction_model =
+        static_cast<TestPredictionModel*>(
+            prediction_manager()->GetPredictionModelForTesting(
+                proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD));
+    EXPECT_FALSE(test_prediction_model);
+
   histogram_tester.ExpectTotalCount(
-      "OptimizationGuide.PredictionManager.PredictionModelsStored", 0);
+      "OptimizationGuide.PredictionManager.PredictionModelsStored", 1);
   histogram_tester.ExpectTotalCount(
       "OptimizationGuide.PredictionManager.HostModelFeaturesStored", 0);
+  histogram_tester.ExpectTotalCount(
+      "OptimizationGuide.PredictionModelLoadedVersion.PainfulPageLoad", 0);
 }
 
 TEST_F(
@@ -1144,16 +1269,16 @@ TEST_F(
   prediction_manager()->UpdatePredictionModelsForTesting(
       get_models_response.get());
 
-  EXPECT_EQ(OptimizationTargetDecision::kModelNotAvailableOnClient,
-            prediction_manager()->ShouldTargetNavigation(
-                navigation_handle.get(),
-                proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD));
+    EXPECT_EQ(OptimizationTargetDecision::kModelNotAvailableOnClient,
+              prediction_manager()->ShouldTargetNavigation(
+                  navigation_handle.get(),
+                  proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD, {}));
 
-  TestPredictionModel* test_prediction_model =
-      static_cast<TestPredictionModel*>(
-          prediction_manager()->GetPredictionModelForTesting(
-              proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD));
-  EXPECT_FALSE(test_prediction_model);
+    TestPredictionModel* test_prediction_model =
+        static_cast<TestPredictionModel*>(
+            prediction_manager()->GetPredictionModelForTesting(
+                proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD));
+    EXPECT_FALSE(test_prediction_model);
   EXPECT_FALSE(models_and_features_store()->WasModelLoaded());
 }
 
@@ -1207,7 +1332,7 @@ TEST_F(PredictionManagerTest, NoHostModelFeaturesForHost) {
   EXPECT_EQ(OptimizationTargetDecision::kPageLoadMatches,
             prediction_manager()->ShouldTargetNavigation(
                 navigation_handle.get(),
-                proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD));
+                proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD, {}));
 
   TestPredictionModel* test_prediction_model =
       static_cast<TestPredictionModel*>(
@@ -1228,7 +1353,6 @@ TEST_F(PredictionManagerTest, NoHostModelFeaturesForHost) {
 }
 
 TEST_F(PredictionManagerTest, UpdateHostModelFeaturesMissingHost) {
-
   CreatePredictionManager({});
   prediction_manager()->SetPredictionModelFetcherForTesting(
       BuildTestPredictionModelFetcher(
@@ -1253,7 +1377,6 @@ TEST_F(PredictionManagerTest, UpdateHostModelFeaturesMissingHost) {
 }
 
 TEST_F(PredictionManagerTest, UpdateHostModelFeaturesNoFeature) {
-
   CreatePredictionManager({});
   prediction_manager()->SetPredictionModelFetcherForTesting(
       BuildTestPredictionModelFetcher(
@@ -1277,7 +1400,6 @@ TEST_F(PredictionManagerTest, UpdateHostModelFeaturesNoFeature) {
 }
 
 TEST_F(PredictionManagerTest, UpdateHostModelFeaturesNoFeatureName) {
-
   CreatePredictionManager({});
   prediction_manager()->SetPredictionModelFetcherForTesting(
       BuildTestPredictionModelFetcher(
@@ -1329,7 +1451,6 @@ TEST_F(PredictionManagerTest, UpdateHostModelFeaturesDoubleValue) {
 }
 
 TEST_F(PredictionManagerTest, UpdateHostModelFeaturesIntValue) {
-
   CreatePredictionManager({});
   prediction_manager()->SetPredictionModelFetcherForTesting(
       BuildTestPredictionModelFetcher(
@@ -1453,7 +1574,25 @@ TEST_F(PredictionManagerTest, UpdateHostModelFeaturesUpdateDataInMap) {
   EXPECT_EQ(6.0, (*host_model_features)["host_feat_added"]);
 }
 
-TEST_P(PredictionManagerTest, ClientFeature) {
+class PredictionManagerClientFeatureTest
+    : public PredictionManagerTest,
+      public testing::WithParamInterface<proto::ClientModelFeature> {
+ public:
+  bool IsSameOriginNavigationFeature() {
+    return GetParam() == proto::CLIENT_MODEL_FEATURE_SAME_ORIGIN_NAVIGATION;
+  }
+
+  bool IsUnknownFeature() {
+    return GetParam() == proto::CLIENT_MODEL_FEATURE_UNKNOWN;
+  }
+};
+
+INSTANTIATE_TEST_SUITE_P(ClientFeature,
+                         PredictionManagerClientFeatureTest,
+                         testing::Range(proto::ClientModelFeature_MIN,
+                                        proto::ClientModelFeature_MAX));
+
+TEST_P(PredictionManagerClientFeatureTest, ClientFeature) {
   base::HistogramTester histogram_tester;
   std::unique_ptr<content::MockNavigationHandle> navigation_handle =
       CreateMockNavigationHandleWithOptimizationGuideWebContentsObserver(
@@ -1483,7 +1622,7 @@ TEST_P(PredictionManagerTest, ClientFeature) {
   EXPECT_EQ(OptimizationTargetDecision::kPageLoadMatches,
             prediction_manager()->ShouldTargetNavigation(
                 navigation_handle.get(),
-                proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD));
+                proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD, {}));
 
   TestPredictionModel* test_prediction_model =
       static_cast<TestPredictionModel*>(
@@ -1503,11 +1642,6 @@ TEST_P(PredictionManagerTest, ClientFeature) {
     EXPECT_TRUE(navigation_data->GetValueForModelFeatureForTesting(GetParam()));
   }
 }
-
-INSTANTIATE_TEST_SUITE_P(ClientFeature,
-                         PredictionManagerTest,
-                         testing::Range(proto::ClientModelFeature_MIN,
-                                        proto::ClientModelFeature_MAX));
 
 TEST_F(PredictionManagerTest, PreviousSessionStatisticsUsed) {
   base::HistogramTester histogram_tester;
@@ -1550,7 +1684,7 @@ TEST_F(PredictionManagerTest, PreviousSessionStatisticsUsed) {
   EXPECT_EQ(OptimizationTargetDecision::kPageLoadMatches,
             prediction_manager()->ShouldTargetNavigation(
                 navigation_handle.get(),
-                proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD));
+                proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD, {}));
 
   TestPredictionModel* test_prediction_model =
       static_cast<TestPredictionModel*>(
@@ -1570,6 +1704,81 @@ TEST_F(PredictionManagerTest, PreviousSessionStatisticsUsed) {
       evaluated_features["CLIENT_MODEL_FEATURE_FIRST_CONTENTFUL_PAINT_"
                          "SESSION_STANDARD_DEVIATION"],
       50.0);
+  EXPECT_FLOAT_EQ(
+      evaluated_features
+          ["CLIENT_MODEL_FEATURE_FIRST_CONTENTFUL_PAINT_PREVIOUS_PAGE_LOAD"],
+      200.0);
+}
+
+TEST_F(PredictionManagerTest,
+       OverriddenClientModelFeaturesUsedIfProvidedBackfilledIfNot) {
+  base::HistogramTester histogram_tester;
+  GURL previous_url = GURL("https://foo.com");
+  std::unique_ptr<content::MockNavigationHandle> navigation_handle =
+      CreateMockNavigationHandleWithOptimizationGuideWebContentsObserver(
+          previous_url);
+  navigation_handle->set_url(previous_url);
+  navigation_handle->set_page_transition(
+      ui::PageTransition::PAGE_TRANSITION_RELOAD);
+
+  pref_service()->SetDouble(optimization_guide::prefs::kSessionStatisticFCPMean,
+                            200.0);
+  pref_service()->SetDouble(
+      optimization_guide::prefs::kSessionStatisticFCPStdDev, 50.0);
+
+  CreatePredictionManager({});
+  prediction_manager()->SetPredictionModelFetcherForTesting(
+      BuildTestPredictionModelFetcher(
+          PredictionModelFetcherEndState::kFetchFailed));
+
+  prediction_manager()->RegisterOptimizationTargets(
+      {proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD});
+
+  SetStoreInitialized();
+
+  std::unique_ptr<proto::GetModelsResponse> get_models_response =
+      BuildGetModelsResponse(
+          {},
+          {proto::CLIENT_MODEL_FEATURE_FIRST_CONTENTFUL_PAINT_SESSION_MEAN,
+           proto::
+               CLIENT_MODEL_FEATURE_FIRST_CONTENTFUL_PAINT_SESSION_STANDARD_DEVIATION,
+           proto::
+               CLIENT_MODEL_FEATURE_FIRST_CONTENTFUL_PAINT_PREVIOUS_PAGE_LOAD});
+  prediction_manager()->UpdateHostModelFeaturesForTesting(
+      get_models_response.get());
+  prediction_manager()->UpdatePredictionModelsForTesting(
+      get_models_response.get());
+
+  EXPECT_EQ(
+      OptimizationTargetDecision::kPageLoadMatches,
+      prediction_manager()->ShouldTargetNavigation(
+          navigation_handle.get(), proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD,
+          {
+              {proto::CLIENT_MODEL_FEATURE_FIRST_CONTENTFUL_PAINT_SESSION_MEAN,
+               3.0},
+              {proto::
+                   CLIENT_MODEL_FEATURE_FIRST_CONTENTFUL_PAINT_SESSION_STANDARD_DEVIATION,
+               5.0},
+          }));
+
+  TestPredictionModel* test_prediction_model =
+      static_cast<TestPredictionModel*>(
+          prediction_manager()->GetPredictionModelForTesting(
+              proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD));
+
+  EXPECT_TRUE(test_prediction_model);
+  EXPECT_TRUE(test_prediction_model->WasModelEvaluated());
+
+  base::flat_map<std::string, float> evaluated_features =
+      test_prediction_model->last_evaluated_features();
+  EXPECT_FLOAT_EQ(
+      evaluated_features
+          ["CLIENT_MODEL_FEATURE_FIRST_CONTENTFUL_PAINT_SESSION_MEAN"],
+      3.0);
+  EXPECT_FLOAT_EQ(
+      evaluated_features["CLIENT_MODEL_FEATURE_FIRST_CONTENTFUL_PAINT_"
+                         "SESSION_STANDARD_DEVIATION"],
+      5.0);
   EXPECT_FLOAT_EQ(
       evaluated_features
           ["CLIENT_MODEL_FEATURE_FIRST_CONTENTFUL_PAINT_PREVIOUS_PAGE_LOAD"],
@@ -1597,7 +1806,7 @@ TEST_F(PredictionManagerTest,
 
   EXPECT_FALSE(prediction_model_fetcher()->models_fetched());
   histogram_tester.ExpectUniqueSample(
-      "OptimizationGuide.PredictionModelVersion.PainfulPageLoad", 1, 1);
+      "OptimizationGuide.PredictionModelLoadedVersion.PainfulPageLoad", 1, 1);
 }
 
 TEST_F(PredictionManagerTest,
@@ -1623,7 +1832,7 @@ TEST_F(PredictionManagerTest,
 
   EXPECT_FALSE(prediction_model_fetcher()->models_fetched());
   histogram_tester.ExpectUniqueSample(
-      "OptimizationGuide.PredictionModelVersion.PainfulPageLoad", 1, 1);
+      "OptimizationGuide.PredictionModelLoadedVersion.PainfulPageLoad", 1, 1);
 }
 
 TEST_F(PredictionManagerTest, ModelFetcherTimerRetryDelay) {

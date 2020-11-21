@@ -7,15 +7,15 @@
 #include <windows.media.protection.h>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/single_thread_task_runner.h"
 #include "base/test/mock_callback.h"
 #include "base/test/task_environment.h"
 #include "base/win/scoped_com_initializer.h"
-#include "base/win/windows_version.h"
 #include "media/base/demuxer_stream.h"
 #include "media/base/mock_filters.h"
 #include "media/base/test_helpers.h"
+#include "media/base/win/test_utils.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 using ::testing::_;
@@ -29,18 +29,6 @@ namespace media {
 using ABI::Windows::Media::Protection::IMediaProtectionPMPServer;
 using Microsoft::WRL::ComPtr;
 
-#define MOCK_STDCALL_METHOD1(Name, Types) \
-  MOCK_METHOD1_WITH_CALLTYPE(STDMETHODCALLTYPE, Name, Types)
-
-#define MOCK_STDCALL_METHOD2(Name, Types) \
-  MOCK_METHOD2_WITH_CALLTYPE(STDMETHODCALLTYPE, Name, Types)
-
-#define MOCK_STDCALL_METHOD3(Name, Types) \
-  MOCK_METHOD3_WITH_CALLTYPE(STDMETHODCALLTYPE, Name, Types)
-
-#define MOCK_STDCALL_METHOD7(Name, Types) \
-  MOCK_METHOD7_WITH_CALLTYPE(STDMETHODCALLTYPE, Name, Types)
-
 class MockMFCdmProxy
     : public Microsoft::WRL::RuntimeClass<
           Microsoft::WRL::RuntimeClassFlags<Microsoft::WRL::ClassicCom>,
@@ -52,21 +40,16 @@ class MockMFCdmProxy
   // IMFCdmProxy.
   MOCK_STDCALL_METHOD2(GetPMPServer,
                        HRESULT(REFIID riid, void** object_result));
-  MOCK_STDCALL_METHOD7(GetInputTrustAuthority,
-                       HRESULT(uint64_t playback_element_id,
-                               uint32_t stream_id,
+  MOCK_STDCALL_METHOD6(GetInputTrustAuthority,
+                       HRESULT(uint32_t stream_id,
                                uint32_t stream_count,
                                const uint8_t* content_init_data,
                                uint32_t content_init_data_size,
                                REFIID riid,
                                IUnknown** object_result));
-
-  MOCK_STDCALL_METHOD1(RefreshTrustedInput,
-                       HRESULT(uint64_t playback_element_id));
-  MOCK_STDCALL_METHOD3(SetLastKeyIds,
-                       HRESULT(uint64_t playback_element_id,
-                               GUID* key_ids,
-                               uint32_t key_ids_count));
+  MOCK_STDCALL_METHOD2(SetLastKeyId,
+                       HRESULT(uint32_t stream_id, REFGUID key_id));
+  MOCK_STDCALL_METHOD0(RefreshTrustedInput, HRESULT());
   MOCK_STDCALL_METHOD2(ProcessContentEnabler,
                        HRESULT(IUnknown* request, IMFAsyncResult* result));
 };
@@ -105,9 +88,8 @@ class MockMediaProtectionPMPServer
 
 class MediaFoundationRendererTest : public testing::Test {
  public:
-  MediaFoundationRendererTest()
-      : test_supported_(base::win::GetVersion() >= base::win::Version::WIN10) {
-    if (!test_supported_)
+  MediaFoundationRendererTest() {
+    if (!MediaFoundationRenderer::IsSupported())
       return;
 
     MockMediaProtectionPMPServer::MakeMockMediaProtectionPMPServer(
@@ -115,8 +97,6 @@ class MediaFoundationRendererTest : public testing::Test {
 
     mf_renderer_ = std::make_unique<MediaFoundationRenderer>(
         /*muted=*/false, task_environment_.GetMainThreadTaskRunner());
-    // It is required to invoke SetPlaybackElementId() before Initialize().
-    mf_renderer_->SetPlaybackElementId(9876543210);
 
     // Some default actions.
     ON_CALL(cdm_context_, GetMediaFoundationCdmProxy(_))
@@ -177,7 +157,6 @@ class MediaFoundationRendererTest : public testing::Test {
   }
 
  protected:
-  const bool test_supported_;
   base::win::ScopedCOMInitializer com_initializer_;
   base::test::TaskEnvironment task_environment_;
   base::MockOnceCallback<void(bool)> set_cdm_cb_;
@@ -192,7 +171,7 @@ class MediaFoundationRendererTest : public testing::Test {
 };
 
 TEST_F(MediaFoundationRendererTest, VerifyInitWithoutSetCdm) {
-  if (!test_supported_)
+  if (!MediaFoundationRenderer::IsSupported())
     return;
 
   AddStream(DemuxerStream::AUDIO, /*encrypted=*/false);
@@ -207,7 +186,7 @@ TEST_F(MediaFoundationRendererTest, VerifyInitWithoutSetCdm) {
 }
 
 TEST_F(MediaFoundationRendererTest, SetCdmThenInit) {
-  if (!test_supported_)
+  if (!MediaFoundationRenderer::IsSupported())
     return;
 
   AddStream(DemuxerStream::AUDIO, /*encrypted=*/true);
@@ -224,7 +203,7 @@ TEST_F(MediaFoundationRendererTest, SetCdmThenInit) {
 }
 
 TEST_F(MediaFoundationRendererTest, InitThenSetCdm) {
-  if (!test_supported_)
+  if (!MediaFoundationRenderer::IsSupported())
     return;
 
   AddStream(DemuxerStream::AUDIO, /*encrypted=*/true);
@@ -241,7 +220,7 @@ TEST_F(MediaFoundationRendererTest, InitThenSetCdm) {
 }
 
 TEST_F(MediaFoundationRendererTest, DirectCompositionHandle) {
-  if (!test_supported_)
+  if (!MediaFoundationRenderer::IsSupported())
     return;
 
   base::MockCallback<MediaFoundationRendererExtension::SetDCompModeCB>

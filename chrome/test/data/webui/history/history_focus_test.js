@@ -8,7 +8,8 @@
  */
 
 GEN_INCLUDE(['//chrome/test/data/webui/polymer_interactive_ui_test.js']);
-GEN('#include "services/network/public/cpp/features.h"');
+
+GEN('#include "content/public/test/browser_test.h"');
 
 const HistoryFocusTest = class extends PolymerInteractiveUITest {
   /** @override */
@@ -22,11 +23,6 @@ const HistoryFocusTest = class extends PolymerInteractiveUITest {
       '//third_party/mocha/mocha.js',
       '//chrome/test/data/webui/mocha_adapter.js',
     ];
-  }
-
-  /** @override */
-  get featureList() {
-    return {enabled: ['network::features::kOutOfBlinkCors']};
   }
 };
 

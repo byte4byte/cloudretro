@@ -20,6 +20,7 @@
 #include "base/version.h"
 #include "chrome/browser/chrome_content_browser_client.h"
 #include "chrome/browser/chromeos/cryptauth/cryptauth_device_id_provider_impl.h"
+#include "chrome/common/pref_names.h"
 #include "chromeos/components/multidevice/logging/logging.h"
 #include "chromeos/constants/chromeos_features.h"
 #include "chromeos/network/network_state_handler.h"
@@ -28,6 +29,7 @@
 #include "chromeos/services/device_sync/public/cpp/gcm_constants.h"
 #include "components/gcm_driver/instance_id/instance_id_driver.h"
 #include "components/gcm_driver/instance_id/instance_id_profile_service.h"
+#include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
 #include "components/version_info/version_info.h"
 #include "device/bluetooth/bluetooth_adapter.h"
@@ -38,6 +40,7 @@ namespace chromeos {
 namespace {
 
 const char kInstanceIdScope[] = "GCM";
+const char kDefaultModelName[] = "Chromebook";
 
 const cryptauthv2::FeatureMetadata& GenerateFeatureMetadata() {
   static const base::NoDestructor<cryptauthv2::FeatureMetadata>
@@ -61,6 +64,21 @@ const cryptauthv2::FeatureMetadata& GenerateFeatureMetadata() {
           inner_metadata.add_supported_features(
               cryptauthv2::
                   BetterTogetherFeatureMetadata_FeatureName_MAGIC_TETHER_CLIENT);
+        }
+
+        // Phone Hub is only supported if the associated flag is enabled.
+        if (features::IsPhoneHubEnabled()) {
+          inner_metadata.add_supported_features(
+              cryptauthv2::
+                  BetterTogetherFeatureMetadata_FeatureName_PHONE_HUB_CLIENT);
+        }
+
+        // Wifi Sync Android is only supported if the associated flag is
+        // enabled.
+        if (features::IsWifiSyncAndroidEnabled()) {
+          inner_metadata.add_supported_features(
+              cryptauthv2::
+                  BetterTogetherFeatureMetadata_FeatureName_WIFI_SYNC_CLIENT);
         }
 
         // Note: |inner_metadata|'s enabled_features field is deprecated and
@@ -97,6 +115,13 @@ void LogInstanceIdTokenFetchRetries(int count) {
 }
 
 }  // namespace
+
+// static
+void ClientAppMetadataProviderService::RegisterProfilePrefs(
+    PrefRegistrySimple* registry) {
+  registry->RegisterStringPref(prefs::kCryptAuthInstanceId, std::string());
+  registry->RegisterStringPref(prefs::kCryptAuthInstanceIdToken, std::string());
+}
 
 // static
 int64_t ClientAppMetadataProviderService::ConvertVersionCodeToInt64(
@@ -213,6 +238,14 @@ void ClientAppMetadataProviderService::OnInstanceIdFetched(
     const base::SysInfo::HardwareInfo& hardware_info,
     const std::string& instance_id) {
   DCHECK(!instance_id.empty());
+  std::string previous_instance_id =
+      pref_service_->GetString(prefs::kCryptAuthInstanceId);
+  if (!previous_instance_id.empty()) {
+    base::UmaHistogramBoolean("CryptAuth.InstanceId.DidInstanceIdChange",
+                              previous_instance_id != instance_id);
+  }
+  pref_service_->SetString(prefs::kCryptAuthInstanceId, instance_id);
+
   GetInstanceId()->GetToken(
       device_sync::
           kCryptAuthV2EnrollmentAuthorizedEntity /* authorized_entity */,
@@ -260,6 +293,13 @@ void ClientAppMetadataProviderService::OnInstanceIdTokenFetched(
   }
 
   DCHECK(!token.empty());
+  std::string previous_instance_id_token =
+      pref_service_->GetString(prefs::kCryptAuthInstanceIdToken);
+  if (!previous_instance_id_token.empty()) {
+    base::UmaHistogramBoolean("CryptAuth.InstanceId.DidInstanceIdTokenChange",
+                              previous_instance_id_token != token);
+  }
+  pref_service_->SetString(prefs::kCryptAuthInstanceIdToken, token);
 
   cryptauthv2::ClientAppMetadata metadata;
 
@@ -280,7 +320,13 @@ void ClientAppMetadataProviderService::OnInstanceIdTokenFetched(
   // device_display_diagonal_mils is unused because it only applies to
   // phones/tablets.
   metadata.set_device_display_diagonal_mils(0);
-  metadata.set_device_model(hardware_info.model);
+
+  base::UmaHistogramBoolean("CryptAuth.ClientAppMetadata.IsModelEmpty",
+                            hardware_info.model.empty());
+  metadata.set_device_model(hardware_info.model.empty() ? kDefaultModelName
+                                                        : hardware_info.model);
+  base::UmaHistogramBoolean("CryptAuth.ClientAppMetadata.IsManufacturerEmpty",
+                            hardware_info.manufacturer.empty());
   metadata.set_device_manufacturer(hardware_info.manufacturer);
   metadata.set_device_type(cryptauthv2::ClientAppMetadata_DeviceType_CHROME);
 

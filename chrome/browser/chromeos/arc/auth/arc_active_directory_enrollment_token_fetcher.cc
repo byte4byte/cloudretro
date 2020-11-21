@@ -102,9 +102,9 @@ void ArcActiveDirectoryEnrollmentTokenFetcher::DoFetchEnrollmentToken() {
               ? url_loader_factory_for_testing()
               : g_browser_process->system_network_context_manager()
                     ->GetSharedURLLoaderFactory(),
-          base::Bind(&ArcActiveDirectoryEnrollmentTokenFetcher::
-                         OnEnrollmentTokenResponseReceived,
-                     weak_ptr_factory_.GetWeakPtr()));
+          base::BindOnce(&ArcActiveDirectoryEnrollmentTokenFetcher::
+                             OnEnrollmentTokenResponseReceived,
+                         weak_ptr_factory_.GetWeakPtr()));
 
   em::ActiveDirectoryEnrollPlayUserRequest* enroll_request =
       config->request()->mutable_active_directory_enroll_play_user_request();
@@ -223,8 +223,10 @@ void ArcActiveDirectoryEnrollmentTokenFetcher::OnAuthFailed(
   LOG(ERROR) << "SAML auth failed: " << error_msg;
 
   // Don't call callback here, allow user to retry.
-  support_host_->ShowError(ArcSupportHost::Error::SERVER_COMMUNICATION_ERROR,
-                           true /* should_show_send_feedback */);
+  support_host_->ShowError(
+      ArcSupportHost::ErrorInfo(
+          ArcSupportHost::Error::SERVER_COMMUNICATION_ERROR),
+      true /* should_show_send_feedback */);
   UpdateOptInCancelUMA(OptInCancelReason::NETWORK_ERROR);
 }
 

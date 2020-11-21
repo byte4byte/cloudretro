@@ -10,6 +10,7 @@
 
 #include "base/callback.h"
 #include "base/observer_list_types.h"
+#include "base/optional.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "components/prefs/pref_change_registrar.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
@@ -18,10 +19,6 @@ namespace aura {
 class Window;
 }  // namespace aura
 
-namespace dlcservice {
-class DlcModuleList;
-}  // namespace dlcservice
-
 class Profile;
 class GURL;
 
@@ -29,11 +26,15 @@ namespace plugin_vm {
 
 class PluginVmPolicySubscription;
 
+// This is used by both the Plugin VM app and its installer.
 // Generated as crx_file::id_util::GenerateId("org.chromium.plugin_vm");
-constexpr char kPluginVmAppId[] = "lgjpclljbbmphhnalkeplcmnjpfmmaek";
+extern const char kPluginVmShelfAppId[];
 
 // Name of the Plugin VM.
-constexpr char kPluginVmName[] = "PvmDefault";
+extern const char kPluginVmName[];
+
+// Base directory for shared paths in Plugin VM, formatted for display.
+extern const char kChromeOSBaseDirectoryDisplayText[];
 
 const net::NetworkTrafficAnnotationTag kPluginVmNetworkTrafficAnnotation =
     net::DefineNetworkTrafficAnnotation("plugin_vm_image_download", R"(
@@ -58,28 +59,22 @@ const net::NetworkTrafficAnnotationTag kPluginVmNetworkTrafficAnnotation =
       }
     )");
 
-// Checks if Plugin VM is allowed for the current profile.
-bool IsPluginVmAllowedForProfile(const Profile* profile);
-
-// Returns whether Plugin VM has been installed.
-// TODO(timloh): We should detect installations via VMC, currently the user
-// needs to manually launch the installer once for the pref to get set.
-bool IsPluginVmConfigured(const Profile* profile);
-
-// Returns true if Plugin VM is allowed and configured for the current profile.
-bool IsPluginVmEnabled(const Profile* profile);
-
 // Determines if the default Plugin VM is running and visible.
 bool IsPluginVmRunning(Profile* profile);
 
 void ShowPluginVmInstallerView(Profile* profile);
 
-// Checks if an window is for Plugin VM.
-bool IsPluginVmWindow(const aura::Window* window);
+// Checks if an window is for the Plugin VM app. Note that it returns false for
+// the Plugin VM installer.
+bool IsPluginVmAppWindow(const aura::Window* window);
 
 // Retrieves the license key to be used for Plugin VM. If
 // none is set this will return an empty string.
 std::string GetPluginVmLicenseKey();
+
+// Retrieves the User Id to be used for Plugin VM. If none is set this will
+// return an empty string.
+std::string GetPluginVmUserIdForProfile(const Profile* profile);
 
 // Sets fake policy values and enables Plugin VM for testing. These set global
 // state so this should be called with empty strings on tear down.
@@ -90,18 +85,17 @@ void SetFakePluginVmPolicy(Profile* profile,
                            const std::string& image_hash,
                            const std::string& license_key);
 bool FakeLicenseKeyIsSet();
+bool FakeUserIdIsSet();
 
 // Used to clean up the Plugin VM Drive download directory if it did not get
 // removed when it should have, perhaps due to a crash.
 void RemoveDriveDownloadDirectoryIfExists();
-bool IsDriveUrl(const GURL& url);
-std::string GetIdFromDriveUrl(const GURL& url);
 
-// Used during communication with |DlcserviceClient|.
-dlcservice::DlcModuleList GetPluginVmDlcModuleList();
+// Returns nullopt if not a drive URL.
+base::Optional<std::string> GetIdFromDriveUrl(const GURL& url);
 
 // A subscription for changes to PluginVm policy that may affect
-// IsPluginVmAllowedForProfile.
+// PluginVmFeatures::Get()->IsAllowed.
 class PluginVmPolicySubscription {
  public:
   using PluginVmAllowedChanged = base::RepeatingCallback<void(bool is_allowed)>;
@@ -124,8 +118,9 @@ class PluginVmPolicySubscription {
   // The user-provided callback method.
   PluginVmAllowedChanged callback_;
 
+  std::unique_ptr<PrefChangeRegistrar> pref_change_registrar_;
   std::unique_ptr<chromeos::CrosSettings::ObserverSubscription>
-      allowed_subscription_;
+      device_allowed_subscription_;
   std::unique_ptr<chromeos::CrosSettings::ObserverSubscription>
       license_subscription_;
   std::unique_ptr<base::CallbackList<void(void)>::Subscription>

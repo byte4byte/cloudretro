@@ -17,7 +17,6 @@
 #include "components/content_settings/core/common/content_settings_pattern.h"
 #include "url/gurl.h"
 
-using content_settings::ResourceIdentifier;
 using content_settings::RuleIterator;
 
 namespace {
@@ -38,7 +37,8 @@ class InstalledWebappIterator : public content_settings::RuleIterator {
 
     return content_settings::Rule(
         ContentSettingsPattern::FromURLNoWildcard(origin),
-        ContentSettingsPattern::Wildcard(), base::Value(setting));
+        ContentSettingsPattern::Wildcard(), base::Value(setting), base::Time(),
+        content_settings::SessionModel::Durable);
   }
 
  private:
@@ -71,7 +71,6 @@ InstalledWebappProvider::~InstalledWebappProvider() {
 
 std::unique_ptr<RuleIterator> InstalledWebappProvider::GetRuleIterator(
     ContentSettingsType content_type,
-    const ResourceIdentifier& resource_identifier,
     bool incognito) const {
   if (incognito)
     return nullptr;
@@ -87,8 +86,8 @@ bool InstalledWebappProvider::SetWebsiteSetting(
     const ContentSettingsPattern& primary_pattern,
     const ContentSettingsPattern& secondary_pattern,
     ContentSettingsType content_type,
-    const ResourceIdentifier& resource_identifier,
-    std::unique_ptr<base::Value>&& value) {
+    std::unique_ptr<base::Value>&& value,
+    const content_settings::ContentSettingConstraints& constraints) {
   // You can't set settings through this provider.
   return false;
 }
@@ -105,5 +104,5 @@ void InstalledWebappProvider::ShutdownOnUIThread() {
 
 void InstalledWebappProvider::Notify(ContentSettingsType content_type) {
   NotifyObservers(ContentSettingsPattern(), ContentSettingsPattern(),
-                  content_type, std::string());
+                  content_type);
 }

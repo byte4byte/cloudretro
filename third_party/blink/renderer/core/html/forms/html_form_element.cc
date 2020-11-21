@@ -32,7 +32,6 @@
 #include "third_party/blink/public/mojom/security_context/insecure_request_policy.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/radio_node_list_or_element.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_controller.h"
-#include "third_party/blink/renderer/bindings/core/v8/script_event_listener.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_submit_event_init.h"
 #include "third_party/blink/renderer/core/dom/attribute.h"
 #include "third_party/blink/renderer/core/dom/document.h"
@@ -64,6 +63,8 @@
 #include "third_party/blink/renderer/core/layout/layout_object.h"
 #include "third_party/blink/renderer/core/loader/form_submission.h"
 #include "third_party/blink/renderer/core/loader/mixed_content_checker.h"
+#include "third_party/blink/renderer/core/page/chrome_client.h"
+#include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
@@ -87,12 +88,11 @@ HTMLFormElement::HTMLFormElement(Document& document)
 
 HTMLFormElement::~HTMLFormElement() = default;
 
-void HTMLFormElement::Trace(Visitor* visitor) {
+void HTMLFormElement::Trace(Visitor* visitor) const {
   visitor->Trace(past_names_map_);
   visitor->Trace(radio_button_group_scope_);
   visitor->Trace(listed_elements_);
   visitor->Trace(image_elements_);
-  visitor->Trace(planned_navigation_);
   HTMLElement::Trace(visitor);
 }
 
@@ -266,14 +266,15 @@ void HTMLFormElement::PrepareForSubmission(
     return;
   }
 
-  if (GetDocument().IsSandboxed(
+  if (GetExecutionContext()->IsSandboxed(
           network::mojom::blink::WebSandboxFlags::kForms)) {
-    GetDocument().AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
-        mojom::ConsoleMessageSource::kSecurity,
-        mojom::ConsoleMessageLevel::kError,
-        "Blocked form submission to '" + attributes_.Action() +
-            "' because the form's frame is sandboxed and the 'allow-forms' "
-            "permission is not set."));
+    GetExecutionContext()->AddConsoleMessage(
+        MakeGarbageCollected<ConsoleMessage>(
+            mojom::blink::ConsoleMessageSource::kSecurity,
+            mojom::blink::ConsoleMessageLevel::kError,
+            "Blocked form submission to '" + attributes_.Action() +
+                "' because the form's frame is sandboxed and the 'allow-forms' "
+                "permission is not set."));
     return;
   }
 
@@ -449,30 +450,55 @@ void HTMLFormElement::ScheduleFormSubmission(
     return;
   }
 
+  DCHECK(form_submission->Method() == FormSubmission::kPostMethod ||
+         form_submission->Method() == FormSubmission::kGetMethod);
+  DCHECK(form_submission->Data());
+  DCHECK(form_submission->Form());
+  if (form_submission->Action().IsEmpty())
+    return;
+  if (GetExecutionContext()->IsSandboxed(
+          network::mojom::blink::WebSandboxFlags::kForms)) {
+    // FIXME: This message should be moved off the console once a solution to
+    // https://bugs.webkit.org/show_bug.cgi?id=103274 exists.
+    GetExecutionContext()->AddConsoleMessage(
+        MakeGarbageCollected<ConsoleMessage>(
+            mojom::blink::ConsoleMessageSource::kSecurity,
+            mojom::blink::ConsoleMessageLevel::kError,
+            "Blocked form submission to '" +
+                form_submission->Action().ElidedString() +
+                "' because the form's frame is sandboxed and the 'allow-forms' "
+                "permission is not set."));
+    return;
+  }
+
+  if (!GetExecutionContext()->GetContentSecurityPolicy()->AllowFormAction(
+          form_submission->Action())) {
+    return;
+  }
+
+  UseCounter::Count(GetDocument(), WebFeature::kFormsSubmitted);
+  if (MixedContentChecker::IsMixedFormAction(GetDocument().GetFrame(),
+                                             form_submission->Action())) {
+    UseCounter::Count(GetDocument(), WebFeature::kMixedContentFormsSubmitted);
+  }
+  if (FastHasAttribute(html_names::kDisabledAttr)) {
+    UseCounter::Count(GetDocument(),
+                      WebFeature::kFormDisabledAttributePresentAndSubmit);
+  }
+
+  if (!target_frame)
+    return;
+
   if (form_submission->Action().ProtocolIsJavaScript()) {
     // For javascript urls, don't post a task to execute the form submission
     // because we already get another task posted for it in
     // Document::ProcessJavascriptUrl. If we post two tasks, the javascript will
     // be run too late according to some tests.
-    planned_navigation_ = form_submission;
-    SubmitForm();
+    form_submission->Navigate();
     return;
   }
 
-  if (!target_frame) {
-    // If we couldn't find a target frame, run through content security policy
-    // logic in SubmitForm anyway.
-    // TODO(1047489): Look a this more closely, consider refactoring
-    planned_navigation_ = form_submission;
-    SubmitForm();
-    return;
-  }
-
-  // According to [1], step 22, form submissions must "plan to navigate".
-  // This allows submissions to be canceled or superseded by later
-  // submission requests. See crbug.com/977882.
-  // [1] https://html.spec.whatwg.org/C/#form-submission-algorithm
-  planned_navigation_ = form_submission;
+  FrameScheduler* scheduler = GetDocument().GetFrame()->GetFrameScheduler();
 
   if (auto* target_local_frame = DynamicTo<LocalFrame>(target_frame)) {
     if (!target_local_frame->IsNavigationAllowed())
@@ -483,9 +509,22 @@ void HTMLFormElement::ScheduleFormSubmission(
         !form_submission->Action().ProtocolIsJavaScript()) {
       target_local_frame->GetDocument()->CancelParsing();
     }
+
+    // Use the target frame's frame scheduler. If we can't due to targeting a
+    // RemoteFrame, then use the frame scheduler from the frame this form is in.
+    scheduler = target_local_frame->GetFrameScheduler();
+
+    // Cancel pending javascript url navigations for the target frame. This new
+    // form submission should take precedence over them.
+    target_local_frame->GetDocument()->CancelPendingJavaScriptUrls();
+
+    // Cancel any pre-existing attempt to navigate the target frame which was
+    // already sent to the browser process so this form submission will take
+    // precedence over it.
+    target_local_frame->Loader().CancelClientNavigation();
   }
 
-  GetDocument().ScheduleFormSubmission(this);
+  target_frame->ScheduleFormSubmission(scheduler, form_submission);
 }
 
 FormData* HTMLFormElement::ConstructEntryList(
@@ -516,45 +555,6 @@ FormData* HTMLFormElement::ConstructEntryList(
   return &form_data;
 }
 
-void HTMLFormElement::SubmitForm() {
-  FormSubmission* submission = planned_navigation_;
-  DCHECK(submission->Method() == FormSubmission::kPostMethod ||
-         submission->Method() == FormSubmission::kGetMethod);
-  DCHECK(submission->Data());
-  DCHECK(submission->Form());
-  if (submission->Action().IsEmpty())
-    return;
-  if (GetDocument().IsSandboxed(
-          network::mojom::blink::WebSandboxFlags::kForms)) {
-    // FIXME: This message should be moved off the console once a solution to
-    // https://bugs.webkit.org/show_bug.cgi?id=103274 exists.
-    GetDocument().AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
-        mojom::ConsoleMessageSource::kSecurity,
-        mojom::ConsoleMessageLevel::kError,
-        "Blocked form submission to '" + submission->Action().ElidedString() +
-            "' because the form's frame is sandboxed and the 'allow-forms' "
-            "permission is not set."));
-    return;
-  }
-
-  if (!GetDocument().GetContentSecurityPolicy()->AllowFormAction(
-          submission->Action())) {
-    return;
-  }
-
-  UseCounter::Count(GetDocument(), WebFeature::kFormsSubmitted);
-  if (MixedContentChecker::IsMixedFormAction(GetDocument().GetFrame(),
-                                             submission->Action())) {
-    UseCounter::Count(GetDocument(), WebFeature::kMixedContentFormsSubmitted);
-  }
-  if (FastHasAttribute(html_names::kDisabledAttr)) {
-    UseCounter::Count(GetDocument(),
-                      WebFeature::kFormDisabledAttributePresentAndSubmit);
-  }
-
-  submission->Navigate();
-}
-
 void HTMLFormElement::reset() {
   LocalFrame* frame = GetDocument().GetFrame();
   if (is_in_reset_function_ || !frame)
@@ -580,6 +580,7 @@ void HTMLFormElement::reset() {
   }
 
   is_in_reset_function_ = false;
+  frame->GetPage()->GetChromeClient().FormElementReset(*this);
 }
 
 void HTMLFormElement::ParseAttribute(
@@ -592,9 +593,12 @@ void HTMLFormElement::ParseAttribute(
     // If we're not upgrading insecure requests, and the new action attribute is
     // pointing to an insecure "action" location from a secure page it is marked
     // as "passive" mixed content.
-    if ((GetDocument().GetSecurityContext().GetInsecureRequestPolicy() &
+    if (GetExecutionContext() &&
+        (GetExecutionContext()
+             ->GetSecurityContext()
+             .GetInsecureRequestPolicy() &
          mojom::blink::InsecureRequestPolicy::kUpgradeInsecureRequests) !=
-        mojom::blink::InsecureRequestPolicy::kLeaveInsecureRequestsAlone)
+            mojom::blink::InsecureRequestPolicy::kLeaveInsecureRequestsAlone)
       return;
     KURL action_url = GetDocument().CompleteURL(
         attributes_.Action().IsEmpty() ? GetDocument().Url().GetString()

@@ -11,6 +11,7 @@
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/task_manager/mock_web_contents_task_manager.h"
 #include "chrome/common/chrome_switches.h"
+#include "content/public/test/browser_test.h"
 #include "extensions/browser/test_image_loader.h"
 #include "extensions/common/constants.h"
 #include "ui/gfx/image/image.h"
@@ -20,18 +21,10 @@ namespace task_manager {
 
 class ExtensionTagsTest : public extensions::ExtensionBrowserTest {
  public:
-  ExtensionTagsTest() {}
-  ~ExtensionTagsTest() override {}
+  ExtensionTagsTest() = default;
+  ~ExtensionTagsTest() override = default;
 
  protected:
-  // extensions::ExtensionBrowserTest:
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    extensions::ExtensionBrowserTest::SetUpCommandLine(command_line);
-
-    // Do not launch device discovery process.
-    command_line->AppendSwitch(switches::kDisableDeviceDiscoveryNotifications);
-  }
-
   // If no extension task was found, a nullptr will be returned.
   Task* FindAndGetExtensionTask(
       const MockWebContentsTaskManager& task_manager) {

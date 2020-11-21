@@ -16,6 +16,7 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "net/cert/x509_util_nss.h"
 #include "net/test/test_certificate_data.h"
@@ -46,7 +47,7 @@ void CertificateViewerUITest::ShowCertificateViewer() {
       std::move(certs), browser()->tab_strip_model()->GetActiveWebContents(),
       browser()->window()->GetNativeWindow());
   content::WebContents* webui_webcontents = dialog->webui_->GetWebContents();
-  content::WaitForLoadStop(webui_webcontents);
+  EXPECT_TRUE(content::WaitForLoadStop(webui_webcontents));
   content::WebUI* webui = webui_webcontents->GetWebUI();
   webui_webcontents->GetMainFrame()->SetWebUIProperty(
       "expectedUrl", chrome::kChromeUICertificateViewerURL);

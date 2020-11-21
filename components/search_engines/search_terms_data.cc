@@ -4,7 +4,7 @@
 
 #include "components/search_engines/search_terms_data.h"
 
-#include "base/logging.h"
+#include "base/check.h"
 #include "components/google/core/common/google_util.h"
 #include "url/gurl.h"
 
@@ -46,7 +46,7 @@ std::string SearchTermsData::GetSearchClient() const {
   return std::string();
 }
 
-std::string SearchTermsData::GetSuggestClient() const {
+std::string SearchTermsData::GetSuggestClient(bool from_ntp) const {
   return std::string();
 }
 

@@ -14,22 +14,46 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/scoped_observer.h"
-#include "base/util/type_safety/strong_alias.h"
+#include "base/time/time.h"
+#include "base/types/strong_alias.h"
+#include "build/branding_buildflags.h"
+#include "build/build_config.h"
 #include "chrome/browser/extensions/api/passwords_private/passwords_private_delegate.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/ui/webui/help/version_updater.h"
 #include "chrome/browser/ui/webui/settings/settings_page_ui_handler.h"
 #include "components/password_manager/core/browser/bulk_leak_check_service.h"
+#include "components/password_manager/core/browser/ui/insecure_credentials_manager.h"
 #include "components/safety_check/safety_check.h"
+#include "components/safety_check/update_check_helper.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
+
+#if defined(OS_WIN) && BUILDFLAG(GOOGLE_CHROME_BRANDING)
+#include "chrome/browser/safe_browsing/chrome_cleaner/chrome_cleaner_controller_win.h"
+#include "chrome/browser/safe_browsing/chrome_cleaner/chrome_cleaner_scanner_results_win.h"
+#endif
+
+// Delegate for accessing external timestamps, overridden for tests.
+class TimestampDelegate {
+ public:
+  virtual ~TimestampDelegate() = default;
+  virtual base::Time GetSystemTime();
+#if defined(OS_WIN) && BUILDFLAG(GOOGLE_CHROME_BRANDING)
+  virtual base::Time FetchChromeCleanerScanCompletionTimestamp();
+#endif
+};
 
 // Settings page UI handler that checks four areas of browser safety:
 // browser updates, password leaks, malicious extensions, and unwanted
 // software.
 class SafetyCheckHandler
     : public settings::SettingsPageUIHandler,
-      public password_manager::BulkLeakCheckService::Observer,
+      public password_manager::BulkLeakCheckServiceInterface::Observer,
+      public password_manager::InsecureCredentialsManager::Observer,
+#if defined(OS_WIN) && BUILDFLAG(GOOGLE_CHROME_BRANDING)
+      public safe_browsing::ChromeCleanerController::Observer,
+#endif
       public safety_check::SafetyCheck::SafetyCheckHandlerInterface {
  public:
   // The following enum represent the state of the safety check parent
@@ -45,33 +69,9 @@ class SafetyCheckHandler
   // check and should be kept in sync with the JS frontend
   // (safety_check_browser_proxy.js) and |SafetyCheck*| metrics enums in
   // enums.xml.
+  using PasswordsStatus = safety_check::SafetyCheck::PasswordsStatus;
   using SafeBrowsingStatus = safety_check::SafetyCheck::SafeBrowsingStatus;
-  enum class UpdateStatus {
-    kChecking = 0,
-    kUpdated = 1,
-    kUpdating = 2,
-    kRelaunch = 3,
-    kDisabledByAdmin = 4,
-    kFailedOffline = 5,
-    kFailed = 6,
-    // Non-Google branded browsers cannot check for updates using
-    // VersionUpdater.
-    kUnknown = 7,
-    // New enum values must go above here.
-    kMaxValue = kUnknown,
-  };
-  enum class PasswordsStatus {
-    kChecking = 0,
-    kSafe = 1,
-    kCompromisedExist = 2,
-    kOffline = 3,
-    kNoPasswords = 4,
-    kSignedOut = 5,
-    kQuotaLimit = 6,
-    kError = 7,
-    // New enum values must go above here.
-    kMaxValue = kError,
-  };
+  using UpdateStatus = safety_check::SafetyCheck::UpdateStatus;
   enum class ExtensionsStatus {
     kChecking = 0,
     kError = 1,
@@ -84,14 +84,48 @@ class SafetyCheckHandler
     // New enum values must go above here.
     kMaxValue = kBlocklistedReenabledAllByAdmin,
   };
+  enum class ChromeCleanerStatus {
+    kHidden = 0,
+    kChecking = 1,
+    kInfected = 2,
+    kRebootRequired = 3,
+    kScanningForUws = 4,
+    kRemovingUws = 5,
+    kDisabledByAdmin = 6,
+    kError = 7,
+    kNoUwsFoundWithTimestamp = 8,
+    kNoUwsFoundWithoutTimestamp = 9,
+    // New enum values must go above here.
+    kMaxValue = kNoUwsFoundWithoutTimestamp,
+  };
+
+  struct ChromeCleanerResult {
+    SafetyCheckHandler::ChromeCleanerStatus status;
+    base::Time cct_completion_time;
+  };
 
   SafetyCheckHandler();
   ~SafetyCheckHandler() override;
 
-  // Triggers all four of the browser safety checks.
+  // Triggers WebUI updates about safety check now running.
+  // Note: since the checks deal with sensitive user information, this method
+  // should only be called as a result of an explicit user action.
+  void SendSafetyCheckStartedWebUiUpdates();
+
+  // Triggers all safety check child checks.
   // Note: since the checks deal with sensitive user information, this method
   // should only be called as a result of an explicit user action.
   void PerformSafetyCheck();
+
+  // Constructs a string depicting how much time passed since the completion of
+  // something from the corresponding timestamps and strings IDs.
+  base::string16 GetStringForTimePassed(base::Time completion_timestamp,
+                                        base::Time system_time,
+                                        int less_than_one_minute_ago_message_id,
+                                        int minutes_ago_message_id,
+                                        int hours_ago_message_id,
+                                        int yesterday_message_id,
+                                        int days_ago_message_id);
 
   // Constructs the 'safety check ran' display string by how long ago safety
   // check ran.
@@ -99,27 +133,57 @@ class SafetyCheckHandler
   base::string16 GetStringForParentRan(base::Time safety_check_completion_time,
                                        base::Time system_time);
 
+#if defined(OS_WIN) && BUILDFLAG(GOOGLE_CHROME_BRANDING)
+  // Constructs the string for the Chrome cleaner 'safe' state which depicts
+  // how long ago its last check ran.
+  base::string16 GetStringForChromeCleanerRan();
+  base::string16 GetStringForChromeCleanerRan(base::Time cct_completion_time,
+                                              base::Time system_time);
+
+  // safe_browsing::ChromeCleanerController::Observer overrides.
+  void OnIdle(
+      safe_browsing::ChromeCleanerController::IdleReason idle_reason) override;
+  void OnReporterRunning() override;
+  void OnScanning() override;
+  void OnInfected(bool is_powered_by_partner,
+                  const safe_browsing::ChromeCleanerScannerResults&
+                      scanner_results) override;
+  void OnCleaning(bool is_powered_by_partner,
+                  const safe_browsing::ChromeCleanerScannerResults&
+                      scanner_results) override;
+  void OnRebootRequired() override;
+  void OnRebootFailed() override;
+#endif
+
  protected:
-  SafetyCheckHandler(std::unique_ptr<VersionUpdater> version_updater,
-                     password_manager::BulkLeakCheckService* leak_service,
-                     extensions::PasswordsPrivateDelegate* passwords_delegate,
-                     extensions::ExtensionPrefs* extension_prefs,
-                     extensions::ExtensionServiceInterface* extension_service);
+  SafetyCheckHandler(
+      std::unique_ptr<safety_check::UpdateCheckHelper> update_helper,
+      std::unique_ptr<VersionUpdater> version_updater,
+      password_manager::BulkLeakCheckService* leak_service,
+      extensions::PasswordsPrivateDelegate* passwords_delegate,
+      extensions::ExtensionPrefs* extension_prefs,
+      extensions::ExtensionServiceInterface* extension_service,
+      std::unique_ptr<TimestampDelegate> timestamp_delegate);
 
   void SetVersionUpdaterForTesting(
       std::unique_ptr<VersionUpdater> version_updater) {
     version_updater_ = std::move(version_updater);
   }
 
+  void SetTimestampDelegateForTesting(
+      std::unique_ptr<TimestampDelegate> timestamp_delegate) {
+    timestamp_delegate_ = std::move(timestamp_delegate);
+  }
+
  private:
   // These ensure integers are passed in the correct possitions in the extension
   // check methods.
-  using Compromised = util::StrongAlias<class CompromisedTag, int>;
-  using Done = util::StrongAlias<class DoneTag, int>;
-  using Total = util::StrongAlias<class TotalTag, int>;
-  using Blocklisted = util::StrongAlias<class BlocklistedTag, int>;
-  using ReenabledUser = util::StrongAlias<class ReenabledUserTag, int>;
-  using ReenabledAdmin = util::StrongAlias<class ReenabledAdminTag, int>;
+  using Compromised = base::StrongAlias<class CompromisedTag, int>;
+  using Done = base::StrongAlias<class DoneTag, int>;
+  using Total = base::StrongAlias<class TotalTag, int>;
+  using Blocklisted = base::StrongAlias<class BlocklistedTag, int>;
+  using ReenabledUser = base::StrongAlias<class ReenabledUserTag, int>;
+  using ReenabledAdmin = base::StrongAlias<class ReenabledAdminTag, int>;
 
   // Handles triggering the safety check from the frontend (by user pressing a
   // button).
@@ -141,13 +205,13 @@ class SafetyCheckHandler
   // that case, if any of those were re-enabled.
   void CheckExtensions();
 
+#if defined(OS_WIN) && BUILDFLAG(GOOGLE_CHROME_BRANDING)
+  // Checks for unwanted software via the Chrome Cleanup Tool. Only on Windows.
+  void CheckChromeCleaner();
+#endif
+
   // Callbacks that get triggered when each check completes.
-  void OnUpdateCheckResult(VersionUpdater::Status status,
-                           int progress,
-                           bool rollback,
-                           const std::string& version,
-                           int64_t update_size,
-                           const base::string16& message);
+  void OnUpdateCheckResult(UpdateStatus status);
   void OnPasswordsCheckResult(PasswordsStatus status,
                               Compromised compromised,
                               Done done,
@@ -156,6 +220,9 @@ class SafetyCheckHandler
                                Blocklisted blocklisted,
                                ReenabledUser reenabled_user,
                                ReenabledAdmin reenabled_admin);
+#if defined(OS_WIN) && BUILDFLAG(GOOGLE_CHROME_BRANDING)
+  void OnChromeCleanerCheckResult(ChromeCleanerResult result);
+#endif
 
   // Methods for building user-visible strings based on the safety check
   // state.
@@ -170,6 +237,15 @@ class SafetyCheckHandler
                                         Blocklisted blocklisted,
                                         ReenabledUser reenabled_user,
                                         ReenabledAdmin reenabled_admin);
+#if defined(OS_WIN) && BUILDFLAG(GOOGLE_CHROME_BRANDING)
+  base::string16 GetStringForChromeCleaner(ChromeCleanerStatus status,
+                                           base::Time cct_completion_time,
+                                           base::Time system_time);
+#endif
+
+  // A generic error state often includes the offline state. This method is used
+  // as a callback for |UpdateCheckHelper| to check connectivity.
+  void DetermineIfOfflineOrError(bool connected);
 
   // Since the password check API does not distinguish between the cases of
   // having no compromised passwords and not having any passwords at all, it is
@@ -180,6 +256,20 @@ class SafetyCheckHandler
       const std::vector<extensions::api::passwords_private::PasswordUiEntry>&
           passwords);
 
+  // Gets the compromised passwords count and invokes an appropriate result
+  // method depending on the state.
+  void UpdatePasswordsResultOnCheckIdle();
+
+  // A callback passed to |VersionUpdater::CheckForUpdate| to receive the update
+  // state.
+  void OnVersionUpdaterResult(VersionUpdater::Status status,
+                              int progress,
+                              bool rollback,
+                              bool powerwash,
+                              const std::string& version,
+                              int64_t update_size,
+                              const base::string16& message);
+
   // SafetyCheck::SafetyCheckHandlerInterface implementation.
   void OnSafeBrowsingCheckResult(SafeBrowsingStatus status) override;
 
@@ -188,6 +278,11 @@ class SafetyCheckHandler
       password_manager::BulkLeakCheckService::State state) override;
   void OnCredentialDone(const password_manager::LeakCheckCredential& credential,
                         password_manager::IsLeaked is_leaked) override;
+
+  // InsecureCredentialsManager::Observer implementation.
+  void OnCompromisedCredentialsChanged(
+      password_manager::InsecureCredentialsManager::CredentialsView credentials)
+      override;
 
   // SettingsPageUIHandler implementation.
   void OnJavascriptAllowed() override;
@@ -211,20 +306,30 @@ class SafetyCheckHandler
   PasswordsStatus passwords_status_ = PasswordsStatus::kChecking;
   SafeBrowsingStatus safe_browsing_status_ = SafeBrowsingStatus::kChecking;
   ExtensionsStatus extensions_status_ = ExtensionsStatus::kChecking;
-
+  ChromeCleanerStatus chrome_cleaner_status_ = ChromeCleanerStatus::kHidden;
   // System time when safety check completed.
   base::Time safety_check_completion_time_;
+  // Tracks whether there is at least one |OnCredentialDone| callback with
+  // is_leaked = true.
+  bool compromised_passwords_exist_ = false;
 
   std::unique_ptr<safety_check::SafetyCheck> safety_check_;
+  std::unique_ptr<safety_check::UpdateCheckHelper> update_helper_;
 
   std::unique_ptr<VersionUpdater> version_updater_;
-  password_manager::BulkLeakCheckService* leak_service_ = nullptr;
+  password_manager::BulkLeakCheckServiceInterface* leak_service_ = nullptr;
+  password_manager::InsecureCredentialsManager* insecure_credentials_manager_ =
+      nullptr;
   extensions::PasswordsPrivateDelegate* passwords_delegate_ = nullptr;
   extensions::ExtensionPrefs* extension_prefs_ = nullptr;
   extensions::ExtensionServiceInterface* extension_service_ = nullptr;
-  ScopedObserver<password_manager::BulkLeakCheckService,
-                 password_manager::BulkLeakCheckService::Observer>
+  ScopedObserver<password_manager::BulkLeakCheckServiceInterface,
+                 password_manager::BulkLeakCheckServiceInterface::Observer>
       observed_leak_check_{this};
+  ScopedObserver<password_manager::InsecureCredentialsManager,
+                 password_manager::InsecureCredentialsManager::Observer>
+      observed_insecure_credentials_manager_{this};
+  std::unique_ptr<TimestampDelegate> timestamp_delegate_;
   base::WeakPtrFactory<SafetyCheckHandler> weak_ptr_factory_{this};
 };
 

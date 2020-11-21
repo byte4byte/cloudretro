@@ -21,7 +21,8 @@ class PageLoadTrackerAccess {
  public:
   static std::unique_ptr<NodeAttachedData>* GetUniquePtrStorage(
       PageNodeImpl* page_node) {
-    return &page_node->page_load_tracker_data_;
+    return &page_node->GetPageLoadTrackerData(
+        base::PassKey<PageLoadTrackerAccess>());
   }
 };
 
@@ -102,10 +103,8 @@ base::Value PageLoadTrackerDecorator::DescribePageNodeData(
     return base::Value();
 
   base::Value ret(base::Value::Type::DICTIONARY);
-  ret.SetKey("load_idle_state_",
-             base::Value(ToString(data->load_idle_state())));
-  ret.SetKey("loading_received_response_",
-             base::Value(data->loading_received_response_));
+  ret.SetStringKey("load_idle_state", ToString(data->load_idle_state()));
+  ret.SetBoolKey("loading_received_response", data->loading_received_response_);
 
   return ret;
 }

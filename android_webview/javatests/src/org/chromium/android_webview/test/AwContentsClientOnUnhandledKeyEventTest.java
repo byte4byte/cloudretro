@@ -4,8 +4,9 @@
 
 package org.chromium.android_webview.test;
 
-import android.support.test.filters.SmallTest;
 import android.view.KeyEvent;
+
+import androidx.test.filters.SmallTest;
 
 import org.junit.Assert;
 import org.junit.Before;
@@ -81,7 +82,7 @@ public class AwContentsClientOnUnhandledKeyEventTest {
      * work.
     */
     @Test
-    @DisabledTest
+    @DisabledTest(message = "https://crbug.com/538377")
     public void testTextboxConsumesKeyEvents() throws Throwable {
         AwActivityTestRule.enableJavaScriptOnUiThread(mTestContainerView.getAwContents());
         final String data = "<html><head></head><body><textarea id='textarea0'></textarea></body>"

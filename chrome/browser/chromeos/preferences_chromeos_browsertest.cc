@@ -24,6 +24,7 @@
 #include "components/feedback/tracing_manager.h"
 #include "components/prefs/pref_service.h"
 #include "components/user_manager/user_manager.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/ime/chromeos/fake_ime_keyboard.h"
@@ -68,11 +69,12 @@ class PreferencesTest : public LoginManagerTest {
     prefs->SetBoolean(prefs::kEnableTouchpadThreeFingerClick, !variant);
     prefs->SetInteger(prefs::kMouseSensitivity, !variant);
     prefs->SetInteger(prefs::kMouseScrollSensitivity, variant ? 1 : 4);
+    prefs->SetInteger(prefs::kPointingStickSensitivity, !variant);
     prefs->SetInteger(prefs::kTouchpadSensitivity, variant);
     prefs->SetInteger(prefs::kTouchpadScrollSensitivity, variant ? 1 : 4);
-    prefs->SetBoolean(prefs::kLanguageXkbAutoRepeatEnabled, variant);
-    prefs->SetInteger(prefs::kLanguageXkbAutoRepeatDelay, variant ? 100 : 500);
-    prefs->SetInteger(prefs::kLanguageXkbAutoRepeatInterval, variant ? 1 : 4);
+    prefs->SetBoolean(ash::prefs::kXkbAutoRepeatEnabled, variant);
+    prefs->SetInteger(ash::prefs::kXkbAutoRepeatDelay, variant ? 100 : 500);
+    prefs->SetInteger(ash::prefs::kXkbAutoRepeatInterval, variant ? 1 : 4);
     prefs->SetString(prefs::kLanguagePreloadEngines,
                      variant ? "xkb:us::eng,xkb:us:dvorak:eng"
                              : "xkb:us::eng,xkb:ru::rus");
@@ -103,17 +105,20 @@ class PreferencesTest : public LoginManagerTest {
               input_settings_->current_mouse_settings().GetSensitivity());
     EXPECT_EQ(prefs->GetInteger(prefs::kMouseScrollSensitivity),
               input_settings_->current_mouse_settings().GetScrollSensitivity());
+    EXPECT_EQ(
+        prefs->GetInteger(prefs::kPointingStickSensitivity),
+        input_settings_->current_pointing_stick_settings().GetSensitivity());
     EXPECT_EQ(prefs->GetInteger(prefs::kTouchpadSensitivity),
               input_settings_->current_touchpad_settings().GetSensitivity());
     EXPECT_EQ(
         prefs->GetInteger(prefs::kTouchpadScrollSensitivity),
         input_settings_->current_touchpad_settings().GetScrollSensitivity());
-    EXPECT_EQ(prefs->GetBoolean(prefs::kLanguageXkbAutoRepeatEnabled),
+    EXPECT_EQ(prefs->GetBoolean(ash::prefs::kXkbAutoRepeatEnabled),
               keyboard_->auto_repeat_is_enabled_);
     input_method::AutoRepeatRate rate = keyboard_->last_auto_repeat_rate_;
-    EXPECT_EQ(prefs->GetInteger(prefs::kLanguageXkbAutoRepeatDelay),
+    EXPECT_EQ(prefs->GetInteger(ash::prefs::kXkbAutoRepeatDelay),
               (int)rate.initial_delay_in_ms);
-    EXPECT_EQ(prefs->GetInteger(prefs::kLanguageXkbAutoRepeatInterval),
+    EXPECT_EQ(prefs->GetInteger(ash::prefs::kXkbAutoRepeatInterval),
               (int)rate.repeat_interval_in_ms);
     EXPECT_EQ(prefs->GetString(prefs::kLanguageCurrentInputMethod),
               input_method::InputMethodManager::Get()
@@ -172,28 +177,28 @@ IN_PROC_BROWSER_TEST_F(PreferencesTest, MultiProfiles) {
 
   // Check that changing prefs of the active user doesn't affect prefs of the
   // inactive user.
-  std::unique_ptr<base::DictionaryValue> prefs_backup =
+  base::Value prefs_backup =
       prefs1->GetPreferenceValues(PrefService::INCLUDE_DEFAULTS);
   SetPrefs(prefs2, false);
   CheckSettingsCorrespondToPrefs(prefs2);
-  EXPECT_TRUE(prefs_backup->Equals(
-      prefs1->GetPreferenceValues(PrefService::INCLUDE_DEFAULTS).get()));
+  EXPECT_EQ(prefs_backup,
+            prefs1->GetPreferenceValues(PrefService::INCLUDE_DEFAULTS));
   SetPrefs(prefs2, true);
   CheckSettingsCorrespondToPrefs(prefs2);
-  EXPECT_TRUE(prefs_backup->Equals(
-      prefs1->GetPreferenceValues(PrefService::INCLUDE_DEFAULTS).get()));
+  EXPECT_EQ(prefs_backup,
+            prefs1->GetPreferenceValues(PrefService::INCLUDE_DEFAULTS));
 
   // Check that changing prefs of the inactive user doesn't affect prefs of the
   // active user.
   prefs_backup = prefs2->GetPreferenceValues(PrefService::INCLUDE_DEFAULTS);
   SetPrefs(prefs1, true);
   CheckSettingsCorrespondToPrefs(prefs2);
-  EXPECT_TRUE(prefs_backup->Equals(
-      prefs2->GetPreferenceValues(PrefService::INCLUDE_DEFAULTS).get()));
+  EXPECT_EQ(prefs_backup,
+            prefs2->GetPreferenceValues(PrefService::INCLUDE_DEFAULTS));
   SetPrefs(prefs1, false);
   CheckSettingsCorrespondToPrefs(prefs2);
-  EXPECT_TRUE(prefs_backup->Equals(
-      prefs2->GetPreferenceValues(PrefService::INCLUDE_DEFAULTS).get()));
+  EXPECT_EQ(prefs_backup,
+            prefs2->GetPreferenceValues(PrefService::INCLUDE_DEFAULTS));
 
   // Check that changing non-owner prefs doesn't change corresponding local
   // state prefs and vice versa.

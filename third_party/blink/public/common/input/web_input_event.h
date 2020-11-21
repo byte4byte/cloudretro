@@ -35,10 +35,12 @@
 
 #include <memory>
 
-#include "base/logging.h"
+#include "base/notreached.h"
 #include "base/time/time.h"
 #include "third_party/blink/public/common/common_export.h"
 #include "third_party/blink/public/mojom/input/input_event.mojom-shared.h"
+#include "ui/events/types/event_type.h"
+#include "ui/events/types/scroll_input_type.h"
 #include "ui/gfx/geometry/point_f.h"
 #include "ui/gfx/geometry/vector2d_f.h"
 
@@ -72,119 +74,7 @@ class BLINK_COMMON_EXPORT WebInputEvent {
   // TODO(hbono): Issue 18064: remove the KeyDown type since it isn't
   // used in Chrome any longer.
 
-  // A Java counterpart will be generated for this enum.
-  // GENERATED_JAVA_ENUM_PACKAGE: org.chromium.blink_public.web
-  // GENERATED_JAVA_CLASS_NAME_OVERRIDE: WebInputEventType
-  enum Type {
-    kUndefined = -1,
-    kTypeFirst = kUndefined,
-
-    // WebMouseEvent
-    kMouseDown,
-    kMouseTypeFirst = kMouseDown,
-    kMouseUp,
-    kMouseMove,
-    kMouseEnter,
-    kMouseLeave,
-    kContextMenu,
-    kMouseTypeLast = kContextMenu,
-
-    // WebMouseWheelEvent
-    kMouseWheel,
-
-    // WebKeyboardEvent
-    kRawKeyDown,
-    kKeyboardTypeFirst = kRawKeyDown,
-    // KeyDown is a single event combining RawKeyDown and Char.  If KeyDown is
-    // sent for a given keystroke, those two other events will not be sent.
-    // Platforms tend to prefer sending in one format (Android uses KeyDown,
-    // Windows uses RawKeyDown+Char, for example), but this is a weakly held
-    // property as tools like WebDriver/DevTools might still send the other
-    // format.
-    kKeyDown,
-    kKeyUp,
-    kChar,
-    kKeyboardTypeLast = kChar,
-
-    // WebGestureEvent - input interpreted semi-semantically, most commonly from
-    // touchscreen but also used for touchpad, mousewheel, and gamepad
-    // scrolling.
-    kGestureScrollBegin,
-    kGestureTypeFirst = kGestureScrollBegin,
-    kGestureScrollEnd,
-    kGestureScrollUpdate,
-    // Fling is a high-velocity and quickly released finger movement.
-    // FlingStart is sent once and kicks off a scroll animation.
-    kGestureFlingStart,
-    kGestureFlingCancel,
-    // Pinch is two fingers moving closer or farther apart.
-    kGesturePinchBegin,
-    kGesturePinchTypeFirst = kGesturePinchBegin,
-    kGesturePinchEnd,
-    kGesturePinchUpdate,
-    kGesturePinchTypeLast = kGesturePinchUpdate,
-
-    // The following types are variations and subevents of single-taps.
-    //
-    // Sent the moment the user's finger hits the screen.
-    kGestureTapDown,
-    // Sent a short interval later, after it seems the finger is staying in
-    // place.  It's used to activate the link highlight ("show the press").
-    kGestureShowPress,
-    // Sent on finger lift for a simple, static, quick finger tap.  This is the
-    // "main" event which maps to a synthetic mouse click event.
-    kGestureTap,
-    // Sent when a GestureTapDown didn't turn into any variation of GestureTap
-    // (likely it turned into a scroll instead).
-    kGestureTapCancel,
-    // Sent as soon as the long-press timeout fires, while the finger is still
-    // down.
-    kGestureLongPress,
-    // Sent when the finger is lifted following a GestureLongPress.
-    kGestureLongTap,
-    // Sent on finger lift when two fingers tapped at the same time without
-    // moving.
-    kGestureTwoFingerTap,
-    // A rare event sent in place of GestureTap on desktop pages viewed on an
-    // Android phone.  This tap could not yet be resolved into a GestureTap
-    // because it may still turn into a GestureDoubleTap.
-    kGestureTapUnconfirmed,
-
-    // On Android, double-tap is two single-taps spread apart in time, like a
-    // double-click. This event is only sent on desktop pages, and is always
-    // preceded by GestureTapUnconfirmed. It's an instruction to Blink to
-    // perform a PageScaleAnimation zoom onto the double-tapped content. (It's
-    // treated differently from GestureTap with tapCount=2, which can also
-    // happen.)
-    // On desktop, this event may be used for a double-tap with two fingers on
-    // a touchpad, as the desired effect is similar to Android's double-tap.
-    kGestureDoubleTap,
-
-    kGestureTypeLast = kGestureDoubleTap,
-
-    // WebTouchEvent - raw touch pointers not yet classified into gestures.
-    kTouchStart,
-    kTouchTypeFirst = kTouchStart,
-    kTouchMove,
-    kTouchEnd,
-    kTouchCancel,
-    // TODO(nzolghadr): This event should be replaced with
-    // kPointerCausedUaAction
-    kTouchScrollStarted,
-    kTouchTypeLast = kTouchScrollStarted,
-
-    // WebPointerEvent: work in progress
-    kPointerDown,
-    kPointerTypeFirst = kPointerDown,
-    kPointerUp,
-    kPointerMove,
-    kPointerRawUpdate,  // To be only used within blink.
-    kPointerCancel,
-    kPointerCausedUaAction,
-    kPointerTypeLast = kPointerCausedUaAction,
-
-    kTypeLast = kPointerTypeLast
-  };
+  using Type = blink::mojom::EventType;
 
   // The modifier constants cannot change their values since pepper
   // does a 1-1 mapping of its values; see
@@ -435,6 +325,22 @@ class BLINK_COMMON_EXPORT WebInputEvent {
 
   virtual std::unique_ptr<WebInputEvent> Clone() const = 0;
 
+  // Returns whether the current event can be merged with the provided
+  // |event|.
+  virtual bool CanCoalesce(const blink::WebInputEvent& event) const = 0;
+
+  // Merge the current event with attributes from |event|.
+  virtual void Coalesce(const WebInputEvent& event) = 0;
+
+  // Returns the scroll input type if this is a scroll event; otherwise,
+  // returns base::nullopt.
+  virtual base::Optional<ui::ScrollInputType> GetScrollInputType() const;
+
+  // Convert this WebInputEvent::Type to a ui::EventType. Note that this is
+  // not a 1:1 relationship. Multiple blink types convert to the same
+  // ui::EventType and not all types do convert.
+  ui::EventType GetTypeAsUiEventType() const;
+
  protected:
   // The root frame scale.
   float frame_scale_ = 1;
@@ -446,6 +352,9 @@ class BLINK_COMMON_EXPORT WebInputEvent {
       : time_stamp_(time_stamp), type_(type), modifiers_(modifiers) {}
 
   WebInputEvent() { time_stamp_ = base::TimeTicks(); }
+
+  static DispatchType MergeDispatchTypes(DispatchType type_1,
+                                         DispatchType type_2);
 
   // Event time since platform start with microsecond resolution.
   base::TimeTicks time_stamp_;

@@ -20,7 +20,9 @@
 
 #include "third_party/blink/renderer/core/svg/svg_ellipse_element.h"
 
+#include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/layout/svg/layout_svg_ellipse.h"
+#include "third_party/blink/renderer/core/svg/svg_animated_length.h"
 #include "third_party/blink/renderer/core/svg/svg_length.h"
 #include "third_party/blink/renderer/platform/heap/heap.h"
 
@@ -58,7 +60,7 @@ SVGEllipseElement::SVGEllipseElement(Document& document)
   AddToPropertyMap(ry_);
 }
 
-void SVGEllipseElement::Trace(Visitor* visitor) {
+void SVGEllipseElement::Trace(Visitor* visitor) const {
   visitor->Trace(cx_);
   visitor->Trace(cy_);
   visitor->Trace(rx_);
@@ -70,8 +72,8 @@ Path SVGEllipseElement::AsPath() const {
   Path path;
 
   SVGLengthContext length_context(this);
-  DCHECK(GetLayoutObject());
-  const ComputedStyle& style = GetLayoutObject()->StyleRef();
+  const ComputedStyle& style = ComputedStyleRef();
+
   const SVGComputedStyle& svg_style = style.SvgStyle();
 
   FloatSize radii(ToFloatSize(
@@ -113,7 +115,9 @@ void SVGEllipseElement::CollectStyleForPresentationAttribute(
   }
 }
 
-void SVGEllipseElement::SvgAttributeChanged(const QualifiedName& attr_name) {
+void SVGEllipseElement::SvgAttributeChanged(
+    const SvgAttributeChangedParams& params) {
+  const QualifiedName& attr_name = params.name;
   if (attr_name == svg_names::kCxAttr || attr_name == svg_names::kCyAttr ||
       attr_name == svg_names::kRxAttr || attr_name == svg_names::kRyAttr) {
     UpdateRelativeLengthsInformation();
@@ -121,7 +125,7 @@ void SVGEllipseElement::SvgAttributeChanged(const QualifiedName& attr_name) {
     return;
   }
 
-  SVGGeometryElement::SvgAttributeChanged(attr_name);
+  SVGGeometryElement::SvgAttributeChanged(params);
 }
 
 bool SVGEllipseElement::SelfHasRelativeLengths() const {

@@ -7,12 +7,18 @@
 
 #include <string>
 
+#include "components/feed/core/v2/public/types.h"
+
 namespace feed {
 
 // Native access to |FeedServiceBridge| in Java.
 class FeedServiceBridge {
  public:
   static std::string GetLanguageTag();
+  static DisplayMetrics GetDisplayMetrics();
+  static void ClearAll();
+  static bool IsEnabled();
+  static void PrefetchImage(const GURL& url);
 };
 
 }  // namespace feed

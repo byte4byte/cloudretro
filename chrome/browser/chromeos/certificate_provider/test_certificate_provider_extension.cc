@@ -14,8 +14,11 @@
 #include "base/json/json_writer.h"
 #include "base/logging.h"
 #include "base/numerics/safe_conversions.h"
+#include "base/path_service.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
+#include "base/threading/thread_restrictions.h"
+#include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/api/certificate_provider.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/notification_details.h"
@@ -35,6 +38,13 @@
 
 namespace {
 
+constexpr char kExtensionId[] = "ecmhnokcdiianioonpgakiooenfnonid";
+// Paths relative to |chrome::DIR_TEST_DATA|:
+constexpr base::FilePath::CharType kExtensionPath[] =
+    FILE_PATH_LITERAL("extensions/test_certificate_provider/extension/");
+constexpr base::FilePath::CharType kExtensionPemPath[] =
+    FILE_PATH_LITERAL("extensions/test_certificate_provider/extension.pem");
+
 // List of algorithms that the extension claims to support for the returned
 // certificates.
 constexpr extensions::api::certificate_provider::Hash kSupportedHashes[] = {
@@ -53,10 +63,6 @@ std::vector<uint8_t> ExtractBytesFromValue(const base::Value& value) {
   for (const base::Value& item_value : value.GetList())
     bytes.push_back(base::checked_cast<uint8_t>(item_value.GetInt()));
   return bytes;
-}
-
-scoped_refptr<net::X509Certificate> GetCertificate() {
-  return net::ImportCertFromFile(net::GetTestCertsDirectory(), "client_1.pem");
 }
 
 base::span<const uint8_t> GetCertDer(const net::X509Certificate& certificate) {
@@ -112,9 +118,37 @@ void SendReplyToJs(extensions::TestSendMessageFunction* function,
   function->Reply(ConvertValueToJson(response));
 }
 
+bssl::UniquePtr<EVP_PKEY> LoadPrivateKeyFromPem(const base::FilePath& path) {
+  base::ScopedAllowBlockingForTesting allow_io;
+  return net::key_util::LoadEVP_PKEYFromPEM(path);
+}
+
 }  // namespace
 
-// Returns the Spki of the certificate provided by the extension.
+// static
+extensions::ExtensionId TestCertificateProviderExtension::extension_id() {
+  return kExtensionId;
+}
+
+// static
+base::FilePath TestCertificateProviderExtension::GetExtensionSourcePath() {
+  return base::PathService::CheckedGet(chrome::DIR_TEST_DATA)
+      .Append(kExtensionPath);
+}
+
+// static
+base::FilePath TestCertificateProviderExtension::GetExtensionPemPath() {
+  return base::PathService::CheckedGet(chrome::DIR_TEST_DATA)
+      .Append(kExtensionPemPath);
+}
+
+// static
+scoped_refptr<net::X509Certificate>
+TestCertificateProviderExtension::GetCertificate() {
+  return net::ImportCertFromFile(net::GetTestCertsDirectory(), "client_1.pem");
+}
+
+// static
 std::string TestCertificateProviderExtension::GetCertificateSpki() {
   const scoped_refptr<net::X509Certificate> certificate = GetCertificate();
   base::StringPiece spki_bytes;
@@ -127,16 +161,12 @@ std::string TestCertificateProviderExtension::GetCertificateSpki() {
 }
 
 TestCertificateProviderExtension::TestCertificateProviderExtension(
-    content::BrowserContext* browser_context,
-    const std::string& extension_id)
+    content::BrowserContext* browser_context)
     : browser_context_(browser_context),
-      extension_id_(extension_id),
       certificate_(GetCertificate()),
-      private_key_(net::key_util::LoadEVP_PKEYFromPEM(
-          net::GetTestCertsDirectory().Append(
-              FILE_PATH_LITERAL("client_1.key")))) {
+      private_key_(LoadPrivateKeyFromPem(net::GetTestCertsDirectory().Append(
+          FILE_PATH_LITERAL("client_1.key")))) {
   DCHECK(browser_context_);
-  DCHECK(!extension_id_.empty());
   CHECK(certificate_);
   CHECK(private_key_);
   notification_registrar_.Add(this,
@@ -154,7 +184,7 @@ void TestCertificateProviderExtension::Observe(
 
   extensions::TestSendMessageFunction* function =
       content::Source<extensions::TestSendMessageFunction>(source).ptr();
-  if (!function->extension() || function->extension_id() != extension_id_ ||
+  if (!function->extension() || function->extension_id() != kExtensionId ||
       function->browser_context() != browser_context_) {
     // Ignore messages targeted to other extensions.
     return;
@@ -191,6 +221,7 @@ void TestCertificateProviderExtension::Observe(
 
 void TestCertificateProviderExtension::HandleCertificatesRequest(
     ReplyToJsCallback callback) {
+  ++certificate_request_count_;
   base::Value cert_info_values(base::Value::Type::LIST);
   if (!should_fail_certificate_requests_)
     cert_info_values.Append(MakeCertInfoValue(*certificate_));
@@ -235,8 +266,17 @@ void TestCertificateProviderExtension::HandleSignatureRequest(
       // side before generating the signature.
       base::Value pin_request_parameters(base::Value::Type::DICTIONARY);
       pin_request_parameters.SetIntKey("signRequestId", sign_request_id);
+      if (remaining_pin_attempts_ == 0) {
+        pin_request_parameters.SetStringKey("errorType",
+                                            "MAX_ATTEMPTS_EXCEEDED");
+      }
       response.SetKey("requestPin", std::move(pin_request_parameters));
       std::move(callback).Run(response);
+      return;
+    }
+    if (remaining_pin_attempts_ == 0) {
+      // The error about the lockout is already displayed, so fail immediately.
+      std::move(callback).Run(/*response=*/base::Value());
       return;
     }
     if (pin_status_string == "canceled" ||
@@ -250,10 +290,19 @@ void TestCertificateProviderExtension::HandleSignatureRequest(
     }
     DCHECK_EQ(pin_status_string, "ok");
     if (pin_string != *required_pin_) {
-      // The PIN is wrong, so retry the PIN request with displaying an error.
+      // The entered PIN is wrong, so decrement the remaining attempt count, and
+      // update the PIN dialog with displaying an error.
+      if (remaining_pin_attempts_ > 0)
+        --remaining_pin_attempts_;
       base::Value pin_request_parameters(base::Value::Type::DICTIONARY);
       pin_request_parameters.SetIntKey("signRequestId", sign_request_id);
-      pin_request_parameters.SetStringKey("errorType", "INVALID_PIN");
+      pin_request_parameters.SetStringKey(
+          "errorType", remaining_pin_attempts_ == 0 ? "MAX_ATTEMPTS_EXCEEDED"
+                                                    : "INVALID_PIN");
+      if (remaining_pin_attempts_ > 0) {
+        pin_request_parameters.SetIntKey("attemptsLeft",
+                                         remaining_pin_attempts_);
+      }
       response.SetKey("requestPin", std::move(pin_request_parameters));
       std::move(callback).Run(response);
       return;

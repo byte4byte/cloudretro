@@ -4,7 +4,7 @@
 
 #import "ios/chrome/browser/crash_report/breadcrumbs/breadcrumb_manager_observer_bridge.h"
 
-#include "base/logging.h"
+#include "base/check.h"
 #include "base/strings/sys_string_conversions.h"
 #include "ios/chrome/browser/crash_report/breadcrumbs/breadcrumb_manager.h"
 #include "ios/chrome/browser/crash_report/breadcrumbs/breadcrumb_manager_keyed_service.h"
@@ -41,6 +41,17 @@ BreadcrumbManagerObserverBridge::~BreadcrumbManagerObserverBridge() {
 
 void BreadcrumbManagerObserverBridge::EventAdded(BreadcrumbManager* manager,
                                                  const std::string& event) {
-  [observer_ breadcrumbManager:manager
-                   didAddEvent:base::SysUTF8ToNSString(event)];
+  if ([observer_ respondsToSelector:@selector(breadcrumbManager:
+                                                    didAddEvent:)]) {
+    [observer_ breadcrumbManager:manager
+                     didAddEvent:base::SysUTF8ToNSString(event)];
+  }
+}
+
+void BreadcrumbManagerObserverBridge::OldEventsRemoved(
+    BreadcrumbManager* manager) {
+  if ([observer_
+          respondsToSelector:@selector(breadcrumbManagerDidRemoveOldEvents:)]) {
+    [observer_ breadcrumbManagerDidRemoveOldEvents:manager];
+  }
 }

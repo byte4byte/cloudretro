@@ -44,8 +44,8 @@ WebContents* ChromeWebContentsHandler::OpenURLFromTab(
   if (!browser) {
     // TODO(erg): OpenURLParams should pass a user_gesture flag, pass it to
     // CreateParams, and pass the real value to nav_params below.
-    browser =
-        new Browser(Browser::CreateParams(Browser::TYPE_NORMAL, profile, true));
+    browser = Browser::Create(
+        Browser::CreateParams(Browser::TYPE_NORMAL, profile, true));
   }
   NavigateParams nav_params(browser, params.url, params.transition);
   nav_params.FillNavigateParamsFromOpenURLParams(params);
@@ -77,6 +77,7 @@ void ChromeWebContentsHandler::AddNewContents(
     content::BrowserContext* context,
     WebContents* source,
     std::unique_ptr<WebContents> new_contents,
+    const GURL& target_url,
     WindowOpenDisposition disposition,
     const gfx::Rect& initial_rect,
     bool user_gesture) {
@@ -88,7 +89,15 @@ void ChromeWebContentsHandler::AddNewContents(
   Browser* browser = chrome::FindTabbedBrowser(profile, false);
   const bool browser_created = !browser;
   if (!browser) {
-    browser = new Browser(
+    // TODO(https://crbug.com/1141608): Remove when root cause is found.
+    if (Browser::GetBrowserCreationStatusForProfile(profile) !=
+        Browser::BrowserCreationStatus::kOk) {
+      NOTREACHED() << "Browser creation status: "
+                   << static_cast<int>(
+                          Browser::GetBrowserCreationStatusForProfile(profile));
+      return;
+    }
+    browser = Browser::Create(
         Browser::CreateParams(Browser::TYPE_NORMAL, profile, user_gesture));
   }
   NavigateParams params(browser, std::move(new_contents));

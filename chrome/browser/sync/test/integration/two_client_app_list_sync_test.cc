@@ -5,8 +5,9 @@
 #include <stddef.h>
 
 #include "base/macros.h"
+#include "base/one_shot_event.h"
+#include "base/run_loop.h"
 #include "build/build_config.h"
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/test/integration/apps_helper.h"
@@ -23,8 +24,7 @@
 #include "components/sync/base/pref_names.h"
 #include "components/sync/base/user_selectable_type.h"
 #include "components/sync/driver/sync_user_settings.h"
-#include "content/public/browser/notification_service.h"
-#include "content/public/test/test_utils.h"
+#include "content/public/test/browser_test.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_system.h"
 
@@ -65,9 +65,8 @@ const app_list::AppListSyncableService::SyncItem* GetSyncItem(
 
 class TwoClientAppListSyncTest : public SyncTest {
  public:
-  TwoClientAppListSyncTest() : SyncTest(TWO_CLIENT) { DisableVerifier(); }
-
-  ~TwoClientAppListSyncTest() override {}
+  TwoClientAppListSyncTest() : SyncTest(TWO_CLIENT) {}
+  ~TwoClientAppListSyncTest() override = default;
 
   // SyncTest
   bool SetupClients() override {
@@ -100,17 +99,12 @@ class TwoClientAppListSyncTest : public SyncTest {
   }
 
   void WaitForExtensionsServiceToLoadForProfile(Profile* profile) {
-    extensions::ExtensionService* extension_service =
-        extensions::ExtensionSystem::Get(profile)->extension_service();
-    if (extension_service && extension_service->is_ready())
-      return;
-    content::WindowedNotificationObserver extensions_loaded_observer(
-        extensions::NOTIFICATION_EXTENSIONS_READY_DEPRECATED,
-        content::NotificationService::AllSources());
-    extensions_loaded_observer.Wait();
+    extensions::ExtensionSystem* extension_system =
+        extensions::ExtensionSystem::Get(profile);
+    base::RunLoop run_loop;
+    extension_system->ready().Post(FROM_HERE, run_loop.QuitClosure());
+    run_loop.Run();
   }
-
-  DISALLOW_COPY_AND_ASSIGN(TwoClientAppListSyncTest);
 };
 
 class RemoveDefaultAppSyncTest : public testing::WithParamInterface<bool>,

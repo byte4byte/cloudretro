@@ -23,6 +23,7 @@
 #include "components/policy/core/common/mock_configuration_policy_provider.h"
 #include "components/policy/policy_constants.h"
 #include "components/prefs/pref_service.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/test_utils.h"
 #include "content/public/test/url_loader_interceptor.h"
 #include "net/base/filename_util.h"
@@ -80,14 +81,13 @@ bool ShouldSwitch(BrowserSwitcherService* service, const GURL& url) {
 
 void SetPolicy(policy::PolicyMap* policies,
                const char* key,
-               std::unique_ptr<base::Value> value) {
+               base::Value value) {
   policies->Set(key, policy::POLICY_LEVEL_MANDATORY, policy::POLICY_SCOPE_USER,
                 policy::POLICY_SOURCE_PLATFORM, std::move(value), nullptr);
 }
 
 void EnableBrowserSwitcher(policy::PolicyMap* policies) {
-  SetPolicy(policies, policy::key::kBrowserSwitcherEnabled,
-            std::make_unique<base::Value>(true));
+  SetPolicy(policies, policy::key::kBrowserSwitcherEnabled, base::Value(true));
 }
 
 }  // namespace
@@ -101,7 +101,6 @@ class BrowserSwitcherServiceTest : public InProcessBrowserTest {
     EXPECT_CALL(provider_, IsInitializationComplete(testing::_))
         .WillRepeatedly(testing::Return(true));
     policy::BrowserPolicyConnector::SetPolicyProviderForTesting(&provider_);
-    BrowserSwitcherService::SetFetchDelayForTesting(base::TimeDelta());
     BrowserSwitcherService::SetRefreshDelayForTesting(base::TimeDelta());
   }
 
@@ -128,7 +127,7 @@ class BrowserSwitcherServiceTest : public InProcessBrowserTest {
     policy::PolicyMap policies;
     EnableBrowserSwitcher(&policies);
     SetPolicy(&policies, policy::key::kBrowserSwitcherUseIeSitelist,
-              std::make_unique<base::Value>(use_ie_sitelist));
+              base::Value(use_ie_sitelist));
     provider_.UpdateChromePolicy(policies);
     base::RunLoop().RunUntilIdle();
   }
@@ -137,7 +136,7 @@ class BrowserSwitcherServiceTest : public InProcessBrowserTest {
     policy::PolicyMap policies;
     EnableBrowserSwitcher(&policies);
     SetPolicy(&policies, policy::key::kBrowserSwitcherExternalSitelistUrl,
-              std::make_unique<base::Value>(url));
+              base::Value(url));
     provider_.UpdateChromePolicy(policies);
     base::RunLoop().RunUntilIdle();
   }
@@ -317,7 +316,7 @@ IN_PROC_BROWSER_TEST_F(BrowserSwitcherServiceTest, ExternalFileUrl) {
   base::ScopedTempDir dir;
   ASSERT_TRUE(dir.CreateUniqueTempDir());
   base::FilePath sitelist_path = dir.GetPath().AppendASCII("sitelist.xml");
-  base::WriteFile(sitelist_path, kSitelistXml, strlen(kSitelistXml));
+  base::WriteFile(sitelist_path, kSitelistXml);
 
   SetExternalUrl(net::FilePathToFileURL(sitelist_path).spec());
 
@@ -368,12 +367,12 @@ IN_PROC_BROWSER_TEST_F(BrowserSwitcherServiceTest,
                        ExternalGreylistFetchAndParseAfterStartup) {
   policy::PolicyMap policies;
   EnableBrowserSwitcher(&policies);
-  auto url_list = std::make_unique<base::ListValue>();
-  url_list->Append("*");
+  base::Value url_list(base::Value::Type::LIST);
+  url_list.Append("*");
   SetPolicy(&policies, policy::key::kBrowserSwitcherUrlList,
             std::move(url_list));
   SetPolicy(&policies, policy::key::kBrowserSwitcherExternalGreylistUrl,
-            std::make_unique<base::Value>(kAValidUrl));
+            base::Value(kAValidUrl));
   policy_provider().UpdateChromePolicy(policies);
   base::RunLoop().RunUntilIdle();
 
@@ -513,23 +512,23 @@ IN_PROC_BROWSER_TEST_F(BrowserSwitcherServiceTest, WritesPrefsToCacheFile) {
   policy::PolicyMap policies;
   EnableBrowserSwitcher(&policies);
   SetPolicy(&policies, policy::key::kAlternativeBrowserPath,
-            std::make_unique<base::Value>("IExplore.exe"));
-  auto alt_params = std::make_unique<base::ListValue>();
-  alt_params->Append(base::Value("--bogus-flag"));
+            base::Value("IExplore.exe"));
+  base::Value alt_params(base::Value::Type::LIST);
+  alt_params.Append("--bogus-flag");
   SetPolicy(&policies, policy::key::kAlternativeBrowserParameters,
             std::move(alt_params));
   SetPolicy(&policies, policy::key::kBrowserSwitcherChromePath,
-            std::make_unique<base::Value>("chrome.exe"));
-  auto chrome_params = std::make_unique<base::ListValue>();
-  chrome_params->Append(base::Value("--force-dark-mode"));
+            base::Value("chrome.exe"));
+  base::Value chrome_params(base::Value::Type::LIST);
+  chrome_params.Append("--force-dark-mode");
   SetPolicy(&policies, policy::key::kBrowserSwitcherChromeParameters,
             std::move(chrome_params));
-  auto url_list = std::make_unique<base::ListValue>();
-  url_list->Append(base::Value("example.com"));
+  base::Value url_list(base::Value::Type::LIST);
+  url_list.Append("example.com");
   SetPolicy(&policies, policy::key::kBrowserSwitcherUrlList,
             std::move(url_list));
-  auto greylist = std::make_unique<base::ListValue>();
-  greylist->Append(base::Value("foo.example.com"));
+  base::Value greylist(base::Value::Type::LIST);
+  greylist.Append("foo.example.com");
   SetPolicy(&policies, policy::key::kBrowserSwitcherUrlGreylist,
             std::move(greylist));
   policy_provider().UpdateChromePolicy(policies);
@@ -559,35 +558,32 @@ IN_PROC_BROWSER_TEST_F(BrowserSwitcherServiceTest, WritesPrefsToCacheFile) {
   EXPECT_FALSE(base::PathExists(sitelist_cache_file_path()));
 }
 
-IN_PROC_BROWSER_TEST_F(BrowserSwitcherServiceTest, WritesSitelistsToCacheFile) {
+IN_PROC_BROWSER_TEST_F(BrowserSwitcherServiceTest,
+                       DISABLED_WritesSitelistsToCacheFile) {
   base::ScopedAllowBlockingForTesting allow_blocking;
 
   base::ScopedTempDir dir;
   ASSERT_TRUE(dir.CreateUniqueTempDir());
   base::FilePath ieem_sitelist_path =
       dir.GetPath().AppendASCII("ieem_sitelist.xml");
-  base::WriteFile(ieem_sitelist_path, kSitelistXml, strlen(kSitelistXml));
+  base::WriteFile(ieem_sitelist_path, kSitelistXml);
 
   base::FilePath external_sitelist_path =
       dir.GetPath().AppendASCII("external_sitelist.xml");
-  base::WriteFile(external_sitelist_path, kOtherSitelistXml,
-                  strlen(kOtherSitelistXml));
+  base::WriteFile(external_sitelist_path, kOtherSitelistXml);
 
   base::FilePath external_greylist_path =
       dir.GetPath().AppendASCII("external_greylist.xml");
-  base::WriteFile(external_greylist_path, kYetAnotherSitelistXml,
-                  strlen(kYetAnotherSitelistXml));
+  base::WriteFile(external_greylist_path, kYetAnotherSitelistXml);
 
   policy::PolicyMap policies;
   EnableBrowserSwitcher(&policies);
   SetPolicy(&policies, policy::key::kBrowserSwitcherExternalSitelistUrl,
-            std::make_unique<base::Value>(
-                net::FilePathToFileURL(external_sitelist_path).spec()));
+            base::Value(net::FilePathToFileURL(external_sitelist_path).spec()));
   SetPolicy(&policies, policy::key::kBrowserSwitcherExternalGreylistUrl,
-            std::make_unique<base::Value>(
-                net::FilePathToFileURL(external_greylist_path).spec()));
+            base::Value(net::FilePathToFileURL(external_greylist_path).spec()));
   SetPolicy(&policies, policy::key::kBrowserSwitcherUseIeSitelist,
-            std::make_unique<base::Value>(true));
+            base::Value(true));
   policy_provider().UpdateChromePolicy(policies);
   base::RunLoop().RunUntilIdle();
   BrowserSwitcherServiceWin::SetIeemSitelistUrlForTesting(
@@ -699,7 +695,7 @@ IN_PROC_BROWSER_TEST_F(BrowserSwitcherServiceTest,
   base::RunLoop().RunUntilIdle();
 
   ASSERT_TRUE(base::CreateDirectory(cache_dir()));
-  base::WriteFile(sitelist_cache_file_path(), "", 0);
+  base::WriteFile(sitelist_cache_file_path(), "");
   ASSERT_TRUE(base::PathExists(sitelist_cache_file_path()));
 
   // Check that "sitelistcache.dat" got cleaned up on startup.
@@ -754,8 +750,8 @@ IN_PROC_BROWSER_TEST_F(BrowserSwitcherServiceTest,
 
   // Cache files already exist.
   ASSERT_TRUE(base::CreateDirectory(cache_dir()));
-  base::WriteFile(cache_file_path(), "", 0);
-  base::WriteFile(sitelist_cache_file_path(), "", 0);
+  base::WriteFile(cache_file_path(), "");
+  base::WriteFile(sitelist_cache_file_path(), "");
   ASSERT_TRUE(base::PathExists(cache_file_path()));
   ASSERT_TRUE(base::PathExists(sitelist_cache_file_path()));
 

@@ -19,6 +19,7 @@
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "content/public/test/browser_test.h"
 #include "ui/gfx/animation/animation_test_api.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/test/widget_test.h"
@@ -35,6 +36,10 @@ class TabHoverCardBubbleViewBrowserTest : public DialogBrowserTest {
     TabHoverCardBubbleView::disable_animations_for_testing_ = true;
     scoped_feature_list_.InitAndEnableFeature(features::kTabHoverCards);
   }
+  TabHoverCardBubbleViewBrowserTest(const TabHoverCardBubbleViewBrowserTest&) =
+      delete;
+  TabHoverCardBubbleViewBrowserTest& operator=(
+      const TabHoverCardBubbleViewBrowserTest&) = delete;
   ~TabHoverCardBubbleViewBrowserTest() override = default;
 
   void SetUpOnMainThread() override {
@@ -90,8 +95,6 @@ class TabHoverCardBubbleViewBrowserTest : public DialogBrowserTest {
   base::test::ScopedFeatureList scoped_feature_list_;
 
   TabStrip* tab_strip_ = nullptr;
-
-  DISALLOW_COPY_AND_ASSIGN(TabHoverCardBubbleViewBrowserTest);
 };
 
 IN_PROC_BROWSER_TEST_F(TabHoverCardBubbleViewBrowserTest,
@@ -120,7 +123,7 @@ IN_PROC_BROWSER_TEST_F(TabHoverCardBubbleViewBrowserTest,
 
 // Verify hover card is visible when tab is focused.
 // TODO(crbug.com/1050765): the test is flaky.
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
 #define MAYBE_WidgetVisibleOnTabFocus DISABLED_WidgetVisibleOnTabFocus
 #else
 #define MAYBE_WidgetVisibleOnTabFocus WidgetVisibleOnTabFocus
@@ -138,7 +141,7 @@ IN_PROC_BROWSER_TEST_F(TabHoverCardBubbleViewBrowserTest,
 // Verify hover card is visible when focus moves from the tab to tab close
 // button.
 // TODO(crbug.com/1050765): the test is flaky.
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
 #define MAYBE_WidgetVisibleOnTabCloseButtonFocusAfterTabFocus \
   DISABLED_WidgetVisibleOnTabCloseButtonFocusAfterTabFocus
 #else
@@ -191,7 +194,7 @@ IN_PROC_BROWSER_TEST_F(TabHoverCardBubbleViewBrowserTest,
 // Verify hover card is visible after navigating to the tab strip using keyboard
 // accelerators.
 // TODO(crbug.com/1050765): the test is flaky.
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
 #define MAYBE_WidgetVisibleOnTabFocusFromKeyboardAccelerator \
   DISABLED_WidgetVisibleOnTabFocusFromKeyboardAccelerator
 #else

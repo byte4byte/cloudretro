@@ -29,7 +29,7 @@ WebBundleInterceptorForHistoryNavigationFromNetwork::
                                                std::move(done_callback),
                                                frame_tree_node_id),
       source_(std::move(source)) {
-  DCHECK(source_->IsNavigationPathRestrictionSatisfied(target_inner_url_));
+  DCHECK(source_->IsPathRestrictionSatisfied(target_inner_url_));
 }
 
 WebBundleInterceptorForHistoryNavigationFromNetwork::
@@ -127,7 +127,7 @@ bool WebBundleInterceptorForHistoryNavigationFromNetwork::
 
 void WebBundleInterceptorForHistoryNavigationFromNetwork::OnMetadataReady(
     network::ResourceRequest request,
-    data_decoder::mojom::BundleMetadataParseErrorPtr error) {
+    web_package::mojom::BundleMetadataParseErrorPtr error) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK_EQ(State::kWebBundleRecieved, state_);
   state_ = State::kMetadataReady;

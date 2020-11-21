@@ -4,11 +4,11 @@
 
 #include "components/prefs/pref_value_map.h"
 
+#include <limits.h>
 #include <map>
 #include <memory>
 #include <utility>
 
-#include "base/logging.h"
 #include "base/values.h"
 
 PrefValueMap::PrefValueMap() {}

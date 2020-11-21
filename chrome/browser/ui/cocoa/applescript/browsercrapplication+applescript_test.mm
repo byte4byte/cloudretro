@@ -16,6 +16,7 @@
 #include "chrome/browser/ui/cocoa/test/run_loop_testing.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/in_process_browser_test.h"
+#include "content/public/test/browser_test.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/gtest_mac.h"
 #include "ui/gfx/geometry/size.h"
@@ -26,9 +27,9 @@ typedef InProcessBrowserTest BrowserCrApplicationAppleScriptTest;
 IN_PROC_BROWSER_TEST_F(BrowserCrApplicationAppleScriptTest, Creation) {
   // Create additional |Browser*| objects of different type.
   Profile* profile = browser()->profile();
-  Browser* b1 =
-      new Browser(Browser::CreateParams(Browser::TYPE_POPUP, profile, true));
-  Browser* b2 = new Browser(Browser::CreateParams::CreateForApp(
+  Browser* b1 = Browser::Create(
+      Browser::CreateParams(Browser::TYPE_POPUP, profile, true));
+  Browser* b2 = Browser::Create(Browser::CreateParams::CreateForApp(
       "Test", true /* trusted_source */, gfx::Rect(), profile, true));
 
   EXPECT_EQ(3U, [[NSApp appleScriptWindows] count]);

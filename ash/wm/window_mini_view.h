@@ -63,14 +63,11 @@ class ASH_EXPORT WindowMiniView : public views::View,
   // image from |source_window_|.
   void UpdateIconView();
 
-  WmHighlightItemBorder* border_ptr() { return border_ptr_; }
-
   // Returns the bounds where the backdrop and preview should go.
   gfx::Rect GetContentAreaBounds() const;
 
   // Subclasses can override these functions to provide customization for
   // margins and layouts of certain elements.
-  virtual int GetMargin() const;
   virtual gfx::Rect GetHeaderBounds() const;
   virtual gfx::Size GetPreviewViewSize() const;
   // Allows subclasses to resize/add shadow to the image that will appear as the
@@ -80,6 +77,7 @@ class ASH_EXPORT WindowMiniView : public views::View,
   // views::View:
   void Layout() override;
   void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
+  void OnThemeChanged() override;
 
   // aura::WindowObserver:
   void OnWindowPropertyChanged(aura::Window* window,
@@ -87,6 +85,8 @@ class ASH_EXPORT WindowMiniView : public views::View,
                                intptr_t old) override;
   void OnWindowDestroying(aura::Window* window) override;
   void OnWindowTitleChanged(aura::Window* window) override;
+
+  aura::Window* source_window() const { return source_window_; }
 
  private:
   // The window this class is meant to be a header for. This class also may

@@ -37,7 +37,7 @@ namespace network {
 // For example, it provides operations:
 // - checking preconditions for the different protocol steps;
 // - storing unblinded, signed tokens; and
-// - managing Signed Redemption Records (SRRs) and corresponding key pairs.
+// - managing Redemption Records (RRs).
 //
 // TrustTokenStore's methods do minimal precondition checking and, in
 // particular, only selectively verify protocol-level invariants and
@@ -48,35 +48,29 @@ class TrustTokenStore {
    public:
     virtual ~RecordExpiryDelegate() = default;
 
-    // Returns whether the given Signed Redemption Record has expired.
+    // Returns whether the given Redemption Record has expired.
     // This is implemented with a delegate to abstract away reading
-    // the values of SRRs (they're opaque to this store).
-    virtual bool IsRecordExpired(
-        const SignedTrustTokenRedemptionRecord& record) = 0;
+    // the values of RRs (they're opaque to this store).
+    //
+    // |issuer| is the issuer that issued the RR.
+    virtual bool IsRecordExpired(const TrustTokenRedemptionRecord& record,
+                                 const SuitableTrustTokenOrigin& issuer) = 0;
   };
 
-  // Creates a new TrustTokenStore passing read and write operations through
-  // to the given persister.
-  //
-  // Until the underlying BoringSSL functionality is implemented to extract
-  // expiry timestamps from Signed Redemption Record bodies, defaults to
-  // never expiring stored SRRs.
-  //
-  // |persister| must not be null.
-  explicit TrustTokenStore(std::unique_ptr<TrustTokenPersister> persister);
-
-  // Creates a TrustTokenStore relying on the given delegate for judging whether
-  // signed redemption records have expired.
-  //
-  // |persister| must not be null.
-  TrustTokenStore(
-      std::unique_ptr<TrustTokenPersister> persister,
-      std::unique_ptr<RecordExpiryDelegate> expiry_delegate_for_testing);
+  // Creates a TrustTokenStore relying on the given persister for underlying
+  // storage and the given delegate for judging whether redemption records
+  // have expired.
+  TrustTokenStore(std::unique_ptr<TrustTokenPersister> persister,
+                  std::unique_ptr<RecordExpiryDelegate> expiry_delegate);
 
   virtual ~TrustTokenStore();
 
-  // Creates a TrustTokenStore on top of an in-memory persister.
-  static std::unique_ptr<TrustTokenStore> CreateInMemory();
+  // Creates a TrustTokenStore with defaults useful for testing: an in-memory
+  // persister and never expiring stored RRs. Callers may provide custom values
+  // for one argument or both.
+  static std::unique_ptr<TrustTokenStore> CreateForTesting(
+      std::unique_ptr<TrustTokenPersister> persister = nullptr,
+      std::unique_ptr<RecordExpiryDelegate> expiry_delegate = nullptr);
 
   //// Methods related to ratelimits:
 
@@ -170,20 +164,19 @@ class TrustTokenStore {
   void DeleteToken(const SuitableTrustTokenOrigin& issuer,
                    const TrustToken& to_delete);
 
-  //// Methods concerning Signed Redemption Records (SRRs)
+  //// Methods concerning Redemption Records (RRs)
 
-  // Sets the cached SRR corresponding to the pair (issuer, top_level)
+  // Sets the cached RR corresponding to the pair (issuer, top_level)
   // to |record|. Overwrites any existing record.
-  virtual void SetRedemptionRecord(
-      const SuitableTrustTokenOrigin& issuer,
-      const SuitableTrustTokenOrigin& top_level,
-      const SignedTrustTokenRedemptionRecord& record);
+  virtual void SetRedemptionRecord(const SuitableTrustTokenOrigin& issuer,
+                                   const SuitableTrustTokenOrigin& top_level,
+                                   const TrustTokenRedemptionRecord& record);
 
-  // Attempts to retrieve the stored SRR for the given pair of (issuer,
+  // Attempts to retrieve the stored RR for the given pair of (issuer,
   // top-level) origins.
-  // - If the pair has a current (i.e., non-expired) SRR, returns that SRR.
+  // - If the pair has a current (i.e., non-expired) RR, returns that RR.
   // - Otherwise, returns nullopt.
-  WARN_UNUSED_RESULT virtual base::Optional<SignedTrustTokenRedemptionRecord>
+  WARN_UNUSED_RESULT virtual base::Optional<TrustTokenRedemptionRecord>
   RetrieveNonstaleRedemptionRecord(const SuitableTrustTokenOrigin& issuer,
                                    const SuitableTrustTokenOrigin& top_level);
 

@@ -15,6 +15,7 @@
 #include "chromecast/browser/test/cast_browser_test.h"
 #include "components/prefs/pref_service.h"
 #include "components/prefs/scoped_user_pref_update.h"
+#include "content/public/test/browser_test.h"
 
 // PLEASE READ:
 // 1) These tests are run in groups to simulate a restart of cast_shell. Each
@@ -305,7 +306,7 @@ IN_PROC_BROWSER_TEST_F(CastFeaturesBrowserTest,
   ASSERT_TRUE(GetDCSExperimentIds().empty());
 }
 
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
 #define MAYBE_TestExperimentIdsPersisted DISABLED_TestExperimentIdsPersisted
 #else
 #define MAYBE_TestExperimentIdsPersisted TestExperimentIdsPersisted

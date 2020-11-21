@@ -65,6 +65,9 @@ class RemoteDeviceRef {
   const std::vector<BeaconSeed>& beacon_seeds() const {
     return remote_device_->beacon_seeds;
   }
+  const std::string& bluetooth_public_address() const {
+    return remote_device_->bluetooth_public_address;
+  }
 
   std::string GetDeviceId() const;
   SoftwareFeatureState GetSoftwareFeatureState(
@@ -74,6 +77,12 @@ class RemoteDeviceRef {
   // IDs are often so long that logs are difficult to read). Note that this
   // ID is not guaranteed to be unique, so it should only be used for log.
   std::string GetTruncatedDeviceIdForLogs() const;
+
+  // Returns the pair of IDs used with RemoteDevices: Instance ID and device ID.
+  // If either ID is missing, this string will make note of that. If a device ID
+  // exists, the truncated version will be presented. This function should only
+  // be used for logging.
+  std::string GetInstanceIdDeviceIdForLogs() const;
 
   bool operator==(const RemoteDeviceRef& other) const;
   bool operator!=(const RemoteDeviceRef& other) const;

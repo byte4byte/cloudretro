@@ -8,22 +8,24 @@
 #include <algorithm>
 #include <memory>
 
+#include "base/check_op.h"
 #include "base/command_line.h"
 #include "base/containers/flat_set.h"
 #include "base/files/file_util.h"
-#include "base/logging.h"
 #include "base/macros.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
+#include "base/threading/sequenced_task_runner_handle.h"
 #include "chromecast/base/chromecast_switches.h"
 #include "chromecast/base/metrics/cast_metrics_helper.h"
 #include "chromecast/browser/cast_browser_context.h"
 #include "chromecast/browser/cast_browser_process.h"
 #include "chromecast/browser/cast_web_contents_impl.h"
+#include "chromecast/browser/test_interfaces.test-mojom.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
@@ -33,11 +35,16 @@
 #include "content/public/test/browser_test_base.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/url_loader_interceptor.h"
-#include "mojo/public/cpp/bindings/connector.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver_set.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "net/http/http_status_code.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
+#include "services/service_manager/public/cpp/interface_provider.h"
+#include "services/service_manager/public/mojom/interface_provider.mojom.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
@@ -239,9 +246,9 @@ class CastWebContentsBrowserTest : public content::BrowserTestBase,
     SetUpCommandLine(base::CommandLine::ForCurrentProcess());
     BrowserTestBase::SetUp();
   }
-  void SetUpCommandLine(base::CommandLine* command_line) final {
-    command_line->AppendSwitch(switches::kNoWifi);
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     command_line->AppendSwitchASCII(switches::kTestType, "browser");
+    command_line->AppendSwitchASCII(switches::kEnableBlinkFeatures, "MojoJS");
   }
   void PreRunTestOnMainThread() override {
     // Pump startup related events.
@@ -749,249 +756,6 @@ IN_PROC_BROWSER_TEST_F(CastWebContentsBrowserTest, NotifyMissingResource) {
   run_loop->Run();
 }
 
-IN_PROC_BROWSER_TEST_F(CastWebContentsBrowserTest, ExecuteJavaScriptOnLoad) {
-  // ===========================================================================
-  // Test: Injecting script to change title should work.
-  // ===========================================================================
-  constexpr char kExpectedTitle[] = "hello";
-  constexpr char kOriginalTitle[] =
-      "Welcome to Stan the Offline Dino's Homepage";
-
-  // The script should be able to run before HTML <script> tag starts running.
-  // The original title will be loaded first and then the injected script. Other
-  // scripts must run after the injected script.
-  EXPECT_CALL(mock_cast_wc_observer_,
-              UpdateTitle(base::ASCIIToUTF16(kExpectedTitle)));
-  EXPECT_CALL(mock_cast_wc_observer_,
-              UpdateTitle(base::ASCIIToUTF16(kOriginalTitle)));
-  constexpr char kBindingsId[] = "1234";
-
-  GURL gurl = content::GetFileUrlWithQuery(
-      GetTestDataFilePath("dynamic_title.html"), "");
-
-  cast_web_contents_->AddBeforeLoadJavaScript(
-      kBindingsId, {gurl.GetOrigin().spec()}, "stashed_title = 'hello';");
-
-  cast_web_contents_->LoadUrl(gurl);
-  title_change_observer_.RunUntilTitleEquals(kExpectedTitle);
-}
-
-IN_PROC_BROWSER_TEST_F(CastWebContentsBrowserTest,
-                       ExecuteJavaScriptUpdatedOnLoad) {
-  // ===========================================================================
-  // Test: Verify that this script replaces the previous script with same
-  // binding id, as opposed to being injected alongside it. (The latter would
-  // result in the title being "helloclobber").
-  // ===========================================================================
-  constexpr char kReplaceTitle[] = "clobber";
-  constexpr char kOriginalTitle[] =
-      "Welcome to Stan the Offline Dino's Homepage";
-
-  // The script should be able to run before HTML <script> tag starts running.
-  EXPECT_CALL(mock_cast_wc_observer_,
-              UpdateTitle(base::ASCIIToUTF16(kReplaceTitle)));
-  EXPECT_CALL(mock_cast_wc_observer_,
-              UpdateTitle(base::ASCIIToUTF16(kOriginalTitle)));
-
-  constexpr char kBindingsId[] = "1234";
-
-  GURL gurl = content::GetFileUrlWithQuery(
-      GetTestDataFilePath("dynamic_title.html"), "");
-
-  cast_web_contents_->AddBeforeLoadJavaScript(
-      kBindingsId, {gurl.GetOrigin().spec()}, "stashed_title = 'hello';");
-
-  cast_web_contents_->AddBeforeLoadJavaScript(
-      kBindingsId, {gurl.GetOrigin().spec()},
-      "stashed_title = document.title + 'clobber';");
-
-  cast_web_contents_->LoadUrl(gurl);
-  title_change_observer_.RunUntilTitleEquals(kReplaceTitle);
-}
-
-IN_PROC_BROWSER_TEST_F(CastWebContentsBrowserTest,
-                       ExecuteJavaScriptOnLoadOrdered) {
-  // ===========================================================================
-  // Test: Verifies that bindings are injected in order by producing a
-  // cumulative, non-commutative result.
-  // ===========================================================================
-  constexpr char kExpectedTitle[] = "hello there";
-  constexpr char kOriginalTitle[] =
-      "Welcome to Stan the Offline Dino's Homepage";
-  constexpr char kBindingsId1[] = "1234";
-  constexpr char kBindingsId2[] = "5678";
-
-  // The script should be able to run before HTML <script> tag starts running.
-  // The original title will be loaded first and then the injected script. Other
-  // scripts must run after the injected script.
-  EXPECT_CALL(mock_cast_wc_observer_,
-              UpdateTitle(base::ASCIIToUTF16(kExpectedTitle)));
-  EXPECT_CALL(mock_cast_wc_observer_,
-              UpdateTitle(base::ASCIIToUTF16(kOriginalTitle)));
-
-  GURL gurl = content::GetFileUrlWithQuery(
-      GetTestDataFilePath("dynamic_title.html"), "");
-
-  cast_web_contents_->AddBeforeLoadJavaScript(
-      kBindingsId1, {gurl.GetOrigin().spec()}, "stashed_title = 'hello';");
-
-  cast_web_contents_->AddBeforeLoadJavaScript(
-      kBindingsId2, {gurl.GetOrigin().spec()}, "stashed_title += ' there';");
-
-  cast_web_contents_->LoadUrl(gurl);
-  title_change_observer_.RunUntilTitleEquals(kExpectedTitle);
-}
-
-IN_PROC_BROWSER_TEST_F(CastWebContentsBrowserTest,
-                       ExecuteJavaScriptOnLoadRemoved) {
-  // ===========================================================================
-  // Test: Verifies that bindings could be removed successfully before page
-  // starts loading.
-  // ===========================================================================
-  constexpr char kExpectedTitle[] = "foo";
-  constexpr char kOriginalTitle[] =
-      "Welcome to Stan the Offline Dino's Homepage";
-  constexpr char kBindingsId1[] = "1234";
-  constexpr char kBindingsId2[] = "5678";
-
-  // The script should be able to run before HTML <script> tag starts running.
-  // The original title will be loaded first and then the injected script. Other
-  // scripts must run after the injected script.
-  EXPECT_CALL(mock_cast_wc_observer_,
-              UpdateTitle(base::ASCIIToUTF16(kExpectedTitle)));
-  EXPECT_CALL(mock_cast_wc_observer_,
-              UpdateTitle(base::ASCIIToUTF16(kOriginalTitle)));
-
-  GURL gurl = content::GetFileUrlWithQuery(
-      GetTestDataFilePath("dynamic_title.html"), "");
-
-  cast_web_contents_->AddBeforeLoadJavaScript(
-      kBindingsId1, {gurl.GetOrigin().spec()}, "stashed_title = 'foo';");
-  // Add a script which clobbers "foo".
-  cast_web_contents_->AddBeforeLoadJavaScript(
-      kBindingsId2, {gurl.GetOrigin().spec()}, "stashed_title = 'bar';");
-  // Deletes the clobbering script.
-  cast_web_contents_->RemoveBeforeLoadJavaScript(kBindingsId2);
-
-  cast_web_contents_->LoadUrl(gurl);
-  title_change_observer_.RunUntilTitleEquals(kExpectedTitle);
-}
-
-IN_PROC_BROWSER_TEST_F(CastWebContentsBrowserTest,
-                       ExecuteJavaScriptOnLoadWrongOrigin) {
-  // ===========================================================================
-  // Test: Injecting script should not happen if the to-be-loaded page's origin
-  // is not whitelisted for the injection script.
-  // ===========================================================================
-  constexpr char kOriginalTitle[] =
-      "Welcome to Stan the Offline Dino's Homepage";
-  constexpr char kBindingsId[] = "1234";
-
-  EXPECT_CALL(mock_cast_wc_observer_,
-              UpdateTitle(base::ASCIIToUTF16(kOriginalTitle)));
-
-  GURL gurl = content::GetFileUrlWithQuery(
-      GetTestDataFilePath("dynamic_title.html"), "");
-
-  cast_web_contents_->AddBeforeLoadJavaScript(
-      kBindingsId, {"http://example.com"}, "stashed_title = 'hello';");
-
-  cast_web_contents_->LoadUrl(gurl);
-  title_change_observer_.RunUntilTitleEquals(kOriginalTitle);
-}
-
-IN_PROC_BROWSER_TEST_F(CastWebContentsBrowserTest,
-                       ExecuteJavaScriptOnLoadWildcardOrigin) {
-  // Start test server for hosting test HTML pages.
-  embedded_test_server()->ServeFilesFromSourceDirectory(GetTestDataPath());
-  StartTestServer();
-  // ===========================================================================
-  // Test: Injecting script should be able to load on arbitrary origins with
-  // wildcard origin restriction set.
-  // ===========================================================================
-  constexpr char kInjectedTitle1[] = "hello";
-  constexpr char kInjectedTitle2[] = "world";
-  constexpr char kOriginalTitle[] =
-      "Welcome to Stan the Offline Dino's Homepage";
-  constexpr char kBindingsId1[] = "1234";
-  constexpr char kBindingsId2[] = "5678";
-
-  // The script should be able to run before HTML <script> tag starts running.
-  EXPECT_CALL(mock_cast_wc_observer_,
-              UpdateTitle(base::ASCIIToUTF16(kOriginalTitle)))
-      .Times(2);
-  EXPECT_CALL(mock_cast_wc_observer_,
-              UpdateTitle(base::ASCIIToUTF16(kInjectedTitle1)));
-  EXPECT_CALL(mock_cast_wc_observer_,
-              UpdateTitle(base::ASCIIToUTF16(kInjectedTitle2)));
-
-  GURL gurl{embedded_test_server()->GetURL("/dynamic_title.html")};
-
-  cast_web_contents_->AddBeforeLoadJavaScript(kBindingsId1, {"*"},
-                                              "stashed_title = 'hello';");
-  // Test script injection for the origin 127.0.0.1.
-  // Load title "hello":
-  cast_web_contents_->LoadUrl(gurl);
-  title_change_observer_.RunUntilTitleEquals(kInjectedTitle1);
-
-  // Load AboutBlank page:
-  cast_web_contents_->LoadUrl(GURL(url::kAboutBlankURL));
-
-  cast_web_contents_->AddBeforeLoadJavaScript(kBindingsId2, {"*"},
-                                              "stashed_title = 'world';");
-  // Test script injection using a different origin ("localhost"), which should
-  // still be picked up by the wildcard. And the title should be initialized as
-  // origianl title first, then as 'world'.
-  GURL alt_url =
-      embedded_test_server()->GetURL("localhost", "/dynamic_title.html");
-  cast_web_contents_->LoadUrl(alt_url);
-  title_change_observer_.RunUntilTitleEquals(kInjectedTitle2);
-}
-
-IN_PROC_BROWSER_TEST_F(CastWebContentsBrowserTest,
-                       ExecuteJavaScriptOnLoadEarlyAndLateRegistrations) {
-  // ===========================================================================
-  // Test: Tests that we can inject scripts before and after RenderFrame
-  // creation.
-  // ===========================================================================
-  constexpr char kExpectedTitle1[] = "foo";
-  constexpr char kExpectedTitle2[] = "foo bar";
-  constexpr char kOriginalTitle[] =
-      "Welcome to Stan the Offline Dino's Homepage";
-  constexpr char kBindingsId1[] = "1234";
-  constexpr char kBindingsId2[] = "5678";
-
-  // The script should be able to run before HTML <script> tag starts running.
-  // The original title will be loaded first and then the injected script. Other
-  // scripts must run after the injected script.
-  EXPECT_CALL(mock_cast_wc_observer_,
-              UpdateTitle(base::ASCIIToUTF16(kExpectedTitle2)));
-  EXPECT_CALL(mock_cast_wc_observer_,
-              UpdateTitle(base::ASCIIToUTF16(kExpectedTitle1)));
-  EXPECT_CALL(mock_cast_wc_observer_,
-              UpdateTitle(base::ASCIIToUTF16(kOriginalTitle)))
-      .Times(2);
-
-  GURL gurl = content::GetFileUrlWithQuery(
-      GetTestDataFilePath("dynamic_title.html"), "");
-
-  cast_web_contents_->AddBeforeLoadJavaScript(
-      kBindingsId1, {gurl.GetOrigin().spec()}, "stashed_title = 'foo';");
-  cast_web_contents_->LoadUrl(gurl);
-  title_change_observer_.RunUntilTitleEquals(kExpectedTitle1);
-
-  // Inject bindings after RenderFrameCreation
-  cast_web_contents_->AddBeforeLoadJavaScript(
-      kBindingsId2, {gurl.GetOrigin().spec()}, "stashed_title += ' bar';");
-
-  // Navigate away to clean the state.
-  cast_web_contents_->LoadUrl(GURL(url::kAboutBlankURL));
-
-  // Navigate back and see if both scripts are working.
-  cast_web_contents_->LoadUrl(gurl);
-  title_change_observer_.RunUntilTitleEquals(kExpectedTitle2);
-}
-
 IN_PROC_BROWSER_TEST_F(CastWebContentsBrowserTest, PostMessageToMainFrame) {
   // ===========================================================================
   // Test: Tests that we can trigger onmessage event on a web page. This test
@@ -1006,8 +770,9 @@ IN_PROC_BROWSER_TEST_F(CastWebContentsBrowserTest, PostMessageToMainFrame) {
   EXPECT_CALL(mock_cast_wc_observer_,
               UpdateTitle(base::ASCIIToUTF16(kOriginalTitle)));
 
-  GURL gurl = content::GetFileUrlWithQuery(
-      GetTestDataFilePath("window_post_message.html"), "");
+  embedded_test_server()->ServeFilesFromSourceDirectory(GetTestDataPath());
+  StartTestServer();
+  GURL gurl = embedded_test_server()->GetURL("/window_post_message.html");
 
   cast_web_contents_->LoadUrl(gurl);
   title_change_observer_.RunUntilTitleEquals(kOriginalTitle);
@@ -1031,8 +796,9 @@ IN_PROC_BROWSER_TEST_F(CastWebContentsBrowserTest, PostMessagePassMessagePort) {
               UpdateTitle(base::ASCIIToUTF16(kOriginalTitle)));
 
   // Load test page.
-  GURL gurl = content::GetFileUrlWithQuery(
-      GetTestDataFilePath("message_port.html"), "");
+  embedded_test_server()->ServeFilesFromSourceDirectory(GetTestDataPath());
+  StartTestServer();
+  GURL gurl = embedded_test_server()->GetURL("/message_port.html");
   cast_web_contents_->LoadUrl(gurl);
   title_change_observer_.RunUntilTitleEquals(kOriginalTitle);
 
@@ -1097,8 +863,9 @@ IN_PROC_BROWSER_TEST_F(CastWebContentsBrowserTest,
   EXPECT_CALL(mock_cast_wc_observer_,
               UpdateTitle(base::ASCIIToUTF16(kOriginalTitle)));
   // Load test page.
-  GURL gurl = content::GetFileUrlWithQuery(
-      GetTestDataFilePath("message_port.html"), "");
+  embedded_test_server()->ServeFilesFromSourceDirectory(GetTestDataPath());
+  StartTestServer();
+  GURL gurl = embedded_test_server()->GetURL("/message_port.html");
   cast_web_contents_->LoadUrl(gurl);
   title_change_observer_.RunUntilTitleEquals(kOriginalTitle);
 
@@ -1194,6 +961,147 @@ IN_PROC_BROWSER_TEST_F(CastWebContentsBrowserTest, ExecuteJavaScript) {
         run_loop2.Quit();
       }));
   run_loop2.Run();
+}
+
+// Helper for the test below. This exposes two interfaces, TestAdder and
+// TestDoubler. TestAdder is exposed only through a binder (see MakeAdderBinder)
+// which the test will register in the CastWebContents' binder_registry().
+// TestDoubler is exposed only through an InterfaceProvider, registered with the
+// CastWebContents using RegisterInterfaceProvider.
+class TestInterfaceProvider : public service_manager::mojom::InterfaceProvider,
+                              public mojom::TestAdder,
+                              public mojom::TestDoubler {
+ public:
+  TestInterfaceProvider()
+      : provider_(receiver_.BindNewPipeAndPassRemote(),
+                  base::SequencedTaskRunnerHandle::Get()) {}
+  ~TestInterfaceProvider() override = default;
+
+  size_t num_adders() const { return adders_.size(); }
+  size_t num_doublers() const { return doublers_.size(); }
+
+  service_manager::InterfaceProvider* interface_provider() {
+    return &provider_;
+  }
+
+  base::RepeatingCallback<void(mojo::PendingReceiver<mojom::TestAdder>)>
+  MakeAdderBinder() {
+    return base::BindLambdaForTesting(
+        [this](mojo::PendingReceiver<mojom::TestAdder> receiver) {
+          adders_.Add(this, std::move(receiver));
+          OnRequestHandled();
+        });
+  }
+
+  // Waits for some number of new interface binding requests to be dispatched
+  // and then invokes `callback`.
+  void WaitForRequests(size_t n, base::OnceClosure callback) {
+    wait_callback_ = std::move(callback);
+    num_requests_to_wait_for_ = n;
+  }
+
+  // service_manager::mojom::InterfaceProvider:
+  void GetInterface(const std::string& interface_name,
+                    mojo::ScopedMessagePipeHandle interface_pipe) override {
+    if (interface_name == mojom::TestDoubler::Name_) {
+      doublers_.Add(this, mojo::PendingReceiver<mojom::TestDoubler>(
+                              std::move(interface_pipe)));
+      OnRequestHandled();
+    }
+  }
+
+  // mojom::TestAdder:
+  void Add(int32_t a, int32_t b, AddCallback callback) override {
+    std::move(callback).Run(a + b);
+  }
+
+  // mojom::TestDouble:
+  void Double(int32_t x, DoubleCallback callback) override {
+    std::move(callback).Run(x * 2);
+  }
+
+ private:
+  void OnRequestHandled() {
+    if (num_requests_to_wait_for_ == 0)
+      return;
+    DCHECK(wait_callback_);
+    if (--num_requests_to_wait_for_ == 0)
+      std::move(wait_callback_).Run();
+  }
+
+  mojo::Receiver<service_manager::mojom::InterfaceProvider> receiver_{this};
+  service_manager::InterfaceProvider provider_;
+  mojo::ReceiverSet<mojom::TestAdder> adders_;
+  mojo::ReceiverSet<mojom::TestDoubler> doublers_;
+  size_t num_requests_to_wait_for_ = 0;
+  base::OnceClosure wait_callback_;
+};
+
+IN_PROC_BROWSER_TEST_F(CastWebContentsBrowserTest, InterfaceBinding) {
+  // This test verifies that interfaces registered with the CastWebContents --
+  // either via its binder_registry() or its RegisterInterfaceProvider() API --
+  // are reachable from render frames using either the deprecated
+  // InterfaceProvider API (which results in an OnInterfaceRequestFromFrame call
+  // on the WebContents) or the newer BrowserInterfaceBroker API which is used
+  // in most other places (including from Mojo JS).
+  TestInterfaceProvider provider;
+  cast_web_contents_->binder_registry()->AddInterface(
+      provider.MakeAdderBinder());
+  cast_web_contents_->RegisterInterfaceProvider(
+      CastWebContents::InterfaceSet{mojom::TestDoubler::Name_},
+      provider.interface_provider());
+
+  // First verify that both interfaces are reachable using the deprecated
+  // WebContents path, which is triggered only by renderer-side use of
+  // RenderFrame::GetRemoteInterfaces(). Since poking renderer state in browser
+  // tests is challenging, we simply simulate the resulting WebContentsObbserver
+  // calls here instead and verify end-to-end connection for each interface.
+  content::RenderFrameHost* main_frame =
+      cast_web_contents_->web_contents()->GetMainFrame();
+  mojo::Remote<mojom::TestAdder> adder;
+  mojo::ScopedMessagePipeHandle adder_receiver_pipe =
+      adder.BindNewPipeAndPassReceiver().PassPipe();
+  cast_web_contents_->OnInterfaceRequestFromFrame(
+      main_frame, mojom::TestAdder::Name_, &adder_receiver_pipe);
+  mojo::Remote<mojom::TestDoubler> doubler;
+  mojo::ScopedMessagePipeHandle doubler_receiver_pipe =
+      doubler.BindNewPipeAndPassReceiver().PassPipe();
+  cast_web_contents_->OnInterfaceRequestFromFrame(
+      main_frame, mojom::TestDoubler::Name_, &doubler_receiver_pipe);
+
+  base::RunLoop add_loop;
+  adder->Add(37, 5, base::BindLambdaForTesting([&](int32_t result) {
+               EXPECT_EQ(42, result);
+               add_loop.Quit();
+             }));
+  add_loop.Run();
+
+  base::RunLoop double_loop;
+  doubler->Double(21, base::BindLambdaForTesting([&](int32_t result) {
+                    EXPECT_EQ(42, result);
+                    double_loop.Quit();
+                  }));
+  double_loop.Run();
+
+  EXPECT_EQ(1u, provider.num_adders());
+  EXPECT_EQ(1u, provider.num_doublers());
+
+  // Now verify that the same interfaces are also reachable at the same binders
+  // when going through the newer BrowserInterfaceBroker path. For simplicity
+  // the test JS here does not have access to bindings and so does not make
+  // calls on the interfaces. It is however totally sufficient for us to verify
+  // that the page's requests result in new receivers being bound inside
+  // TestInterfaceProvider.
+  base::RunLoop loop;
+  provider.WaitForRequests(2, loop.QuitClosure());
+  embedded_test_server()->ServeFilesFromSourceDirectory(GetTestDataPath());
+  StartTestServer();
+  const GURL kUrl{embedded_test_server()->GetURL("/interface_binding.html")};
+  cast_web_contents_->LoadUrl(kUrl);
+  loop.Run();
+
+  EXPECT_EQ(2u, provider.num_adders());
+  EXPECT_EQ(2u, provider.num_doublers());
 }
 
 }  // namespace chromecast

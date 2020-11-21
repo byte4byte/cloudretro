@@ -116,6 +116,8 @@ class BrowserViewRenderer : public content::SynchronousCompositorClient,
   // Android views hierarchy gluing.
   bool IsVisible() const;
   gfx::Rect GetScreenRect() const;
+  bool view_visible() const { return view_visible_; }
+  bool window_visible() const { return window_visible_; }
   bool attached_to_window() const { return attached_to_window_; }
   bool was_attached() const { return was_attached_; }
   gfx::Size size() const { return size_; }
@@ -236,6 +238,9 @@ class BrowserViewRenderer : public content::SynchronousCompositorClient,
   float max_page_scale_factor_;
   bool on_new_picture_enable_;
   bool clear_view_;
+
+  // Used for metrics, indicates if we called invalidate since last draw.
+  bool did_invalidate_since_last_draw_ = false;
 
   // Approximates whether render thread functor has a frame to draw. It is safe
   // for Java side to stop blitting the background color once this is true.

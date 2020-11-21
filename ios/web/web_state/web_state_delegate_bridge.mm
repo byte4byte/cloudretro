@@ -4,7 +4,6 @@
 
 #import "ios/web/public/web_state_delegate_bridge.h"
 
-#include "base/logging.h"
 #import "ios/web/public/ui/context_menu_params.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -83,22 +82,22 @@ void WebStateDelegateBridge::OnAuthRequired(
     WebState* source,
     NSURLProtectionSpace* protection_space,
     NSURLCredential* proposed_credential,
-    const AuthCallback& callback) {
-  AuthCallback local_callback(callback);
+    AuthCallback callback) {
   if ([delegate_
           respondsToSelector:@selector(webState:
                                  didRequestHTTPAuthForProtectionSpace:
                                                    proposedCredential:
                                                     completionHandler:)]) {
+    __block AuthCallback local_callback = std::move(callback);
     [delegate_ webState:source
         didRequestHTTPAuthForProtectionSpace:protection_space
                           proposedCredential:proposed_credential
                            completionHandler:^(NSString* username,
                                                NSString* password) {
-                             local_callback.Run(username, password);
+                             std::move(local_callback).Run(username, password);
                            }];
   } else {
-    local_callback.Run(nil, nil);
+    std::move(callback).Run(nil, nil);
   }
 }
 
@@ -130,6 +129,13 @@ void WebStateDelegateBridge::CommitPreviewingViewController(
     [delegate_ webState:source
         commitPreviewingViewController:previewing_view_controller];
   }
+}
+
+UIView* WebStateDelegateBridge::GetWebViewContainer(WebState* source) {
+  if ([delegate_ respondsToSelector:@selector(webViewContainerForWebState:)]) {
+    return [delegate_ webViewContainerForWebState:source];
+  }
+  return nil;
 }
 
 void WebStateDelegateBridge::ContextMenuConfiguration(

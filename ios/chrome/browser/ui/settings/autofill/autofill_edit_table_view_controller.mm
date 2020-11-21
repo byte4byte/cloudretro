@@ -4,7 +4,7 @@
 
 #import "ios/chrome/browser/ui/settings/autofill/autofill_edit_table_view_controller.h"
 
-#include "base/logging.h"
+#include "base/check.h"
 #import "base/mac/foundation_util.h"
 #import "ios/chrome/browser/ui/autofill/cells/autofill_edit_item.h"
 #import "ios/chrome/browser/ui/autofill/form_input_accessory/form_input_accessory_view.h"
@@ -83,6 +83,7 @@
 - (void)textFieldDidBeginEditing:(UITextField*)textField {
   TableViewTextEditCell* cell = [self autofillEditCellForTextField:textField];
   _currentEditingCell = cell;
+  self.formInputAccessoryView.hidden = NO;
   [textField setInputAccessoryView:self.formInputAccessoryView];
   [self updateAccessoryViewButtonState];
 }
@@ -91,6 +92,7 @@
   TableViewTextEditCell* cell = [self autofillEditCellForTextField:textField];
   DCHECK(_currentEditingCell == cell);
   [textField setInputAccessoryView:nil];
+  self.formInputAccessoryView.hidden = YES;
   _currentEditingCell = nil;
 }
 
@@ -160,13 +162,17 @@
   return [self.tableView indexPathForCell:_currentEditingCell];
 }
 
+- (BOOL)isItemAtIndexPathTextEditCell:(NSIndexPath*)cellPath {
+  return YES;
+}
+
 - (void)moveToAnotherCellWithOffset:(NSInteger)offset {
   NSIndexPath* cellPath = [self indexPathForCurrentTextField];
   DCHECK(cellPath);
   NSIndexPath* nextCellPath = [self indexForCellPathWithOffset:offset
                                                       fromPath:cellPath];
 
-  if (!nextCellPath) {
+  if (!nextCellPath || ![self isItemAtIndexPathTextEditCell:nextCellPath]) {
     [[_currentEditingCell textField] resignFirstResponder];
   } else {
     TableViewTextEditCell* nextCell =

@@ -17,13 +17,13 @@
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/common/renderer.mojom.h"
-#include "content/common/view_messages.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_iterator.h"
+#include "content/public/browser/web_contents.h"
 #include "content/public/common/content_switches.h"
 #include "ui/gfx/scoped_ns_graphics_context_save_gstate_mac.h"
 
@@ -279,7 +279,7 @@ SkColor MenuBackgroundColor() {
     if (!rvh)
       continue;
 
-    rvh->OnWebkitPreferencesChanged();
+    content::WebContents::FromRenderViewHost(rvh)->OnWebPreferencesChanged();
   }
 }
 

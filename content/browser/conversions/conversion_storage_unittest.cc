@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "base/callback.h"
+#include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
@@ -44,56 +45,18 @@ base::RepeatingCallback<bool(const url::Origin&)> GetMatcher(
 
 }  // namespace
 
-// Mock delegate which provides default behavior and delays reports by a fixed
-// time from impression.
-class MockStorageDelegate : public ConversionStorage::Delegate {
- public:
-  MockStorageDelegate() = default;
-  ~MockStorageDelegate() override = default;
-
-  // ConversionStorage::Delegate
-  void ProcessNewConversionReports(
-      std::vector<ConversionReport>* reports) override {
-    // Note: reports are ordered by impression time, descending.
-    for (auto& report : *reports) {
-      report.report_time = report.impression.impression_time() +
-                           base::TimeDelta::FromMilliseconds(kReportTime);
-
-      // If attribution credits were provided, associate them with reports
-      // in order.
-      if (!attribution_credits_.empty()) {
-        report.attribution_credit = attribution_credits_.front();
-        attribution_credits_.pop_front();
-      }
-    }
-  }
-
-  int GetMaxConversionsPerImpression() const override {
-    return kMaxConversions;
-  }
-
-  void AddCredits(AttributionCredits credits) {
-    // Add all credits to our list in order.
-    attribution_credits_.splice(attribution_credits_.end(), credits);
-  }
-
- private:
-  // List of attribution credits the mock delegate should associate with
-  // reports.
-  AttributionCredits attribution_credits_;
-};
-
 // Unit test suite for the ConversionStorage interface. All ConversionStorage
 // implementations (including fakes) should be able to re-use this test suite.
 class ConversionStorageTest : public testing::Test {
  public:
   ConversionStorageTest() {
     EXPECT_TRUE(dir_.CreateUniqueTempDir());
-    auto delegate = std::make_unique<MockStorageDelegate>();
+    auto delegate = std::make_unique<ConfigurableStorageDelegate>();
+    delegate->set_report_time_ms(kReportTime);
+    delegate->set_max_conversions_per_impression(kMaxConversions);
     delegate_ = delegate.get();
     storage_ = std::make_unique<ConversionStorageSql>(
         dir_.GetPath(), std::move(delegate), &clock_);
-    EXPECT_TRUE(storage_->Initialize());
   }
 
   // Given a |conversion|, returns the expected conversion report properties at
@@ -101,10 +64,11 @@ class ConversionStorageTest : public testing::Test {
   ConversionReport GetExpectedReport(const StorableImpression& impression,
                                      const StorableConversion& conversion,
                                      int attribution_credit = 0) {
-    ConversionReport report(
-        impression, conversion.conversion_data(),
-        clock_.Now() + base::TimeDelta::FromMilliseconds(kReportTime),
-        base::nullopt /* conversion_id */);
+    ConversionReport report(impression, conversion.conversion_data(),
+                            /*conversion_time=*/clock_.Now(),
+                            /*report_time=*/clock_.Now() +
+                                base::TimeDelta::FromMilliseconds(kReportTime),
+                            base::nullopt /* conversion_id */);
     report.attribution_credit = attribution_credit;
     return report;
   }
@@ -123,12 +87,63 @@ class ConversionStorageTest : public testing::Test {
 
   ConversionStorage* storage() { return storage_.get(); }
 
- private:
-  MockStorageDelegate* delegate_;
-  base::SimpleTestClock clock_;
+  ConfigurableStorageDelegate* delegate() { return delegate_; }
+
+ protected:
   base::ScopedTempDir dir_;
+
+ private:
+  ConfigurableStorageDelegate* delegate_;
+  base::SimpleTestClock clock_;
   std::unique_ptr<ConversionStorage> storage_;
 };
+
+TEST_F(ConversionStorageTest,
+       StorageUsedAfterFailedInitilization_FailsSilently) {
+  // We create a failed initialization by writing a dir to the database file
+  // path.
+  base::CreateDirectoryAndGetError(
+      dir_.GetPath().Append(FILE_PATH_LITERAL("Conversions")), nullptr);
+  std::unique_ptr<ConversionStorage> storage =
+      std::make_unique<ConversionStorageSql>(
+          dir_.GetPath(), std::make_unique<ConfigurableStorageDelegate>(),
+          clock());
+  static_cast<ConversionStorageSql*>(storage.get())
+      ->set_ignore_errors_for_testing(true);
+
+  // Test all public methods on ConversionStorage.
+  EXPECT_NO_FATAL_FAILURE(
+      storage->StoreImpression(ImpressionBuilder(clock()->Now()).Build()));
+  EXPECT_EQ(0,
+            storage->MaybeCreateAndStoreConversionReports(DefaultConversion()));
+  EXPECT_TRUE(storage->GetConversionsToReport(clock()->Now()).empty());
+  EXPECT_TRUE(storage->GetActiveImpressions().empty());
+  EXPECT_EQ(0, storage->DeleteExpiredImpressions());
+  EXPECT_EQ(0, storage->DeleteConversion(0UL));
+  EXPECT_NO_FATAL_FAILURE(storage->ClearData(
+      base::Time::Min(), base::Time::Max(), base::NullCallback()));
+}
+
+TEST_F(ConversionStorageTest, ImpressionStoredAndRetrieved_ValuesIdentical) {
+  auto impression = ImpressionBuilder(clock()->Now()).Build();
+  storage()->StoreImpression(impression);
+  std::vector<StorableImpression> stored_impressions =
+      storage()->GetActiveImpressions();
+  EXPECT_EQ(1u, stored_impressions.size());
+
+  // Verify that each field was stored as expected.
+  EXPECT_EQ(impression.impression_data(),
+            stored_impressions[0].impression_data());
+  EXPECT_EQ(impression.impression_origin(),
+            stored_impressions[0].impression_origin());
+  EXPECT_EQ(impression.conversion_origin(),
+            stored_impressions[0].conversion_origin());
+  EXPECT_EQ(impression.reporting_origin(),
+            stored_impressions[0].reporting_origin());
+  EXPECT_EQ(impression.impression_time(),
+            stored_impressions[0].impression_time());
+  EXPECT_EQ(impression.expiry_time(), stored_impressions[0].expiry_time());
+}
 
 TEST_F(ConversionStorageTest,
        GetWithNoMatchingImpressions_NoImpressionsReturned) {
@@ -557,6 +572,26 @@ TEST_F(ConversionStorageTest,
   std::vector<ConversionReport> actual_reports =
       storage()->GetConversionsToReport(clock()->Now());
   EXPECT_TRUE(ReportsEqual(expected_reports, actual_reports));
+}
+
+TEST_F(ConversionStorageTest, MaxImpressionsPerOrigin) {
+  delegate()->set_max_impressions_per_origin(2);
+  storage()->StoreImpression(ImpressionBuilder(clock()->Now()).Build());
+  storage()->StoreImpression(ImpressionBuilder(clock()->Now()).Build());
+  storage()->StoreImpression(ImpressionBuilder(clock()->Now()).Build());
+  EXPECT_EQ(
+      2, storage()->MaybeCreateAndStoreConversionReports(DefaultConversion()));
+}
+
+TEST_F(ConversionStorageTest, MaxConversionsPerOrigin) {
+  delegate()->set_max_conversions_per_origin(2);
+  storage()->StoreImpression(ImpressionBuilder(clock()->Now()).Build());
+  EXPECT_EQ(
+      1, storage()->MaybeCreateAndStoreConversionReports(DefaultConversion()));
+  EXPECT_EQ(
+      1, storage()->MaybeCreateAndStoreConversionReports(DefaultConversion()));
+  EXPECT_EQ(
+      0, storage()->MaybeCreateAndStoreConversionReports(DefaultConversion()));
 }
 
 TEST_F(ConversionStorageTest, ClearDataWithNoMatch_NoDelete) {

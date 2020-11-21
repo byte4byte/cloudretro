@@ -18,8 +18,6 @@
 namespace password_manager {
 namespace {
 
-using autofill::PasswordForm;
-
 std::vector<PasswordForm> DeepCopyVector(
     const std::vector<const PasswordForm*>& forms) {
   std::vector<PasswordForm> result;
@@ -43,14 +41,17 @@ class PasswordDataForUI : public PasswordFormManagerForUI {
   PasswordDataForUI& operator=(const PasswordDataForUI&) = delete;
 
   // PasswordFormManagerForUI:
-  const GURL& GetOrigin() const override;
+  const GURL& GetURL() const override;
   const std::vector<const PasswordForm*>& GetBestMatches() const override;
   std::vector<const PasswordForm*> GetFederatedMatches() const override;
   const PasswordForm& GetPendingCredentials() const override;
   metrics_util::CredentialSourceType GetCredentialSource() const override;
   PasswordFormMetricsRecorder* GetMetricsRecorder() override;
   base::span<const InteractionsStats> GetInteractionsStats() const override;
+  base::span<const CompromisedCredentials> GetCompromisedCredentials()
+      const override;
   bool IsBlacklisted() const override;
+  bool WasUnblacklisted() const override;
   bool IsMovableToAccountStore() const override;
   void Save() override;
   void Update(const PasswordForm& credentials_to_update) override;
@@ -90,8 +91,8 @@ PasswordDataForUI::PasswordDataForUI(
     matches_.push_back(&form);
 }
 
-const GURL& PasswordDataForUI::GetOrigin() const {
-  return pending_form_.origin;
+const GURL& PasswordDataForUI::GetURL() const {
+  return pending_form_.url;
 }
 
 const std::vector<const PasswordForm*>& PasswordDataForUI::GetBestMatches()
@@ -126,8 +127,18 @@ base::span<const InteractionsStats> PasswordDataForUI::GetInteractionsStats()
   return {};
 }
 
+base::span<const CompromisedCredentials>
+PasswordDataForUI::GetCompromisedCredentials() const {
+  return {};
+}
+
 bool PasswordDataForUI::IsBlacklisted() const {
   // 'true' would suppress the bubble.
+  return false;
+}
+
+bool PasswordDataForUI::WasUnblacklisted() const {
+  // This information should not be relevant hereconst.
   return false;
 }
 

@@ -55,6 +55,7 @@
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
 #include "components/user_manager/user_names.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "crypto/rsa_private_key.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
@@ -90,7 +91,7 @@ policy::CloudPolicyStore* GetStoreForUser(const user_manager::User* user) {
   return policy_manager->core()->store();
 }
 
-// Compute the average ARGB color of |bitmap|.
+// Compute the average ARGB color of `bitmap`.
 SkColor ComputeAverageColor(const SkBitmap& bitmap) {
   if (bitmap.empty() || bitmap.width() < 1 || bitmap.height() < 1) {
     ADD_FAILURE() << "Empty or invalid bitmap.";
@@ -153,9 +154,7 @@ class WallpaperPolicyTest : public LoginManagerTest,
         user_policy_builder->GetPublicSigningKeyAsString();
     EXPECT_FALSE(user_key_bits.empty());
     EXPECT_TRUE(base::CreateDirectory(user_key_file.DirName()));
-    EXPECT_EQ(base::WriteFile(user_key_file, user_key_bits.data(),
-                              user_key_bits.length()),
-              base::checked_cast<int>(user_key_bits.length()));
+    EXPECT_TRUE(base::WriteFile(user_key_file, user_key_bits));
     user_policy_builder->policy_data().set_username(account_id.GetUserEmail());
     user_policy_builder->policy_data().set_gaia_id(account_id.GetGaiaId());
     return user_policy_builder;
@@ -250,8 +249,8 @@ class WallpaperPolicyTest : public LoginManagerTest,
     return policy;
   }
 
-  // Inject |filename| as wallpaper policy for test user |user_number|.  Set
-  // empty |filename| to clear policy.
+  // Inject `filename` as wallpaper policy for test user `user_number`.  Set
+  // empty `filename` to clear policy.
   void InjectPolicy(int user_number, const std::string& filename) {
     ASSERT_TRUE(user_number == 0 || user_number == 1);
     const AccountId& account_id =
@@ -279,7 +278,7 @@ class WallpaperPolicyTest : public LoginManagerTest,
               store->validation_status());
   }
 
-  // Inject |filename| as the device wallpaper policy. Set empty |filename| to
+  // Inject `filename` as the device wallpaper policy. Set empty `filename` to
   // clear policy.
   void InjectDevicePolicy(const std::string& filename) {
     if (!filename.empty()) {

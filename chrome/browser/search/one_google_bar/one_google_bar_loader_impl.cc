@@ -30,6 +30,7 @@
 #include "url/gurl.h"
 
 #if defined(OS_CHROMEOS)
+#include "chrome/browser/signin/chrome_signin_helper.h"
 #include "components/signin/core/browser/chrome_connected_header_helper.h"
 #include "components/signin/core/browser/signin_header_helper.h"
 #endif
@@ -39,8 +40,6 @@ namespace {
 const char kNewTabOgbApiPath[] = "/async/newtab_ogb";
 
 const char kResponsePreamble[] = ")]}'";
-
-const char kUrlOverrideCommandLineSwitch[] = "ogb-parts-test-url";
 
 // This namespace contains helpers to extract SafeHtml-wrapped strings (see
 // https://github.com/google/safe-html-types) from the response json. If there
@@ -205,11 +204,18 @@ void OneGoogleBarLoaderImpl::AuthenticatedURLLoader::SetRequestHeaders(
     profile_mode = signin::PROFILE_MODE_INCOGNITO_DISABLED |
                    signin::PROFILE_MODE_ADD_ACCOUNT_DISABLED;
   }
+
+  // TODO(crbug.com/1134045): Check whether the child account status should also
+  // be sent in the Mirror request header when loading the local version of
+  // OneGoogleBar.
   std::string chrome_connected_header_value =
       chrome_connected_header_helper.BuildRequestHeader(
           /*is_header_request=*/true, api_url_,
           // Gaia ID is only needed for (drive|docs).google.com.
-          /*gaia_id=*/std::string(), profile_mode);
+          /*gaia_id=*/std::string(),
+          /* is_child_account=*/base::nullopt, profile_mode,
+          signin::kChromeMirrorHeaderSource,
+          /*force_account_consistency=*/false);
   if (!chrome_connected_header_value.empty()) {
     request->headers.SetHeader(signin::kChromeConnectedHeader,
                                chrome_connected_header_value);
@@ -294,29 +300,40 @@ GURL OneGoogleBarLoaderImpl::GetLoadURLForTesting() const {
   return GetApiUrl();
 }
 
+bool OneGoogleBarLoaderImpl::SetAdditionalQueryParams(
+    const std::string& value) {
+  if (additional_query_params_ == value) {
+    return false;
+  }
+  additional_query_params_ = value;
+  return true;
+}
+
 GURL OneGoogleBarLoaderImpl::GetApiUrl() const {
   GURL api_url;
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          kUrlOverrideCommandLineSwitch)) {
-    api_url = GURL(base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-        kUrlOverrideCommandLineSwitch));
-  } else {
-    GURL google_base_url = google_util::CommandLineGoogleBaseURL();
-    if (!google_base_url.is_valid()) {
-      google_base_url = GURL(google_util::kGoogleHomepageURL);
-    }
-
-    api_url = google_base_url.Resolve(kNewTabOgbApiPath);
+  GURL google_base_url = google_util::CommandLineGoogleBaseURL();
+  if (!google_base_url.is_valid()) {
+    google_base_url = GURL(google_util::kGoogleHomepageURL);
   }
 
+  api_url = google_base_url.Resolve(kNewTabOgbApiPath);
+
   // Add the "hl=" parameter.
-  api_url = net::AppendQueryParameter(api_url, "hl", application_locale_);
+  if (additional_query_params_.find("&hl=") == std::string::npos) {
+    api_url = net::AppendQueryParameter(api_url, "hl", application_locale_);
+  }
 
   // Add the "async=" parameter. We can't use net::AppendQueryParameter for
   // this because we need the ":" to remain unescaped.
   GURL::Replacements replacements;
   std::string query = api_url.query();
-  query += "&async=fixed:0";
+  query += additional_query_params_;
+  if (additional_query_params_.find("&async=") == std::string::npos) {
+    query += "&async=fixed:0";
+  }
+  if (query.at(0) == '&') {
+    query = query.substr(1);
+  }
   replacements.SetQueryStr(query);
   return api_url.ReplaceComponents(replacements);
 }

@@ -18,14 +18,15 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/android/chrome_jni_headers/WebApkUpdateManager_jni.h"
-#include "chrome/browser/android/color_helpers.h"
 #include "chrome/browser/android/shortcut_info.h"
 #include "chrome/browser/android/webapk/webapk_install_service.h"
 #include "chrome/browser/android/webapk/webapk_installer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "content/public/browser/browser_thread.h"
+#include "third_party/blink/public/mojom/manifest/manifest.mojom.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/android/color_helpers.h"
 #include "ui/gfx/android/java_bitmap.h"
 #include "url/gurl.h"
 
@@ -92,9 +93,9 @@ static void JNI_WebApkUpdateManager_StoreWebApkUpdateRequestToFile(
   info.user_title = info.short_name;
   info.display = static_cast<blink::mojom::DisplayMode>(java_display_mode);
   info.orientation =
-      static_cast<blink::WebScreenOrientationLockType>(java_orientation);
-  info.theme_color = JavaColorToOptionalSkColor(java_theme_color);
-  info.background_color = JavaColorToOptionalSkColor(java_background_color);
+      static_cast<device::mojom::ScreenOrientationLockType>(java_orientation);
+  info.theme_color = ui::JavaColorToOptionalSkColor(java_theme_color);
+  info.background_color = ui::JavaColorToOptionalSkColor(java_background_color);
   info.best_primary_icon_url =
       GURL(ConvertJavaStringToUTF8(env, java_primary_icon_url));
   info.splash_image_url =
@@ -112,13 +113,13 @@ static void JNI_WebApkUpdateManager_StoreWebApkUpdateRequestToFile(
         ConvertJavaStringToUTF16(java_share_target_param_text);
     info.share_target->method =
         java_share_target_param_is_method_post == JNI_TRUE
-            ? blink::Manifest::ShareTarget::Method::kPost
-            : blink::Manifest::ShareTarget::Method::kGet;
+            ? blink::mojom::ManifestShareTarget_Method::kPost
+            : blink::mojom::ManifestShareTarget_Method::kGet;
 
     info.share_target->enctype =
         java_share_target_param_is_enctype_multipart == JNI_TRUE
-            ? blink::Manifest::ShareTarget::Enctype::kMultipartFormData
-            : blink::Manifest::ShareTarget::Enctype::kFormUrlEncoded;
+            ? blink::mojom::ManifestShareTarget_Enctype::kMultipartFormData
+            : blink::mojom::ManifestShareTarget_Enctype::kFormUrlEncoded;
 
     std::vector<base::string16> fileNames;
     base::android::AppendJavaStringArrayToStringVector(
@@ -172,21 +173,24 @@ static void JNI_WebApkUpdateManager_StoreWebApkUpdateRequestToFile(
                                                    &shortcuts);
 
   for (const auto& shortcut_data : shortcuts) {
-    DCHECK_EQ(shortcut_data.size(), 5u);
+    DCHECK_EQ(shortcut_data.size(), 6u);
     blink::Manifest::ShortcutItem shortcut_item;
     shortcut_item.name = shortcut_data[0];
-    shortcut_item.short_name = base::NullableString16(shortcut_data[1]);
+    shortcut_item.short_name = shortcut_data[1];
     shortcut_item.url = GURL(base::UTF16ToUTF8(shortcut_data[2]));
 
     blink::Manifest::ImageResource icon;
-    icon.src = GURL(base::UTF16ToUTF8(shortcut_data[3]));
-    icon.purpose.push_back(blink::Manifest::ImageResource::Purpose::ANY);
+    GURL icon_src(base::UTF16ToUTF8(shortcut_data[3]));
+    icon.src = icon_src;
+    icon.purpose.push_back(blink::mojom::ManifestImageResource_Purpose::ANY);
+    shortcut_item.icons.push_back(std::move(icon));
 
-    if (icon.src.is_valid()) {
-      icon_url_to_murmur2_hash[icon.src.spec()] = WebApkIconHasher::Icon{
-          /* data= */ "", /* hash= */ base::UTF16ToUTF8(shortcut_data[4])};
+    if (icon_src.is_valid()) {
+      icon_url_to_murmur2_hash[icon_src.spec()] = WebApkIconHasher::Icon{
+          /* data= */ base::UTF16ToUTF8(shortcut_data[5]),
+          /* hash= */ base::UTF16ToUTF8(shortcut_data[4])};
     }
-    info.best_shortcut_icon_urls.push_back(icon.src);
+    info.best_shortcut_icon_urls.push_back(std::move(icon_src));
     info.shortcut_items.push_back(std::move(shortcut_item));
   }
 

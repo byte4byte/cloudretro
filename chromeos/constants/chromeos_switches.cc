@@ -8,8 +8,6 @@
 
 #include "base/command_line.h"
 #include "base/metrics/field_trial.h"
-#include "chromeos/constants/chromeos_features.h"
-#include "third_party/icu/source/common/unicode/locid.h"
 
 namespace chromeos {
 namespace switches {
@@ -82,6 +80,12 @@ const char kArcDataCleanupOnStart[] = "arc-data-cleanup-on-start";
 // Flag that disables ARC app sync flow that installs some apps silently. Used
 // in autotests to resolve racy conditions.
 const char kArcDisableAppSync[] = "arc-disable-app-sync";
+
+// Flag to enables an experiment to allow users to turn on 64-bit support in
+// native bridge on systems that have such support available but not yet enabled
+// by default.
+const char kArcEnableNativeBridge64BitSupportExperiment[] =
+    "arc-enable-native-bridge-64bit-support-experiment";
 
 // Used in autotest to disable GMS-core caches which is on by default.
 const char kArcDisableGmsCoreCache[] = "arc-disable-gms-core-cache";
@@ -215,7 +219,8 @@ const char kDisableFineGrainedTimeZoneDetection[] =
 const char kDisableGaiaServices[] = "disable-gaia-services";
 
 // Disables HID-detection OOBE screen.
-const char kDisableHIDDetectionOnOOBE[] = "disable-hid-detection-on-oobe";
+const char kDisableHIDDetectionOnOOBEForTesting[] =
+    "disable-hid-detection-on-oobe";
 
 // Avoid doing expensive animations upon login.
 const char kDisableLoginAnimations[] = "disable-login-animations";
@@ -264,14 +269,17 @@ const char kEnableEncryptionMigration[] = "enable-encryption-migration";
 // Enables sharing assets for installed default apps.
 const char kEnableExtensionAssetsSharing[] = "enable-extension-assets-sharing";
 
-// Enables the use of Houdini library for ARM binary translation.
+// Enables the use of 32-bit Houdini library for ARM binary translation.
 const char kEnableHoudini[] = "enable-houdini";
 
-// Enables the use of Houdini 64-bit library for ARM binary translation.
+// Enables the use of 64-bit Houdini library for ARM binary translation.
 const char kEnableHoudini64[] = "enable-houdini64";
 
-// Enables the use of NDK translation library for ARM binary translation.
+// Enables the use of 32-bit NDK translation library for ARM binary translation.
 const char kEnableNdkTranslation[] = "enable-ndk-translation";
+
+// Enables the use of 64-bit NDK translation library for ARM binary translation.
+const char kEnableNdkTranslation64[] = "enable-ndk-translation64";
 
 // Enables request of tablet site (via user agent override).
 const char kEnableRequestTabletSite[] = "enable-request-tablet-site";
@@ -298,6 +306,9 @@ const char kEnterpriseEnableForcedReEnrollment[] =
 // Whether to enable initial enterprise enrollment.
 const char kEnterpriseEnableInitialEnrollment[] =
     "enterprise-enable-initial-enrollment";
+
+// Whether to enable private set membership queries.
+const char kEnterpriseEnablePrivateSetMembership[] = "enterprise-enable-psm";
 
 // Enables the zero-touch enterprise enrollment flow.
 const char kEnterpriseEnableZeroTouchEnrollment[] =
@@ -329,6 +340,12 @@ const char kFakeDriveFsLauncherChrootPath[] =
 const char kFakeDriveFsLauncherSocketPath[] =
     "fake-drivefs-launcher-socket-path";
 
+// Specifies number of recommended (fake) ARC apps during user onboarding.
+// App descriptions are generated locally instead of being fetched from server.
+// Limited to ChromeOS-on-linux and test images only.
+const char kFakeArcRecommendedAppsForTesting[] =
+    "fake-arc-recommended-apps-for-testing";
+
 // Fingerprint sensor location indicates the physical sensor's location. The
 // value is a string with possible values: "power-button-top-left",
 // "keyboard-bottom-left", keyboard-bottom-right", "keyboard-top-right".
@@ -354,6 +371,11 @@ const char kForceFirstRunUI[] = "force-first-run-ui";
 // user profile check and time limits and shows the notification every time
 // for any type of user. Should be used only for testing.
 const char kForceHappinessTrackingSystem[] = "force-happiness-tracking-system";
+
+// Forces Hardware ID check (happens during OOBE) to fail. Should be used only
+// for testing.
+const char kForceHWIDCheckFailureForTest[] =
+    "force-hwid-check-failure-for-test";
 
 // Usually in browser tests the usual login manager bringup is skipped so that
 // tests can change how it's brought up. This flag disables that.
@@ -384,6 +406,11 @@ const char kHasChromeOSKeyboard[] = "has-chromeos-keyboard";
 // Defines user homedir. This defaults to primary user homedir.
 const char kHomedir[] = "homedir";
 
+// If set, the "ignore_dev_conf" field in StartArcVmRequest message will
+// consequently be set such that all development configuration directives in
+// /usr/local/vms/etc/arcvm_dev.conf will be ignored during ARCVM start.
+const char kIgnoreArcVmDevConf[] = "ignore-arcvm-dev-conf";
+
 // If true, profile selection in UserManager will always return active user's
 // profile.
 // TODO(nkostlyev): http://crbug.com/364604 - Get rid of this switch after we
@@ -395,6 +422,28 @@ const char kIgnoreUserProfileMappingForTests[] =
 // unless the enable-experimental-kernel-vm-support flag is set in
 // chrome://flags
 const char kKernelnextRestrictVMs[] = "kernelnext-restrict-vms";
+
+// If this switch is set, then ash-chrome will pass additional arguments when
+// launching lacros-chrome. The string '####' is used as a delimiter. Example:
+// --lacros-chrome-additional-args="--foo=5####--bar=/tmp/dir name". Will
+// result in two arguments passed to lacros-chrome:
+//   --foo=5
+//   --bar=/tmp/dir name
+const char kLacrosChromeAdditionalArgs[] = "lacros-chrome-additional-args";
+
+// If this switch is set, then ash-chrome will exec the lacros-chrome binary
+// from the indicated path rather than from component updater. Note that the
+// path should be to a directory that contains a binary named 'chrome'.
+const char kLacrosChromePath[] = "lacros-chrome-path";
+
+// If set, ash-chrome will drop a Unix domain socket to wait for a process to
+// connect to it, and the connection will be used to request file descriptors
+// from ash-chrome, and when the process forks to start a lacros-chrome, the
+// obtained file descriptor will be used by lacros-chrome to set up the mojo
+// connection with ash-chrome. There are mainly two use cases:
+// 1. Test launcher to run browser tests in testing environment.
+// 2. A terminal to start lacros-chrome with a debugger.
+const char kLacrosMojoSocketForTesting[] = "lacros-mojo-socket-for-testing";
 
 // Enables Chrome-as-a-login-manager behavior.
 const char kLoginManager[] = "login-manager";
@@ -429,6 +478,9 @@ const char kNoteTakingAppIds[] = "note-taking-app-ids";
 // chromeos::kScreenNames in oobe_screen.cc. Supported screens are:
 //   user-image
 const char kOobeForceShowScreen[] = "oobe-force-show-screen";
+
+// Allows the eula url to be overridden for tests.
+const char kOobeEulaUrlForTests[] = "oobe-eula-url-for-tests";
 
 // Indicates that the first user run flow (sequence of OOBE screens after the
 // first user login) should show tablet mode centric screens, even if the device
@@ -481,12 +533,6 @@ const char kShelfHotseat[] = "shelf-hotseat";
 // App window previews when hovering over the shelf.
 const char kShelfHoverPreviews[] = "shelf-hover-previews";
 
-// If true, files in Android internal storage will be shown in Files app.
-const char kShowAndroidFilesInFilesApp[] = "show-android-files-in-files-app";
-
-// If true, files in Android internal storage will be hidden in Files app.
-const char kHideAndroidFilesInFilesApp[] = "hide-android-files-in-files-app";
-
 // The name of the per-model directory which contains per-region
 // subdirectories with regulatory label files for this model.
 // The per-model directories (if there are any) are located under
@@ -500,6 +546,15 @@ const char kShowLoginDevOverlay[] = "show-login-dev-overlay";
 // Enables OOBE UI Debugger for ease of navigation between screens during manual
 // testing. Limited to ChromeOS-on-linux and test images only.
 const char kShowOobeDevOverlay[] = "show-oobe-dev-overlay";
+
+// Enables OOBE testing API for tast tests.
+const char kEnableOobeTestAPI[] = "enable-oobe-test-api";
+
+// Specifies directory for screenshots taken with OOBE UI Debugger.
+const char kOobeScreenshotDirectory[] = "oobe-screenshot-dir";
+
+// Specifies directory for the Telemetry System Web Extension.
+const char kTelemetryExtensionDirectory[] = "telemetry-extension-dir";
 
 // Enables testing for encryption migration UI.
 const char kTestEncryptionMigrationUI[] = "test-encryption-migration-ui";
@@ -529,14 +584,15 @@ const char kUnfilteredBluetoothDevices[] = "unfiltered-bluetooth-devices";
 const char kWaitForInitialPolicyFetchForTest[] =
     "wait-for-initial-policy-fetch-for-test";
 
-// Enables wake on wifi packet feature, which wakes the device on the receipt
-// of network packets from whitelisted sources.
-const char kWakeOnWifiPacket[] = "wake-on-wifi-packet";
-
 // Prevents any CPU restrictions being set on the ARC container. Only meant to
 // be used by tests as some tests may time out if the ARC container is
 // throttled.
 const char kDisableArcCpuRestriction[] = "disable-arc-cpu-restriction";
+
+// If this switch is passed, the device policy DeviceMinimumVersion
+// assumes that the device has reached Auto Update Expiration. This is useful
+// for testing the policy behaviour on the DUT.
+const char kUpdateRequiredAueForTest[] = "aue-reached-for-update-required-test";
 
 bool WakeOnWifiEnabled() {
   return !base::CommandLine::ForCurrentProcess()->HasSwitch(kDisableWakeOnWifi);
@@ -566,10 +622,6 @@ bool IsCellularFirstDevice() {
 bool IsSigninFrameClientCertsEnabled() {
   return !base::CommandLine::ForCurrentProcess()->HasSwitch(
       kDisableSigninFrameClientCerts);
-}
-
-bool ShouldShowShelfHotseat() {
-  return base::FeatureList::IsEnabled(features::kShelfHotseat);
 }
 
 bool ShouldShowShelfHoverPreviews() {
@@ -608,6 +660,11 @@ bool IsUnfilteredBluetoothDevicesEnabled() {
 bool ShouldOobeUseTabletModeFirstRun() {
   return base::CommandLine::ForCurrentProcess()->HasSwitch(
       kOobeForceTabletFirstRun);
+}
+
+bool IsAueReachedForUpdateRequiredForTest() {
+  return base::CommandLine::ForCurrentProcess()->HasSwitch(
+      kUpdateRequiredAueForTest);
 }
 
 }  // namespace switches

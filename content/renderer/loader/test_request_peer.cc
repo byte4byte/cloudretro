@@ -24,7 +24,8 @@ void TestRequestPeer::OnUploadProgress(uint64_t position, uint64_t size) {
 
 bool TestRequestPeer::OnReceivedRedirect(
     const net::RedirectInfo& redirect_info,
-    network::mojom::URLResponseHeadPtr head) {
+    network::mojom::URLResponseHeadPtr head,
+    std::vector<std::string>*) {
   EXPECT_FALSE(context_->cancelled);
   EXPECT_FALSE(context_->complete);
   ++context_->seen_redirects;
@@ -84,10 +85,6 @@ void TestRequestPeer::OnCompletedRequest(
   EXPECT_FALSE(context_->complete);
   context_->complete = true;
   context_->completion_status = status;
-}
-
-scoped_refptr<base::TaskRunner> TestRequestPeer::GetTaskRunner() {
-  return blink::scheduler::GetSingleThreadTaskRunnerForTesting();
 }
 
 TestRequestPeer::Context::Context() = default;

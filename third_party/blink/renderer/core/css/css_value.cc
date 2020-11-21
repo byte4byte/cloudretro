@@ -36,6 +36,7 @@
 #include "third_party/blink/renderer/core/css/css_cursor_image_value.h"
 #include "third_party/blink/renderer/core/css/css_custom_ident_value.h"
 #include "third_party/blink/renderer/core/css/css_custom_property_declaration.h"
+#include "third_party/blink/renderer/core/css/css_element_offset_value.h"
 #include "third_party/blink/renderer/core/css/css_font_face_src_value.h"
 #include "third_party/blink/renderer/core/css/css_font_family_value.h"
 #include "third_party/blink/renderer/core/css/css_font_feature_value.h"
@@ -47,15 +48,17 @@
 #include "third_party/blink/renderer/core/css/css_grid_integer_repeat_value.h"
 #include "third_party/blink/renderer/core/css/css_grid_line_names_value.h"
 #include "third_party/blink/renderer/core/css/css_grid_template_areas_value.h"
+#include "third_party/blink/renderer/core/css/css_id_selector_value.h"
 #include "third_party/blink/renderer/core/css/css_identifier_value.h"
 #include "third_party/blink/renderer/core/css/css_image_set_value.h"
 #include "third_party/blink/renderer/core/css/css_image_value.h"
 #include "third_party/blink/renderer/core/css/css_inherited_value.h"
+#include "third_party/blink/renderer/core/css/css_initial_color_value.h"
 #include "third_party/blink/renderer/core/css/css_initial_value.h"
 #include "third_party/blink/renderer/core/css/css_invalid_variable_value.h"
 #include "third_party/blink/renderer/core/css/css_keyframe_shorthand_value.h"
 #include "third_party/blink/renderer/core/css/css_layout_function_value.h"
-#include "third_party/blink/renderer/core/css/css_light_dark_color_pair.h"
+#include "third_party/blink/renderer/core/css/css_light_dark_value_pair.h"
 #include "third_party/blink/renderer/core/css/css_math_function_value.h"
 #include "third_party/blink/renderer/core/css/css_numeric_literal_value.h"
 #include "third_party/blink/renderer/core/css/css_paint_value.h"
@@ -100,6 +103,7 @@ CSSValue* CSSValue::Create(const Length& value, float zoom) {
       return CSSPrimitiveValue::CreateFromLength(value, zoom);
     case Length::kDeviceWidth:
     case Length::kDeviceHeight:
+    case Length::kMinIntrinsic:
     case Length::kNone:
       NOTREACHED();
       break;
@@ -237,6 +241,8 @@ bool CSSValue::operator==(const CSSValue& other) const {
         return CompareCSSValues<CSSIdentifierValue>(*this, other);
       case kKeyframeShorthandClass:
         return CompareCSSValues<CSSKeyframeShorthandValue>(*this, other);
+      case kInitialColorValueClass:
+        return CompareCSSValues<CSSInitialColorValue>(*this, other);
       case kQuadClass:
         return CompareCSSValues<CSSQuadValue>(*this, other);
       case kReflectClass:
@@ -273,8 +279,12 @@ bool CSSValue::operator==(const CSSValue& other) const {
                                                                        other);
       case kInvalidVariableValueClass:
         return CompareCSSValues<CSSInvalidVariableValue>(*this, other);
-      case kLightDarkColorPairClass:
-        return CompareCSSValues<CSSLightDarkColorPair>(*this, other);
+      case kLightDarkValuePairClass:
+        return CompareCSSValues<CSSLightDarkValuePair>(*this, other);
+      case kIdSelectorClass:
+        return CompareCSSValues<cssvalue::CSSIdSelectorValue>(*this, other);
+      case kElementOffsetClass:
+        return CompareCSSValues<cssvalue::CSSElementOffsetValue>(*this, other);
     }
     NOTREACHED();
     return false;
@@ -358,6 +368,8 @@ String CSSValue::CssText() const {
       return To<CSSIdentifierValue>(this)->CustomCSSText();
     case kKeyframeShorthandClass:
       return To<CSSKeyframeShorthandValue>(this)->CustomCSSText();
+    case kInitialColorValueClass:
+      return To<CSSInitialColorValue>(this)->CustomCSSText();
     case kQuadClass:
       return To<CSSQuadValue>(this)->CustomCSSText();
     case kReflectClass:
@@ -391,8 +403,12 @@ String CSSValue::CssText() const {
       return To<cssvalue::CSSPendingSubstitutionValue>(this)->CustomCSSText();
     case kInvalidVariableValueClass:
       return To<CSSInvalidVariableValue>(this)->CustomCSSText();
-    case kLightDarkColorPairClass:
-      return To<CSSLightDarkColorPair>(this)->CustomCSSText();
+    case kLightDarkValuePairClass:
+      return To<CSSLightDarkValuePair>(this)->CustomCSSText();
+    case kIdSelectorClass:
+      return To<cssvalue::CSSIdSelectorValue>(this)->CustomCSSText();
+    case kElementOffsetClass:
+      return To<cssvalue::CSSElementOffsetValue>(this)->CustomCSSText();
   }
   NOTREACHED();
   return String();
@@ -515,6 +531,9 @@ void CSSValue::FinalizeGarbageCollectedObject() {
     case kKeyframeShorthandClass:
       To<CSSKeyframeShorthandValue>(this)->~CSSKeyframeShorthandValue();
       return;
+    case kInitialColorValueClass:
+      To<CSSInitialColorValue>(this)->~CSSInitialColorValue();
+      return;
     case kQuadClass:
       To<CSSQuadValue>(this)->~CSSQuadValue();
       return;
@@ -567,14 +586,20 @@ void CSSValue::FinalizeGarbageCollectedObject() {
     case kInvalidVariableValueClass:
       To<CSSInvalidVariableValue>(this)->~CSSInvalidVariableValue();
       return;
-    case kLightDarkColorPairClass:
-      To<CSSLightDarkColorPair>(this)->~CSSLightDarkColorPair();
+    case kLightDarkValuePairClass:
+      To<CSSLightDarkValuePair>(this)->~CSSLightDarkValuePair();
+      return;
+    case kIdSelectorClass:
+      To<cssvalue::CSSIdSelectorValue>(this)->~CSSIdSelectorValue();
+      return;
+    case kElementOffsetClass:
+      To<cssvalue::CSSElementOffsetValue>(this)->~CSSElementOffsetValue();
       return;
   }
   NOTREACHED();
 }
 
-void CSSValue::Trace(Visitor* visitor) {
+void CSSValue::Trace(Visitor* visitor) const {
   switch (GetClassType()) {
     case kAxisClass:
       To<cssvalue::CSSAxisValue>(this)->TraceAfterDispatch(visitor);
@@ -691,6 +716,9 @@ void CSSValue::Trace(Visitor* visitor) {
     case kKeyframeShorthandClass:
       To<CSSKeyframeShorthandValue>(this)->TraceAfterDispatch(visitor);
       return;
+    case kInitialColorValueClass:
+      To<CSSInitialColorValue>(this)->TraceAfterDispatch(visitor);
+      return;
     case kQuadClass:
       To<CSSQuadValue>(this)->TraceAfterDispatch(visitor);
       return;
@@ -743,8 +771,14 @@ void CSSValue::Trace(Visitor* visitor) {
     case kInvalidVariableValueClass:
       To<CSSInvalidVariableValue>(this)->TraceAfterDispatch(visitor);
       return;
-    case kLightDarkColorPairClass:
-      To<CSSLightDarkColorPair>(this)->TraceAfterDispatch(visitor);
+    case kLightDarkValuePairClass:
+      To<CSSLightDarkValuePair>(this)->TraceAfterDispatch(visitor);
+      return;
+    case kIdSelectorClass:
+      To<cssvalue::CSSIdSelectorValue>(this)->TraceAfterDispatch(visitor);
+      return;
+    case kElementOffsetClass:
+      To<cssvalue::CSSElementOffsetValue>(this)->TraceAfterDispatch(visitor);
       return;
   }
   NOTREACHED();

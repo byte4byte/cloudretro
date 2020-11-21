@@ -15,8 +15,10 @@
 #include "ash/app_list/app_list_view_delegate.h"
 #include "ash/app_list/model/search/search_result.h"
 #include "ash/app_list/views/search_result_page_view.h"
+#include "ash/public/cpp/app_list/app_list_color_provider.h"
 #include "ash/public/cpp/app_list/app_list_config.h"
 #include "ash/public/cpp/app_list/app_list_features.h"
+#include "ash/public/cpp/app_list/app_list_notifier.h"
 #include "ash/public/cpp/app_list/app_list_types.h"
 #include "ash/public/cpp/app_list/internal_app_id_constants.h"
 #include "base/bind.h"
@@ -47,8 +49,6 @@ constexpr int kSeparatorLeftRightPadding = 4;
 constexpr int kSeparatorHeight = 46;
 constexpr int kSeparatorTopPadding = 10;
 
-constexpr SkColor kSeparatorColor = SkColorSetA(gfx::kGoogleGrey900, 0x24);
-
 // The Delay before recording play store app results impression, i.e., if the
 // play store results are displayed less than the duration, we assume user
 // won't have chance to see them clearly and click on them, and wont' log
@@ -70,14 +70,10 @@ bool IsPlayStoreApp(SearchResult* result) {
 }  // namespace
 
 SearchResultTileItemListView::SearchResultTileItemListView(
-    SearchResultPageView* search_result_page_view,
     views::Textfield* search_box,
     AppListViewDelegate* view_delegate)
     : SearchResultContainerView(view_delegate),
-      search_result_page_view_(search_result_page_view),
       search_box_(search_box),
-      is_play_store_app_search_enabled_(
-          app_list_features::IsPlayStoreAppSearchEnabled()),
       is_app_reinstall_recommendation_enabled_(
           app_list_features::IsAppReinstallZeroStateEnabled()),
       max_search_result_tiles_(
@@ -87,27 +83,23 @@ SearchResultTileItemListView::SearchResultTileItemListView(
       gfx::Insets(kItemListVerticalSpacing, kItemListHorizontalSpacing),
       kBetweenItemSpacing));
   for (size_t i = 0; i < max_search_result_tiles_; ++i) {
-    if (is_app_reinstall_recommendation_enabled_ ||
-        is_play_store_app_search_enabled_) {
-      views::Separator* separator =
-          AddChildView(std::make_unique<views::Separator>());
-      separator->SetVisible(false);
-      separator->SetBorder(views::CreateEmptyBorder(
-          kSeparatorTopPadding, kSeparatorLeftRightPadding,
-          AppListConfig::instance().search_tile_height() - kSeparatorHeight,
-          kSeparatorLeftRightPadding));
-      separator->SetColor(kSeparatorColor);
-      separator_views_.push_back(separator);
-      layout_->SetFlexForView(separator, 0);
-    }
+    views::Separator* separator =
+        AddChildView(std::make_unique<views::Separator>());
+    separator->SetVisible(false);
+    separator->SetBorder(views::CreateEmptyBorder(
+        kSeparatorTopPadding, kSeparatorLeftRightPadding,
+        AppListConfig::instance().search_tile_height() - kSeparatorHeight,
+        kSeparatorLeftRightPadding));
+    separator->SetColor(AppListColorProvider::Get()->GetSeparatorColor());
+    separator_views_.push_back(separator);
+    layout_->SetFlexForView(separator, 0);
 
     SearchResultTileItemView* tile_item =
         AddChildView(std::make_unique<SearchResultTileItemView>(
-            view_delegate, nullptr /* pagination model */,
-            false /* show_in_apps_page */));
+            view_delegate, false /* show_in_apps_page */));
     tile_item->set_index_in_container(i);
     tile_item->SetParentBackgroundColor(
-        AppListConfig::instance().card_background_color());
+        AppListColorProvider::Get()->GetSearchBoxCardBackgroundColor());
     tile_views_.push_back(tile_item);
     AddObservedResultView(tile_item);
   }
@@ -122,20 +114,6 @@ SearchResultTileItemView* SearchResultTileItemListView::GetResultViewAt(
     size_t index) {
   DCHECK(index >= 0 && index < tile_views_.size());
   return tile_views_[index];
-}
-
-void SearchResultTileItemListView::NotifyFirstResultYIndex(int y_index) {
-  for (size_t i = 0; i < static_cast<size_t>(num_results()); ++i)
-    GetResultViewAt(i)->result()->set_distance_from_origin(i + y_index);
-}
-
-int SearchResultTileItemListView::GetYSize() {
-  return num_results() ? 1 : 0;
-}
-
-SearchResultBaseView* SearchResultTileItemListView::GetFirstResultView() {
-  DCHECK(!tile_views_.empty());
-  return num_results() <= 0 ? nullptr : tile_views_[0];
 }
 
 int SearchResultTileItemListView::DoUpdate() {
@@ -168,10 +146,7 @@ int SearchResultTileItemListView::DoUpdate() {
     }
 
     if (i >= display_results.size()) {
-      if (is_app_reinstall_recommendation_enabled_ ||
-          is_play_store_app_search_enabled_) {
-        separator_views_[i]->SetVisible(false);
-      }
+      separator_views_[i]->SetVisible(false);
 
       GetResultViewAt(i)->SetResult(nullptr);
       continue;
@@ -196,20 +171,26 @@ int SearchResultTileItemListView::DoUpdate() {
     result_id_added.insert(item->id());
     is_result_an_installable_app = IsResultAnInstallableApp(item);
 
-    if (is_play_store_app_search_enabled_ ||
-        is_app_reinstall_recommendation_enabled_) {
-      if (i > 0 && (is_result_an_installable_app !=
-                    is_previous_result_installable_app)) {
-        // Add a separator between installed apps and installable apps.
-        // This assumes the search results are already separated in groups for
-        // installed and installable apps.
-        separator_views_[i]->SetVisible(true);
-      } else {
-        separator_views_[i]->SetVisible(false);
-      }
+    if (i > 0 &&
+        (is_result_an_installable_app != is_previous_result_installable_app)) {
+      // Add a separator between installed apps and installable apps.
+      // This assumes the search results are already separated in groups for
+      // installed and installable apps.
+      separator_views_[i]->SetVisible(true);
+    } else {
+      separator_views_[i]->SetVisible(false);
     }
 
     is_previous_result_installable_app = is_result_an_installable_app;
+  }
+
+  auto* notifier = view_delegate()->GetNotifier();
+  if (notifier) {
+    std::vector<AppListNotifier::Result> notifier_results;
+    for (const auto* result : display_results)
+      notifier_results.emplace_back(result->id(), result->metrics_type());
+    notifier->NotifyResultsUpdated(SearchResultDisplayType::kTile,
+                                   notifier_results);
   }
 
   // Track play store results and start the timer for recording their impression
@@ -262,7 +243,9 @@ int SearchResultTileItemListView::DoUpdate() {
   }
 
   set_container_score(
-      display_results.empty() ? -1 : display_results.front()->display_score());
+      display_results.empty()
+          ? -1.0
+          : AppListConfig::instance().app_tiles_container_score());
 
   return display_results.size();
 }
@@ -366,41 +349,6 @@ void SearchResultTileItemListView::OnPlayStoreImpressionTimer() {
 void SearchResultTileItemListView::CleanUpOnViewHide() {
   playstore_impression_timer_.Stop();
   recent_playstore_query_.clear();
-}
-
-bool SearchResultTileItemListView::OnKeyPressed(const ui::KeyEvent& event) {
-  // Let the FocusManager handle Left/Right keys.
-  if (!IsUnhandledUpDownKeyEvent(event))
-    return false;
-
-  views::View* next_focusable_view = nullptr;
-
-  // Since search result tile item views have horizontal layout, hitting
-  // up/down when one of them is focused moves focus to the previous/next
-  // search result container.
-  if (event.key_code() == ui::VKEY_UP) {
-    next_focusable_view = GetFocusManager()->GetNextFocusableView(
-        tile_views_.front(), GetWidget(), true, false);
-    if (!search_result_page_view_->Contains(next_focusable_view)) {
-      // Focus should be moved to search box when it is moved outside search
-      // result page view.
-      search_box_->RequestFocus();
-      return true;
-    }
-  } else {
-    DCHECK_EQ(event.key_code(), ui::VKEY_DOWN);
-    next_focusable_view = GetFocusManager()->GetNextFocusableView(
-        tile_views_.back(), GetWidget(), false, false);
-  }
-
-  if (next_focusable_view) {
-    next_focusable_view->RequestFocus();
-    return true;
-  }
-
-  // Return false to let FocusManager to handle default focus move by key
-  // events.
-  return false;
 }
 
 const char* SearchResultTileItemListView::GetClassName() const {

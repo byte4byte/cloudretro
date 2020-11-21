@@ -51,9 +51,9 @@ testcase.fileDisplayLaunchOnLocalFolder = async () => {
   // Wait for app window to open.
   const appId = await remoteCall.waitForWindow('files#');
 
-  // Check: the Downloads/photos folder should be selected.
-  await remoteCall.waitForElement(
-      appId, '#file-list [file-name="photos"][selected]');
+  // Check: The current directory is MyFiles/Downloads/photos.
+  await remoteCall.waitUntilCurrentDirectoryIsChanged(
+      appId, '/My files/Downloads/photos');
 
   // The API used to launch the Files app does not set the IN_TEST flag to true:
   // error when attempting to retrieve Web Store access token.
@@ -268,14 +268,28 @@ testcase.fileDisplayUsbPartition = async () => {
   chrome.test.assertEq(
       'removable', fakeUsb.attributes['volume-type-for-testing']);
 
-  // Check unpartitioned USB does not have partitions as tree children.
-  const itemEntriesQuery =
-      ['[entry-label="fake-usb"] .tree-children .tree-item'];
-  const itemEntries = await remoteCall.callRemoteTestUtil(
-      'queryAllElements', appId, itemEntriesQuery);
-  chrome.test.assertEq(1, itemEntries.length);
-  const childVolumeType = itemEntries[0].attributes['volume-type-for-testing'];
-  chrome.test.assertTrue('removable' !== childVolumeType);
+  if (await isSinglePartitionFormat(appId)) {
+    // Check unpartitioned USB has single partition as tree child.
+    const itemEntriesQuery =
+        ['[entry-label="FAKEUSB"] .tree-children .tree-item'];
+    const itemEntries = await remoteCall.callRemoteTestUtil(
+        'queryAllElements', appId, itemEntriesQuery);
+    chrome.test.assertEq(1, itemEntries.length);
+    const childVolumeType =
+        itemEntries[0].attributes['volume-type-for-testing'];
+
+    chrome.test.assertTrue('removable' == childVolumeType);
+  } else {
+    // Check unpartitioned USB does not have partitions as tree children.
+    const itemEntriesQuery =
+        ['[entry-label="fake-usb"] .tree-children .tree-item'];
+    const itemEntries = await remoteCall.callRemoteTestUtil(
+        'queryAllElements', appId, itemEntriesQuery);
+    chrome.test.assertEq(1, itemEntries.length);
+    const childVolumeType =
+        itemEntries[0].attributes['volume-type-for-testing'];
+    chrome.test.assertTrue('removable' !== childVolumeType);
+  }
 };
 
 /**
@@ -308,7 +322,7 @@ testcase.fileDisplayUsbPartitionSort = async () => {
   await remoteCall.callRemoteTestUtil(
       'fakeMouseClick', appId, ['.table-header-cell:nth-of-type(4)']);
   const iconSortedAsc = (await isFilesNg(appId)) ?
-      '.table-header-cell .sorted [iron-icon="files16:arrow_down_small"]' :
+      '.table-header-cell .sorted [iron-icon="files16:arrow_up_small"]' :
       '.table-header-sort-image-asc';
   await remoteCall.waitForElement(appId, iconSortedAsc);
 
@@ -325,7 +339,7 @@ testcase.fileDisplayUsbPartitionSort = async () => {
   await remoteCall.callRemoteTestUtil(
       'fakeMouseClick', appId, ['.table-header-cell:nth-of-type(4)']);
   const iconSortedDesc = (await isFilesNg(appId)) ?
-      '.table-header-cell .sorted [iron-icon="files16:arrow_up_small"]' :
+      '.table-header-cell .sorted [iron-icon="files16:arrow_down_small"]' :
       '.table-header-sort-image-desc';
   await remoteCall.waitForElement(appId, iconSortedDesc);
 
@@ -565,19 +579,19 @@ testcase.fileDisplayWithoutDrive = async () => {
 
   // Wait for the loading indicator blink to finish.
   await remoteCall.waitForElement(
-      appId, '#list-container paper-progress[hidden]');
+      appId, '#list-container .loading-indicator[hidden]');
 
   // Navigate to the fake Google Drive.
   await remoteCall.callRemoteTestUtil(
       'fakeMouseClick', appId, ['[root-type-icon=\'drive\']']);
   await remoteCall.waitUntilCurrentDirectoryIsChanged(appId, '/Google Drive');
 
-  // The fake Google Drive should be empty.
+  // Check: the fake Google Drive should be empty.
   await remoteCall.waitForFiles(appId, []);
 
-  // The loading indicator should be visible and remain visible forever.
+  // Check: the loading indicator should be visible.
   await remoteCall.waitForElement(
-      appId, '#list-container paper-progress:not([hidden])');
+      appId, '#list-container .loading-indicator:not([hidden])');
 };
 
 /**
@@ -874,9 +888,12 @@ testcase.fileDisplayCheckNoReadOnlyIconOnLinuxFiles = async () => {
 
   // Click on Linux files.
   await remoteCall.callRemoteTestUtil('fakeMouseClick', appId, [fakeRoot]);
-  await remoteCall.waitForElement(appId, 'paper-progress:not([hidden])');
 
-  // Make sure read-only indicator on toolbar is NOT visible.
+  // Check: the loading indicator should be visible.
+  await remoteCall.waitForElement(
+      appId, '#list-container .loading-indicator:not([hidden])');
+
+  // Check: the toolbar read-only indicator should not be visible.
   await remoteCall.waitForElement(appId, '#read-only-indicator[hidden]');
 };
 

@@ -6,15 +6,15 @@
 
 #include <vector>
 
+#include "base/check_op.h"
 #include "base/command_line.h"
-#include "base/logging.h"
 #include "build/build_config.h"
 #include "ui/gl/gl_context.h"
 #include "ui/gl/gl_implementation.h"
 #include "ui/gl/gl_switches.h"
 #include "ui/gl/init/gl_factory.h"
 
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
 #include "ui/platform_window/common/platform_window_defaults.h"  // nogncheck
 #endif
 
@@ -23,7 +23,10 @@
 #endif
 
 #if defined(USE_X11)
-#include "ui/gfx/x/x11.h"
+#endif
+
+#if defined(USE_X11) || defined(USE_OZONE)
+#include "ui/base/ui_base_features.h"
 #endif
 
 namespace gl {
@@ -32,20 +35,15 @@ namespace {
 void InitializeOneOffHelper(bool init_extensions) {
   DCHECK_EQ(kGLImplementationNone, GetGLImplementation());
 
-  // TODO(https://crbug.com/1036285): delete this once USE_X11 is removed. If
-  // Ozone/X11 is used, XThreads are initialized with the
-  // OzonePlatform::InitializeForGPU call.
-#if defined(USE_X11)
-  XInitThreads();
-#endif
-
 #if defined(USE_OZONE)
-  ui::OzonePlatform::InitParams params;
-  params.single_process = true;
-  ui::OzonePlatform::InitializeForGPU(params);
+  if (features::IsUsingOzonePlatform()) {
+    ui::OzonePlatform::InitParams params;
+    params.single_process = true;
+    ui::OzonePlatform::InitializeForGPU(params);
+  }
 #endif
 
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
   ui::test::EnableTestConfigForPlatformWindows();
 #endif
 
@@ -58,10 +56,8 @@ void InitializeOneOffHelper(bool init_extensions) {
     use_software_gl = false;
   }
 
-#if defined(OS_ANDROID) || defined(OS_FUCHSIA)
+#if defined(OS_ANDROID)
   // On Android we always use hardware GL.
-  // On Fuchsia, we always use fake GL, but we don't want any software
-  // GLs, but rather a stub implementation.
   use_software_gl = false;
 #endif
 
@@ -118,9 +114,11 @@ void GLSurfaceTestSupport::InitializeOneOffImplementation(
 // static
 void GLSurfaceTestSupport::InitializeOneOffWithMockBindings() {
 #if defined(USE_OZONE)
-  ui::OzonePlatform::InitParams params;
-  params.single_process = true;
-  ui::OzonePlatform::InitializeForGPU(params);
+  if (features::IsUsingOzonePlatform()) {
+    ui::OzonePlatform::InitParams params;
+    params.single_process = true;
+    ui::OzonePlatform::InitializeForGPU(params);
+  }
 #endif
 
   InitializeOneOffImplementation(kGLImplementationMockGL, false);
@@ -129,9 +127,11 @@ void GLSurfaceTestSupport::InitializeOneOffWithMockBindings() {
 // static
 void GLSurfaceTestSupport::InitializeOneOffWithStubBindings() {
 #if defined(USE_OZONE)
-  ui::OzonePlatform::InitParams params;
-  params.single_process = true;
-  ui::OzonePlatform::InitializeForGPU(params);
+  if (features::IsUsingOzonePlatform()) {
+    ui::OzonePlatform::InitParams params;
+    params.single_process = true;
+    ui::OzonePlatform::InitializeForGPU(params);
+  }
 #endif
 
   InitializeOneOffImplementation(kGLImplementationStubGL, false);

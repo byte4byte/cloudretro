@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "ash/public/cpp/keyboard/keyboard_controller.h"
+#include "ash/public/cpp/keyboard/keyboard_controller_observer.h"
 #include "ash/shell.h"
 #include "base/bind.h"
 #include "base/callback.h"
@@ -62,12 +63,17 @@ class ChromeKeyboardControllerClientTestHelper::FakeKeyboardController
   bool SetWindowBoundsInScreen(const gfx::Rect& bounds) override {
     return false;
   }
+  void SetKeyboardConfigFromPref(bool enabled) override {}
   bool ShouldOverscroll() override { return true; }
   void AddObserver(ash::KeyboardControllerObserver* observer) override {
     observers_.AddObserver(observer);
   }
   void RemoveObserver(ash::KeyboardControllerObserver* observer) override {
     observers_.RemoveObserver(observer);
+  }
+  ash::KeyRepeatSettings GetKeyRepeatSettings() override {
+    return ash::KeyRepeatSettings{true, base::TimeDelta::FromMilliseconds(1000),
+                                  base::TimeDelta::FromMilliseconds(1000)};
   }
 
  private:

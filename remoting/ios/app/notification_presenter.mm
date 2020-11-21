@@ -2,26 +2,26 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#if !defined(__has_feature) || !__has_feature(objc_arc)
-#error "This file requires ARC support."
-#endif
-
 #include "remoting/ios/app/notification_presenter.h"
 
-#import "ios/third_party/material_components_ios/src/components/Dialogs/src/MaterialDialogs.h"
+#import <MaterialComponents/MaterialDialogs.h>
+
 #import "remoting/ios/app/notification_dialog_view_controller.h"
 #import "remoting/ios/facade/remoting_authentication.h"
 #import "remoting/ios/facade/remoting_service.h"
 #import "remoting/ios/persistence/remoting_preferences.h"
-
 #include "base/bind.h"
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "remoting/base/string_resources.h"
 #include "remoting/client/chromoting_client_runtime.h"
 #include "remoting/ios/app/view_utils.h"
 #include "ui/base/l10n/l10n_util.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 namespace remoting {
 

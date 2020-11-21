@@ -15,6 +15,10 @@ base::FilePath GetChromeProxyPath();
 
 namespace internals {
 
+// Sanitizes |name| and returns a version of it that is safe to use as an
+// on-disk file name.
+base::FilePath GetSanitizedFileName(const base::string16& name);
+
 // Returns the Windows user-level shortcut paths that are specified in
 // |creation_locations|.
 std::vector<base::FilePath> GetShortcutPaths(
@@ -26,9 +30,18 @@ std::vector<base::FilePath> GetShortcutPaths(
 // refreshed, ensuring the correct icon is displayed, but causing a flicker.
 // Refreshing the icon cache is not necessary on shortcut creation as the shell
 // will be notified when the shortcut is created.
+// Creates the parent dir of icon_file, if it doesn't exist.
 bool CheckAndSaveIcon(const base::FilePath& icon_file,
                       const gfx::ImageFamily& image,
                       bool refresh_shell_icon_cache);
+
+// Finds shortcuts in |shortcut_path| that match profile for |profile_path| and
+// extension with title |shortcut_name|.
+// If |shortcut_name| is empty, finds all shortcuts matching |profile_path|.
+std::vector<base::FilePath> FindAppShortcutsByProfileAndTitle(
+    const base::FilePath& shortcut_path,
+    const base::FilePath& profile_path,
+    const base::string16& shortcut_name);
 
 base::FilePath GetIconFilePath(const base::FilePath& web_app_path,
                                const base::string16& title);

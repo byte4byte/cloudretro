@@ -82,6 +82,8 @@ container{
   ],
   "showRulers": true,
   "showExtensionLines": true,
+  "showAccessibilityInfo": true,
+  "colorFormat": "hex",
   "elementInfo": {
     "tagName": "div",
     "idValue": "container",
@@ -89,7 +91,9 @@ container{
     "nodeHeight": "300",
     "isKeyboardFocusable": false,
     "accessibleName": "",
-    "accessibleRole": "generic"
+    "accessibleRole": "generic",
+    "layoutObjectName": "LayoutNGBlockFlow",
+    "showAccessibilityInfo": true
   }
 }
 child{
@@ -174,6 +178,8 @@ child{
   ],
   "showRulers": true,
   "showExtensionLines": true,
+  "showAccessibilityInfo": true,
+  "colorFormat": "hex",
   "elementInfo": {
     "tagName": "div",
     "idValue": "child",
@@ -181,7 +187,9 @@ child{
     "nodeHeight": "220",
     "isKeyboardFocusable": false,
     "accessibleName": "",
-    "accessibleRole": "generic"
+    "accessibleRole": "generic",
+    "layoutObjectName": "LayoutNGBlockFlow",
+    "showAccessibilityInfo": true
   }
 }
 span{
@@ -266,6 +274,8 @@ span{
   ],
   "showRulers": true,
   "showExtensionLines": true,
+  "showAccessibilityInfo": true,
+  "colorFormat": "hex",
   "elementInfo": {
     "tagName": "span",
     "idValue": "span",
@@ -273,7 +283,9 @@ span{
     "nodeHeight": "70",
     "isKeyboardFocusable": false,
     "accessibleName": "",
-    "accessibleRole": "generic"
+    "accessibleRole": "generic",
+    "layoutObjectName": "LayoutInline",
+    "showAccessibilityInfo": true
   }
 }
 TEXT{
@@ -358,10 +370,13 @@ TEXT{
   ],
   "showRulers": true,
   "showExtensionLines": true,
+  "showAccessibilityInfo": true,
+  "colorFormat": "hex",
   "elementInfo": {
     "nodeWidth": "10",
     "nodeHeight": "70",
-    "tagName": "#text"
+    "tagName": "#text",
+    "showAccessibilityInfo": true
   }
 }
 

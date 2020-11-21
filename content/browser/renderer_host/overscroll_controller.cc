@@ -6,8 +6,9 @@
 
 #include <algorithm>
 
+#include "base/check_op.h"
 #include "base/command_line.h"
-#include "base/logging.h"
+#include "base/notreached.h"
 #include "base/numerics/ranges.h"
 #include "content/browser/renderer_host/overscroll_controller_delegate.h"
 #include "content/public/browser/overscroll_configuration.h"
@@ -174,6 +175,10 @@ bool OverscrollController::WillHandleEvent(const blink::WebInputEvent& event) {
 
   // In overscrolling state, consume scroll-update and fling-start events when
   // they do not contribute to overscroll in order to prevent content scroll.
+  // TODO(bokan): This needs to account for behavior_ somehow since if the page
+  // declares that it doesn't want an overscroll effect, we should allow
+  // sending the scroll update events to generate DOM overscroll events.
+  // https://crbug.com/1112183.
   return scroll_state_ == ScrollState::OVERSCROLLING &&
          (event.GetType() == blink::WebInputEvent::Type::kGestureScrollUpdate ||
           event.GetType() == blink::WebInputEvent::Type::kGestureFlingStart);

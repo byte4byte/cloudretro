@@ -18,11 +18,11 @@
 #include "chrome/browser/interstitials/enterprise_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ssl/stateful_ssl_host_state_delegate_factory.h"
-#include "chrome/common/chrome_features.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "components/safe_browsing/core/common/safe_browsing_prefs.h"
 #include "components/security_interstitials/content/content_metrics_helper.h"
+#include "components/security_interstitials/content/settings_page_helper.h"
 #include "components/security_interstitials/content/stateful_ssl_host_state_delegate.h"
 #include "components/security_interstitials/content/utils.h"
 #include "content/public/browser/browser_thread.h"
@@ -31,6 +31,7 @@
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/settings_window_manager_chromeos.h"
+#include "chrome/browser/ui/webui/settings/chromeos/constants/routes.mojom.h"
 #include "chrome/common/webui_url_constants.h"
 #endif
 
@@ -77,14 +78,17 @@ SSLErrorControllerClient::SSLErrorControllerClient(
     const net::SSLInfo& ssl_info,
     int cert_error,
     const GURL& request_url,
-    std::unique_ptr<security_interstitials::MetricsHelper> metrics_helper)
+    std::unique_ptr<security_interstitials::MetricsHelper> metrics_helper,
+    std::unique_ptr<security_interstitials::SettingsPageHelper>
+        settings_page_helper)
     : SecurityInterstitialControllerClient(
           web_contents,
           std::move(metrics_helper),
           Profile::FromBrowserContext(web_contents->GetBrowserContext())
               ->GetPrefs(),
           g_browser_process->GetApplicationLocale(),
-          GURL(chrome::kChromeUINewTabURL)),
+          GURL(chrome::kChromeUINewTabURL),
+          std::move(settings_page_helper)),
       ssl_info_(ssl_info),
       request_url_(request_url),
       cert_error_(cert_error) {
@@ -137,7 +141,8 @@ void SSLErrorControllerClient::LaunchDateAndTimeSettings() {
 
 #if defined(OS_CHROMEOS)
   chrome::SettingsWindowManager::GetInstance()->ShowOSSettings(
-      ProfileManager::GetActiveUserProfile(), chrome::kDateTimeSubPage);
+      ProfileManager::GetActiveUserProfile(),
+      chromeos::settings::mojom::kDateAndTimeSectionPath);
 #else
   base::ThreadPool::PostTask(
       FROM_HERE, {base::TaskPriority::USER_VISIBLE, base::MayBlock()},

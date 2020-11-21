@@ -30,6 +30,7 @@
 #include "components/sessions/content/session_tab_helper.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/no_renderer_crashes_assertion.h"
 #include "content/public/test/test_utils.h"
@@ -47,7 +48,7 @@ using browsertest_util::WaitForTaskManagerRows;
 class TaskManagerViewTest : public InProcessBrowserTest {
  public:
   TaskManagerViewTest() {
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
     feature_list_.InitAndEnableFeature(features::kViewsTaskManager);
 #endif
   }

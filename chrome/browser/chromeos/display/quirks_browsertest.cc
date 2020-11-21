@@ -6,10 +6,11 @@
 #include "base/files/file_util.h"
 #include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "base/threading/thread_restrictions.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "components/quirks/quirks_manager.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/test_utils.h"
 #include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
 #include "services/network/test/test_url_loader_factory.h"
@@ -49,7 +50,8 @@ class QuirksBrowserTest : public InProcessBrowserTest {
   ~QuirksBrowserTest() override = default;
 
   // Query QuirksManager for icc file, then run msg loop to wait for callback.
-  // |find_fake_file| indicates that URLFetcher should respond with success.
+  // |find_fake_file| indicates that URLLoaderFactory should respond with
+  // success.
   void TestQuirksClient(int64_t product_id, bool find_fake_file) {
     find_fake_file_ = find_fake_file;
 

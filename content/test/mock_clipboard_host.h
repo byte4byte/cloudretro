@@ -20,9 +20,9 @@ class MockClipboardHost : public blink::mojom::ClipboardHost {
   ~MockClipboardHost() override;
 
   void Bind(mojo::PendingReceiver<blink::mojom::ClipboardHost> receiver);
+  // Clears all clipboard data.
   void Reset();
 
- private:
   // blink::mojom::ClipboardHost
   void GetSequenceNumber(ui::ClipboardBuffer clipboard_buffer,
                          GetSequenceNumberCallback callback) override;
@@ -35,6 +35,8 @@ class MockClipboardHost : public blink::mojom::ClipboardHost {
                 ReadTextCallback callback) override;
   void ReadHtml(ui::ClipboardBuffer clipboard_buffer,
                 ReadHtmlCallback callback) override;
+  void ReadSvg(ui::ClipboardBuffer clipboard_buffer,
+               ReadSvgCallback callback) override;
   void ReadRtf(ui::ClipboardBuffer clipboard_buffer,
                ReadRtfCallback callback) override;
   void ReadImage(ui::ClipboardBuffer clipboard_buffer,
@@ -44,6 +46,7 @@ class MockClipboardHost : public blink::mojom::ClipboardHost {
                       ReadCustomDataCallback callback) override;
   void WriteText(const base::string16& text) override;
   void WriteHtml(const base::string16& markup, const GURL& url) override;
+  void WriteSvg(const base::string16& markup) override;
   void WriteSmartPasteMarker() override;
   void WriteCustomData(
       const base::flat_map<base::string16, base::string16>& data) override;
@@ -51,14 +54,15 @@ class MockClipboardHost : public blink::mojom::ClipboardHost {
                      const base::string16& title) override;
   void WriteImage(const SkBitmap& bitmap) override;
   void CommitWrite() override;
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
   void WriteStringToFindPboard(const base::string16& text) override;
 #endif
-
+ private:
   mojo::ReceiverSet<blink::mojom::ClipboardHost> receivers_;
   uint64_t sequence_number_ = 0;
   base::string16 plain_text_;
   base::string16 html_text_;
+  base::string16 svg_text_;
   GURL url_;
   SkBitmap image_;
   std::map<base::string16, base::string16> custom_data_;

@@ -23,6 +23,7 @@
 #include "components/omnibox/browser/omnibox_field_trial.h"
 #include "components/omnibox/browser/on_device_head_provider.h"
 #include "components/omnibox/common/omnibox_features.h"
+#include "components/search_engines/omnibox_focus_type.h"
 #include "components/search_engines/search_terms_data.h"
 #include "components/search_engines/template_url_service.h"
 #include "third_party/metrics_proto/omnibox_input_type.pb.h"
@@ -66,9 +67,9 @@ struct OnDeviceHeadProvider::OnDeviceHeadProviderParams {
       : request_id(request_id), input(input) {}
 
   ~OnDeviceHeadProviderParams() = default;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(OnDeviceHeadProviderParams);
+  OnDeviceHeadProviderParams(const OnDeviceHeadProviderParams&) = delete;
+  OnDeviceHeadProviderParams& operator=(const OnDeviceHeadProviderParams&) =
+      delete;
 };
 
 // static
@@ -108,8 +109,7 @@ void OnDeviceHeadProvider::AddModelUpdateCallback() {
 }
 
 bool OnDeviceHeadProvider::IsOnDeviceHeadProviderAllowed(
-    const AutocompleteInput& input,
-    const std::string& incognito_serve_mode) {
+    const AutocompleteInput& input) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(main_sequence_checker_);
 
   // Check whether "new" features are enabled.
@@ -125,21 +125,16 @@ bool OnDeviceHeadProvider::IsOnDeviceHeadProviderAllowed(
   if (!client()->SearchSuggestEnabled())
     return false;
 
-  // This flag specifies whether we should serve incognito or non incognito
-  // request, value can be:
-  // 1. incognito-not-allowed (or empty string): only serve non incognito
-  //    request; this is the default behavior;
-  // 2. incognito-only: only serve incognito request;
-  // 3. always-serve: always serve regardless of incognito.
-  if (incognito_serve_mode != "always-serve") {
-    if (client()->IsOffTheRecord() && incognito_serve_mode != "incognito-only")
-      return false;
-    if (!client()->IsOffTheRecord() && incognito_serve_mode == "incognito-only")
-      return false;
-  }
+  // Check if provider is allowed in incognito / non-incognito.
+  if (client()->IsOffTheRecord() &&
+      !OmniboxFieldTrial::IsOnDeviceHeadSuggestEnabledForIncognito())
+    return false;
+  if (!client()->IsOffTheRecord() &&
+      !OmniboxFieldTrial::IsOnDeviceHeadSuggestEnabledForNonIncognito())
+    return false;
 
   // Reject on focus request.
-  if (input.from_omnibox_focus())
+  if (input.focus_type() != OmniboxFocusType::DEFAULT)
     return false;
 
   // Do not proceed if default search provider is not Google.
@@ -153,10 +148,7 @@ void OnDeviceHeadProvider::Start(const AutocompleteInput& input,
   // Cancel any in-progress request.
   Stop(!minimal_changes, false);
 
-  const std::string mode = base::GetFieldTrialParamValueByFeature(
-      omnibox::kOnDeviceHeadProvider,
-      OmniboxFieldTrial::kOnDeviceHeadSuggestIncognitoServeMode);
-  if (!IsOnDeviceHeadProviderAllowed(input, mode)) {
+  if (!IsOnDeviceHeadProviderAllowed(input)) {
     matches_.clear();
     return;
   }
@@ -182,12 +174,8 @@ void OnDeviceHeadProvider::Start(const AutocompleteInput& input,
   // Therefore, we might want to delay the On Device suggest requests (and also
   // apply a timeout to search default loader) to mitigate this issue. Note this
   // delay is not needed for incognito where server suggestion is not served.
-  int delay = 0;
-  if (!client()->IsOffTheRecord()) {
-    delay = base::GetFieldTrialParamByFeatureAsInt(
-        omnibox::kOnDeviceHeadProvider,
-        OmniboxFieldTrial::kOnDeviceHeadSuggestDelaySuggestRequestMs, 0);
-  }
+  int delay = OmniboxFieldTrial::OnDeviceHeadSuggestDelaySuggestRequestMs(
+      client()->IsOffTheRecord());
   base::SequencedTaskRunnerHandle::Get()->PostDelayedTask(
       FROM_HERE,
       base::BindOnce(&OnDeviceHeadProvider::DoSearch,
@@ -291,33 +279,11 @@ void OnDeviceHeadProvider::SearchDone(
                                 params->suggestions.size(), 1, 5, 6);
     matches_.clear();
 
-    int relevance;
-    if (params->input.type() == metrics::OmniboxInputType::URL) {
-      relevance = kBaseRelevance;
-    } else {
-      if (client()->IsOffTheRecord()) {
-        relevance = base::GetFieldTrialParamByFeatureAsInt(
-            omnibox::kOnDeviceHeadProvider,
-            OmniboxFieldTrial::
-                kOnDeviceHeadSuggestMaxScoreForNonUrlInputIncognito,
-            0);
-        if (relevance <= 0) {
-          // TODO(crbug.com/925072): this is a fallback for existing Incognito
-          // experiments which are still using finch flag
-          // kOnDeviceHeadSuggestMaxScoreForNonUrlInput; we will remove this
-          // fallback logic once no Incognito experiment is using the flag.
-          relevance = base::GetFieldTrialParamByFeatureAsInt(
-              omnibox::kOnDeviceHeadProvider,
-              OmniboxFieldTrial::kOnDeviceHeadSuggestMaxScoreForNonUrlInput,
-              kBaseRelevance);
-        }
-      } else {
-        relevance = base::GetFieldTrialParamByFeatureAsInt(
-            omnibox::kOnDeviceHeadProvider,
-            OmniboxFieldTrial::kOnDeviceHeadSuggestMaxScoreForNonUrlInput,
-            kBaseRelevance);
-      }
-    }
+    int relevance =
+        params->input.type() == metrics::OmniboxInputType::URL
+            ? kBaseRelevance
+            : OmniboxFieldTrial::OnDeviceHeadSuggestMaxScoreForNonUrlInput(
+                  client()->IsOffTheRecord(), kBaseRelevance);
 
     for (const auto& item : params->suggestions) {
       matches_.push_back(BaseSearchProvider::CreateOnDeviceSearchSuggestion(

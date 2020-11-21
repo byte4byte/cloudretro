@@ -12,13 +12,13 @@
 #include "build/build_config.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
-#include "chrome/browser/ui/blocked_content/popup_opener_tab_helper.h"
 #include "chrome/browser/ui/blocked_content/tab_under_navigation_throttle.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_navigator_params.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/blocked_content/popup_opener_tab_helper.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_types.h"
@@ -26,6 +26,7 @@
 #include "components/policy/core/common/mock_configuration_policy_provider.h"
 #include "components/policy/policy_constants.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "content/public/test/test_utils.h"
@@ -64,8 +65,7 @@ class TabUnderBlockerBrowserTest : public extensions::ExtensionBrowserTest {
     policy::PolicyMap policy;
     policy.Set(policy::key::kDefaultPopupsSetting,
                policy::POLICY_LEVEL_MANDATORY, policy::POLICY_SCOPE_USER,
-               policy::POLICY_SOURCE_CLOUD,
-               std::make_unique<base::Value>(popup_setting),
+               policy::POLICY_SOURCE_CLOUD, base::Value(popup_setting),
                nullptr /* external_data_fetcher */);
     provider_.UpdateChromePolicy(policy);
   }
@@ -106,7 +106,7 @@ IN_PROC_BROWSER_TEST_F(TabUnderBlockerBrowserTest, SimpleTabUnder_IsBlocked) {
   EXPECT_TRUE(content::ExecuteScript(opener, "window.open('/title1.html')"));
   navigation_observer.Wait();
 
-  EXPECT_TRUE(PopupOpenerTabHelper::FromWebContents(opener)
+  EXPECT_TRUE(blocked_content::PopupOpenerTabHelper::FromWebContents(opener)
                   ->has_opened_popup_since_last_user_gesture());
   EXPECT_EQ(opener->GetVisibility(), content::Visibility::HIDDEN);
 
@@ -115,8 +115,8 @@ IN_PROC_BROWSER_TEST_F(TabUnderBlockerBrowserTest, SimpleTabUnder_IsBlocked) {
       embedded_test_server()->GetURL("a.com", "/title1.html");
 
   std::string expected_error = GetError(cross_origin_url);
-  content::ConsoleObserverDelegate console_observer(opener, expected_error);
-  opener->SetDelegate(&console_observer);
+  content::WebContentsConsoleObserver console_observer(opener);
+  console_observer.SetPattern(expected_error);
 
   EXPECT_TRUE(content::ExecuteScriptWithoutUserGesture(
       opener, base::StringPrintf("window.location = '%s';",
@@ -128,7 +128,7 @@ IN_PROC_BROWSER_TEST_F(TabUnderBlockerBrowserTest, SimpleTabUnder_IsBlocked) {
   // to be consistent with the NotBlocked test below, which has to use this
   // technique.
   EXPECT_TRUE(content::ExecuteScript(opener, "var a = 0;"));
-  EXPECT_EQ(expected_error, console_observer.message());
+  EXPECT_EQ(expected_error, console_observer.GetMessageAt(0u));
   EXPECT_TRUE(IsUiShownForUrl(opener, cross_origin_url));
 }
 
@@ -145,7 +145,7 @@ IN_PROC_BROWSER_TEST_F(TabUnderBlockerBrowserTest,
   EXPECT_TRUE(content::ExecuteScript(opener, "window.open('/title1.html')"));
   navigation_observer.Wait();
 
-  EXPECT_TRUE(PopupOpenerTabHelper::FromWebContents(opener)
+  EXPECT_TRUE(blocked_content::PopupOpenerTabHelper::FromWebContents(opener)
                   ->has_opened_popup_since_last_user_gesture());
   EXPECT_EQ(opener->GetVisibility(), content::Visibility::HIDDEN);
 
@@ -155,9 +155,8 @@ IN_PROC_BROWSER_TEST_F(TabUnderBlockerBrowserTest,
   content::TestNavigationObserver tab_under_observer(opener, 1);
   const GURL cross_origin_url =
       embedded_test_server()->GetURL("a.com", "/title1.html");
-  content::ConsoleObserverDelegate console_observer(opener,
-                                                    GetError(cross_origin_url));
-  opener->SetDelegate(&console_observer);
+  content::WebContentsConsoleObserver console_observer(opener);
+  console_observer.SetPattern(GetError(cross_origin_url));
   EXPECT_TRUE(content::ExecuteScriptWithoutUserGesture(
       opener, base::StringPrintf("window.location = '%s';",
                                  cross_origin_url.spec().c_str())));
@@ -166,7 +165,7 @@ IN_PROC_BROWSER_TEST_F(TabUnderBlockerBrowserTest,
 
   // Round trip to the renderer to ensure the message would have been sent.
   EXPECT_TRUE(content::ExecuteScript(opener, "var a = 0;"));
-  EXPECT_TRUE(console_observer.message().empty());
+  EXPECT_TRUE(console_observer.messages().empty());
   EXPECT_FALSE(IsUiShownForUrl(opener, cross_origin_url));
 }
 
@@ -182,7 +181,7 @@ IN_PROC_BROWSER_TEST_F(TabUnderBlockerBrowserTest,
   const std::string script =
       "var evt = new MouseEvent('click', {"
       "  view : window,"
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
       "  metaKey : true"
 #else
       "  ctrlKey : true"
@@ -309,9 +308,9 @@ IN_PROC_BROWSER_TEST_F(TabUnderBlockerBrowserTest, ControlledBySetting) {
   {
     HostContentSettingsMap* settings_map =
         HostContentSettingsMapFactory::GetForProfile(browser()->profile());
-    settings_map->SetContentSettingDefaultScope(
-        top_level_url, GURL(), ContentSettingsType::POPUPS, std::string(),
-        CONTENT_SETTING_ALLOW);
+    settings_map->SetContentSettingDefaultScope(top_level_url, GURL(),
+                                                ContentSettingsType::POPUPS,
+                                                CONTENT_SETTING_ALLOW);
     content::TestNavigationObserver tab_under_observer(opener, 1);
     const GURL cross_origin_url =
         embedded_test_server()->GetURL("a.com", "/title1.html");

@@ -7,9 +7,9 @@ module crostini.mojom;
 enum InstallerState {
   kStart,               // Just started installation
   kInstallImageLoader,  // Loading the Termina VM component.
-  kStartConcierge,      // Starting the Concierge D-Bus client.
   kCreateDiskImage,     // Creating the image for the Termina VM.
   kStartTerminaVm,      // Starting the Termina VM.
+  kStartLxd,            // Starting LXD.
   kCreateContainer,     // Creating the container inside the Termina VM.
   kSetupContainer,      // Setting up the container inside the Termina VM.
   kStartContainer,      // Starting the container inside the Termina VM.
@@ -21,9 +21,9 @@ enum InstallerState {
 enum InstallerError {
   kNone,
   kErrorLoadingTermina,
-  kErrorStartingConcierge,
   kErrorCreatingDiskImage,
   kErrorStartingTermina,
+  kErrorStartingLxd,
   kErrorStartingContainer,
   kErrorOffline,
   kErrorFetchingSshKeys,

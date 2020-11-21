@@ -4,8 +4,8 @@
 
 #import "chrome/browser/chrome_browser_application_mac.h"
 
+#include "base/check.h"
 #include "base/command_line.h"
-#include "base/logging.h"
 #include "base/mac/call_with_eh_frame.h"
 #include "base/observer_list.h"
 #include "base/strings/stringprintf.h"
@@ -298,32 +298,31 @@ std::string DescriptionForNSEvent(NSEvent* event) {
 - (void)sendEvent:(NSEvent*)event {
   TRACE_EVENT0("toplevel", "BrowserCrApplication::sendEvent");
 
+  // TODO(bokan): Tracing added temporarily to diagnose crbug.com/1039833.
+  TRACE_EVENT_INSTANT1("toplevel", "KeyWindow", TRACE_EVENT_SCOPE_THREAD,
+                       "KeyWin", [[NSApp keyWindow] windowNumber]);
+
   static crash_reporter::CrashKeyString<256> nseventKey("nsevent");
   crash_reporter::ScopedCrashKeyString scopedKey(&nseventKey,
                                                  DescriptionForNSEvent(event));
 
   base::mac::CallWithEHFrame(^{
-    switch (event.type) {
-      case NSLeftMouseDown:
-      case NSRightMouseDown: {
-        // In kiosk mode, we want to prevent context menus from appearing,
-        // so simply discard menu-generating events instead of passing them
-        // along.
-        bool kioskMode = base::CommandLine::ForCurrentProcess()->HasSwitch(
-            switches::kKioskMode);
-        bool ctrlDown = [event modifierFlags] & NSControlKeyMask;
-        if (kioskMode && ([event type] == NSRightMouseDown || ctrlDown))
-          break;
-        FALLTHROUGH;  // Not menu-generating, so pass on the event.
-      }
-
-      default: {
-        base::mac::ScopedSendingEvent sendingEventScoper;
-        content::ScopedNotifyNativeEventProcessorObserver
-            scopedObserverNotifier(&_observers, event);
-        [super sendEvent:event];
-      }
+    static const bool kKioskMode =
+        base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kKioskMode);
+    if (kKioskMode) {
+      // In kiosk mode, we want to prevent context menus from appearing,
+      // so simply discard menu-generating events instead of passing them
+      // along.
+      BOOL couldTriggerContextMenu = event.type == NSRightMouseDown ||
+                                     (event.type == NSLeftMouseDown &&
+                                      (event.modifierFlags & NSControlKeyMask));
+      if (couldTriggerContextMenu)
+        return;
     }
+    base::mac::ScopedSendingEvent sendingEventScoper;
+    content::ScopedNotifyNativeEventProcessorObserver scopedObserverNotifier(
+        &_observers, event);
+    [super sendEvent:event];
   });
 }
 

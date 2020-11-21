@@ -7,6 +7,7 @@
  * 'chooser-exception-list' shows a list of chooser exceptions for a given
  * chooser type.
  */
+import 'chrome://resources/cr_elements/shared_style_css.m.js';
 import 'chrome://resources/cr_elements/shared_vars_css.m.js';
 import 'chrome://resources/polymer/v3_0/paper-tooltip/paper-tooltip.js';
 import '../settings_shared_css.m.js';
@@ -17,7 +18,7 @@ import {ListPropertyUpdateBehavior} from 'chrome://resources/js/list_property_up
 import {WebUIListenerBehavior} from 'chrome://resources/js/web_ui_listener_behavior.m.js';
 import {html, Polymer} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
-import {loadTimeData} from '../i18n_setup.m.js';
+import {loadTimeData} from '../i18n_setup.js';
 
 import {ChooserType, ContentSettingsTypes} from './constants.js';
 import {SiteSettingsBehavior} from './site_settings_behavior.js';
@@ -113,7 +114,7 @@ Polymer({
    * @private
    */
   chooserTypeChanged_() {
-    if (this.chooserType == ChooserType.NONE) {
+    if (this.chooserType === ChooserType.NONE) {
       return;
     }
 
@@ -164,12 +165,12 @@ Polymer({
       this.$.tooltip.hide();
       target.removeEventListener('mouseleave', hide);
       target.removeEventListener('blur', hide);
-      target.removeEventListener('tap', hide);
+      target.removeEventListener('click', hide);
       this.$.tooltip.removeEventListener('mouseenter', hide);
     };
     target.addEventListener('mouseleave', hide);
     target.addEventListener('blur', hide);
-    target.addEventListener('tap', hide);
+    target.addEventListener('click', hide);
     this.$.tooltip.addEventListener('mouseenter', hide);
     this.$.tooltip.show();
   },

@@ -39,7 +39,7 @@ class MockEmbeddedSearchClientFactory
     : public SearchIPCRouter::EmbeddedSearchClientFactory {
  public:
   MOCK_METHOD0(GetEmbeddedSearchClient,
-               chrome::mojom::EmbeddedSearchClient*(void));
+               search::mojom::EmbeddedSearchClient*(void));
 };
 
 }  // namespace
@@ -87,7 +87,7 @@ class SearchTabHelperTest : public ChromeRenderViewHostTestHarness {
 };
 
 TEST_F(SearchTabHelperTest, FileSelectedUpdatesLastSelectedDirectory) {
-  NavigateAndCommit(GURL(chrome::kChromeUINewTabURL));
+  NavigateAndCommit(GURL(chrome::kChromeSearchLocalNtpUrl));
   SearchTabHelper* search_tab_helper =
       SearchTabHelper::FromWebContents(web_contents());
   ASSERT_NE(nullptr, search_tab_helper);
@@ -100,7 +100,7 @@ TEST_F(SearchTabHelperTest, FileSelectedUpdatesLastSelectedDirectory) {
 }
 
 TEST_F(SearchTabHelperTest, TitleIsSetForNTP) {
-  NavigateAndCommit(GURL(chrome::kChromeUINewTabURL));
+  NavigateAndCommit(GURL(chrome::kChromeSearchLocalNtpUrl));
   EXPECT_EQ(l10n_util::GetStringUTF16(IDS_NEW_TAB_TITLE),
             web_contents()->GetTitle());
 }

@@ -10,18 +10,36 @@
 #include "base/bind.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_process_platform_part.h"
+#include "chrome/browser/chromeos/plugin_vm/plugin_vm_pref_names.h"
 #include "chrome/browser/chromeos/plugin_vm/plugin_vm_util.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
-#include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/settings_window_manager_chromeos.h"
+#include "chrome/browser/ui/webui/settings/chromeos/app_management/app_management_uma.h"
+#include "chrome/browser/ui/webui/settings/chromeos/constants/routes.mojom.h"
 #include "chrome/common/webui_url_constants.h"
 #include "chromeos/dbus/plugin_vm_service/plugin_vm_service.pb.h"
+#include "components/prefs/pref_service.h"
+#include "components/user_manager/user_manager.h"
 #include "dbus/message.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 
 // A fixed UUID where the first 4 bytes spell 'test', reported when under test.
 constexpr char kFakeUUID[] = "74657374-4444-4444-8888-888888888888";
+
+// These are the accepted inputs to the ShowSettingsPage D-Bus method.
+constexpr char kShowSettingsPageDetails[] = "pluginVm/details";
+constexpr char kShowSettingsPageSharedPaths[] = "pluginVm/sharedPaths";
+
+namespace {
+Profile* GetPrimaryProfile() {
+  const user_manager::User* primary_user =
+      user_manager::UserManager::Get()->GetPrimaryUser();
+  return chromeos::ProfileHelper::Get()->GetProfileByUser(primary_user);
+}
+}  // namespace
 
 namespace chromeos {
 
@@ -43,6 +61,18 @@ void PluginVmServiceProvider::Start(
                           weak_ptr_factory_.GetWeakPtr()),
       base::BindOnce(&PluginVmServiceProvider::OnExported,
                      weak_ptr_factory_.GetWeakPtr()));
+  exported_object->ExportMethod(
+      kPluginVmServiceInterface, kPluginVmServiceGetAppLicenseUserId,
+      base::BindRepeating(&PluginVmServiceProvider::GetUserId,
+                          weak_ptr_factory_.GetWeakPtr()),
+      base::BindRepeating(&PluginVmServiceProvider::OnExported,
+                          weak_ptr_factory_.GetWeakPtr()));
+  exported_object->ExportMethod(
+      kPluginVmServiceInterface, kPluginVmServiceGetPermissionsMethod,
+      base::BindRepeating(&PluginVmServiceProvider::GetPermissions,
+                          weak_ptr_factory_.GetWeakPtr()),
+      base::BindRepeating(&PluginVmServiceProvider::OnExported,
+                          weak_ptr_factory_.GetWeakPtr()));
 }
 
 void PluginVmServiceProvider::OnExported(const std::string& interface_name,
@@ -88,9 +118,16 @@ void PluginVmServiceProvider::ShowSettingsPage(
     return;
   }
 
-  // Validate subpage path.
-  if ((request.subpage_path() != chrome::kPluginVmDetailsSubPage) &&
-      (request.subpage_path() != chrome::kPluginVmSharedPathsSubPage)) {
+  Profile* primary_profile = GetPrimaryProfile();
+  if (request.subpage_path() == kShowSettingsPageDetails) {
+    chrome::ShowAppManagementPage(
+        primary_profile, plugin_vm::kPluginVmShelfAppId,
+        AppManagementEntryPoint::kDBusServicePluginVm);
+  } else if (request.subpage_path() == kShowSettingsPageSharedPaths) {
+    chrome::SettingsWindowManager::GetInstance()->ShowOSSettings(
+        primary_profile,
+        chromeos::settings::mojom::kPluginVmSharedPathsSubpagePath);
+  } else {
     constexpr char error_message[] = "Invalid subpage_path";
     LOG(ERROR) << error_message;
     std::move(response_sender)
@@ -99,9 +136,34 @@ void PluginVmServiceProvider::ShowSettingsPage(
     return;
   }
 
-  chrome::SettingsWindowManager::GetInstance()->ShowOSSettings(
-      ProfileManager::GetPrimaryUserProfile(), request.subpage_path());
   std::move(response_sender).Run(dbus::Response::FromMethodCall(method_call));
+}
+
+void PluginVmServiceProvider::GetUserId(
+    dbus::MethodCall* method_call,
+    dbus::ExportedObject::ResponseSender response_sender) {
+  std::unique_ptr<dbus::Response> response =
+      dbus::Response::FromMethodCall(method_call);
+  plugin_vm_service::GetAppLicenseUserIdResponse payload;
+  payload.set_user_id(
+      plugin_vm::GetPluginVmUserIdForProfile(GetPrimaryProfile()));
+  dbus::MessageWriter writer(response.get());
+  writer.AppendProtoAsArrayOfBytes(payload);
+  std::move(response_sender).Run(std::move(response));
+}
+
+void PluginVmServiceProvider::GetPermissions(
+    dbus::MethodCall* method_call,
+    dbus::ExportedObject::ResponseSender response_sender) {
+  std::unique_ptr<dbus::Response> response =
+      dbus::Response::FromMethodCall(method_call);
+  plugin_vm_service::GetPermissionsResponse payload;
+  payload.set_data_collection_enabled(
+      GetPrimaryProfile()->GetPrefs()->GetBoolean(
+          plugin_vm::prefs::kPluginVmDataCollectionAllowed));
+  dbus::MessageWriter writer(response.get());
+  writer.AppendProtoAsArrayOfBytes(payload);
+  std::move(response_sender).Run(std::move(response));
 }
 
 }  // namespace chromeos

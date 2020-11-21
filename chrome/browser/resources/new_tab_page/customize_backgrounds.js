@@ -2,13 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import './grid.js';
+import 'chrome://resources/cr_elements/hidden_style_css.m.js';
+import 'chrome://resources/cr_elements/cr_grid/cr_grid.js';
 import './mini_page.js';
-import './untrusted_iframe.js';
+import './iframe.js';
 
+import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
 import {html, PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+
 import {BrowserProxy} from './browser_proxy.js';
-import {BackgroundSelection, BackgroundSelectionType} from './customize_dialog.js';
+import {BackgroundSelection, BackgroundSelectionType} from './customize_dialog_types.js';
 
 /** Element that lets the user configure the background. */
 class CustomizeBackgroundsElement extends PolymerElement {
@@ -29,6 +32,19 @@ class CustomizeBackgroundsElement extends PolymerElement {
         notify: true,
       },
 
+      /** @private */
+      customBackgroundDisabledByPolicy_: {
+        type: Boolean,
+        value: () =>
+            loadTimeData.getBoolean('customBackgroundDisabledByPolicy'),
+      },
+
+      /** @private */
+      showBackgroundSelection_: {
+        type: Boolean,
+        computed: 'computeShowBackgroundSelection_(selectedCollection)',
+      },
+
       /** @private {newTabPage.mojom.BackgroundCollection} */
       selectedCollection: {
         notify: true,
@@ -43,18 +59,29 @@ class CustomizeBackgroundsElement extends PolymerElement {
       /** @private {!Array<!newTabPage.mojom.BackgroundCollection>} */
       collections_: Array,
 
-      /** @private {!Array<!newTabPage.mojom.BackgroundImage>} */
+      /** @private {!Array<!newTabPage.mojom.CollectionImage>} */
       images_: Array,
     };
   }
 
   constructor() {
     super();
+    if (this.customBackgroundDisabledByPolicy_) {
+      return;
+    }
     /** @private {newTabPage.mojom.PageHandlerRemote} */
     this.pageHandler_ = BrowserProxy.getInstance().handler;
     this.pageHandler_.getBackgroundCollections().then(({collections}) => {
       this.collections_ = collections;
     });
+  }
+
+  /**
+   * @return {boolean}
+   * @private
+   */
+  computeShowBackgroundSelection_() {
+    return !this.customBackgroundDisabledByPolicy_ && !this.selectedCollection;
   }
 
   /**
@@ -64,8 +91,8 @@ class CustomizeBackgroundsElement extends PolymerElement {
   getCustomBackgroundClass_() {
     switch (this.backgroundSelection.type) {
       case BackgroundSelectionType.NO_SELECTION:
-        return this.theme && this.theme.backgroundImageUrl &&
-                this.theme.backgroundImageUrl.url.startsWith(
+        return this.theme && this.theme.backgroundImage &&
+                this.theme.backgroundImage.url.url.startsWith(
                     'chrome-untrusted://new-tab-page/background.jpg') ?
             'selected' :
             '';
@@ -83,7 +110,7 @@ class CustomizeBackgroundsElement extends PolymerElement {
       case BackgroundSelectionType.NO_BACKGROUND:
         return 'selected';
       case BackgroundSelectionType.NO_SELECTION:
-        return this.theme && !this.theme.backgroundImageUrl &&
+        return this.theme && !this.theme.backgroundImage &&
                 !this.theme.dailyRefreshCollectionId ?
             'selected' :
             '';
@@ -107,8 +134,8 @@ class CustomizeBackgroundsElement extends PolymerElement {
             'selected' :
             '';
       case BackgroundSelectionType.NO_SELECTION:
-        return this.theme && this.theme.backgroundImageUrl &&
-                this.theme.backgroundImageUrl.url === url &&
+        return this.theme && this.theme.backgroundImage &&
+                this.theme.backgroundImage.url.url === url &&
                 !this.theme.dailyRefreshCollectionId ?
             'selected' :
             '';
@@ -125,10 +152,15 @@ class CustomizeBackgroundsElement extends PolymerElement {
    */
   onCollectionClick_(e) {
     this.selectedCollection = this.$.collectionsRepeat.itemForElement(e.target);
+    this.pageHandler_.onCustomizeDialogAction(
+        newTabPage.mojom.CustomizeDialogAction.kBackgroundsCollectionOpened);
   }
 
   /** @private */
   async onUploadFromDeviceClick_() {
+    this.pageHandler_.onCustomizeDialogAction(
+        newTabPage.mojom.CustomizeDialogAction
+            .kBackgroundsUploadFromDeviceClicked);
     const {success} = await this.pageHandler_.chooseLocalCustomBackground();
     if (success) {
       // The theme update is asynchronous. Close the dialog and allow ntp-app
@@ -139,6 +171,12 @@ class CustomizeBackgroundsElement extends PolymerElement {
 
   /** @private */
   onDefaultClick_() {
+    if (this.backgroundSelection.type !==
+        BackgroundSelectionType.NO_BACKGROUND) {
+      this.pageHandler_.onCustomizeDialogAction(
+          newTabPage.mojom.CustomizeDialogAction
+              .kBackgroundsNoBackgroundSelected);
+    }
     this.backgroundSelection = {type: BackgroundSelectionType.NO_BACKGROUND};
   }
 
@@ -147,9 +185,15 @@ class CustomizeBackgroundsElement extends PolymerElement {
    * @private
    */
   onImageClick_(e) {
+    const image = this.$.imagesRepeat.itemForElement(e.target);
+    if (this.backgroundSelection.type !== BackgroundSelectionType.IMAGE ||
+        this.backgroundSelection.image !== image) {
+      this.pageHandler_.onCustomizeDialogAction(
+          newTabPage.mojom.CustomizeDialogAction.kBackgroundsImageSelected);
+    }
     this.backgroundSelection = {
       type: BackgroundSelectionType.IMAGE,
-      image: this.$.imagesRepeat.itemForElement(e.target),
+      image: image,
     };
   }
 

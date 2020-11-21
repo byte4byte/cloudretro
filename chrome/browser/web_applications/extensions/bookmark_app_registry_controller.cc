@@ -9,8 +9,8 @@
 #include "base/one_shot_event.h"
 #include "chrome/browser/extensions/launch_util.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/web_applications/extensions/bookmark_app_registrar.h"
 #include "chrome/browser/web_applications/extensions/bookmark_app_util.h"
-#include "chrome/common/chrome_features.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
@@ -21,8 +21,10 @@ using web_app::DisplayMode;
 
 namespace extensions {
 
-BookmarkAppRegistryController::BookmarkAppRegistryController(Profile* profile)
-    : AppRegistryController(profile) {}
+BookmarkAppRegistryController::BookmarkAppRegistryController(
+    Profile* profile,
+    BookmarkAppRegistrar* registrar)
+    : AppRegistryController(profile), registrar_(registrar) {}
 
 BookmarkAppRegistryController::~BookmarkAppRegistryController() = default;
 
@@ -40,7 +42,8 @@ const Extension* BookmarkAppRegistryController::GetExtension(
 
 void BookmarkAppRegistryController::SetAppUserDisplayMode(
     const web_app::AppId& app_id,
-    DisplayMode display_mode) {
+    DisplayMode display_mode,
+    bool is_user_action) {
   const Extension* extension = GetExtension(app_id);
   if (!extension)
     return;
@@ -57,23 +60,56 @@ void BookmarkAppRegistryController::SetAppUserDisplayMode(
     case DisplayMode::kUndefined:
     case DisplayMode::kMinimalUi:
     case DisplayMode::kFullscreen:
+    case DisplayMode::kWindowControlsOverlay:
       NOTREACHED();
       return;
   }
 }
 
+// Disabling here isn't equivalent to extensions disabling. It means the app is
+// installed, but won't be launched via app service. Ideally this disabled state
+// should be kept in the data model (ExtensionPrefs) and have a getter the same
+// as WebApp::chromeos_data.is_disabled, but as BMO will launch soon and this is
+// a short-term solution, it's not added to ExtensionPrefs.
 void BookmarkAppRegistryController::SetAppIsDisabled(
     const web_app::AppId& app_id,
     bool is_disabled) {
-  NOTIMPLEMENTED();
+  const Extension* extension = GetExtension(app_id);
+  if (!extension)
+    return;
+
+  registrar_->NotifyWebAppDisabledStateChanged(app_id, is_disabled);
 }
 
-void BookmarkAppRegistryController::SetAppIsLocallyInstalledForTesting(
+void BookmarkAppRegistryController::SetAppIsLocallyInstalled(
     const web_app::AppId& app_id,
     bool is_locally_installed) {
   SetBookmarkAppIsLocallyInstalled(profile(), GetExtension(app_id),
                                    is_locally_installed);
+  registrar_->NotifyWebAppLocallyInstalledStateChanged(app_id,
+                                                       is_locally_installed);
 }
+
+void BookmarkAppRegistryController::SetAppLastLaunchTime(
+    const web_app::AppId& app_id,
+    const base::Time& time) {
+  const Extension* extension = GetExtension(app_id);
+  if (!extension)
+    return;
+  ExtensionPrefs::Get(profile())->SetLastLaunchTime(extension->id(), time);
+  registrar_->NotifyWebAppLastLaunchTimeChanged(app_id, time);
+}
+
+// Bookmark apps are deprecated. They don't update install time on local
+// installs.
+void BookmarkAppRegistryController::SetAppInstallTime(
+    const web_app::AppId& app_id,
+    const base::Time& time) {}
+
+// Bookmark apps are deprecated. They don't support Run on OS Login.
+void BookmarkAppRegistryController::SetAppRunOnOsLoginMode(
+    const web_app::AppId& app_id,
+    web_app::RunOnOsLoginMode mode) {}
 
 web_app::WebAppSyncBridge* BookmarkAppRegistryController::AsWebAppSyncBridge() {
   return nullptr;

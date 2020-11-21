@@ -83,6 +83,7 @@ CRWSessionStorage* GetTestSessionStorage(const GURL& testUrl) {
   CRWNavigationItemStorage* item = [[CRWNavigationItemStorage alloc] init];
   [item setURL:testUrl];
   [result setItemStorages:@[ item ]];
+  result.userAgentType = UserAgentType::MOBILE;
   return result;
 }
 
@@ -731,6 +732,7 @@ class WebStateObserverMock : public WebStateObserver {
   WebStateObserverMock() = default;
 
   MOCK_METHOD2(DidStartNavigation, void(WebState*, NavigationContext*));
+  MOCK_METHOD2(DidRedirectNavigation, void(WebState*, NavigationContext*));
   MOCK_METHOD2(DidFinishNavigation, void(WebState*, NavigationContext*));
   MOCK_METHOD1(DidStartLoading, void(WebState*));
   MOCK_METHOD1(DidStopLoading, void(WebState*));
@@ -1007,8 +1009,8 @@ TEST_F(WebStateObserverTest, FailedNavigation) {
   web::NavigationItem* item = manager->GetPendingItem();
   item->SetTitle(base::UTF8ToUTF16(kFailedTitle));
   ASSERT_TRUE(test::WaitForWebViewContainingText(
-      web_state(), testing::GetErrorText(web_state(), url, "NSURLErrorDomain",
-                                         /*error_code=*/-1005,
+      web_state(), testing::GetErrorText(web_state(), url,
+                                         testing::CreateConnectionLostError(),
                                          /*is_post=*/false, /*is_otr=*/false,
                                          /*cert_status=*/0)));
   DCHECK_EQ(item->GetTitle(), base::UTF8ToUTF16(kFailedTitle));
@@ -1134,9 +1136,10 @@ TEST_F(WebStateObserverTest, WebViewUnsupportedSchemeNavigation) {
   EXPECT_CALL(observer_, DidStopLoading(web_state()));
 
   test::LoadUrl(web_state(), url);
+  NSError* error = testing::CreateErrorWithUnderlyingErrorChain(
+      {{NSURLErrorDomain, -1002}, {net::kNSErrorDomain, net::ERR_INVALID_URL}});
   ASSERT_TRUE(test::WaitForWebViewContainingText(
-      web_state(), testing::GetErrorText(web_state(), url, "NSURLErrorDomain",
-                                         /*error_code=*/-1002,
+      web_state(), testing::GetErrorText(web_state(), url, error,
                                          /*is_post=*/false, /*is_otr=*/false,
                                          /*cert_status=*/0)));
 }
@@ -1179,9 +1182,10 @@ TEST_F(WebStateObserverTest, WebViewUnsupportedUrlNavigation) {
   EXPECT_CALL(observer_, DidStopLoading(web_state()));
 
   test::LoadUrl(web_state(), url);
+  NSError* error = testing::CreateErrorWithUnderlyingErrorChain(
+      {{@"WebKitErrorDomain", 101}, {net::kNSErrorDomain, net::ERR_FAILED}});
   ASSERT_TRUE(test::WaitForWebViewContainingText(
-      web_state(), testing::GetErrorText(web_state(), url, "WebKitErrorDomain",
-                                         /*error_code=*/101,
+      web_state(), testing::GetErrorText(web_state(), url, error,
                                          /*is_post=*/false, /*is_otr=*/false,
                                          /*cert_status=*/0)));
 }
@@ -1705,8 +1709,13 @@ TEST_F(WebStateObserverTest, ReloadPostNavigation) {
   NavigationContext* context = nullptr;
   int32_t nav_id = 0;
   EXPECT_CALL(observer_, DidStartLoading(web_state()));
-  // ShouldAllowRequest() not called because repost is caught before calling
-  // policy decider.
+
+  WebStatePolicyDecider::RequestInfo form_reload_request_info(
+      ui::PageTransition::PAGE_TRANSITION_RELOAD,
+      /*target_main_frame=*/true, /*has_user_gesture=*/false);
+  EXPECT_CALL(*decider_,
+              ShouldAllowRequest(_, RequestInfoMatch(form_reload_request_info)))
+      .WillOnce(Return(WebStatePolicyDecider::PolicyDecision::Allow()));
 
   EXPECT_CALL(observer_, DidStartNavigation(web_state(), _))
       .WillOnce(VerifyPostStartedContext(
@@ -1875,15 +1884,35 @@ TEST_F(WebStateObserverTest, RedirectNavigation) {
           web_state(), url, ui::PageTransition::PAGE_TRANSITION_TYPED, &context,
           &nav_id));
 
-  // 5 calls on ShouldAllowRequest for redirections.
+  // 5 calls on ShouldAllowRequest and DidRedirectNavigation for redirections.
   WebStatePolicyDecider::RequestInfo expected_redirect_request_info(
       ui::PageTransition::PAGE_TRANSITION_CLIENT_REDIRECT,
       /*target_main_frame=*/true, /*has_user_gesture=*/false);
   EXPECT_CALL(
       *decider_,
       ShouldAllowRequest(_, RequestInfoMatch(expected_redirect_request_info)))
-      .Times(5)
-      .WillRepeatedly(Return(WebStatePolicyDecider::PolicyDecision::Allow()));
+      .WillOnce(Return(WebStatePolicyDecider::PolicyDecision::Allow()));
+  EXPECT_CALL(observer_, DidRedirectNavigation(web_state(), _));
+  EXPECT_CALL(
+      *decider_,
+      ShouldAllowRequest(_, RequestInfoMatch(expected_redirect_request_info)))
+      .WillOnce(Return(WebStatePolicyDecider::PolicyDecision::Allow()));
+  EXPECT_CALL(observer_, DidRedirectNavigation(web_state(), _));
+  EXPECT_CALL(
+      *decider_,
+      ShouldAllowRequest(_, RequestInfoMatch(expected_redirect_request_info)))
+      .WillOnce(Return(WebStatePolicyDecider::PolicyDecision::Allow()));
+  EXPECT_CALL(observer_, DidRedirectNavigation(web_state(), _));
+  EXPECT_CALL(
+      *decider_,
+      ShouldAllowRequest(_, RequestInfoMatch(expected_redirect_request_info)))
+      .WillOnce(Return(WebStatePolicyDecider::PolicyDecision::Allow()));
+  EXPECT_CALL(observer_, DidRedirectNavigation(web_state(), _));
+  EXPECT_CALL(
+      *decider_,
+      ShouldAllowRequest(_, RequestInfoMatch(expected_redirect_request_info)))
+      .WillOnce(Return(WebStatePolicyDecider::PolicyDecision::Allow()));
+  EXPECT_CALL(observer_, DidRedirectNavigation(web_state(), _));
 
   EXPECT_CALL(*decider_, ShouldAllowResponse(_, /*for_main_frame=*/true, _))
       .WillOnce(
@@ -1932,13 +1961,9 @@ TEST_F(WebStateObserverTest, DownloadNavigation) {
 }
 
 // Tests failed load after the navigation is sucessfully finished.
-// TODO(crbug.com/954232): this test is flaky on device.
-#if TARGET_IPHONE_SIMULATOR
-#define MAYBE_FailedLoad FailedLoad
-#else
-#define MAYBE_FailedLoad FLAKY_FailedLoad
-#endif
-TEST_F(WebStateObserverTest, MAYBE_FailedLoad) {
+// TODO(crbug.com/954232): this test is flaky on device, and as of iOS14
+// simulator as well.
+TEST_F(WebStateObserverTest, FLAKY_FailedLoad) {
   GURL url = test_server_->GetURL("/exabyte_response");
 
   NavigationContext* context = nullptr;
@@ -2003,7 +2028,16 @@ TEST_F(WebStateObserverTest, FailedSslConnection) {
       .WillOnce(VerifyPageStartedContext(
           web_state(), url, ui::PageTransition::PAGE_TRANSITION_TYPED, &context,
           &nav_id));
-  // TODO(crbug.com/921916): DidFinishNavigation is not called for SSL errors.
+  EXPECT_CALL(observer_, DidStopLoading(web_state()));
+  // First, a placeholder navigation starts and finishes.
+  EXPECT_CALL(observer_, DidStartLoading(web_state()));
+  EXPECT_CALL(observer_, DidStopLoading(web_state()));
+  EXPECT_CALL(observer_, DidFinishNavigation(web_state(), _));
+  EXPECT_CALL(observer_,
+              PageLoaded(web_state(), PageLoadCompletionStatus::FAILURE));
+
+  // Finally, the error page itself is loaded.
+  EXPECT_CALL(observer_, DidStartLoading(web_state()));
   EXPECT_CALL(observer_, DidStopLoading(web_state()));
 
   test::LoadUrl(web_state(), url);
@@ -2050,40 +2084,18 @@ TEST_F(WebStateObserverTest, DisallowRequestAndShowError) {
       .WillOnce(Return(
           WebStatePolicyDecider::PolicyDecision::CancelAndDisplayError(error)));
 
-  // Allow error page to load
-  // TODO(crbug.com/1069151): ShouldAllowRequest shouldn't be called for the
-  // presentation of error pages.
-  WebStatePolicyDecider::RequestInfo expected_request_info_2(
-      ui::PageTransition::PAGE_TRANSITION_CLIENT_REDIRECT,
-      /*target_main_frame=*/true, /*has_user_gesture=*/false);
-  EXPECT_CALL(*decider_,
-              ShouldAllowRequest(_, RequestInfoMatch(expected_request_info_2)))
-      .WillOnce(Return(WebStatePolicyDecider::PolicyDecision::Allow()));
   EXPECT_CALL(observer_, DidStartNavigation(web_state(), _));
-  EXPECT_CALL(*decider_, ShouldAllowResponse(_, /*for_main_frame=*/true, _))
-      .WillOnce(
-          RunOnceCallback<2>(WebStatePolicyDecider::PolicyDecision::Allow()));
-  EXPECT_CALL(observer_, DidFinishNavigation(web_state(), _));
   EXPECT_CALL(observer_, TitleWasSet(web_state()));
   EXPECT_CALL(observer_, DidStopLoading(web_state()));
+  EXPECT_CALL(observer_, DidFinishNavigation(web_state(), _));
   EXPECT_CALL(observer_,
               PageLoaded(web_state(), PageLoadCompletionStatus::FAILURE));
-  // TODO(crbug.com/1071117): DidStartNavigation is over-triggered when
-  // |web::features::kUseJSForErrorPage| is enabled.
-  EXPECT_CALL(observer_, DidStartNavigation(web_state(), _));
-  EXPECT_CALL(observer_, DidFinishNavigation(web_state(), _));
-  EXPECT_CALL(observer_, DidStartNavigation(web_state(), _));
-  EXPECT_CALL(observer_, DidFinishNavigation(web_state(), _));
-  EXPECT_CALL(observer_,
-              PageLoaded(web_state(), PageLoadCompletionStatus::SUCCESS));
 
   GURL url = test_server_->GetURL("/echo");
   test::LoadUrl(web_state(), url);
 
   EXPECT_TRUE(test::WaitForWebViewContainingText(
-      web_state(), testing::GetErrorText(web_state(), url,
-                                         base::SysNSStringToUTF8(error.domain),
-                                         /*error_code=*/error.code,
+      web_state(), testing::GetErrorText(web_state(), url, error,
                                          /*is_post=*/false, /*is_otr=*/false,
                                          /*cert_status=*/0)));
   // The URL of the error page should remain the URL of the blocked page.
@@ -2309,6 +2321,12 @@ TEST_F(WebStateObserverTest, StopFinishedNavigation) {
 
 // Tests that iframe navigation triggers DidChangeBackForwardState.
 TEST_F(WebStateObserverTest, IframeNavigation) {
+  // This test fails in iOS 13.4 but is fixed in iOS 14. See crbug.com//1076233.
+  if (base::ios::IsRunningOnOrLater(13, 4, 0) &&
+      !base::ios::IsRunningOnIOS14OrLater()) {
+    return;
+  }
+
   GURL url = test_server_->GetURL("/iframe_host.html");
 
   // Callbacks due to loading of the main frame.

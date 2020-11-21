@@ -10,8 +10,8 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
 #include "base/callback.h"
+#include "base/callback_helpers.h"
 #include "base/memory/ptr_util.h"
 #include "base/stl_util.h"
 #include "services/device/public/cpp/test/mock_usb_mojo_device.h"
@@ -161,11 +161,13 @@ void FakeUsbDevice::Reset(ResetCallback callback) {
   std::move(callback).Run(true);
 }
 
-void FakeUsbDevice::ClearHalt(uint8_t endpoint, ClearHaltCallback callback) {
+void FakeUsbDevice::ClearHalt(mojom::UsbTransferDirection direction,
+                              uint8_t endpoint_number,
+                              ClearHaltCallback callback) {
   // Go on with mock device for testing.
   MockUsbMojoDevice* mock_device = device_->mock_device();
   if (mock_device) {
-    mock_device->ClearHalt(endpoint, std::move(callback));
+    mock_device->ClearHalt(direction, endpoint_number, std::move(callback));
     return;
   }
   std::move(callback).Run(true);

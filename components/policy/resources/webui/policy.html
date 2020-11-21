@@ -18,6 +18,7 @@
 <script src="chrome://resources/js/cr/ui.js"></script>
 <script src="chrome://resources/js/cr/ui/focus_outline_manager.js"></script>
 <script src="chrome://resources/js/load_time_data.js"></script>
+<script src="chrome://resources/js/assert.js"></script>
 <script src="chrome://resources/js/util.js"></script>
 </head>
 
@@ -32,6 +33,7 @@
     <div class="header-row">
       <button id="reload-policies">$i18n{reloadPolicies}</button>
       <button id="export-policies">$i18n{exportPoliciesJSON}</button>
+      <button id="copy-policies">$i18n{copyPoliciesJSON}</button>
       <div id="show-unset-container" class="show-unset-checkbox">
         <label>
           <input id="show-unset" type="checkbox">
@@ -52,6 +54,10 @@
   <div hidden>
     <fieldset id="status-box-template">
       <legend class="legend"></legend>
+      <div class="status-entry" hidden>
+        <div class="label">$i18n{labelVersion}</div>
+        <div class="version"></div>
+      </div>
       <div class="status-entry" hidden>
         <div class="label">$i18n{labelEnterpriseEnrollmentDomain}</div>
         <div class="enterprise-enrollment-domain"></div>
@@ -100,19 +106,19 @@
         <div class="label">$i18n{labelDirectoryApiId}</div>
         <div class="directory-api-id"></div>
       </div>
-      <div class="status-entry">
+      <div class="status-entry" hidden>
         <div class="label">$i18n{labelTimeSinceLastRefresh}</div>
         <div class="time-since-last-refresh"></div>
       </div>
-      <div class="status-entry">
+      <div class="status-entry" hidden>
         <div class="label">$i18n{labelRefreshInterval}</div>
         <div class="refresh-interval"></div>
       </div>
-      <div class="status-entry">
+      <div class="status-entry" hidden>
         <div class="label">$i18n{labelPoliciesPush}</div>
         <div class="policy-push"></div>
       </div>
-      <div class="status-entry">
+      <div class="status-entry" hidden>
         <div class="label">$i18n{labelStatus}</div>
         <div class="status"></div>
       </div>
@@ -123,6 +129,10 @@
       <div class="status-entry" hidden>
         <div class="label">$i18n{labelIsOffHoursActive}</div>
         <div class="is-offhours-active"></div>
+      </div>
+      <div class="status-entry" hidden>
+        <div class="label">$i18n{labelVersion}</div>
+        <div class="version"></div>
       </div>
     </fieldset>
 
@@ -182,6 +192,11 @@
       <div class="value row" role="row" hidden>
         <div class="name" role="rowheader">$i18n{value}</div>
         <div class="value" role="cell"></div>
+        <div class="copy" role="cell">
+          <a is="action-link" class="copy-value link" role="cell">
+            <img src="../../../../ui/webui/resources/images/icon_copy_content.svg">
+          </a>
+        </div>
       </div>
       <div class="errors row" role="row" hidden>
         <div class="name" role="rowheader">$i18n{error}</div>

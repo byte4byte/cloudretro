@@ -139,6 +139,8 @@ enum ResultCode : int {
   SBOX_ERROR_INVALID_WRITE_VARIABLE_SIZE = 58,
   // Cannot initialize BrokerServices.
   SBOX_ERROR_CANNOT_INIT_BROKERSERVICES = 59,
+  // Cannot update job active process limit.
+  SBOX_ERROR_CANNOT_UPDATE_JOB_PROCESS_LIMIT = 60,
   // Placeholder for last item of the enum.
   SBOX_ERROR_LAST
 };
@@ -172,11 +174,7 @@ struct SandboxInterfaceInfo {
   TargetServices* target_services;
 };
 
-#if SANDBOX_EXPORTS
-#define SANDBOX_INTERCEPT extern "C" __declspec(dllexport)
-#else
 #define SANDBOX_INTERCEPT extern "C"
-#endif
 
 enum InterceptionType {
   INTERCEPTION_INVALID = 0,

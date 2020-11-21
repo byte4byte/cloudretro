@@ -194,7 +194,6 @@ class FileTransferController {
     chrome.fileManagerPrivate.enableExternalFileScheme();
   }
 
-
   /**
    * @param {!cr.ui.List} list Items in the list will be draggable.
    * @private
@@ -287,6 +286,23 @@ class FileTransferController {
         !this.selectionHandler_.isAvailable());
     this.appendUriList_(
         clipboardData, this.selectionHandler_.selection.entries);
+    if (util.isCopyImageEnabled()) {
+      const entries = this.selectionHandler_.selection.entries;
+      if (entries.length == 1 && FileType.isImage(entries[0])) {
+        // We are using setTimeout to ensure that the previous copy commands
+        // execute successfully, so we can append our image to the system
+        // clipboard at the end of the event loop.
+        setTimeout(() => {
+          chrome.fileManagerPrivate.copyImageToClipboard(entries[0],
+            () => {
+              if (chrome.runtime.lastError) {
+                console.error(chrome.runtime.lastError.message);
+                return;
+              }
+          });
+        });
+      }
+    }
   }
 
   /**
@@ -409,20 +425,38 @@ class FileTransferController {
    * Collects parameters of paste operation by the given command and the current
    * system clipboard.
    *
+   * @param {!DataTransfer} clipboardData System data transfer object.
+   * @param {DirectoryEntry=} opt_destinationEntry Paste destination.
+   * @param {string=} opt_effect Desired drop/paste effect. Could be
+   *     'move'|'copy' (default is copy). Ignored if conflicts with
+   *     |clipboardData.effectAllowed|.
    * @return {!FileTransferController.PastePlan}
    */
   preparePaste(clipboardData, opt_destinationEntry, opt_effect) {
+    // When FilesApp does drag and drop to itself, it uses fs/sources to
+    // populate sourceURLs, and it will resolve sourceEntries later using
+    // webkitResolveLocalFileSystemURL().
     const sourceURLs = clipboardData.getData('fs/sources') ?
         clipboardData.getData('fs/sources').split('\n') :
         [];
+
+    // When FilesApp is the paste target for other apps such as crostini,
+    // the file URL is either not provided, or it is not compatible. We use
+    // DataTransferItem.webkitGetAsEntry() to get the entry now.
+    const sourceEntries = sourceURLs.length === 0 ?
+        Array.prototype.filter.call(clipboardData.items, i => i.kind === 'file')
+            .map(i => i.webkitGetAsEntry()) :
+        [];
+
     // effectAllowed set in copy/paste handlers stay uninitialized. DnD handlers
     // work fine.
     const effectAllowed = clipboardData.effectAllowed !== 'uninitialized' ?
         clipboardData.effectAllowed :
         clipboardData.getData('fs/effectallowed');
-    const destinationEntry = opt_destinationEntry ||
+    const destinationEntry = assert(
+        opt_destinationEntry ||
         /** @type {DirectoryEntry} */
-        (this.directoryModel_.getCurrentDirEntry());
+        (this.directoryModel_.getCurrentDirEntry()));
     const toMove = util.isDropEffectAllowed(effectAllowed, 'move') &&
         (!util.isDropEffectAllowed(effectAllowed, 'copy') ||
          opt_effect === 'move');
@@ -431,11 +465,12 @@ class FileTransferController {
         this.volumeManager_.getLocationInfo(destinationEntry);
     if (!destinationLocationInfo) {
       console.log(
-          'Failed to get destination location for ' + destinationEntry.title() +
+          'Failed to get destination location for ' + destinationEntry.toURL() +
           ' while attempting to paste files.');
     }
     return new FileTransferController.PastePlan(
-        sourceURLs, destinationEntry, assert(destinationLocationInfo), toMove);
+        sourceURLs, sourceEntries, destinationEntry,
+        assert(destinationLocationInfo), toMove);
   }
 
   /**
@@ -453,10 +488,8 @@ class FileTransferController {
     const pastePlan =
         this.preparePaste(clipboardData, opt_destinationEntry, opt_effect);
 
-    return FileTransferController.URLsToEntriesWithAccess(pastePlan.sourceURLs)
-        .then(entriesResult => {
-          const sourceEntries = entriesResult.entries;
-
+    return pastePlan.resolveEntries().then(
+        sourceEntries => {
           if (sourceEntries.length == 0) {
             // This can happen when copied files were deleted before pasting
             // them. We execute the plan as-is, so as to share the post-copy
@@ -464,13 +497,12 @@ class FileTransferController {
             // same-directory entries.
             return Promise.resolve(this.executePaste(pastePlan));
           }
-          const confirmationType = pastePlan.getConfirmationType(sourceEntries);
+          const confirmationType = pastePlan.getConfirmationType();
           if (confirmationType ==
               FileTransferController.ConfirmationType.NONE) {
             return Promise.resolve(this.executePaste(pastePlan));
           }
-          const messages = pastePlan.getConfirmationMessages(
-              confirmationType, sourceEntries);
+          const messages = pastePlan.getConfirmationMessages(confirmationType);
           this.confirmationCallback_(pastePlan.isMove, messages)
               .then(userApproved => {
                 if (userApproved) {
@@ -492,21 +524,16 @@ class FileTransferController {
     const destinationEntry = pastePlan.destinationEntry;
 
     let entries = [];
-    let failureUrls;
     let shareEntries;
     const taskId = this.fileOperationManager_.generateTaskId();
 
-    FileTransferController.URLsToEntriesWithAccess(sourceURLs)
-        .then(/**
-               * @param {Object} result
-               */
-              result => {
-                failureUrls = result.failureUrls;
-                // The promise is not rejected, so it's safe to not remove the
-                // early progress center item here.
-                return this.fileOperationManager_.filterSameDirectoryEntry(
-                    result.entries, destinationEntry, toMove);
-              })
+    pastePlan.resolveEntries()
+        .then(sourceEntries => {
+          // The promise is not rejected, so it's safe to not remove the
+          // early progress center item here.
+          return this.fileOperationManager_.filterSameDirectoryEntry(
+              sourceEntries, destinationEntry, toMove);
+        })
         .then(/**
                * @param {!Array<Entry>} filteredEntries
                */
@@ -563,7 +590,7 @@ class FileTransferController {
                     entries, destinationEntry, toMove, taskId);
                 this.pendingTaskIds.splice(
                     this.pendingTaskIds.indexOf(taskId), 1);
-        })
+              })
         .catch(error => {
           if (error !== 'ABORT') {
             console.error(error.stack ? error.stack : error);
@@ -571,9 +598,9 @@ class FileTransferController {
         })
         .finally(() => {
           // Publish source not found error item.
-          for (let i = 0; i < failureUrls.length; i++) {
-            const fileName =
-                decodeURIComponent(failureUrls[i].replace(/^.+\//, ''));
+          for (let i = 0; i < pastePlan.failureUrls.length; i++) {
+            const fileName = decodeURIComponent(
+                pastePlan.failureUrls[i].replace(/^.+\//, ''));
             const item = new ProgressCenterItem();
             item.id = 'source-not-found-' + this.sourceNotFoundErrorCount_;
             if (toMove) {
@@ -698,6 +725,41 @@ class FileTransferController {
   }
 
   /**
+   * Renders a drag-and-drop thumbnail. TODO(files-ng): remove renderThumbnail_
+   * and its strings, preloadedThumbnailImagePromise_, constants, etc.
+   *
+   * @return {!HTMLElement} Thumbnail element.
+   * @private
+   */
+  renderThumbnailFilesNg_() {
+    const entry = this.selectionHandler_.selection.entries[0];
+    const index = this.selectionHandler_.selection.indexes[0];
+    const items = this.selectionHandler_.selection.entries.length;
+
+    const container = /** @type {!HTMLElement} */ (
+        this.document_.body.querySelector('#drag-container'));
+    const multiple = items > 1 ? 'block' : 'none';
+    container.innerHTML = `
+      <div class='drag-box drag-multiple' style='display:${multiple}'></div>
+      <div class='drag-box drag-contents'>
+        <div class='detail-icon'></div><div class='label'>${entry.name}</div>
+      </div>
+      <div class='drag-bubble' style='display:${multiple}'>${items}</div>
+    `;
+
+    const icon = container.querySelector('.detail-icon');
+    const thumbnail = this.listContainer_.currentView.getThumbnail(index);
+    if (thumbnail) {
+      icon.style.backgroundImage = thumbnail.style.backgroundImage;
+      icon.style.backgroundSize = 'cover';
+    } else {
+      icon.setAttribute('file-type-icon', FileType.getIcon(entry));
+    }
+
+    return container;
+  }
+
+  /**
    * @param {!cr.ui.List} list Drop target list
    * @param {!Event} event A dragstart event of DOM.
    * @private
@@ -732,34 +794,43 @@ class FileTransferController {
       return;
     }
 
-    const dt = /** @type {DragEvent} */ (event).dataTransfer;
+    const dataTransfer = /** @type {DragEvent} */ (event).dataTransfer;
+
     const canCopy = this.canCopyOrDrag();
     const canCut = this.canCutOrDrag();
     if (canCopy || canCut) {
       if (canCopy && canCut) {
-        this.cutOrCopy_(dt, 'all');
+        this.cutOrCopy_(dataTransfer, 'all');
       } else if (canCopy) {
-        this.cutOrCopy_(dt, 'copyLink');
+        this.cutOrCopy_(dataTransfer, 'copyLink');
       } else {
-        this.cutOrCopy_(dt, 'move');
+        this.cutOrCopy_(dataTransfer, 'move');
       }
     } else {
       event.preventDefault();
       return;
     }
 
-    const dragThumbnail = this.renderThumbnail_();
-    let yOffset = 0;
-    // Position the drag image above the start point for touch intiated drag.
-    if (this.touching_) {
-      const thumbNailExtent = dragThumbnail.getBoundingClientRect();
-      yOffset = thumbNailExtent.height;
+    const thumbnail = {element: null, x: 0, y: 0};
+
+    if (util.isFilesNg()) {
+      thumbnail.element = this.renderThumbnailFilesNg_();
+      if (this.document_.querySelector(':root[dir=rtl]')) {
+        thumbnail.x = thumbnail.element.clientWidth * window.devicePixelRatio;
+      }
+    } else {
+      thumbnail.element = this.renderThumbnail_();
+      // Move drag image above the start point for touch initiated drags.
+      if (this.touching_) {
+        thumbnail.y = thumbnail.element.getBoundingClientRect().height;
+      }
     }
-    dt.setDragImage(dragThumbnail, 0, yOffset);
+
+    dataTransfer.setDragImage(thumbnail.element, thumbnail.x, thumbnail.y);
 
     window[DRAG_AND_DROP_GLOBAL_DATA] = {
-      sourceRootURL: dt.getData('fs/sourceRootURL'),
-      missingFileContents: dt.getData('fs/missingFileContents')
+      sourceRootURL: dataTransfer.getData('fs/sourceRootURL'),
+      missingFileContents: dataTransfer.getData('fs/missingFileContents'),
     };
   }
 
@@ -792,14 +863,22 @@ class FileTransferController {
     if (!entry && !onlyIntoDirectories) {
       entry = this.directoryModel_.getCurrentDirEntry();
     }
+
     const effectAndLabel =
         this.selectDropEffect_(event, this.getDragAndDropGlobalData_(), entry);
     event.dataTransfer.dropEffect = effectAndLabel.getDropEffect();
     event.preventDefault();
-    const label = effectAndLabel.getLabel();
+
+    if (util.isFilesNg()) {
+      return;
+    }
+
+    // TODO(files-ng): the #drop-label is not used in files-ng, remove this
+    // code and update the effectAndLabel class to remove its label code.
     if (!this.dropLabel_) {
       this.dropLabel_ = document.querySelector('div#drop-label');
     }
+    const label = effectAndLabel.getLabel();
     if (label) {
       this.dropLabel_.innerText = label;
       this.dropLabel_.style.left = event.pageX + 'px';
@@ -818,10 +897,12 @@ class FileTransferController {
    */
   onDragEnterFileList_(list, event) {
     event.preventDefault();  // Required to prevent the cursor flicker.
+
     this.lastEnteredTarget_ = event.target;
     let item = list.getListItemAncestor(
         /** @type {HTMLElement} */ (event.target));
     item = item && list.isItem(item) ? item : null;
+
     if (item === this.dropTarget_) {
       return;
     }
@@ -841,6 +922,12 @@ class FileTransferController {
    */
   onDragEnterTree_(tree, event) {
     event.preventDefault();  // Required to prevent the cursor flicker.
+
+    if (!event.relatedTarget) {
+      event.dataTransfer.dropEffect = 'move';
+      return;
+    }
+
     this.lastEnteredTarget_ = event.target;
     let item = event.target;
     while (item && !(item instanceof cr.ui.TreeItem)) {
@@ -875,6 +962,8 @@ class FileTransferController {
       this.clearDropTarget_();
       this.lastEnteredTarget_ = null;
     }
+
+    // TODO(files-ng): dropLabel_ is not used in files-ng, remove it.
     if (this.dropLabel_) {
       this.dropLabel_.style.display = 'none';
     }
@@ -935,28 +1024,51 @@ class FileTransferController {
 
     // Set the new drop target.
     this.dropTarget_ = domElement;
-
     if (!domElement || !destinationEntry.isDirectory) {
       return;
     }
 
-    if (this.selectionHandler_.selection.entries.find(element => {
-          return util.isSameEntry(element, destinationEntry);
-        })) {
+    assert(destinationEntry.isDirectory);
+
+    // Assume the destination directory won't accept this drop.
+    domElement.classList.remove('accepts');
+    domElement.classList.add('denies');
+
+    // Disallow dropping a directory on itself.
+    const entries = this.selectionHandler_.selection.entries;
+    for (let i = 0; i < entries.length; i++) {
+      if (util.isSameEntry(entries[i], destinationEntry)) {
+        return;
+      }
+    }
+
+    this.destinationEntry_ = destinationEntry;
+
+    // Add accept classes if the directory can accept this drop.
+    if (this.canPasteOrDrop_(clipboardData, destinationEntry)) {
+      domElement.classList.remove('denies');
+      domElement.classList.add('accepts');
+    }
+
+    // Change directory immediately if it's a fake entry for Crostini.
+    if (destinationEntry.rootType === VolumeManagerCommon.RootType.CROSTINI) {
+      this.changeToDropTargetDirectory_();
       return;
     }
 
-    // Add accept class if the domElement can accept the drag.
-    domElement.classList.add('accepts');
-    this.destinationEntry_ = destinationEntry;
+    // Change to the directory after the drag target hover time out.
+    const navigate = this.changeToDropTargetDirectory_.bind(this);
+    this.navigateTimer_ = setTimeout(navigate, this.dragTargetHoverTime_());
+  }
 
-    // Change directory immediately for crostini, otherwise start timer.
-    if (destinationEntry.rootType === VolumeManagerCommon.RootType.CROSTINI) {
-      this.changeToDropTargetDirectory_();
-    } else {
-      this.navigateTimer_ =
-          setTimeout(this.changeToDropTargetDirectory_.bind(this), 2000);
-    }
+  /**
+   * Return the drag target hover time in milliseconds.
+   *
+   * @private
+   * @return {number}
+   */
+  dragTargetHoverTime_() {
+    return window.IN_TEST ? 500 : 2000;
   }
 
   /**
@@ -984,12 +1096,14 @@ class FileTransferController {
    * @private
    */
   clearDropTarget_() {
-    if (this.dropTarget_ && this.dropTarget_.classList.contains('accepts')) {
-      this.dropTarget_.classList.remove('accepts');
+    if (this.dropTarget_) {
+      this.dropTarget_.classList.remove('accepts', 'denies');
     }
+
     this.dropTarget_ = null;
     this.destinationEntry_ = null;
-    if (this.navigateTimer_ !== undefined) {
+
+    if (this.navigateTimer_) {
       clearTimeout(this.navigateTimer_);
       this.navigateTimer_ = 0;
     }
@@ -1137,7 +1251,8 @@ class FileTransferController {
   }
 
   /**
-   * @return {boolean} Returns true if the current directory is not read only.
+   * @return {boolean} Returns true if the current directory is not read only,
+   *     or any of the selected entries isn't read-only.
    * @public
    */
   canCutOrDrag() {
@@ -1152,6 +1267,13 @@ class FileTransferController {
     if (metadata.some(item => item.canDelete === false)) {
       return false;
     }
+
+    for (let i = 0; i < entries.length; i++) {
+      if (util.isNonModifiable(this.volumeManager_, entries[i])) {
+        return false;
+      }
+    }
+
     return true;
   }
 
@@ -1211,19 +1333,26 @@ class FileTransferController {
     if (!clipboardData) {
       return false;
     }
+
     if (!destinationEntry) {
       return false;
     }
+
     const destinationLocationInfo =
         this.volumeManager_.getLocationInfo(destinationEntry);
     if (!destinationLocationInfo || destinationLocationInfo.isReadOnly) {
       return false;
     }
+
     if (destinationLocationInfo.volumeInfo &&
         destinationLocationInfo.volumeInfo.error) {
       return false;
     }
-    if (!clipboardData.types || clipboardData.types.indexOf('fs/tag') === -1) {
+
+    // DataTransfer type will be 'fs/tag' when the source was FilesApp, or
+    // 'Files' when the source was any other app.
+    const types = clipboardData.types;
+    if (!types || !(types.includes('fs/tag') || types.includes('Files'))) {
       return false;  // Unsupported type of content.
     }
 
@@ -1525,17 +1654,31 @@ FileTransferController.ConfirmationType = {
 FileTransferController.PastePlan = class {
   /**
    * @param {!Array<string>} sourceURLs URLs of source entries.
+   * @param {!Array<!Entry>} sourceEntries Entries of source entries.
    * @param {!DirectoryEntry} destinationEntry Destination directory.
    * @param {!EntryLocation} destinationLocationInfo Location info of the
    *     destination directory.
    * @param {boolean} isMove true if move, false if copy.
    */
-  constructor(sourceURLs, destinationEntry, destinationLocationInfo, isMove) {
+  constructor(
+      sourceURLs, sourceEntries, destinationEntry, destinationLocationInfo,
+      isMove) {
     /**
      * @type {!Array<string>}
      * @const
      */
     this.sourceURLs = sourceURLs;
+
+    /**
+     * @type {!Array<!Entry>}
+     */
+    this.sourceEntries = sourceEntries;
+
+    /**
+     * Any URLs from sourceURLs which failed resolving to into sourceEntries.
+     * @type {!Array<string>}
+     */
+    this.failureUrls = [];
 
     /**
      * @type {!DirectoryEntry}
@@ -1555,19 +1698,33 @@ FileTransferController.PastePlan = class {
   }
 
   /**
+   * Resolves sourceEntries from sourceURLs if needed and returns them.
+   *
+   * @return {!Promise<!Array<!Entry>>}
+   */
+  async resolveEntries() {
+    if (!this.sourceEntries.length) {
+      const result =
+          await FileTransferController.URLsToEntriesWithAccess(this.sourceURLs);
+      this.sourceEntries = result.entries;
+      this.failureUrls = result.failureUrls;
+    }
+    return this.sourceEntries;
+  }
+
+  /**
    * Obtains whether the planned operation requires user's confirmation, as well
    * as its type.
    *
-   * @param {!Array<!Entry>} sourceEntries
    * @return {FileTransferController.ConfirmationType} type of the confirmation
    *     required for the operation. If no confirmation is needed,
    *     FileTransferController.ConfirmationType.NONE will be returned.
    */
-  getConfirmationType(sourceEntries) {
-    assert(sourceEntries.length != 0);
+  getConfirmationType() {
+    assert(this.sourceEntries.length != 0);
     const source = {
-      isTeamDrive: util.isSharedDriveEntry(sourceEntries[0]),
-      teamDriveName: util.getTeamDriveName(sourceEntries[0])
+      isTeamDrive: util.isSharedDriveEntry(this.sourceEntries[0]),
+      teamDriveName: util.getTeamDriveName(this.sourceEntries[0])
     };
     const destination = {
       isTeamDrive: util.isSharedDriveEntry(this.destinationEntry),
@@ -1612,9 +1769,9 @@ FileTransferController.PastePlan = class {
    * @param {FileTransferController.ConfirmationType} confirmationType
    * @return {!Array<string>} sentences for a confirmation dialog box.
    */
-  getConfirmationMessages(confirmationType, sourceEntries) {
-    assert(sourceEntries.length != 0);
-    const sourceName = util.getTeamDriveName(sourceEntries[0]);
+  getConfirmationMessages(confirmationType) {
+    assert(this.sourceEntries.length != 0);
+    const sourceName = util.getTeamDriveName(this.sourceEntries[0]);
     const destinationName = util.getTeamDriveName(this.destinationEntry);
     switch (confirmationType) {
       case FileTransferController.ConfirmationType.MOVE_BETWEEN_SHARED_DRIVES:
@@ -1643,7 +1800,6 @@ FileTransferController.PastePlan = class {
     return [];
   }
 };
-
 
 /**
  * Converts list of urls to list of Entries with granting R/W permissions to

@@ -24,11 +24,11 @@
       <property name="severity" value="error"/>
     </module>
     <module name="RedundantImport">
-      <message key="import.redundant" value="Redundant import: {0}. Use :JavaImportOrganize (ECLIM) or Ctrl+Shift+O (Eclipse) to sort imports"/>
+      <message key="import.redundant" value="Redundant import: {0}."/>
       <property name="severity" value="error"/>
     </module>
     <module name="UnusedImports">
-      <message key="import.unused" value="Unused import: {0}. Use :JavaImportOrganize (ECLIM) or Ctrl+Shift+O (Eclipse) to sort imports"/>
+      <message key="import.unused" value="Unused import: {0}."/>
       <property name="severity" value="error"/>
       <property name="processJavadoc" value="true"/>
     </module>
@@ -82,7 +82,7 @@
     <module name="MethodName">
         <property name="id" value="MethodNameCheck"/>
         <property name="severity" value="error"/>
-        <property name="format" value="^[a-z][a-zA-Z0-9_]*$"/>
+        <property name="format" value="^(([a-z][a-zA-Z0-9_]*)|(__constructor__))$"/>
         <message key="name.invalidPattern" value="Method names should start with a lower case letter (e.g. getWidth())"/>
     </module>
     <module name="ParameterName">

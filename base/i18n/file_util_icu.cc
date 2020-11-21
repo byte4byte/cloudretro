@@ -10,16 +10,16 @@
 
 #include <memory>
 
+#include "base/check.h"
 #include "base/files/file_path.h"
 #include "base/i18n/icu_string_conversions.h"
 #include "base/i18n/string_compare.h"
-#include "base/logging.h"
-#include "base/macros.h"
 #include "base/memory/singleton.h"
 #include "base/strings/string_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "third_party/icu/source/common/unicode/uniset.h"
 #include "third_party/icu/source/i18n/unicode/coll.h"
 
@@ -30,19 +30,22 @@ namespace {
 
 class IllegalCharacters {
  public:
+  IllegalCharacters(const IllegalCharacters&) = delete;
+  IllegalCharacters& operator=(const IllegalCharacters&) = delete;
+
   static IllegalCharacters* GetInstance() {
     return Singleton<IllegalCharacters>::get();
   }
 
-  bool DisallowedEverywhere(UChar32 ucs4) {
+  bool DisallowedEverywhere(UChar32 ucs4) const {
     return !!illegal_anywhere_->contains(ucs4);
   }
 
-  bool DisallowedLeadingOrTrailing(UChar32 ucs4) {
+  bool DisallowedLeadingOrTrailing(UChar32 ucs4) const {
     return !!illegal_at_ends_->contains(ucs4);
   }
 
-  bool IsAllowedName(const string16& s) {
+  bool IsAllowedName(const string16& s) const {
     return s.empty() || (!!illegal_anywhere_->containsNone(
                              icu::UnicodeString(s.c_str(), s.size())) &&
                          !illegal_at_ends_->contains(*s.begin()) &&
@@ -61,8 +64,6 @@ class IllegalCharacters {
 
   // set of characters considered invalid at either end of a filename.
   std::unique_ptr<icu::UnicodeSet> illegal_at_ends_;
-
-  DISALLOW_COPY_AND_ASSIGN(IllegalCharacters);
 };
 
 IllegalCharacters::IllegalCharacters() {
@@ -165,7 +166,7 @@ bool LocaleAwareCompareFilenames(const FilePath& a, const FilePath& b) {
 }
 
 void NormalizeFileNameEncoding(FilePath* file_name) {
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   std::string normalized_str;
   if (ConvertToUtf8AndNormalize(file_name->BaseName().value(), kCodepageUTF8,
                                 &normalized_str) &&

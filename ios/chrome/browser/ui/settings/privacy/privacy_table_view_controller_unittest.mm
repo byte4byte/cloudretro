@@ -8,6 +8,7 @@
 
 #include "base/memory/ptr_util.h"
 #include "base/strings/sys_string_conversions.h"
+#include "components/content_settings/core/common/features.h"
 #include "components/handoff/pref_names_ios.h"
 #include "components/prefs/pref_service.h"
 #include "components/strings/grit/components_strings.h"
@@ -74,7 +75,8 @@ class PrivacyTableViewControllerTest : public ChromeTableViewControllerTest {
   }
 
   ChromeTableViewController* InstantiateController() override {
-    return [[PrivacyTableViewController alloc] initWithBrowser:browser_.get()];
+    return [[PrivacyTableViewController alloc] initWithBrowser:browser_.get()
+                                        reauthenticationModule:nil];
   }
 
   web::WebTaskEnvironment task_environment_;
@@ -92,18 +94,18 @@ TEST_F(PrivacyTableViewControllerTest, TestModel) {
 
   // Sections[0].
   EXPECT_EQ(1, NumberOfItemsInSection(0));
+  CheckTextCellTextAndDetailText(
+      l10n_util::GetNSString(IDS_IOS_CLEAR_BROWSING_DATA_TITLE), nil, 0, 0);
+
+  // Sections[1].
+  EXPECT_EQ(1, NumberOfItemsInSection(1));
   NSString* handoffSubtitle = chrome_browser_state_->GetPrefs()->GetBoolean(
                                   prefs::kIosHandoffToOtherDevices)
                                   ? l10n_util::GetNSString(IDS_IOS_SETTING_ON)
                                   : l10n_util::GetNSString(IDS_IOS_SETTING_OFF);
   CheckTextCellTextAndDetailText(
       l10n_util::GetNSString(IDS_IOS_OPTIONS_ENABLE_HANDOFF_TO_OTHER_DEVICES),
-      handoffSubtitle, 0, 0);
-
-  // Sections[1].
-  EXPECT_EQ(1, NumberOfItemsInSection(1));
-  CheckTextCellTextAndDetailText(
-      l10n_util::GetNSString(IDS_IOS_CLEAR_BROWSING_DATA_TITLE), nil, 1, 0);
+      handoffSubtitle, 1, 0);
 }
 
 }  // namespace

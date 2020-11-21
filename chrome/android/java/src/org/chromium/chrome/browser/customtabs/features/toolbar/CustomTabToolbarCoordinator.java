@@ -9,7 +9,9 @@ import static org.chromium.chrome.browser.dependency_injection.ChromeCommonQuali
 import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
+import android.content.res.Resources;
 import android.net.Uri;
+import android.text.TextUtils;
 import android.view.View;
 
 import androidx.annotation.Nullable;
@@ -17,20 +19,20 @@ import androidx.annotation.VisibleForTesting;
 import androidx.browser.customtabs.CustomTabsIntent;
 
 import org.chromium.base.Log;
-import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.browserservices.BrowserServicesActivityTabController;
+import org.chromium.base.metrics.RecordUserAction;
+import org.chromium.chrome.R;
+import org.chromium.chrome.browser.app.ChromeActivity;
+import org.chromium.chrome.browser.browser_controls.BrowserControlsVisibilityManager;
 import org.chromium.chrome.browser.browserservices.BrowserServicesIntentDataProvider;
-import org.chromium.chrome.browser.compositor.layouts.LayoutManager;
+import org.chromium.chrome.browser.compositor.layouts.LayoutManagerImpl;
 import org.chromium.chrome.browser.customtabs.CloseButtonVisibilityManager;
 import org.chromium.chrome.browser.customtabs.CustomButtonParams;
 import org.chromium.chrome.browser.customtabs.CustomTabCompositorContentInitializer;
-import org.chromium.chrome.browser.customtabs.CustomTabUmaRecorder;
 import org.chromium.chrome.browser.customtabs.CustomTabsConnection;
 import org.chromium.chrome.browser.customtabs.content.CustomTabActivityNavigationController;
+import org.chromium.chrome.browser.customtabs.content.CustomTabActivityTabController;
 import org.chromium.chrome.browser.customtabs.content.CustomTabActivityTabProvider;
 import org.chromium.chrome.browser.dependency_injection.ActivityScope;
-import org.chromium.chrome.browser.fullscreen.ChromeFullscreenManager;
-import org.chromium.chrome.browser.fullscreen.FullscreenManager;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.toolbar.ToolbarManager;
 import org.chromium.content_public.common.BrowserControlsState;
@@ -43,7 +45,7 @@ import dagger.Lazy;
 
 /**
  * Works with the toolbar in a Custom Tab. Encapsulates interactions with Chrome's toolbar-related
- * classes such as {@link ToolbarManager} and {@link FullscreenManager}.
+ * classes such as {@link ToolbarManager} and {@link BrowserControlsVisibilityManager}.
  *
  * TODO(pshmakov):
  * 1. Reduce the coupling between Custom Tab toolbar and Chrome's common code. In particular,
@@ -57,13 +59,12 @@ import dagger.Lazy;
 @ActivityScope
 public class CustomTabToolbarCoordinator {
     private final BrowserServicesIntentDataProvider mIntentDataProvider;
-    private final @Nullable CustomTabUmaRecorder mUmaRecorder;
     private final CustomTabActivityTabProvider mTabProvider;
     private final CustomTabsConnection mConnection;
     private final ChromeActivity<?> mActivity;
     private final Context mAppContext;
-    private final BrowserServicesActivityTabController mTabController;
-    private final Lazy<ChromeFullscreenManager> mFullscreenManager;
+    private final CustomTabActivityTabController mTabController;
+    private final Lazy<BrowserControlsVisibilityManager> mBrowserControlsVisibilityManager;
     private final CustomTabActivityNavigationController mNavigationController;
     private final CloseButtonVisibilityManager mCloseButtonVisibilityManager;
     private final CustomTabBrowserControlsVisibilityDelegate mVisibilityDelegate;
@@ -80,24 +81,22 @@ public class CustomTabToolbarCoordinator {
 
     @Inject
     public CustomTabToolbarCoordinator(BrowserServicesIntentDataProvider intentDataProvider,
-            @Nullable CustomTabUmaRecorder umaRecorder, CustomTabActivityTabProvider tabProvider,
-            CustomTabsConnection connection, ChromeActivity<?> activity,
-            @Named(APP_CONTEXT) Context appContext,
-            BrowserServicesActivityTabController tabController,
-            Lazy<ChromeFullscreenManager> fullscreenManager,
+            CustomTabActivityTabProvider tabProvider, CustomTabsConnection connection,
+            ChromeActivity<?> activity, @Named(APP_CONTEXT) Context appContext,
+            CustomTabActivityTabController tabController,
+            Lazy<BrowserControlsVisibilityManager> controlsVisiblityManager,
             CustomTabActivityNavigationController navigationController,
             CloseButtonVisibilityManager closeButtonVisibilityManager,
             CustomTabBrowserControlsVisibilityDelegate visibilityDelegate,
             CustomTabCompositorContentInitializer compositorContentInitializer,
             CustomTabToolbarColorController toolbarColorController) {
         mIntentDataProvider = intentDataProvider;
-        mUmaRecorder = umaRecorder;
         mTabProvider = tabProvider;
         mConnection = connection;
         mActivity = activity;
         mAppContext = appContext;
         mTabController = tabController;
-        mFullscreenManager = fullscreenManager;
+        mBrowserControlsVisibilityManager = controlsVisiblityManager;
         mNavigationController = navigationController;
         mCloseButtonVisibilityManager = closeButtonVisibilityManager;
         mVisibilityDelegate = visibilityDelegate;
@@ -145,8 +144,11 @@ public class CustomTabToolbarCoordinator {
 
         sendButtonPendingIntentWithUrlAndTitle(params, tab.getUrlString(), tab.getTitle());
 
-        if (mUmaRecorder != null) {
-            mUmaRecorder.recordCustomButtonClick(mActivity.getResources(), params);
+        RecordUserAction.record("CustomTabsCustomActionButtonClick");
+        Resources resources = mActivity.getResources();
+        if (mIntentDataProvider.shouldEnableEmbeddedMediaExperience()
+                && TextUtils.equals(params.getDescription(), resources.getString(R.string.share))) {
+            RecordUserAction.record("CustomTabsCustomActionButtonClick.DownloadsUI.Share");
         }
     }
 
@@ -170,27 +172,30 @@ public class CustomTabToolbarCoordinator {
         }
     }
 
-    private void onCompositorContentInitialized(LayoutManager layoutDriver) {
-        mToolbarManager.initializeWithNative(mTabController.getTabModelSelector(),
-                mFullscreenManager.get().getBrowserVisibilityDelegate(), null, layoutDriver, null,
-                null, null, v -> onCloseButtonClick(), null);
+    private void onCompositorContentInitialized(LayoutManagerImpl layoutDriver) {
+        mToolbarManager.initializeWithNative(
+                layoutDriver, null, null, null, v -> onCloseButtonClick(), null);
         mInitializedToolbarWithNative = true;
     }
 
     private void onCloseButtonClick() {
-        if (mUmaRecorder != null) {
-            mUmaRecorder.recordCloseButtonClick();
+        RecordUserAction.record("CustomTabs.CloseButtonClicked");
+        if (mIntentDataProvider.shouldEnableEmbeddedMediaExperience()) {
+            RecordUserAction.record("CustomTabs.CloseButtonClicked.DownloadsUI");
         }
+
         mNavigationController.navigateOnClose();
     }
 
     public void setBrowserControlsState(@BrowserControlsState int controlsState) {
         mVisibilityDelegate.setControlsState(controlsState);
         if (controlsState == BrowserControlsState.HIDDEN) {
-            mControlsHidingToken = mFullscreenManager.get()
-                    .hideAndroidControlsAndClearOldToken(mControlsHidingToken);
+            mControlsHidingToken =
+                    mBrowserControlsVisibilityManager.get().hideAndroidControlsAndClearOldToken(
+                            mControlsHidingToken);
         } else {
-            mFullscreenManager.get().releaseAndroidControlsHidingToken(mControlsHidingToken);
+            mBrowserControlsVisibilityManager.get().releaseAndroidControlsHidingToken(
+                    mControlsHidingToken);
         }
     }
 
@@ -198,7 +203,9 @@ public class CustomTabToolbarCoordinator {
      * Shows toolbar temporarily, for a few seconds.
      */
     public void showToolbarTemporarily() {
-        mFullscreenManager.get().getBrowserVisibilityDelegate().showControlsTransient();
+        mBrowserControlsVisibilityManager.get()
+                .getBrowserVisibilityDelegate()
+                .showControlsTransient();
     }
 
     /**

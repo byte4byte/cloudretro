@@ -13,7 +13,7 @@
 #include "base/macros.h"
 #include "base/path_service.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
 #include "chrome/browser/background/background_mode_manager.h"
@@ -48,15 +48,15 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/url_constants.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/url_loader_interceptor.h"
 #include "net/base/upload_bytes_element_reader.h"
 #include "net/base/upload_data_stream.h"
-#include "net/url_request/url_request.h"
 #include "services/network/public/cpp/features.h"
 #include "services/network/test/test_utils.h"
 
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
 #include "base/mac/scoped_nsautorelease_pool.h"
 #endif
 
@@ -147,28 +147,6 @@ class BetterSessionRestoreTest : public InProcessBrowserTest {
                 return true;
               }
 
-              if (path == path_prefix + "accept_ch.html") {
-                std::string header =
-                    "HTTP/1.1 200 OK\nContent-type: text/html\nAccept-CH: "
-                    "device-memory\n\n";
-
-                if (params->url_request.url.query().find("lifetime") !=
-                    std::string::npos)
-                  header += "Accept-CH-Lifetime: 10000\n";
-                header += "\n";
-
-                // Make title consistent with other tests
-                std::string title = "<html><head><title>";
-                if (params->url_request.headers.HasHeader("device-memory"))
-                  title += "PASS";
-                else
-                  title += "STORING";
-
-                title += "</title></head><body>Data posted</body></html>";
-                content::URLLoaderInterceptor::WriteResponse(
-                    header, title, params->client.get());
-                return true;
-              }
               return false;
             }));
   }
@@ -426,7 +404,7 @@ IN_PROC_BROWSER_TEST_F(ContinueWhereILeftOffTest,
 }
 
 // Crashes on Mac and Windows. http://crbug.com/656211
-#if defined(OS_MACOSX) || defined(OS_WIN)
+#if defined(OS_MAC) || defined(OS_WIN)
 #define MAYBE_LocalStorageClearedOnExit DISABLED_LocalStorageClearedOnExit
 #else
 #define MAYBE_LocalStorageClearedOnExit LocalStorageClearedOnExit
@@ -450,7 +428,7 @@ IN_PROC_BROWSER_TEST_F(ContinueWhereILeftOffTest, PRE_CookiesClearedOnExit) {
 }
 
 // Flaky on Mac. http://crbug.com/656211.
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
 #define MAYBE_CookiesClearedOnExit DISABLED_CookiesClearedOnExit
 #else
 #define MAYBE_CookiesClearedOnExit CookiesClearedOnExit
@@ -503,7 +481,7 @@ IN_PROC_BROWSER_TEST_F(ContinueWhereILeftOffTest,
 }
 
 // Flaky on Mac: https://crbug.com/709504
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
 #define MAYBE_SessionCookiesCloseAllBrowsers \
   DISABLED_SessionCookiesCloseAllBrowsers
 #else
@@ -764,7 +742,7 @@ IN_PROC_BROWSER_TEST_F(NoSessionRestoreTest, CookiesClearedOnExit) {
 IN_PROC_BROWSER_TEST_F(NoSessionRestoreTest,
                        SessionCookiesBrowserCloseWithPopupOpen) {
   StoreDataWithPage("session_cookies.html");
-  Browser* popup = new Browser(
+  Browser* popup = Browser::Create(
       Browser::CreateParams(Browser::TYPE_POPUP, browser()->profile(), true));
   popup->window()->Show();
   Browser* new_browser = QuitBrowserAndRestore(browser(), false);
@@ -776,7 +754,7 @@ IN_PROC_BROWSER_TEST_F(NoSessionRestoreTest,
 IN_PROC_BROWSER_TEST_F(NoSessionRestoreTest,
                        SessionCookiesBrowserClosePopupLast) {
   StoreDataWithPage("session_cookies.html");
-  Browser* popup = new Browser(
+  Browser* popup = Browser::Create(
       Browser::CreateParams(Browser::TYPE_POPUP, browser()->profile(), true));
   popup->window()->Show();
   CloseBrowserSynchronously(browser());
@@ -875,52 +853,6 @@ IN_PROC_BROWSER_TEST_F(NoSessionRestoreTest, SessionCookiesBrowserClose) {
     NavigateAndCheckStoredData(new_browser, "session_cookies.html");
   else
     StoreDataWithPage(new_browser, "session_cookies.html");
-}
-
-// These tests ensure that the Better Session Restore features are not triggered
-// when they shouldn't be.
-class NoClientHintRestoreTest : public NoSessionRestoreTest {
- public:
-  NoClientHintRestoreTest() {
-    scoped_feature_list_.InitWithFeatureList(EnabledFeatures());
-  }
-
-  std::unique_ptr<base::FeatureList> EnabledFeatures() {
-    std::unique_ptr<base::FeatureList> feature_list(new base::FeatureList);
-    feature_list->InitializeFromCommandLine("FeaturePolicyForClientHints", "");
-    return feature_list;
-  }
-
- private:
-  base::test::ScopedFeatureList scoped_feature_list_;
-  DISALLOW_COPY_AND_ASSIGN(NoClientHintRestoreTest);
-};
-
-IN_PROC_BROWSER_TEST_F(NoSessionRestoreTest,
-                       PersistClientHintsCloseAllBrowsers) {
-  SetSecureFakeServerAddress();
-  // Without the feature, the lifetime is needed to persist opt-in preferences.
-  StoreDataWithPage("accept_ch.html?lifetime");
-  NavigateAndCheckStoredData("accept_ch.html?lifetime");
-  EnableBackgroundMode();
-  Browser* new_browser = QuitBrowserAndRestore(browser(), true);
-  NavigateAndCheckStoredData(new_browser, "accept_ch.html?lifetime");
-  DisableBackgroundMode();
-  new_browser = QuitBrowserAndRestore(new_browser, true);
-  NavigateAndCheckStoredData(new_browser, "accept_ch.html?lifetime");
-}
-
-IN_PROC_BROWSER_TEST_F(NoClientHintRestoreTest,
-                       ClearClientHintsCloseAllBrowsers) {
-  SetSecureFakeServerAddress();
-  StoreDataWithPage("accept_ch.html");
-  NavigateAndCheckStoredData("accept_ch.html");
-  EnableBackgroundMode();
-  Browser* new_browser = QuitBrowserAndRestore(browser(), true);
-  StoreDataWithPage(new_browser, "accept_ch.html");
-  DisableBackgroundMode();
-  new_browser = QuitBrowserAndRestore(new_browser, true);
-  StoreDataWithPage(new_browser, "accept_ch.html");
 }
 
 #endif  // BUILDFLAG(ENABLE_BACKGROUND_MODE)

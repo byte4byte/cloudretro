@@ -683,37 +683,41 @@ TEST(HTTPParsersTest, ParseContentSecurityPolicyDirectiveName) {
       "Content-Security-Policy: frame-ancestors 'none'\r\n"
       "Content-Security-Policy: sandbox allow-script\r\n"
       "Content-Security-Policy: form-action 'none'\r\n"
-      "Content-Security-Policy: navigate-to'none'\r\n"
+      "Content-Security-Policy: navigate-to 'none'\r\n"
       "Content-Security-Policy: frame-src 'none'\r\n"
       "Content-Security-Policy: child-src 'none'\r\n"
       "Content-Security-Policy: script-src 'none'\r\n"
-      "Content-Security-Policy: default-src 'none'\r\n");
-  EXPECT_EQ(8u, policies.size());
+      "Content-Security-Policy: default-src 'none'\r\n"
+      "Content-Security-Policy: upgrade-insecure-requests\r\n");
+  EXPECT_EQ(9u, policies.size());
   // frame-ancestors
   EXPECT_EQ(1u, policies[0]->directives.size());
   // sandbox. TODO(https://crbug.com/1041376) Implement this.
   EXPECT_EQ(0u, policies[1]->directives.size());
-  // form-action. Not parsed.
-  EXPECT_EQ(0u, policies[2]->directives.size());
-  // navigate-to. Not parsed.
-  EXPECT_EQ(0u, policies[3]->directives.size());
-  // frame-src. Not parsed.
-  EXPECT_EQ(0u, policies[4]->directives.size());
-  // child-src. Not parsed.
-  EXPECT_EQ(0u, policies[5]->directives.size());
-  // script-src. Not parsed.
-  EXPECT_EQ(0u, policies[6]->directives.size());
-  // default-src. Not parsed.
-  EXPECT_EQ(0u, policies[7]->directives.size());
+  // form-action.
+  EXPECT_EQ(1u, policies[2]->directives.size());
+  // navigate-to.
+  EXPECT_EQ(1u, policies[3]->directives.size());
+  // frame-src.
+  EXPECT_EQ(1u, policies[4]->directives.size());
+  // child-src.
+  EXPECT_EQ(1u, policies[5]->directives.size());
+  // script-src.
+  EXPECT_EQ(1u, policies[6]->directives.size());
+  // default-src.
+  EXPECT_EQ(1u, policies[7]->directives.size());
+  // upgrade-insecure-policies.
+  EXPECT_EQ(true, policies[8]->upgrade_insecure_requests);
 }
 
 TEST(HTTPParsersTest, ParseContentSecurityPolicyReportTo) {
   auto policies =
       ParseContentSecurityPolicy("Content-Security-Policy: report-to a b\r\n");
   EXPECT_TRUE(policies[0]->use_reporting_api);
-  ASSERT_EQ(2u, policies[0]->report_endpoints.size());
+  // The specification https://w3c.github.io/webappsec-csp/#directive-report-to
+  // only allows for one endpoints to be defined. The other ones are ignored.
+  ASSERT_EQ(1u, policies[0]->report_endpoints.size());
   EXPECT_EQ("a", policies[0]->report_endpoints[0]);
-  EXPECT_EQ("b", policies[0]->report_endpoints[1]);
 }
 
 TEST(HTTPParsersTest, ParseContentSecurityPolicyReportUri) {

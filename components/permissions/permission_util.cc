@@ -4,7 +4,7 @@
 
 #include "components/permissions/permission_util.h"
 
-#include "base/logging.h"
+#include "base/notreached.h"
 #include "build/build_config.h"
 #include "content/public/browser/permission_type.h"
 
@@ -67,6 +67,10 @@ std::string PermissionUtil::GetPermissionString(
       return "StorageAccess";
     case ContentSettingsType::CAMERA_PAN_TILT_ZOOM:
       return "CameraPanTiltZoom";
+    case ContentSettingsType::WINDOW_PLACEMENT:
+      return "WindowPlacement";
+    case ContentSettingsType::FONT_ACCESS:
+      return "FontAccess";
     default:
       break;
   }
@@ -106,6 +110,12 @@ PermissionRequestType PermissionUtil::GetRequestType(ContentSettingsType type) {
       return PermissionRequestType::PERMISSION_STORAGE_ACCESS;
     case ContentSettingsType::CAMERA_PAN_TILT_ZOOM:
       return PermissionRequestType::PERMISSION_CAMERA_PAN_TILT_ZOOM;
+    case ContentSettingsType::WINDOW_PLACEMENT:
+      return PermissionRequestType::PERMISSION_WINDOW_PLACEMENT;
+    case ContentSettingsType::FONT_ACCESS:
+      return PermissionRequestType::PERMISSION_FONT_ACCESS;
+    case ContentSettingsType::IDLE_DETECTION:
+      return PermissionRequestType::PERMISSION_IDLE_DETECTION;
     default:
       NOTREACHED();
       return PermissionRequestType::UNKNOWN;
@@ -167,6 +177,12 @@ bool PermissionUtil::GetPermissionType(ContentSettingsType type,
     *out = PermissionType::STORAGE_ACCESS_GRANT;
   } else if (type == ContentSettingsType::CAMERA_PAN_TILT_ZOOM) {
     *out = PermissionType::CAMERA_PAN_TILT_ZOOM;
+  } else if (type == ContentSettingsType::WINDOW_PLACEMENT) {
+    *out = PermissionType::WINDOW_PLACEMENT;
+  } else if (type == ContentSettingsType::FONT_ACCESS) {
+    *out = PermissionType::FONT_ACCESS;
+  } else if (type == ContentSettingsType::IDLE_DETECTION) {
+    *out = PermissionType::IDLE_DETECTION;
   } else {
     return false;
   }
@@ -199,6 +215,9 @@ bool PermissionUtil::IsPermission(ContentSettingsType type) {
     case ContentSettingsType::AR:
     case ContentSettingsType::STORAGE_ACCESS:
     case ContentSettingsType::CAMERA_PAN_TILT_ZOOM:
+    case ContentSettingsType::WINDOW_PLACEMENT:
+    case ContentSettingsType::FONT_ACCESS:
+    case ContentSettingsType::IDLE_DETECTION:
       return true;
     default:
       return false;

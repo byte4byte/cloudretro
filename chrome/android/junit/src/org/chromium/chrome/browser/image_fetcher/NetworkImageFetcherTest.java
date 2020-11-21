@@ -4,9 +4,9 @@
 
 package org.chromium.chrome.browser.image_fetcher;
 
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.ArgumentMatchers.anyObject;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.verify;
@@ -67,8 +67,7 @@ public class NetworkImageFetcherTest {
             return null;
         })
                 .when(mBridge)
-                .fetchImage(anyInt(), eq(URL), eq(UMA_CLIENT_NAME), anyInt(), anyInt(),
-                        bitmapCallbackCaptor.capture());
+                .fetchImage(anyInt(), any(), bitmapCallbackCaptor.capture());
 
         ArgumentCaptor<Callback<BaseGifImage>> gifCallbackCaptor =
                 ArgumentCaptor.forClass(Callback.class);
@@ -77,24 +76,26 @@ public class NetworkImageFetcherTest {
             return null;
         })
                 .when(mBridge)
-                .fetchGif(anyInt(), eq(URL), eq(UMA_CLIENT_NAME), gifCallbackCaptor.capture());
+                .fetchGif(anyInt(), eq(ImageFetcher.Params.create(URL, UMA_CLIENT_NAME)),
+                        gifCallbackCaptor.capture());
     }
 
     @Test
     public void test_fetchImage() {
-        mImageFetcher.fetchImage(URL, UMA_CLIENT_NAME, WIDTH_PX, HEIGHT_PX, mBitmapCallback);
+        ImageFetcher.Params params =
+                ImageFetcher.Params.create(URL, UMA_CLIENT_NAME, WIDTH_PX, HEIGHT_PX);
+        mImageFetcher.fetchImage(params, mBitmapCallback);
         verify(mBitmapCallback).onResult(mBitmap);
-        verify(mBridge).fetchImage(eq(ImageFetcherConfig.NETWORK_ONLY), eq(URL),
-                eq(UMA_CLIENT_NAME), eq(WIDTH_PX), eq(HEIGHT_PX), anyObject());
+        verify(mBridge).fetchImage(eq(ImageFetcherConfig.NETWORK_ONLY), eq(params), any());
         verify(mBridge).reportTotalFetchTimeFromNative(eq(UMA_CLIENT_NAME), anyLong());
     }
 
     @Test
     public void test_fetchGif() {
-        mImageFetcher.fetchGif(URL, UMA_CLIENT_NAME, mGifCallback);
+        ImageFetcher.Params params = ImageFetcher.Params.create(URL, UMA_CLIENT_NAME);
+        mImageFetcher.fetchGif(params, mGifCallback);
         verify(mGifCallback).onResult(mGif);
-        verify(mBridge).fetchGif(
-                ImageFetcherConfig.NETWORK_ONLY, URL, UMA_CLIENT_NAME, mGifCallback);
+        verify(mBridge).fetchGif(ImageFetcherConfig.NETWORK_ONLY, params, mGifCallback);
     }
 
     @Test

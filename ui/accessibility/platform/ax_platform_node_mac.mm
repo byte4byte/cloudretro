@@ -106,6 +106,8 @@ RoleMap BuildRoleMap() {
       {ax::mojom::Role::kDocNoteRef, NSAccessibilityLinkRole},
       {ax::mojom::Role::kDocNotice, NSAccessibilityGroupRole},
       {ax::mojom::Role::kDocPageBreak, NSAccessibilitySplitterRole},
+      {ax::mojom::Role::kDocPageFooter, NSAccessibilityGroupRole},
+      {ax::mojom::Role::kDocPageHeader, NSAccessibilityGroupRole},
       {ax::mojom::Role::kDocPageList, NSAccessibilityGroupRole},
       {ax::mojom::Role::kDocPart, NSAccessibilityGroupRole},
       {ax::mojom::Role::kDocPreface, NSAccessibilityGroupRole},
@@ -159,7 +161,6 @@ RoleMap BuildRoleMap() {
       {ax::mojom::Role::kMath, NSAccessibilityGroupRole},
       {ax::mojom::Role::kMenu, NSAccessibilityMenuRole},
       {ax::mojom::Role::kMenuBar, NSAccessibilityMenuBarRole},
-      {ax::mojom::Role::kMenuButton, NSAccessibilityButtonRole},
       {ax::mojom::Role::kMenuItem, NSAccessibilityMenuItemRole},
       {ax::mojom::Role::kMenuItemCheckBox, NSAccessibilityMenuItemRole},
       {ax::mojom::Role::kMenuItemRadio, NSAccessibilityMenuItemRole},
@@ -194,7 +195,6 @@ RoleMap BuildRoleMap() {
       {ax::mojom::Role::kSearchBox, NSAccessibilityTextFieldRole},
       {ax::mojom::Role::kSection, NSAccessibilityGroupRole},
       {ax::mojom::Role::kSlider, NSAccessibilitySliderRole},
-      {ax::mojom::Role::kSliderThumb, NSAccessibilityValueIndicatorRole},
       {ax::mojom::Role::kSpinButton, NSAccessibilityIncrementorRole},
       {ax::mojom::Role::kSplitter, NSAccessibilitySplitterRole},
       {ax::mojom::Role::kStaticText, NSAccessibilityStaticTextRole},
@@ -350,6 +350,12 @@ bool AlsoUseShowMenuActionForDefaultAction(const ui::AXNodeData& data) {
          data.role == ax::mojom::Role::kPopUpButton;
 }
 
+// Check whether |selector| is an accessibility setter. This is a heuristic but
+// seems to be a pretty good one.
+bool IsAXSetter(SEL selector) {
+  return [NSStringFromSelector(selector) hasPrefix:@"setAccessibility"];
+}
+
 }  // namespace
 
 @interface AXPlatformNodeCocoa (Private)
@@ -489,7 +495,7 @@ bool AlsoUseShowMenuActionForDefaultAction(const ui::AXNodeData& data) {
     return YES;
 
   return [[self AXRole] isEqualToString:NSAccessibilityUnknownRole] ||
-         _node->GetData().HasState(ax::mojom::State::kInvisible);
+         _node->IsInvisibleOrIgnored();
 }
 
 - (id)accessibilityHitTest:(NSPoint)point {
@@ -497,6 +503,8 @@ bool AlsoUseShowMenuActionForDefaultAction(const ui::AXNodeData& data) {
     return nil;
 
   for (id child in [[self AXChildren] reverseObjectEnumerator]) {
+    if (!NSPointInRect(point, [child accessibilityFrame]))
+      continue;
     if (id foundChild = [child accessibilityHitTest:point])
       return foundChild;
   }
@@ -620,7 +628,6 @@ bool AlsoUseShowMenuActionForDefaultAction(const ui::AXNodeData& data) {
     case ax::mojom::Role::kRadioButton:
     case ax::mojom::Role::kSearchBox:
     case ax::mojom::Role::kSlider:
-    case ax::mojom::Role::kSliderThumb:
     case ax::mojom::Role::kToggleButton:
       [axAttributes addObjectsFromArray:kValueAttributes];
       break;
@@ -628,12 +635,14 @@ bool AlsoUseShowMenuActionForDefaultAction(const ui::AXNodeData& data) {
     default:
       break;
   }
-  if (_node->GetData().HasBoolAttribute(ax::mojom::BoolAttribute::kSelected)) {
-    [axAttributes addObjectsFromArray:@[ NSAccessibilitySelectedAttribute ]];
-  }
-  if (ui::IsMenuItem(_node->GetData().role)) {
-    [axAttributes addObjectsFromArray:@[ @"AXMenuItemMarkChar" ]];
-  }
+  if (_node->GetData().HasBoolAttribute(ax::mojom::BoolAttribute::kSelected))
+    [axAttributes addObject:NSAccessibilitySelectedAttribute];
+  if (ui::IsMenuItem(_node->GetData().role))
+    [axAttributes addObject:@"AXMenuItemMarkChar"];
+  if (ui::IsItemLike(_node->GetData().role))
+    [axAttributes addObjectsFromArray:@[ @"AXARIAPosInSet", @"AXARIASetSize" ]];
+  if (ui::IsSetLike(_node->GetData().role))
+    [axAttributes addObject:@"AXARIASetSize"];
   return axAttributes.autorelease();
 }
 
@@ -744,14 +753,14 @@ bool AlsoUseShowMenuActionForDefaultAction(const ui::AXNodeData& data) {
   if (ui::IsNameExposedInAXValueForRole(role))
     return [self getName];
 
-  if (_node->HasIntAttribute(ax::mojom::IntAttribute::kCheckedState)) {
+  if (_node->IsPlatformCheckable()) {
     // Mixed checkbox state not currently supported in views, but could be.
     // See browser_accessibility_cocoa.mm for details.
     const auto checkedState = static_cast<ax::mojom::CheckedState>(
         _node->GetIntAttribute(ax::mojom::IntAttribute::kCheckedState));
     return checkedState == ax::mojom::CheckedState::kTrue ? @1 : @0;
   }
-  return [self getStringAttribute:ax::mojom::StringAttribute::kValue];
+  return base::SysUTF16ToNSString(_node->GetValueForControl());
 }
 
 - (NSNumber*)AXEnabled {
@@ -833,6 +842,20 @@ bool AlsoUseShowMenuActionForDefaultAction(const ui::AXNodeData& data) {
   return @"";
 }
 
+- (NSNumber*)AXARIAPosInSet {
+  base::Optional<int> posInSet = _node->GetPosInSet();
+  if (!posInSet)
+    return nil;
+  return @(*posInSet);
+}
+
+- (NSNumber*)AXARIASetSize {
+  base::Optional<int> setSize = _node->GetSetSize();
+  if (!setSize)
+    return nil;
+  return @(*setSize);
+}
+
 // Text-specific attributes.
 
 - (NSString*)AXSelectedText {
@@ -844,8 +867,10 @@ bool AlsoUseShowMenuActionForDefaultAction(const ui::AXNodeData& data) {
 - (NSValue*)AXSelectedTextRange {
   // Selection might not be supported. Return (NSRange){0,0} in that case.
   int start = 0, end = 0;
-  _node->GetIntAttribute(ax::mojom::IntAttribute::kTextSelStart, &start);
-  _node->GetIntAttribute(ax::mojom::IntAttribute::kTextSelEnd, &end);
+  if (_node->IsPlainTextField()) {
+    start = _node->GetIntAttribute(ax::mojom::IntAttribute::kTextSelStart);
+    end = _node->GetIntAttribute(ax::mojom::IntAttribute::kTextSelEnd);
+  }
 
   // NSRange cannot represent the direction the text was selected in.
   return [NSValue valueWithRange:{std::min(start, end), abs(end - start)}];
@@ -950,7 +975,7 @@ bool AlsoUseShowMenuActionForDefaultAction(const ui::AXNodeData& data) {
     return NO;
 
   return (![[self AXRole] isEqualToString:NSAccessibilityUnknownRole] &&
-          !_node->GetData().HasState(ax::mojom::State::kInvisible));
+          !_node->IsInvisibleOrIgnored());
 }
 - (BOOL)isAccessibilityEnabled {
   if (!_node)
@@ -990,33 +1015,26 @@ bool AlsoUseShowMenuActionForDefaultAction(const ui::AXNodeData& data) {
   if (!_node)
     return NO;
 
-  const ax::mojom::Restriction restriction = _node->GetData().GetRestriction();
-  if (restriction == ax::mojom::Restriction::kDisabled)
-    return NO;
+  if (selector == @selector(setAccessibilityFocused:))
+    return _node->GetData().HasState(ax::mojom::State::kFocusable);
 
-  if (selector == @selector(setAccessibilityValue:)) {
+  if (selector == @selector(setAccessibilityValue:) &&
+      _node->GetData().role == ax::mojom::Role::kTab) {
     // Tabs use the radio button role on Mac, so they are selected by calling
     // setSelected on an individual tab, rather than by setting the selected
     // element on the tabstrip as a whole.
-    if (_node->GetData().role == ax::mojom::Role::kTab) {
-      return !_node->GetData().GetBoolAttribute(
-          ax::mojom::BoolAttribute::kSelected);
-    }
-    return restriction != ax::mojom::Restriction::kReadOnly;
+    return !_node->GetData().GetBoolAttribute(
+        ax::mojom::BoolAttribute::kSelected);
   }
 
+  // Don't allow calling AX setters on disabled elements.
   // TODO(https://crbug.com/692362): Once the underlying bug in
   // views::Textfield::SetSelectionRange() described in that bug is fixed,
-  // remove the check here; right now, this check serves to prevent
-  // accessibility clients from trying to set the selection range, which won't
-  // work because of 692362.
-  if (selector == @selector(setAccessibilitySelectedText:) ||
-      selector == @selector(setAccessibilitySelectedTextRange:)) {
-    return restriction != ax::mojom::Restriction::kReadOnly;
-  }
-
-  if (selector == @selector(setAccessibilityFocused:))
-    return _node->GetData().HasState(ax::mojom::State::kFocusable);
+  // remove the check here when the selector is setAccessibilitySelectedText*;
+  // right now, this check serves to prevent accessibility clients from trying
+  // to set the selection range, which won't work because of 692362.
+  if (_node->GetData().IsReadOnlyOrDisabled() && IsAXSetter(selector))
+    return NO;
 
   // TODO(https://crbug.com/386671): What about role-specific selectors?
   return [super isAccessibilitySelectorAllowed:selector];
@@ -1207,6 +1225,17 @@ void AXPlatformNodeMac::Destroy() {
   if (native_node_)
     [native_node_ detach];
   AXPlatformNodeBase::Destroy();
+}
+
+// On Mac, the checked state is mapped to AXValue.
+bool AXPlatformNodeMac::IsPlatformCheckable() const {
+  if (GetData().role == ax::mojom::Role::kTab) {
+    // On Mac, tabs are exposed as radio buttons, and are treated as checkable.
+    // Also, the internal State::kSelected is be mapped to checked via AXValue.
+    return true;
+  }
+
+  return AXPlatformNodeBase::IsPlatformCheckable();
 }
 
 gfx::NativeViewAccessible AXPlatformNodeMac::GetNativeViewAccessible() {

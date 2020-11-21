@@ -5,6 +5,7 @@
 #include "ash/ambient/ambient_view_delegate_impl.h"
 
 #include "ash/ambient/ambient_controller.h"
+#include "ash/ambient/model/ambient_backend_model.h"
 #include "base/bind.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 
@@ -16,12 +17,23 @@ AmbientViewDelegateImpl::AmbientViewDelegateImpl(
 
 AmbientViewDelegateImpl::~AmbientViewDelegateImpl() = default;
 
-PhotoModel* AmbientViewDelegateImpl::GetPhotoModel() {
-  return ambient_controller_->photo_model();
+void AmbientViewDelegateImpl::AddObserver(
+    AmbientViewDelegateObserver* observer) {
+  view_delegate_observers_.AddObserver(observer);
 }
 
-void AmbientViewDelegateImpl::OnBackgroundPhotoEvents() {
-  ambient_controller_->OnBackgroundPhotoEvents();
+void AmbientViewDelegateImpl::RemoveObserver(
+    AmbientViewDelegateObserver* observer) {
+  view_delegate_observers_.RemoveObserver(observer);
+}
+
+AmbientBackendModel* AmbientViewDelegateImpl::GetAmbientBackendModel() {
+  return ambient_controller_->GetAmbientBackendModel();
+}
+
+void AmbientViewDelegateImpl::OnPhotoTransitionAnimationCompleted() {
+  for (auto& observer : view_delegate_observers_)
+    observer.OnPhotoTransitionAnimationCompleted();
 }
 
 }  // namespace ash

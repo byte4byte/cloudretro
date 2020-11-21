@@ -105,7 +105,7 @@ process_template() (
     > "$TMPLOUT" <<< "$TMPLINCL"
 )
 
-# Setup the installation directory hierachy in the package staging area.
+# Setup the installation directory hierarchy in the package staging area.
 prep_staging_common() {
   install -m 755 -d "${STAGEDIR}/${INSTALLDIR}" \
     "${STAGEDIR}/usr/bin" \
@@ -192,6 +192,12 @@ stage_install_common() {
   find "${OUTPUTDIR}/locales" -type f -name '*.pak' -exec \
     cp -a '{}' "${STAGEDIR}/${INSTALLDIR}/locales/" \;
   find "${STAGEDIR}/${INSTALLDIR}/locales" -type f -exec chmod 644 '{}' \;
+
+  # TODO(https://crbug.com/1077934): The below conditions check for the
+  # existence of files to determine if they should be copied to the staging
+  # directory.  However, these may be stale if the build config no longer
+  # builds these files.  The build config should be obtained from gn rather than
+  # guessed based on the presence of files.
 
   # MEI Preload
   if [ -f "${OUTPUTDIR}/MEIPreload/manifest.json" ]; then

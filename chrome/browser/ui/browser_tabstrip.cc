@@ -5,6 +5,7 @@
 #include "chrome/browser/ui/browser_tabstrip.h"
 
 #include "base/command_line.h"
+#include "base/feature_list.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_navigator.h"
@@ -17,6 +18,7 @@
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
+#include "url/gurl.h"
 
 namespace chrome {
 
@@ -53,6 +55,7 @@ content::WebContents* AddSelectedTabWithURL(Browser* browser,
 void AddWebContents(Browser* browser,
                     content::WebContents* source_contents,
                     std::unique_ptr<content::WebContents> new_contents,
+                    const GURL& target_url,
                     WindowOpenDisposition disposition,
                     const gfx::Rect& initial_rect) {
   // No code for this yet.
@@ -62,6 +65,7 @@ void AddWebContents(Browser* browser,
 
   NavigateParams params(browser, std::move(new_contents));
   params.source_contents = source_contents;
+  params.url = target_url;
   params.disposition = disposition;
   params.window_bounds = initial_rect;
   params.window_action = NavigateParams::SHOW_WINDOW;
@@ -90,9 +94,6 @@ void CloseWebContents(Browser* browser,
 }
 
 void ConfigureTabGroupForNavigation(NavigateParams* nav_params) {
-  if (!base::FeatureList::IsEnabled(features::kTabGroups))
-    return;
-
   if (!nav_params->source_contents)
     return;
 
@@ -116,6 +117,14 @@ void ConfigureTabGroupForNavigation(NavigateParams* nav_params) {
   if (nav_params->disposition == WindowOpenDisposition::NEW_FOREGROUND_TAB ||
       nav_params->disposition == WindowOpenDisposition::NEW_BACKGROUND_TAB) {
     nav_params->group = model->GetTabGroupForTab(source_index);
+    if (base::FeatureList::IsEnabled(features::kTabGroupsAutoCreate) &&
+        !nav_params->group.has_value() && !model->IsTabPinned(source_index)) {
+      const GURL& source_url =
+          nav_params->source_contents->GetLastCommittedURL();
+      const GURL& target_url = nav_params->url;
+      if (target_url.DomainIs(source_url.host_piece()))
+        nav_params->group = model->AddToNewGroup({source_index});
+    }
   }
 }
 

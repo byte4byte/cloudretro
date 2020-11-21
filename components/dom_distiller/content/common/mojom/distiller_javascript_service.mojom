@@ -13,7 +13,10 @@ interface DistillerJavaScriptService {
   // "distiller.openSettings" function.
   HandleDistillerOpenSettingsCall();
 
-  // Store updated appearance settings as synced prefs.
+  // Store selected theme as a synced preference.
   HandleStoreThemePref(Theme theme);
+  // Store selected font family as a synced preference.
   HandleStoreFontFamilyPref(FontFamily font_family);
+  // Store selected font size scaling factor as a preference.
+  HandleStoreFontScalingPref(float font_scale);
 };

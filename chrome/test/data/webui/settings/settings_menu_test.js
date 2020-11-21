@@ -5,19 +5,14 @@
 /** @fileoverview Runs tests for the settings menu. */
 
 // clang-format off
-import {pageVisibility, Router, routes} from 'chrome://settings/settings.js';
-import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 import {isChromeOS} from 'chrome://resources/js/cr.m.js';
+import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+import {pageVisibility, Router, routes} from 'chrome://settings/settings.js';
+
 // clang-format on
 
 suite('SettingsMenu', function() {
   let settingsMenu = null;
-
-  suiteSetup(function() {
-    loadTimeData.overrideValues({
-      privacySettingsRedesignEnabled: true,
-    });
-  });
 
   setup(function() {
     PolymerTest.clearBody();
@@ -86,8 +81,7 @@ suite('SettingsMenu', function() {
         urlParams.toString(),
         Router.getInstance().getQueryParameters().toString());
     settingsMenu.$.people.click();
-    assertEquals(
-        '', Router.getInstance().getQueryParameters().toString());
+    assertEquals('', Router.getInstance().getQueryParameters().toString());
   });
 });
 
@@ -99,6 +93,7 @@ suite('SettingsMenuReset', function() {
     Router.getInstance().navigateTo(routes.RESET, '');
     settingsMenu = document.createElement('settings-menu');
     document.body.appendChild(settingsMenu);
+    flush();
   });
 
   teardown(function() {
@@ -136,13 +131,14 @@ suite('SettingsMenuReset', function() {
   });
 
   test('pageVisibility', function() {
-    function assertPageVisibility(expectedHidden) {
+    function assertPagesHidden(expectedHidden) {
       assertEquals(expectedHidden, settingsMenu.$$('#people').hidden);
       assertEquals(expectedHidden, settingsMenu.$$('#appearance').hidden);
       assertEquals(expectedHidden, settingsMenu.$$('#onStartup').hidden);
       assertEquals(expectedHidden, settingsMenu.$$('#advancedButton').hidden);
       assertEquals(expectedHidden, settingsMenu.$$('#advancedSubmenu').hidden);
       assertEquals(expectedHidden, settingsMenu.$$('#reset').hidden);
+      assertEquals(expectedHidden, settingsMenu.$$('#safetyCheck').hidden);
 
       if (!isChromeOS) {
         assertEquals(expectedHidden, settingsMenu.$$('#defaultBrowser').hidden);
@@ -150,7 +146,7 @@ suite('SettingsMenuReset', function() {
     }
 
     // The default pageVisibility should not cause menu items to be hidden.
-    assertPageVisibility(false);
+    assertPagesHidden(false);
 
     // Set the visibility of the pages under test to "false".
     settingsMenu.pageVisibility = Object.assign(pageVisibility || {}, {
@@ -160,42 +156,12 @@ suite('SettingsMenuReset', function() {
       multidevice: false,
       onStartup: false,
       people: false,
-      reset: false
+      reset: false,
+      safetyCheck: false,
     });
     flush();
 
     // Now, the menu items should be hidden.
-    assertPageVisibility(true);
-  });
-
-  test('safetyCheckInMenu', function() {
-    flush();
-    assertTrue(!!settingsMenu.$$('#safetyCheck'));
-  });
-});
-
-suite('SettingsMenuPrivacyRedesignFlagOff', function() {
-  let settingsMenu = null;
-
-  suiteSetup(function() {
-    loadTimeData.overrideValues({
-      privacySettingsRedesignEnabled: false,
-    });
-  });
-
-  setup(function() {
-    PolymerTest.clearBody();
-    settingsMenu = document.createElement('settings-menu');
-    settingsMenu.pageVisibility = pageVisibility;
-    document.body.appendChild(settingsMenu);
-  });
-
-  teardown(function() {
-    settingsMenu.remove();
-  });
-
-  test('safetyCheckNotInMenu', function() {
-    flush();
-    assertFalse(!!settingsMenu.$$('#safetyCheck'));
+    assertPagesHidden(true);
   });
 });

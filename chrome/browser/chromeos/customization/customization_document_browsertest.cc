@@ -17,6 +17,7 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chromeos/system/fake_statistics_provider.h"
 #include "chromeos/system/statistics_provider.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -31,14 +32,14 @@ namespace {
 class LanguageSwitchedWaiter {
  public:
   explicit LanguageSwitchedWaiter(SwitchLanguageCallback callback)
-      : callback_(callback),
+      : callback_(std::move(callback)),
         finished_(false),
         runner_(new content::MessageLoopRunner) {}
 
   void ExitMessageLoop(const LanguageSwitchResult& result) {
     finished_ = true;
     runner_->Quit();
-    callback_.Run(result);
+    std::move(callback_).Run(result);
   }
 
   void Wait() {
@@ -48,7 +49,7 @@ class LanguageSwitchedWaiter {
   }
 
   SwitchLanguageCallback Callback() {
-    return SwitchLanguageCallback(base::Bind(
+    return SwitchLanguageCallback(base::BindOnce(
         &LanguageSwitchedWaiter::ExitMessageLoop, base::Unretained(this)));
   }
 

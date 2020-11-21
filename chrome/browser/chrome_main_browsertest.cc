@@ -5,6 +5,7 @@
 #include "base/command_line.h"
 #include "base/process/launch.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
@@ -16,11 +17,14 @@
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/test/browser_test.h"
 #include "net/base/filename_util.h"
 
-// These tests don't apply to the Mac version; see GetCommandLineForRelaunch
+// These tests don't apply to Mac or Lacros; see GetCommandLineForRelaunch
 // for details.
-#if !defined(OS_MACOSX)
+#if defined(OS_MAC) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#error Not supported on this platform.
+#endif
 
 class ChromeMainTest : public InProcessBrowserTest {
  public:
@@ -54,7 +58,7 @@ IN_PROC_BROWSER_TEST_F(ChromeMainTest, ReuseBrowserInstanceWhenOpeningFile) {
 
 // ChromeMainTest.SecondLaunchWithIncognitoUrl is flaky on Win and Linux.
 // http://crbug.com/130395
-#if defined(OS_WIN) || defined(OS_LINUX)
+#if defined(OS_WIN) || defined(OS_LINUX) || defined(OS_CHROMEOS)
 #define MAYBE_SecondLaunchWithIncognitoUrl DISABLED_SecondLaunchWithIncognitoUrl
 #else
 #define MAYBE_SecondLaunchWithIncognitoUrl SecondLaunchWithIncognitoUrl
@@ -111,5 +115,3 @@ IN_PROC_BROWSER_TEST_F(ChromeMainTest, SecondLaunchFromIncognitoWithNormalUrl) {
   ASSERT_EQ(2u, chrome::GetTotalBrowserCount());
   ASSERT_EQ(1u, chrome::GetTabbedBrowserCount(profile));
 }
-
-#endif  // !OS_MACOSX

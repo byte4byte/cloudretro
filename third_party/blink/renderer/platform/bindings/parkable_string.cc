@@ -6,7 +6,8 @@
 
 #include "base/allocator/partition_allocator/partition_alloc.h"
 #include "base/bind.h"
-#include "base/logging.h"
+#include "base/check_op.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/process/memory.h"
 #include "base/single_thread_task_runner.h"
@@ -41,7 +42,7 @@ ParkableStringImpl::Age MakeOlder(ParkableStringImpl::Age age) {
   }
 }
 
-enum class ParkingAction { kParked, kUnparked };
+enum class ParkingAction { kParked, kUnparked, kWritten, kRead };
 
 void RecordStatistics(size_t size,
                       base::TimeDelta duration,
@@ -49,29 +50,40 @@ void RecordStatistics(size_t size,
   size_t throughput_mb_s =
       static_cast<size_t>(size / duration.InSecondsF()) / 1000000;
   size_t size_kb = size / 1000;
-  if (action == ParkingAction::kParked) {
-    UMA_HISTOGRAM_COUNTS_10000("Memory.ParkableString.Compression.SizeKb",
-                               size_kb);
-    // Size is at least 10kB, and at most ~1MB, and compression throughput
-    // ranges from single-digit MB/s to ~40MB/s depending on the CPU, hence
-    // the range.
-    UMA_HISTOGRAM_CUSTOM_MICROSECONDS_TIMES(
-        "Memory.ParkableString.Compression.Latency", duration,
-        base::TimeDelta::FromMicroseconds(500), base::TimeDelta::FromSeconds(1),
-        100);
-    UMA_HISTOGRAM_COUNTS_1000(
-        "Memory.ParkableString.Compression.ThroughputMBps", throughput_mb_s);
-  } else {
-    UMA_HISTOGRAM_COUNTS_10000("Memory.ParkableString.Decompression.SizeKb",
-                               size_kb);
-    UMA_HISTOGRAM_CUSTOM_MICROSECONDS_TIMES(
-        "Memory.ParkableString.Decompression.Latency", duration,
-        base::TimeDelta::FromMicroseconds(500), base::TimeDelta::FromSeconds(1),
-        100);
-    // Decompression speed can go up to >500MB/s.
-    UMA_HISTOGRAM_COUNTS_1000(
-        "Memory.ParkableString.Decompression.ThroughputMBps", throughput_mb_s);
+
+  const char *size_histogram, *latency_histogram, *throughput_histogram;
+  switch (action) {
+    case ParkingAction::kParked:
+      size_histogram = "Memory.ParkableString.Compression.SizeKb";
+      latency_histogram = "Memory.ParkableString.Compression.Latency";
+      throughput_histogram = "Memory.ParkableString.Compression.ThroughputMBps";
+      break;
+    case ParkingAction::kUnparked:
+      size_histogram = "Memory.ParkableString.Decompression.SizeKb";
+      latency_histogram = "Memory.ParkableString.Decompression.Latency";
+      throughput_histogram =
+          "Memory.ParkableString.Decompression.ThroughputMBps";
+      break;
+    case ParkingAction::kWritten:
+      size_histogram = "Memory.ParkableString.Write.SizeKb";
+      latency_histogram = "Memory.ParkableString.Write.Latency";
+      throughput_histogram = "Memory.ParkableString.Write.ThroughputMBps";
+      break;
+    case ParkingAction::kRead:
+      size_histogram = "Memory.ParkableString.Read.SizeKb";
+      latency_histogram = "Memory.ParkableString.Read.Latency";
+      throughput_histogram = "Memory.ParkableString.Read.ThroughputMBps";
+      break;
   }
+
+  // Size should be <1MiB in most cases.
+  base::UmaHistogramCounts1000(size_histogram, size_kb);
+  // Size is at least 10kB, and at most ~10MB, and throughput ranges from
+  // single-digit MB/s to ~1000MB/s depending on the CPU/disk, hence the ranges.
+  base::UmaHistogramCustomMicrosecondsTimes(
+      latency_histogram, duration, base::TimeDelta::FromMicroseconds(500),
+      base::TimeDelta::FromSeconds(1), 100);
+  base::UmaHistogramCounts1000(throughput_histogram, throughput_mb_s);
 }
 
 void AsanPoisonString(const String& string) {
@@ -519,15 +531,20 @@ String ParkableStringImpl::UnparkInternal() {
   // variable protected by it.
 
   base::ElapsedTimer timer;
+  auto& manager = ParkableStringManager::Instance();
 
   if (is_on_disk()) {
+    base::ElapsedTimer disk_read_timer;
     DCHECK(has_on_disk_data());
     metadata_->compressed_ = std::make_unique<Vector<uint8_t>>();
     metadata_->compressed_->Grow(metadata_->on_disk_metadata_->size());
-    auto& manager = ParkableStringManager::Instance();
     manager.data_allocator().Read(*metadata_->on_disk_metadata_,
                                   metadata_->compressed_->data());
+    base::TimeDelta elapsed = disk_read_timer.Elapsed();
+    RecordStatistics(metadata_->on_disk_metadata_->size(), elapsed,
+                     ParkingAction::kRead);
     manager.OnReadFromDisk(this);
+    manager.RecordDiskReadTime(elapsed);
   }
 
   base::StringPiece compressed_string_piece(
@@ -564,7 +581,7 @@ String ParkableStringImpl::UnparkInternal() {
                                     uncompressed_string_piece));
 
   base::TimeDelta elapsed = timer.Elapsed();
-  ParkableStringManager::Instance().RecordUnparkingTime(elapsed);
+  manager.RecordUnparkingTime(elapsed);
   RecordStatistics(CharactersSizeInBytes(), elapsed, ParkingAction::kUnparked);
 
   return uncompressed;
@@ -710,7 +727,7 @@ void ParkableStringImpl::PostBackgroundWritingTask() {
         this, metadata_->compressed_->data(), metadata_->compressed_->size(),
         Thread::Current()->GetTaskRunner());
     worker_pool::PostTask(
-        FROM_HERE,
+        FROM_HERE, {base::MayBlock(), base::ThreadPool()},
         CrossThreadBindOnce(&ParkableStringImpl::WriteToDiskInBackground,
                             std::move(params)));
   }
@@ -720,24 +737,29 @@ void ParkableStringImpl::PostBackgroundWritingTask() {
 void ParkableStringImpl::WriteToDiskInBackground(
     std::unique_ptr<BackgroundTaskParams> params) {
   auto& allocator = ParkableStringManager::Instance().data_allocator();
+  base::ElapsedTimer timer;
   auto metadata = allocator.Write(params->data, params->size);
+  base::TimeDelta elapsed = timer.Elapsed();
+  RecordStatistics(params->size, elapsed, ParkingAction::kWritten);
 
   auto* task_runner = params->callback_task_runner.get();
   PostCrossThreadTask(
       *task_runner, FROM_HERE,
       CrossThreadBindOnce(
           [](std::unique_ptr<BackgroundTaskParams> params,
-             std::unique_ptr<DiskDataAllocator::Metadata> metadata) {
+             std::unique_ptr<DiskDataMetadata> metadata,
+             base::TimeDelta elapsed) {
             auto* string = params->string.get();
             string->OnWritingCompleteOnMainThread(std::move(params),
-                                                  std::move(metadata));
+                                                  std::move(metadata), elapsed);
           },
-          std::move(params), std::move(metadata)));
+          std::move(params), std::move(metadata), elapsed));
 }
 
 void ParkableStringImpl::OnWritingCompleteOnMainThread(
     std::unique_ptr<BackgroundTaskParams> params,
-    std::unique_ptr<DiskDataAllocator::Metadata> on_disk_metadata) {
+    std::unique_ptr<DiskDataMetadata> on_disk_metadata,
+    base::TimeDelta writing_time) {
   DCHECK(metadata_->background_task_in_progress_);
   DCHECK(!metadata_->on_disk_metadata_);
 
@@ -757,6 +779,10 @@ void ParkableStringImpl::OnWritingCompleteOnMainThread(
     DiscardCompressedData();
     metadata_->state_ = State::kOnDisk;
   }
+
+  // Record the time no matter whether the string was discarded or not, as the
+  // writing cost was paid.
+  ParkableStringManager::Instance().RecordDiskWriteTime(writing_time);
 }
 
 ParkableString::ParkableString(scoped_refptr<StringImpl>&& impl) {

@@ -10,7 +10,7 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/logging.h"
+#include "base/check.h"
 #include "base/single_thread_task_runner.h"
 #include "base/task_runner_util.h"
 #include "base/time/time.h"
@@ -51,10 +51,10 @@ VideoFramePump::VideoFramePump(
       keep_alive_timer_(
           FROM_HERE,
           base::TimeDelta::FromMilliseconds(kKeepAlivePacketIntervalMs),
-          base::Bind(&VideoFramePump::SendKeepAlivePacket,
-                     base::Unretained(this))),
-      capture_scheduler_(base::Bind(&VideoFramePump::CaptureNextFrame,
-                                    base::Unretained(this))) {
+          base::BindRepeating(&VideoFramePump::SendKeepAlivePacket,
+                              base::Unretained(this))),
+      capture_scheduler_(base::BindRepeating(&VideoFramePump::CaptureNextFrame,
+                                             base::Unretained(this))) {
   DCHECK(encoder_);
   DCHECK(video_stub_);
 

@@ -10,7 +10,10 @@
 #include <utility>
 
 #include "base/strings/sys_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
+#include "base/test/metrics/histogram_tester.h"
 #import "ios/web/navigation/navigation_item_impl.h"
+#import "ios/web/navigation/navigation_item_storage_builder.h"
 #import "ios/web/navigation/navigation_item_storage_test_util.h"
 #include "ios/web/public/navigation/referrer.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -37,8 +40,6 @@ class CRWNavigationItemStorageTest : public PlatformTest {
     [item_storage_
         setDisplayState:web::PageDisplayState(CGPointZero, UIEdgeInsetsZero,
                                               0.0, 0.0, 0.0)];
-    [item_storage_
-        setPOSTData:[@"Test data" dataUsingEncoding:NSUTF8StringEncoding]];
     [item_storage_ setHTTPRequestHeaders:@{@"HeaderKey" : @"HeaderValue"}];
     [item_storage_ setUserAgentType:web::UserAgentType::DESKTOP];
   }
@@ -56,12 +57,51 @@ TEST_F(CRWNavigationItemStorageTest, EncodeDecode) {
   NSData* data = [NSKeyedArchiver archivedDataWithRootObject:item_storage()
                                        requiringSecureCoding:NO
                                                        error:nil];
-
   NSKeyedUnarchiver* unarchiver =
       [[NSKeyedUnarchiver alloc] initForReadingFromData:data error:nil];
   unarchiver.requiresSecureCoding = NO;
   id decoded = [unarchiver decodeObjectForKey:NSKeyedArchiveRootObjectKey];
   EXPECT_TRUE(web::ItemStoragesAreEqual(item_storage(), decoded));
+}
+
+// Tests histograms recording.
+TEST_F(CRWNavigationItemStorageTest, Histograms) {
+  CRWNavigationItemStorage* storage = [[CRWNavigationItemStorage alloc] init];
+
+  [storage setURL:GURL("http://" + std::string(2048, 'a') + ".test")];
+  [storage setVirtualURL:GURL("http://" + std::string(3072, 'b') + ".test")];
+  [storage setReferrer:web::Referrer(
+                           GURL("http://" + std::string(4096, 'c') + ".test"),
+                           web::ReferrerPolicyDefault)];
+  [storage setTimestamp:base::Time::Now()];
+  [storage setTitle:base::UTF8ToUTF16(std::string(5120, 'd'))];
+  [storage setDisplayState:web::PageDisplayState(CGPointZero, UIEdgeInsetsZero,
+                                                 0.0, 0.0, 0.0)];
+  [storage setHTTPRequestHeaders:@{
+    @"HeaderKey1" : @"HeaderValue1",
+    @"HeaderKey2" : @"HeaderValue2",
+    @"HeaderKey3" : @"HeaderValue3",
+  }];
+  [storage setUserAgentType:web::UserAgentType::DESKTOP];
+
+  base::HistogramTester histogram_tester;
+  [NSKeyedArchiver archivedDataWithRootObject:storage
+                        requiringSecureCoding:NO
+                                        error:nil];
+  histogram_tester.ExpectBucketCount(
+      web::kNavigationItemSerializedSizeHistogram, 16 /*KB*/, 1);
+  histogram_tester.ExpectBucketCount(
+      web::kNavigationItemSerializedVirtualURLSizeHistogram, 3 /*KB*/, 1);
+  histogram_tester.ExpectBucketCount(
+      web::kNavigationItemSerializedURLSizeHistogram, 2 /*KB*/, 1);
+  histogram_tester.ExpectBucketCount(
+      web::kNavigationItemSerializedReferrerURLSizeHistogram, 4 /*KB*/, 1);
+  histogram_tester.ExpectBucketCount(
+      web::kNavigationItemSerializedTitleSizeHistogram, 5 /*KB*/, 1);
+  histogram_tester.ExpectBucketCount(
+      web::kNavigationItemSerializedDisplayStateSizeHistogram, 0 /*KB*/, 1);
+  histogram_tester.ExpectBucketCount(
+      web::kNavigationItemSerializedRequestHeadersSizeHistogram, 1 /*KB*/, 1);
 }
 
 // Tests that unarchiving CRWNavigationItemStorage data with the URL key being
@@ -87,4 +127,39 @@ TEST_F(CRWNavigationItemStorageTest, EncodeDecodeNoURL) {
   // If the URL isn't encoded, the virtual URL is used.
   EXPECT_EQ(item_storage().virtualURL, decoded.URL);
   EXPECT_EQ(item_storage().virtualURL, decoded.virtualURL);
+}
+
+// CRWNavigationItemStorage does not store "virtualURL" if the it's the same
+// as "URL" to save memory. This test verifies that virtualURL actually gets
+// restored correctly.
+TEST_F(CRWNavigationItemStorageTest, EncodeDecodeSameVirtualURL) {
+  web::NavigationItemStorageBuilder builder;
+
+  web::NavigationItemImpl item_to_store;
+  item_to_store.SetURL(GURL("http://url.test"));
+  item_to_store.SetVirtualURL(item_to_store.GetURL());
+
+  // Serialize and deserialize navigation item.
+  NSData* data = [NSKeyedArchiver
+      archivedDataWithRootObject:builder.BuildStorage(&item_to_store)
+           requiringSecureCoding:NO
+                           error:nil];
+  NSKeyedUnarchiver* unarchiver =
+      [[NSKeyedUnarchiver alloc] initForReadingFromData:data error:nil];
+  unarchiver.requiresSecureCoding = NO;
+  std::unique_ptr<web::NavigationItemImpl> restored_item =
+      builder.BuildNavigationItemImpl(
+          [unarchiver decodeObjectForKey:NSKeyedArchiveRootObjectKey]);
+
+  EXPECT_EQ(item_to_store.GetURL(), restored_item->GetURL());
+  EXPECT_EQ(item_to_store.GetVirtualURL(), restored_item->GetVirtualURL());
+}
+
+// Tests that virtualURL will be the same as URL, if virtualURL is not
+// overridden. This logic allows to store only one URL when virtualURL and URL
+// are the same.
+TEST_F(CRWNavigationItemStorageTest, VirtualURL) {
+  CRWNavigationItemStorage* storage = [[CRWNavigationItemStorage alloc] init];
+  storage.URL = GURL("https://foo.test/");
+  EXPECT_EQ(storage.URL, storage.virtualURL);
 }

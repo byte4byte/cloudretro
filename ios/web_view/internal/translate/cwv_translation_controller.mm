@@ -7,8 +7,9 @@
 #include <memory>
 #include <string>
 
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "base/memory/ptr_util.h"
+#include "base/notreached.h"
 #include "base/strings/string16.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/time/time.h"
@@ -186,6 +187,10 @@ CWVTranslationError CWVConvertTranslateError(
 
 - (void)revertTranslation {
   _translateClient->RevertTranslation();
+}
+
+- (BOOL)requestTranslationOffer {
+  return _translateClient->RequestTranslationOffer();
 }
 
 - (void)setTranslationPolicy:(CWVTranslationPolicy*)policy

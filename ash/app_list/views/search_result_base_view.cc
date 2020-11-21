@@ -12,7 +12,8 @@
 
 namespace ash {
 
-SearchResultBaseView::SearchResultBaseView() : Button(this) {
+SearchResultBaseView::SearchResultBaseView() {
+  SetFocusBehavior(FocusBehavior::ACCESSIBLE_ONLY);
   SetInstallFocusRingOnFocus(false);
 }
 
@@ -40,20 +41,16 @@ void SearchResultBaseView::SetSelected(bool selected,
 
   selected_ = selected;
 
-  if (app_list_features::IsSearchBoxSelectionEnabled()) {
-    if (selected) {
-      SelectInitialResultAction(reverse_tab_order.value_or(false));
-    } else {
-      ClearSelectedResultAction();
-    }
+  if (selected) {
+    SelectInitialResultAction(reverse_tab_order.value_or(false));
+  } else {
+    ClearSelectedResultAction();
   }
 
   SchedulePaint();
 }
 
 bool SearchResultBaseView::SelectNextResultAction(bool reverse_tab_order) {
-  DCHECK(app_list_features::IsSearchBoxSelectionEnabled());
-
   if (!selected() || !actions_view_)
     return false;
 
@@ -64,12 +61,10 @@ bool SearchResultBaseView::SelectNextResultAction(bool reverse_tab_order) {
   return true;
 }
 
-void SearchResultBaseView::NotifyA11yResultSelected() {
-  if (actions_view_ && actions_view_->HasSelectedAction()) {
-    actions_view_->NotifyA11yResultSelected();
-    return;
-  }
-  NotifyAccessibilityEvent(ax::mojom::Event::kSelection, true);
+views::View* SearchResultBaseView::GetSelectedView() {
+  if (actions_view_ && actions_view_->HasSelectedAction())
+    return actions_view_->GetSelectedView();
+  return this;
 }
 
 void SearchResultBaseView::SetResult(SearchResult* result) {
@@ -114,17 +109,11 @@ void SearchResultBaseView::ClearResult() {
 }
 
 void SearchResultBaseView::SelectInitialResultAction(bool reverse_tab_order) {
-  DCHECK(app_list_features::IsSearchBoxSelectionEnabled());
-
-  if (actions_view_ && actions_view_->SelectInitialAction(reverse_tab_order))
-    return;
-
-  NotifyAccessibilityEvent(ax::mojom::Event::kSelection, true);
+  if (actions_view_)
+    actions_view_->SelectInitialAction(reverse_tab_order);
 }
 
 void SearchResultBaseView::ClearSelectedResultAction() {
-  DCHECK(app_list_features::IsSearchBoxSelectionEnabled());
-
   if (actions_view_)
     actions_view_->ClearSelectedAction();
 }

@@ -25,31 +25,27 @@
 #include "ui/views/style/typography.h"
 #include "ui/views/widget/widget.h"
 
-namespace {
-
-std::unique_ptr<views::View> CreateExtraView(views::ButtonListener* listener) {
-  auto help_button = CreateVectorImageButtonWithNativeTheme(
-      listener, vector_icons::kHelpOutlineIcon);
-  help_button->SetFocusForPlatform();
-  help_button->SetTooltipText(l10n_util::GetStringUTF16(IDS_LEARN_MORE));
-  return help_button;
-}
-
-}  // namespace
-
 ConfirmBubbleViews::ConfirmBubbleViews(
     std::unique_ptr<ConfirmBubbleModel> model)
-    : model_(std::move(model)), help_button_(nullptr) {
-  DialogDelegate::SetButtonLabel(
-      ui::DIALOG_BUTTON_OK, model_->GetButtonLabel(ui::DIALOG_BUTTON_OK));
-  DialogDelegate::SetButtonLabel(
-      ui::DIALOG_BUTTON_CANCEL,
-      model_->GetButtonLabel(ui::DIALOG_BUTTON_CANCEL));
-  DialogDelegate::SetAcceptCallback(base::BindOnce(
-      &ConfirmBubbleModel::Accept, base::Unretained(model_.get())));
-  DialogDelegate::SetCancelCallback(base::BindOnce(
-      &ConfirmBubbleModel::Cancel, base::Unretained(model_.get())));
-  help_button_ = DialogDelegate::SetExtraView(::CreateExtraView(this));
+    : model_(std::move(model)) {
+  SetButtonLabel(ui::DIALOG_BUTTON_OK,
+                 model_->GetButtonLabel(ui::DIALOG_BUTTON_OK));
+  SetButtonLabel(ui::DIALOG_BUTTON_CANCEL,
+                 model_->GetButtonLabel(ui::DIALOG_BUTTON_CANCEL));
+  SetAcceptCallback(base::BindOnce(&ConfirmBubbleModel::Accept,
+                                   base::Unretained(model_.get())));
+  SetCancelCallback(base::BindOnce(&ConfirmBubbleModel::Cancel,
+                                   base::Unretained(model_.get())));
+  views::ImageButton* help_button =
+      SetExtraView(views::CreateVectorImageButtonWithNativeTheme(
+          base::BindRepeating(
+              [](ConfirmBubbleViews* bubble) {
+                bubble->model_->OpenHelpPage();
+                bubble->GetWidget()->Close();
+              },
+              base::Unretained(this)),
+          vector_icons::kHelpOutlineIcon));
+  help_button->SetTooltipText(l10n_util::GetStringUTF16(IDS_LEARN_MORE));
 
   set_margins(ChromeLayoutProvider::Get()->GetDialogInsetsForContentType(
       views::TEXT, views::TEXT));
@@ -60,12 +56,12 @@ ConfirmBubbleViews::ConfirmBubbleViews(
   const int kMaxMessageWidth = 400;
   views::ColumnSet* cs = layout->AddColumnSet(0);
   cs->AddColumn(views::GridLayout::LEADING, views::GridLayout::CENTER,
-                views::GridLayout::kFixedSize, views::GridLayout::FIXED,
-                kMaxMessageWidth, false);
+                views::GridLayout::kFixedSize,
+                views::GridLayout::ColumnSize::kFixed, kMaxMessageWidth, false);
 
   // Add the message label.
   auto label = std::make_unique<views::Label>(
-      model_->GetMessageText(), views::style::CONTEXT_MESSAGE_BOX_BODY_TEXT,
+      model_->GetMessageText(), views::style::CONTEXT_DIALOG_BODY_TEXT,
       views::style::STYLE_SECONDARY);
   DCHECK(!label->GetText().empty());
   label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
@@ -90,14 +86,6 @@ base::string16 ConfirmBubbleViews::GetWindowTitle() const {
 
 bool ConfirmBubbleViews::ShouldShowCloseButton() const {
   return false;
-}
-
-void ConfirmBubbleViews::ButtonPressed(views::Button* sender,
-                                       const ui::Event& event) {
-  if (sender == help_button_) {
-    model_->OpenHelpPage();
-    GetWidget()->Close();
-  }
 }
 
 void ConfirmBubbleViews::OnDialogInitialized() {

@@ -11,7 +11,9 @@
 
 #include "base/bind.h"
 #include "base/run_loop.h"
+#include "base/test/scoped_feature_list.h"
 #include "base/test/task_environment.h"
+#include "build/build_config.h"
 #include "components/image_fetcher/core/fake_image_decoder.h"
 #include "components/prefs/pref_service.h"
 #include "components/prefs/scoped_user_pref_update.h"
@@ -23,6 +25,7 @@
 #include "components/signin/internal/identity_manager/profile_oauth2_token_service.h"
 #include "components/signin/public/base/account_consistency_method.h"
 #include "components/signin/public/base/signin_pref_names.h"
+#include "components/signin/public/base/signin_switches.h"
 #include "components/signin/public/base/test_signin_client.h"
 #include "components/sync_preferences/testing_pref_service_syncable.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -30,6 +33,8 @@
 #if !defined(OS_CHROMEOS)
 #include "components/signin/internal/identity_manager/primary_account_policy_manager_impl.h"
 #endif
+
+using signin::ConsentLevel;
 
 class PrimaryAccountManagerTest : public testing::Test,
                                   public PrimaryAccountManager::Observer {
@@ -106,7 +111,7 @@ class PrimaryAccountManagerTest : public testing::Test,
   }
 
   void ExpectSignInWithRefreshTokenSuccess() {
-    EXPECT_TRUE(manager_->IsAuthenticated());
+    EXPECT_TRUE(manager_->HasPrimaryAccount(ConsentLevel::kSync));
     EXPECT_FALSE(manager_->GetAuthenticatedAccountId().empty());
     EXPECT_FALSE(manager_->GetAuthenticatedAccountInfo().email.empty());
 
@@ -151,19 +156,17 @@ TEST_F(PrimaryAccountManagerTest, SignOut) {
   manager_->SignIn("user@gmail.com");
   manager_->SignOut(signin_metrics::SIGNOUT_TEST,
                     signin_metrics::SignoutDelete::IGNORE_METRIC);
-  EXPECT_FALSE(manager_->IsAuthenticated());
+  EXPECT_FALSE(manager_->HasPrimaryAccount(ConsentLevel::kSync));
   EXPECT_TRUE(manager_->GetAuthenticatedAccountInfo().email.empty());
   EXPECT_TRUE(manager_->GetAuthenticatedAccountId().empty());
-  EXPECT_EQ(main_account_id,
-            manager_->GetUnconsentedPrimaryAccountInfo().account_id);
+  EXPECT_TRUE(manager_->GetUnconsentedPrimaryAccountInfo().IsEmpty());
   // Should not be persisted anymore
   ShutDownManager();
   CreatePrimaryAccountManager();
-  EXPECT_FALSE(manager_->IsAuthenticated());
+  EXPECT_FALSE(manager_->HasPrimaryAccount(ConsentLevel::kSync));
   EXPECT_TRUE(manager_->GetAuthenticatedAccountInfo().email.empty());
   EXPECT_TRUE(manager_->GetAuthenticatedAccountId().empty());
-  EXPECT_EQ(main_account_id,
-            manager_->GetUnconsentedPrimaryAccountInfo().account_id);
+  EXPECT_TRUE(manager_->GetUnconsentedPrimaryAccountInfo().IsEmpty());
 }
 
 TEST_F(PrimaryAccountManagerTest, SignOutRevoke) {
@@ -175,17 +178,19 @@ TEST_F(PrimaryAccountManagerTest, SignOutRevoke) {
   token_service_.UpdateCredentials(main_account_id, "token");
   token_service_.UpdateCredentials(other_account_id, "token");
   manager_->SignIn("user@gmail.com");
-  EXPECT_TRUE(manager_->IsAuthenticated());
+  EXPECT_TRUE(manager_->HasPrimaryAccount(ConsentLevel::kSync));
   EXPECT_EQ(main_account_id, manager_->GetAuthenticatedAccountId());
 
   manager_->SignOut(signin_metrics::SIGNOUT_TEST,
                     signin_metrics::SignoutDelete::IGNORE_METRIC);
 
   // Tokens are revoked.
-  EXPECT_FALSE(manager_->IsAuthenticated());
+  EXPECT_FALSE(manager_->HasPrimaryAccount(ConsentLevel::kSync));
   EXPECT_TRUE(token_service_.GetAccounts().empty());
 }
 
+// kRemoveAuthenticatedAccountIfInError isn't supported on Android.
+#if !defined(OS_ANDROID)
 TEST_F(PrimaryAccountManagerTest, SignOutDiceNoRevoke) {
   account_consistency_ = signin::AccountConsistencyMethod::kDice;
   CreatePrimaryAccountManager();
@@ -196,14 +201,14 @@ TEST_F(PrimaryAccountManagerTest, SignOutDiceNoRevoke) {
   token_service_.UpdateCredentials(main_account_id, "token");
   token_service_.UpdateCredentials(other_account_id, "token");
   manager_->SignIn("user@gmail.com");
-  EXPECT_TRUE(manager_->IsAuthenticated());
+  EXPECT_TRUE(manager_->HasPrimaryAccount(ConsentLevel::kSync));
   EXPECT_EQ(main_account_id, manager_->GetAuthenticatedAccountId());
 
   manager_->SignOut(signin_metrics::SIGNOUT_TEST,
                     signin_metrics::SignoutDelete::IGNORE_METRIC);
 
   // Tokens are not revoked.
-  EXPECT_FALSE(manager_->IsAuthenticated());
+  EXPECT_FALSE(manager_->HasPrimaryAccount(ConsentLevel::kSync));
   std::vector<CoreAccountId> expected_tokens = {main_account_id,
                                                 other_account_id};
   EXPECT_EQ(expected_tokens, token_service_.GetAccounts());
@@ -230,21 +235,22 @@ TEST_F(PrimaryAccountManagerTest, SignOutDiceWithError) {
   ASSERT_TRUE(token_service_.RefreshTokenHasError(main_account_id));
   ASSERT_TRUE(token_service_.RefreshTokenHasError(other_account_id));
 
-  EXPECT_TRUE(manager_->IsAuthenticated());
+  EXPECT_TRUE(manager_->HasPrimaryAccount(ConsentLevel::kSync));
   EXPECT_EQ(main_account_id, manager_->GetAuthenticatedAccountId());
 
   manager_->SignOut(signin_metrics::SIGNOUT_TEST,
                     signin_metrics::SignoutDelete::IGNORE_METRIC);
 
   // Only main token is revoked.
-  EXPECT_FALSE(manager_->IsAuthenticated());
+  EXPECT_FALSE(manager_->HasPrimaryAccount(ConsentLevel::kSync));
   std::vector<CoreAccountId> expected_tokens = {other_account_id};
   EXPECT_EQ(expected_tokens, token_service_.GetAccounts());
 }
+#endif
 
 TEST_F(PrimaryAccountManagerTest, SignOutWhileProhibited) {
   CreatePrimaryAccountManager();
-  EXPECT_FALSE(manager_->IsAuthenticated());
+  EXPECT_FALSE(manager_->HasPrimaryAccount(ConsentLevel::kSync));
   EXPECT_TRUE(manager_->GetAuthenticatedAccountInfo().email.empty());
   EXPECT_TRUE(manager_->GetAuthenticatedAccountId().empty());
 
@@ -253,11 +259,28 @@ TEST_F(PrimaryAccountManagerTest, SignOutWhileProhibited) {
   signin_client()->set_is_signout_allowed(false);
   manager_->SignOut(signin_metrics::SIGNOUT_TEST,
                     signin_metrics::SignoutDelete::IGNORE_METRIC);
-  EXPECT_TRUE(manager_->IsAuthenticated());
+  EXPECT_TRUE(manager_->HasPrimaryAccount(ConsentLevel::kSync));
   signin_client()->set_is_signout_allowed(true);
   manager_->SignOut(signin_metrics::SIGNOUT_TEST,
                     signin_metrics::SignoutDelete::IGNORE_METRIC);
-  EXPECT_FALSE(manager_->IsAuthenticated());
+  EXPECT_FALSE(manager_->HasPrimaryAccount(ConsentLevel::kSync));
+}
+
+TEST_F(PrimaryAccountManagerTest, UnconsentedSignOutWhileProhibited) {
+  CreatePrimaryAccountManager();
+  EXPECT_FALSE(manager_->HasPrimaryAccount(ConsentLevel::kSync));
+  EXPECT_TRUE(manager_->GetAuthenticatedAccountInfo().email.empty());
+  EXPECT_TRUE(manager_->GetAuthenticatedAccountId().empty());
+
+  CoreAccountId account_id = AddToAccountTracker("gaia_id", "user@gmail.com");
+  CoreAccountInfo account_info = account_tracker()->GetAccountInfo(account_id);
+  manager_->SetUnconsentedPrimaryAccountInfo(account_info);
+  EXPECT_TRUE(manager_->HasPrimaryAccount(ConsentLevel::kNotRequired));
+  EXPECT_FALSE(manager_->HasPrimaryAccount(ConsentLevel::kSync));
+  signin_client()->set_is_signout_allowed(false);
+  manager_->SignOut(signin_metrics::SIGNOUT_TEST,
+                    signin_metrics::SignoutDelete::IGNORE_METRIC);
+  EXPECT_FALSE(manager_->HasPrimaryAccount(ConsentLevel::kNotRequired));
 }
 
 TEST_F(PrimaryAccountManagerTest, ProhibitedAtStartup) {
@@ -338,64 +361,72 @@ TEST_F(PrimaryAccountManagerTest, SigninNotAllowed) {
 #endif
 
 TEST_F(PrimaryAccountManagerTest, GaiaIdMigration) {
-  if (account_tracker()->GetMigrationState() !=
-      AccountTrackerService::MIGRATION_NOT_STARTED) {
-    std::string email = "user@gmail.com";
-    std::string gaia_id = "account_gaia_id";
+#if defined(OS_CHROMEOS)
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndEnableFeature(switches::kAccountIdMigration);
+#endif
 
-    PrefService* client_prefs = signin_client()->GetPrefs();
-    client_prefs->SetInteger(prefs::kAccountIdMigrationState,
-                             AccountTrackerService::MIGRATION_NOT_STARTED);
-    ListPrefUpdate update(client_prefs, prefs::kAccountInfo);
-    update->Clear();
-    auto dict = std::make_unique<base::DictionaryValue>();
-    dict->SetString("account_id", email);
-    dict->SetString("email", email);
-    dict->SetString("gaia", gaia_id);
-    update->Append(std::move(dict));
+  ASSERT_EQ(AccountTrackerService::MIGRATION_DONE,
+            account_tracker()->GetMigrationState());
+  std::string email = "user@gmail.com";
+  std::string gaia_id = "account_gaia_id";
 
-    account_tracker()->Shutdown();
-    account_tracker()->Initialize(prefs(), base::FilePath());
+  PrefService* client_prefs = signin_client()->GetPrefs();
+  client_prefs->SetInteger(prefs::kAccountIdMigrationState,
+                           AccountTrackerService::MIGRATION_NOT_STARTED);
+  ListPrefUpdate update(client_prefs, prefs::kAccountInfo);
+  update->Clear();
+  auto dict = std::make_unique<base::DictionaryValue>();
+  dict->SetString("account_id", email);
+  dict->SetString("email", email);
+  dict->SetString("gaia", gaia_id);
+  update->Append(std::move(dict));
 
-    client_prefs->SetString(prefs::kGoogleServicesAccountId, email);
+  account_tracker()->Shutdown();
+  account_tracker()->Initialize(prefs(), base::FilePath());
 
-    CreatePrimaryAccountManager();
+  client_prefs->SetString(prefs::kGoogleServicesAccountId, email);
 
-    EXPECT_EQ(CoreAccountId(gaia_id), manager_->GetAuthenticatedAccountId());
-    EXPECT_EQ(gaia_id, user_prefs_.GetString(prefs::kGoogleServicesAccountId));
-  }
+  CreatePrimaryAccountManager();
+
+  EXPECT_EQ(CoreAccountId(gaia_id), manager_->GetAuthenticatedAccountId());
+  EXPECT_EQ(gaia_id, user_prefs_.GetString(prefs::kGoogleServicesAccountId));
 }
 
 TEST_F(PrimaryAccountManagerTest, GaiaIdMigrationCrashInTheMiddle) {
-  if (account_tracker()->GetMigrationState() !=
-      AccountTrackerService::MIGRATION_NOT_STARTED) {
-    std::string email = "user@gmail.com";
-    std::string gaia_id = "account_gaia_id";
+#if defined(OS_CHROMEOS)
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndEnableFeature(switches::kAccountIdMigration);
+#endif
 
-    PrefService* client_prefs = signin_client()->GetPrefs();
-    client_prefs->SetInteger(prefs::kAccountIdMigrationState,
-                             AccountTrackerService::MIGRATION_NOT_STARTED);
-    ListPrefUpdate update(client_prefs, prefs::kAccountInfo);
-    update->Clear();
-    auto dict = std::make_unique<base::DictionaryValue>();
-    dict->SetString("account_id", email);
-    dict->SetString("email", email);
-    dict->SetString("gaia", gaia_id);
-    update->Append(std::move(dict));
+  ASSERT_EQ(AccountTrackerService::MIGRATION_DONE,
+            account_tracker()->GetMigrationState());
+  std::string email = "user@gmail.com";
+  std::string gaia_id = "account_gaia_id";
 
-    account_tracker()->Shutdown();
-    account_tracker()->Initialize(prefs(), base::FilePath());
+  PrefService* client_prefs = signin_client()->GetPrefs();
+  client_prefs->SetInteger(prefs::kAccountIdMigrationState,
+                           AccountTrackerService::MIGRATION_NOT_STARTED);
+  ListPrefUpdate update(client_prefs, prefs::kAccountInfo);
+  update->Clear();
+  auto dict = std::make_unique<base::DictionaryValue>();
+  dict->SetString("account_id", email);
+  dict->SetString("email", email);
+  dict->SetString("gaia", gaia_id);
+  update->Append(std::move(dict));
 
-    client_prefs->SetString(prefs::kGoogleServicesAccountId, gaia_id);
+  account_tracker()->Shutdown();
+  account_tracker()->Initialize(prefs(), base::FilePath());
 
-    CreatePrimaryAccountManager();
-    EXPECT_EQ(CoreAccountId(gaia_id), manager_->GetAuthenticatedAccountId());
-    EXPECT_EQ(gaia_id, user_prefs_.GetString(prefs::kGoogleServicesAccountId));
+  client_prefs->SetString(prefs::kGoogleServicesAccountId, gaia_id);
 
-    base::RunLoop().RunUntilIdle();
-    EXPECT_EQ(AccountTrackerService::MIGRATION_DONE,
-              account_tracker()->GetMigrationState());
-  }
+  CreatePrimaryAccountManager();
+  EXPECT_EQ(CoreAccountId(gaia_id), manager_->GetAuthenticatedAccountId());
+  EXPECT_EQ(gaia_id, user_prefs_.GetString(prefs::kGoogleServicesAccountId));
+
+  base::RunLoop().RunUntilIdle();
+  EXPECT_EQ(AccountTrackerService::MIGRATION_DONE,
+            account_tracker()->GetMigrationState());
 }
 
 TEST_F(PrimaryAccountManagerTest, RestoreFromPrefsConsented) {
@@ -486,11 +517,11 @@ TEST_F(PrimaryAccountManagerTest, RevokeSyncConsent) {
   CreatePrimaryAccountManager();
   CoreAccountId account_id = AddToAccountTracker("gaia_id", "user@gmail.com");
   manager_->SignIn("user@gmail.com");
-  EXPECT_TRUE(manager_->IsAuthenticated());
+  EXPECT_TRUE(manager_->HasPrimaryAccount(ConsentLevel::kSync));
 
   manager_->RevokeSyncConsent();
-  EXPECT_FALSE(manager_->IsAuthenticated());
-  EXPECT_TRUE(manager_->HasUnconsentedPrimaryAccount());
+  EXPECT_FALSE(manager_->HasPrimaryAccount(ConsentLevel::kSync));
+  EXPECT_TRUE(manager_->HasPrimaryAccount(ConsentLevel::kNotRequired));
   EXPECT_EQ(account_id,
             manager_->GetUnconsentedPrimaryAccountInfo().account_id);
 }

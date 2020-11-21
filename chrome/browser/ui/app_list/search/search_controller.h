@@ -9,8 +9,10 @@
 
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
+#include "base/callback.h"
 #include "base/macros.h"
 #include "base/strings/string16.h"
 #include "chrome/browser/ui/app_list/search/mixer.h"
@@ -21,8 +23,14 @@ class AppListModelUpdater;
 class ChromeSearchResult;
 class Profile;
 
+namespace ash {
+class AppListNotifier;
+enum class AppListSearchResultType;
+}
+
 namespace app_list {
 
+class SearchMetricsObserver;
 class SearchProvider;
 enum class RankingItemType;
 
@@ -31,8 +39,12 @@ enum class RankingItemType;
 // results to the given SearchResults UI model.
 class SearchController {
  public:
+  using ResultsChangedCallback =
+      base::RepeatingCallback<void(ash::AppListSearchResultType)>;
+
   SearchController(AppListModelUpdater* model_updater,
                    AppListControllerDelegate* list_controller,
+                   ash::AppListNotifier* notifier,
                    Profile* profile);
   virtual ~SearchController();
 
@@ -42,12 +54,10 @@ class SearchController {
   void ViewClosing();
 
   void OpenResult(ChromeSearchResult* result, int event_flags);
-  void InvokeResultAction(ChromeSearchResult* result,
-                          int action_index,
-                          int event_flags);
+  void InvokeResultAction(ChromeSearchResult* result, int action_index);
 
   // Adds a new mixer group. See Mixer::AddGroup.
-  size_t AddGroup(size_t max_results, double multiplier, double boost);
+  size_t AddGroup(size_t max_results);
 
   // Takes ownership of |provider| and associates it with given mixer group.
   void AddProvider(size_t group_id, std::unique_ptr<SearchProvider> provider);
@@ -72,9 +82,16 @@ class SearchController {
       const ash::SearchResultIdWithPositionIndices& results,
       int launched_index);
 
+  void set_results_changed_callback_for_test(ResultsChangedCallback callback) {
+    results_changed_callback_ = std::move(callback);
+  }
+
  private:
-  // Invoked when the search results are changed.
+  // Invoked when the search results are changed. Providers should use the one
+  // argument version, and pass the primary type of result produced by the
+  // invoking search provider.
   void OnResultsChanged();
+  void OnResultsChangedWithType(ash::AppListSearchResultType result_type);
 
   Profile* profile_;
 
@@ -90,7 +107,11 @@ class SearchController {
   // recording.
   std::string last_launched_app_id_;
 
+  // If set, called when OnResultsChanged is invoked.
+  ResultsChangedCallback results_changed_callback_;
+
   std::unique_ptr<Mixer> mixer_;
+  std::unique_ptr<SearchMetricsObserver> metrics_observer_;
   using Providers = std::vector<std::unique_ptr<SearchProvider>>;
   Providers providers_;
   AppListControllerDelegate* list_controller_;

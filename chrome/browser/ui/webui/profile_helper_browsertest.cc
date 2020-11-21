@@ -5,6 +5,7 @@
 #include "base/bind.h"
 #include "base/run_loop.h"
 #include "build/build_config.h"
+#include "chrome/browser/apps/platform_apps/shortcut_manager.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile_attributes_storage.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -15,6 +16,7 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/browsing_data_remover.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browsing_data_remover_test_util.h"
 #include "content/public/test/test_utils.h"
 #include "content/public/test/test_web_ui.h"
@@ -35,7 +37,7 @@ Profile* CreateProfile() {
   base::FilePath new_path = profile_manager->GenerateNextProfileDirectoryPath();
   base::RunLoop run_loop;
   profile_manager->CreateProfileAsync(
-      new_path, base::Bind(&UnblockOnProfileCreation, &run_loop),
+      new_path, base::BindRepeating(&UnblockOnProfileCreation, &run_loop),
       base::string16(), std::string());
   run_loop.Run();
   return profile_manager->GetProfileByPath(new_path);
@@ -96,7 +98,20 @@ class BrowserAddedObserver : public BrowserListObserver {
 
 }  // namespace
 
-using ProfileHelperTest = InProcessBrowserTest;
+class ProfileHelperTest : public InProcessBrowserTest {
+ public:
+  ProfileHelperTest() = default;
+
+ protected:
+  void SetUp() override {
+    // Shortcut deletion delays tests shutdown on Win-7 and results in time out.
+    // See crbug.com/1073451.
+#if defined(OS_WIN)
+    AppShortcutManager::SuppressShortcutsForTesting();
+#endif
+    InProcessBrowserTest::SetUp();
+  }
+};
 
 IN_PROC_BROWSER_TEST_F(ProfileHelperTest, OpenNewWindowForProfile) {
   BrowserList* browser_list = BrowserList::GetInstance();
@@ -128,7 +143,7 @@ IN_PROC_BROWSER_TEST_F(ProfileHelperTest, OpenNewWindowForProfile) {
 // the same issue as BrowserWindowCocoa::Activate(), and execute call
 // BrowserList::SetLastActive() directly. Not sure if it is a bug or desired
 // behaviour.
-#if !defined(OS_MACOSX)
+#if !defined(OS_MAC)
   // Switch to original browser. Only LastActive should change.
   activation_observer =
       std::make_unique<ExpectBrowserActivationForProfile>(original_profile);
@@ -144,6 +159,8 @@ IN_PROC_BROWSER_TEST_F(ProfileHelperTest, DeleteSoleProfile) {
   Browser* original_browser = browser();
   ProfileAttributesStorage& storage =
       g_browser_process->profile_manager()->GetProfileAttributesStorage();
+  base::FilePath original_browser_profile_path =
+      original_browser->profile()->GetPath();
 
   BrowserList* browser_list = BrowserList::GetInstance();
   EXPECT_EQ(1u, browser_list->size());
@@ -158,8 +175,7 @@ IN_PROC_BROWSER_TEST_F(ProfileHelperTest, DeleteSoleProfile) {
   Browser* new_browser = added_observer.Wait();
 
   EXPECT_EQ(1u, browser_list->size());
-  EXPECT_FALSE(base::Contains(*browser_list, original_browser));
-  EXPECT_NE(new_browser, original_browser);
+  EXPECT_NE(original_browser_profile_path, new_browser->profile()->GetPath());
   EXPECT_EQ(1u, storage.GetNumberOfProfiles());
 }
 

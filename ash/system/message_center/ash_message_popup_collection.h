@@ -62,6 +62,8 @@ class ASH_EXPORT AshMessagePopupCollection
       views::Widget* widget,
       views::Widget::InitParams* init_params) override;
   bool IsPrimaryDisplayForNotification() const override;
+  bool BlockForMixedFullscreen(
+      const message_center::Notification& notification) const override;
   void NotifyPopupAdded(message_center::MessagePopupView* popup) override;
   void NotifyPopupClosed(message_center::MessagePopupView* popup) override;
 
@@ -88,6 +90,8 @@ class ASH_EXPORT AshMessagePopupCollection
 
   // ShelfObserver:
   void OnShelfWorkAreaInsetsChanged() override;
+  void OnHotseatStateChanged(HotseatState old_state,
+                             HotseatState new_state) override;
 
   // display::DisplayObserver:
   void OnDisplayMetricsChanged(const display::Display& display,

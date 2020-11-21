@@ -4,7 +4,7 @@
 
 #import "ios/chrome/browser/overlays/public/overlay_browser_agent_base.h"
 
-#include "base/logging.h"
+#include "base/check.h"
 #import "ios/chrome/browser/main/browser.h"
 #include "ios/chrome/browser/overlays/public/overlay_request.h"
 #include "ios/chrome/browser/overlays/public/overlay_request_callback_installer.h"
@@ -94,7 +94,10 @@ OverlayBrowserAgentBase::CallbackInstallationDriver::GetRequestSupport(
 
 void OverlayBrowserAgentBase::CallbackInstallationDriver::WillShowOverlay(
     OverlayPresenter* presenter,
-    OverlayRequest* request) {
+    OverlayRequest* request,
+    bool initial_presentation) {
+  if (!initial_presentation)
+    return;
   browser_agent_->InstallOverlayRequestCallbacks(request,
                                                  presenter->GetModality());
 }

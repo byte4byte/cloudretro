@@ -4,8 +4,6 @@
 
 #include "ash/shelf/home_to_overview_nudge_controller.h"
 
-#include "ash/home_screen/home_launcher_gesture_handler.h"
-#include "ash/home_screen/home_screen_controller.h"
 #include "ash/home_screen/swipe_home_to_overview_controller.h"
 #include "ash/public/cpp/ash_features.h"
 #include "ash/public/cpp/ash_pref_names.h"
@@ -20,6 +18,7 @@
 #include "ash/wm/overview/overview_controller.h"
 #include "ash/wm/tablet_mode/tablet_mode_controller_test_api.h"
 #include "ash/wm/window_state.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/simple_test_clock.h"
 #include "ui/compositor/layer.h"
@@ -81,7 +80,9 @@ class HomeToOverviewNudgeControllerWithNudgesDisabledTest : public AshTestBase {
 class HomeToOverviewNudgeControllerTest : public AshTestBase {
  public:
   HomeToOverviewNudgeControllerTest() {
-    scoped_feature_list_.InitAndEnableFeature(ash::features::kContextualNudges);
+    scoped_feature_list_.InitWithFeatures(
+        {features::kContextualNudges, features::kHideShelfControlsInTabletMode},
+        {});
   }
   ~HomeToOverviewNudgeControllerTest() override = default;
 
@@ -224,6 +225,7 @@ TEST_F(HomeToOverviewNudgeControllerTest, NoNudgeBeforeLogin) {
 // first time, nudge should remain visible until the hotseat state changes. On
 // subsequent shows, the nudge should be hidden after a timeout.
 TEST_F(HomeToOverviewNudgeControllerTest, ShownOnHomeScreen) {
+  base::HistogramTester histogram_tester;
   CreateUserSessions(1);
 
   // The nudge should not be shown in clamshell.
@@ -289,6 +291,9 @@ TEST_F(HomeToOverviewNudgeControllerTest, ShownOnHomeScreen) {
   GetNudgeController()->FireHideTimerForTesting();
   EXPECT_FALSE(GetNudgeController()->nudge_for_testing());
   EXPECT_EQ(gfx::Transform(), GetHotseatWidget()->GetLayer()->transform());
+  histogram_tester.ExpectBucketCount(
+      "Ash.ContextualNudgeDismissContext.HomeToOverview",
+      contextual_tooltip::DismissNudgeReason::kTimeout, 1);
 }
 
 // Tests that the nudge eventually stops showing.
@@ -323,6 +328,7 @@ TEST_F(HomeToOverviewNudgeControllerTest, ShownLimitedNumberOfTimes) {
 
 // Tests that the nudge is hidden when tablet mode exits.
 TEST_F(HomeToOverviewNudgeControllerTest, HiddenOnTabletModeExit) {
+  base::HistogramTester histogram_tester;
   TabletModeControllerTestApi().EnterTabletMode();
   CreateUserSessions(1);
   ScopedWindowList extra_windows = CreateAndMinimizeWindows(2);
@@ -336,6 +342,10 @@ TEST_F(HomeToOverviewNudgeControllerTest, HiddenOnTabletModeExit) {
   EXPECT_FALSE(GetNudgeController()->nudge_for_testing());
   EXPECT_EQ(gfx::Transform(),
             GetHotseatWidget()->GetLayer()->GetTargetTransform());
+
+  histogram_tester.ExpectBucketCount(
+      "Ash.ContextualNudgeDismissContext.HomeToOverview",
+      contextual_tooltip::DismissNudgeReason::kOther, 1);
 }
 
 // Tests that the nudge show is canceled when tablet mode exits.
@@ -500,6 +510,7 @@ TEST_F(HomeToOverviewNudgeControllerTest, NoCrashIfNudgeWidgetGetsClosed) {
 
 // Tests that tapping on the nudge hides the nudge.
 TEST_F(HomeToOverviewNudgeControllerTest, TapOnTheNudgeClosesTheNudge) {
+  base::HistogramTester histogram_tester;
   TabletModeControllerTestApi().EnterTabletMode();
   CreateUserSessions(1);
   ScopedWindowList windows = CreateAndMinimizeWindows(2);
@@ -521,6 +532,10 @@ TEST_F(HomeToOverviewNudgeControllerTest, TapOnTheNudgeClosesTheNudge) {
 
   EXPECT_EQ(gfx::Transform(),
             GetHotseatWidget()->GetLayer()->GetTargetTransform());
+
+  histogram_tester.ExpectBucketCount(
+      "Ash.ContextualNudgeDismissContext.HomeToOverview",
+      contextual_tooltip::DismissNudgeReason::kTap, 1);
 }
 
 TEST_F(HomeToOverviewNudgeControllerTest, TapOnTheNudgeDuringShowAnimation) {
@@ -608,9 +623,8 @@ TEST_F(HomeToOverviewNudgeControllerTest, NoNudgeAfterSuccessfulGestures) {
               // transition to overview (which happens after swipe moves far
               // enough), run it to trigger transition to overview.
               SwipeHomeToOverviewController* swipe_controller =
-                  Shell::Get()
-                      ->home_screen_controller()
-                      ->home_launcher_gesture_handler()
+                  GetPrimaryShelf()
+                      ->shelf_layout_manager()
                       ->swipe_home_to_overview_controller_for_testing();
               ASSERT_TRUE(swipe_controller);
 
@@ -620,7 +634,7 @@ TEST_F(HomeToOverviewNudgeControllerTest, NoNudgeAfterSuccessfulGestures) {
                 transition_timer->FireNow();
             }));
 
-    // No point oof continuing the test if transition to overview failed.
+    // No point in continuing the test if transition to overview failed.
     ASSERT_TRUE(Shell::Get()->overview_controller()->InOverviewSession());
   }
 
@@ -661,9 +675,8 @@ TEST_F(HomeToOverviewNudgeControllerTest, HomeToOverviewGestureFromNudge) {
         // transition to overview (which happens after swipe moves far
         // enough), run it to trigger transition to overview.
         SwipeHomeToOverviewController* swipe_controller =
-            Shell::Get()
-                ->home_screen_controller()
-                ->home_launcher_gesture_handler()
+            GetPrimaryShelf()
+                ->shelf_layout_manager()
                 ->swipe_home_to_overview_controller_for_testing();
         ASSERT_TRUE(swipe_controller);
 

@@ -3,11 +3,15 @@
 // found in the LICENSE file.
 
 // clang-format off
-import {ContentSetting,SiteSettingSource,SiteSettingsPrefsBrowserProxyImpl} from 'chrome://settings/lazy_load.js';
-import {isChildVisible,isVisible} from 'chrome://test/test_util.m.js';
 import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
-import {routes} from 'chrome://settings/settings.js';
-import {TestSiteSettingsPrefsBrowserProxy} from 'chrome://test/settings/test_site_settings_prefs_browser_proxy.js';
+import {ContentSetting, SiteSettingSource, SiteSettingsPrefsBrowserProxyImpl} from 'chrome://settings/lazy_load.js';
+import {Router, routes} from 'chrome://settings/settings.js';
+
+import {assertEquals, assertFalse, assertTrue} from '../chai_assert.js';
+import {isChildVisible, isVisible} from '../test_util.m.js';
+
+import {TestSiteSettingsPrefsBrowserProxy} from './test_site_settings_prefs_browser_proxy.js';
+
 // clang-format on
 
 suite('CrSettingsRecentSitePermissionsTest', function() {
@@ -17,33 +21,36 @@ suite('CrSettingsRecentSitePermissionsTest', function() {
    */
   let browserProxy = null;
 
-  /** @type {SettingsRecentSitePermissionsElement} */
+  /** @type {!SettingsRecentSitePermissionsElement} */
   let testElement;
 
   setup(function() {
     browserProxy = new TestSiteSettingsPrefsBrowserProxy();
     SiteSettingsPrefsBrowserProxyImpl.instance_ = browserProxy;
 
-    PolymerTest.clearBody();
-    testElement = document.createElement('settings-recent-site-permissions');
+    document.body.innerHTML = '';
+    testElement =
+        /** @type {!SettingsRecentSitePermissionsElement} */
+        (document.createElement('settings-recent-site-permissions'));
     document.body.appendChild(testElement);
     flush();
   });
 
   teardown(function() {
     testElement.remove();
+    Router.getInstance().navigateTo(routes.BASIC);
   });
 
   test('No recent permissions', async function() {
-    browserProxy.setResultFor('getRecentSitePermissions', Promise.resolve([]));
-    testElement.currentRouteChanged(routes.SITE_SETTINGS);
+    browserProxy.setRecentSitePermissions([]);
+    Router.getInstance().navigateTo(routes.SITE_SETTINGS);
     await browserProxy.whenCalled('getRecentSitePermissions');
     flush();
-    assertTrue(isVisible(testElement, '#noPermissionsText'));
+    assertTrue(isChildVisible(testElement, '#noPermissionsText'));
   });
 
   test('Various recent permissions', async function() {
-    const mockData = Promise.resolve([
+    const mockData = [
       {
         origin: 'https://bar.com',
         incognito: true,
@@ -52,9 +59,8 @@ suite('CrSettingsRecentSitePermissionsTest', function() {
       },
       {
         origin: 'https://bar.com',
-        recentPermissions: [
-          {setting: ContentSetting.ALLOW, displayName: 'notifications'}
-        ]
+        recentPermissions:
+            [{setting: ContentSetting.ALLOW, displayName: 'notifications'}]
       },
       {
         origin: 'http://foo.com',
@@ -66,9 +72,9 @@ suite('CrSettingsRecentSitePermissionsTest', function() {
           }
         ]
       },
-    ]);
-    browserProxy.setResultFor('getRecentSitePermissions', mockData);
-    testElement.currentRouteChanged(routes.SITE_SETTINGS);
+    ];
+    browserProxy.setRecentSitePermissions(mockData);
+    Router.getInstance().navigateTo(routes.SITE_SETTINGS);
     await browserProxy.whenCalled('getRecentSitePermissions');
     flush();
 
@@ -78,8 +84,8 @@ suite('CrSettingsRecentSitePermissionsTest', function() {
     const siteEntries = testElement.shadowRoot.querySelectorAll('.link-button');
     assertEquals(3, siteEntries.length);
 
-    const incognitoIcons =
-        testElement.shadowRoot.querySelectorAll('.incognito-icon');
+    const incognitoIcons = /** @type !NodeList<!HTMLElement> */ (
+        testElement.shadowRoot.querySelectorAll('.incognito-icon'));
     assertTrue(isVisible(incognitoIcons[0]));
     assertFalse(isVisible(incognitoIcons[1]));
     assertFalse(isVisible(incognitoIcons[2]));

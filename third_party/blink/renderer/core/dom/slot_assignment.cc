@@ -72,6 +72,7 @@ void SlotAssignment::DidRemoveSlot(HTMLSlotElement& slot) {
       ClearCandidateNodes(candidates);
       slot.ClearAssignedNodesCandidates();
       SetNeedsAssignmentRecalc();
+      slot.DidSlotChangeAfterRemovedFromShadowTree();
     }
     return;
   }
@@ -231,6 +232,7 @@ void SlotAssignment::SetNeedsAssignmentRecalc() {
   if (owner_->isConnected()) {
     owner_->GetDocument().GetSlotAssignmentEngine().AddShadowRootNeedingRecalc(
         *owner_);
+    owner_->GetDocument().ScheduleLayoutTreeUpdateIfNeeded();
   }
 }
 
@@ -393,13 +395,17 @@ HTMLSlotElement* SlotAssignment::GetCachedFirstSlotWithoutAccessingNodeTree(
   return nullptr;
 }
 
-void SlotAssignment::UpdateCandidateNodeAssignedSlot(Node& node,
+bool SlotAssignment::UpdateCandidateNodeAssignedSlot(Node& node,
                                                      HTMLSlotElement& slot) {
+  bool updated = false;
   auto* prev_slot = candidate_assigned_slot_map_.at(&node);
-  if (prev_slot && prev_slot != &slot)
+  if (prev_slot && prev_slot != &slot) {
     prev_slot->RemoveAssignedNodeCandidate(node);
+    updated = true;
+  }
 
   candidate_assigned_slot_map_.Set(&node, &slot);
+  return updated;
 }
 
 void SlotAssignment::ClearCandidateNodes(
@@ -407,7 +413,7 @@ void SlotAssignment::ClearCandidateNodes(
   candidate_assigned_slot_map_.RemoveAll(candidates);
 }
 
-void SlotAssignment::Trace(Visitor* visitor) {
+void SlotAssignment::Trace(Visitor* visitor) const {
   visitor->Trace(slots_);
   visitor->Trace(slot_map_);
   visitor->Trace(owner_);

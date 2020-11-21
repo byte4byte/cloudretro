@@ -49,6 +49,10 @@ RequestPinView::RequestPinView(
   SetDialogParameters(code_type, security_token_pin::ErrorLabel::kNone,
                       attempts_left, accept_input);
   chrome::RecordDialogCreation(chrome::DialogIdentifier::REQUEST_PIN);
+
+  SetShowCloseButton(false);
+  set_fixed_width(views::LayoutProvider::Get()->GetDistanceMetric(
+      views::DISTANCE_MODAL_DIALOG_PREFERRED_WIDTH));
 }
 
 RequestPinView::~RequestPinView() {
@@ -111,16 +115,6 @@ base::string16 RequestPinView::GetWindowTitle() const {
   return window_title_;
 }
 
-bool RequestPinView::ShouldShowCloseButton() const {
-  return false;
-}
-
-gfx::Size RequestPinView::CalculatePreferredSize() const {
-  int default_width = views::LayoutProvider::Get()->GetDistanceMetric(
-      DISTANCE_MODAL_DIALOG_PREFERRED_WIDTH);
-  return gfx::Size(default_width, GetHeightForWidth(default_width));
-}
-
 void RequestPinView::SetDialogParameters(
     security_token_pin::CodeType code_type,
     security_token_pin::ErrorLabel error_label,
@@ -167,7 +161,7 @@ void RequestPinView::Init() {
   views::ColumnSet* column_set = layout->AddColumnSet(column_view_set_id);
 
   column_set->AddColumn(views::GridLayout::LEADING, views::GridLayout::FILL, 1,
-                        views::GridLayout::USE_PREF, 0, 0);
+                        views::GridLayout::ColumnSize::kUsePreferred, 0, 0);
   layout->StartRow(0, column_view_set_id);
 
   // Information label.
@@ -184,7 +178,7 @@ void RequestPinView::Init() {
   column_view_set_id++;
   column_set = layout->AddColumnSet(column_view_set_id);
   column_set->AddColumn(views::GridLayout::FILL, views::GridLayout::FILL, 100,
-                        views::GridLayout::USE_PREF, 0, 0);
+                        views::GridLayout::ColumnSize::kUsePreferred, 0, 0);
 
   // Textfield to enter the PIN/PUK.
   layout->StartRow(0, column_view_set_id);
@@ -201,7 +195,7 @@ void RequestPinView::Init() {
   column_view_set_id++;
   column_set = layout->AddColumnSet(column_view_set_id);
   column_set->AddColumn(views::GridLayout::LEADING, views::GridLayout::FILL, 1,
-                        views::GridLayout::USE_PREF, 0, 0);
+                        views::GridLayout::ColumnSize::kUsePreferred, 0, 0);
 
   // Error label.
   layout->StartRow(0, column_view_set_id);

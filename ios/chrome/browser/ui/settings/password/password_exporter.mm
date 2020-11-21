@@ -5,16 +5,17 @@
 #import "ios/chrome/browser/ui/settings/password/password_exporter.h"
 
 #include "base/bind.h"
+#include "base/check.h"
 #include "base/files/file_path.h"
-#include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/notreached.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/task/post_task.h"
 #include "base/task/thread_pool.h"
 #include "base/task_runner_util.h"
 #include "base/threading/scoped_blocking_call.h"
-#include "components/autofill/core/common/password_form.h"
 #include "components/password_manager/core/browser/export/password_csv_writer.h"
+#include "components/password_manager/core/browser/password_form.h"
 #include "components/password_manager/core/browser/password_manager_metrics_util.h"
 #include "components/password_manager/core/common/passwords_directory_util_ios.h"
 #include "components/strings/grit/components_strings.h"
@@ -45,7 +46,8 @@ enum class ReauthenticationStatus {
 @implementation PasswordSerializerBridge
 
 - (void)serializePasswords:
-            (std::vector<std::unique_ptr<autofill::PasswordForm>>)passwords
+            (std::vector<std::unique_ptr<password_manager::PasswordForm>>)
+                passwords
                    handler:(void (^)(std::string))serializedPasswordsHandler {
   base::ThreadPool::PostTaskAndReplyWithResult(
       FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_BLOCKING},
@@ -163,7 +165,7 @@ enum class ReauthenticationStatus {
 }
 
 - (void)startExportFlow:
-    (std::vector<std::unique_ptr<autofill::PasswordForm>>)passwords {
+    (std::vector<std::unique_ptr<password_manager::PasswordForm>>)passwords {
   DCHECK(!passwords.empty());
   DCHECK(self.exportState == ExportState::IDLE);
   if ([_weakReauthenticationModule canAttemptReauth]) {
@@ -187,7 +189,7 @@ enum class ReauthenticationStatus {
 }
 
 - (void)serializePasswords:
-    (std::vector<std::unique_ptr<autofill::PasswordForm>>)passwords {
+    (std::vector<std::unique_ptr<password_manager::PasswordForm>>)passwords {
   self.passwordCount = passwords.size();
 
   __weak PasswordExporter* weakSelf = self;

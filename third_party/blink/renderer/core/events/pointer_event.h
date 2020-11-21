@@ -5,7 +5,9 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_EVENTS_POINTER_EVENT_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_EVENTS_POINTER_EVENT_H_
 
+#include "third_party/blink/public/common/input/pointer_id.h"
 #include "third_party/blink/renderer/core/events/mouse_event.h"
+#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/wtf/casting.h"
 
 namespace blink {
@@ -32,6 +34,11 @@ class CORE_EXPORT PointerEvent final : public MouseEvent {
     return PointerEvent::Create(type, initializer, base::TimeTicks::Now());
   }
 
+  static PointerEvent* Create(const AtomicString& event_type,
+                              AbstractView*,
+                              const Event* underlying_event,
+                              SimulatedClickCreationScope);
+
   PointerEvent(const AtomicString&,
                const PointerEventInit*,
                base::TimeTicks platform_time_stamp,
@@ -44,6 +51,8 @@ class CORE_EXPORT PointerEvent final : public MouseEvent {
   float pressure() const { return pressure_; }
   int32_t tiltX() const { return tilt_x_; }
   int32_t tiltY() const { return tilt_y_; }
+  double azimuthAngle() const { return azimuth_angle_; }
+  double altitudeAngle() const { return altitude_angle_; }
   float tangentialPressure() const { return tangential_pressure_; }
   int32_t twist() const { return twist_; }
   const String& pointerType() const { return pointer_type_; }
@@ -53,12 +62,36 @@ class CORE_EXPORT PointerEvent final : public MouseEvent {
   bool IsMouseEvent() const override;
   bool IsPointerEvent() const override;
 
-  double screenX() const override { return screen_location_.X(); }
-  double screenY() const override { return screen_location_.Y(); }
-  double clientX() const override { return client_location_.X(); }
-  double clientY() const override { return client_location_.Y(); }
-  double pageX() const override { return page_location_.X(); }
-  double pageY() const override { return page_location_.Y(); }
+  double screenX() const override {
+    if (ShouldHaveIntegerCoordinates())
+      return MouseEvent::screenX();
+    return screen_location_.X();
+  }
+  double screenY() const override {
+    if (ShouldHaveIntegerCoordinates())
+      return MouseEvent::screenY();
+    return screen_location_.Y();
+  }
+  double clientX() const override {
+    if (ShouldHaveIntegerCoordinates())
+      return MouseEvent::clientX();
+    return client_location_.X();
+  }
+  double clientY() const override {
+    if (ShouldHaveIntegerCoordinates())
+      return MouseEvent::clientY();
+    return client_location_.Y();
+  }
+  double pageX() const override {
+    if (ShouldHaveIntegerCoordinates())
+      return MouseEvent::pageX();
+    return page_location_.X();
+  }
+  double pageY() const override {
+    if (ShouldHaveIntegerCoordinates())
+      return MouseEvent::pageY();
+    return page_location_.Y();
+  }
 
   double offsetX() const override;
   double offsetY() const override;
@@ -76,15 +109,19 @@ class CORE_EXPORT PointerEvent final : public MouseEvent {
 
   DispatchEventResult DispatchEvent(EventDispatcher&) override;
 
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
 
  private:
+  bool ShouldHaveIntegerCoordinates() const;
+
   PointerId pointer_id_;
   double width_;
   double height_;
   float pressure_;
   int32_t tilt_x_;
   int32_t tilt_y_;
+  double azimuth_angle_;
+  double altitude_angle_;
   float tangential_pressure_;
   int32_t twist_;
   String pointer_type_;

@@ -34,7 +34,9 @@ class MediaHistoryFeedsTable : public MediaHistoryTableBase {
     kBadFetchResult = 2,
     kBadLogo = 3,
     kBadUserIdentifier = 4,
-    kMaxValue = kBadUserIdentifier,
+    kBadResetReason = 5,
+    kBadSafeSearchResult = 6,
+    kMaxValue = kBadSafeSearchResult,
   };
 
  private:
@@ -53,15 +55,18 @@ class MediaHistoryFeedsTable : public MediaHistoryTableBase {
   bool DiscoverFeed(const GURL& url);
 
   // Updates the feed following a fetch.
-  bool UpdateFeedFromFetch(const int64_t feed_id,
-                           const media_feeds::mojom::FetchResult result,
-                           const bool was_fetched_from_cache,
-                           const int item_count,
-                           const int item_play_next_count,
-                           const int item_content_types,
-                           const std::vector<media_session::MediaImage>& logos,
-                           const std::string& display_name,
-                           const int item_safe_count);
+  bool UpdateFeedFromFetch(
+      const int64_t feed_id,
+      const media_feeds::mojom::FetchResult result,
+      const bool was_fetched_from_cache,
+      const int item_count,
+      const int item_play_next_count,
+      const int item_content_types,
+      const std::vector<media_feeds::mojom::MediaImagePtr>& logos,
+      const media_feeds::mojom::UserIdentifier* user_identifier,
+      const std::string& display_name,
+      const int item_safe_count,
+      const std::string& cookie_name_filter);
 
   // Returns the feed rows in the database.
   std::vector<media_feeds::mojom::MediaFeedPtr> GetRows(
@@ -73,6 +78,41 @@ class MediaHistoryFeedsTable : public MediaHistoryTableBase {
   // Recalculates the Safe Search safe item count and returns true if it was
   // successful.
   bool RecalculateSafeSearchItemCount(const int64_t feed_id);
+
+  // Resets the feed to defaults and returns a boolean if it was saved.
+  bool Reset(const int64_t feed_id,
+             const media_feeds::mojom::ResetReason reason);
+
+  // Deletes the feed with |feed_id| and returns a boolean if it was successful.
+  bool Delete(const int64_t feed_id);
+
+  // Returns the fetch details for the feed.
+  base::Optional<MediaHistoryKeyedService::MediaFeedFetchDetails>
+  GetFetchDetails(const int64_t feed_id);
+
+  // Clears the reset reason for a feed and returns a boolean if it was saved.
+  bool ClearResetReason(const int64_t feed_id);
+
+  // Returns the cookie name filter for |feed_id| or an empty string.
+  std::string GetCookieNameFilter(const int64_t feed_id);
+
+  // Gets the feed for |origin|'s subdomains.
+  std::set<int64_t> GetFeedsForOriginSubdomain(const url::Origin& origin);
+
+  // Gets the feed for |origin|.
+  base::Optional<int64_t> GetFeedForOrigin(const url::Origin& origin);
+
+  // Returns all the media feeds that have an unknown safe search result.
+  MediaHistoryKeyedService::PendingSafeSearchCheckList
+  GetPendingSafeSearchCheckItems();
+
+  // Stores the safe search result for |feed_id| and returns true if successful.
+  bool StoreSafeSearchResult(int64_t feed_id,
+                             media_feeds::mojom::SafeSearchResult result);
+
+  // Updates the user status and returns true if successful.
+  bool UpdateFeedUserStatus(const int64_t feed_id,
+                            media_feeds::mojom::FeedUserStatus status);
 };
 
 }  // namespace media_history

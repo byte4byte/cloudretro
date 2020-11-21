@@ -5,7 +5,7 @@
 #include <memory>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/check.h"
 #include "base/test/launcher/unit_test_launcher.h"
 #include "base/test/test_suite.h"
@@ -14,15 +14,11 @@
 #include "chrome/updater/win/util.h"
 
 int main(int argc, char** argv) {
-  // ScopedCOMInitializer keeps COM initialized in a specific scope. We don't
-  // want to initialize it for sandboxed processes, so manage its lifetime with
-  // a unique_ptr, which will call ScopedCOMInitializer's destructor when it
-  // goes out of scope below.
   auto scoped_com_initializer =
       std::make_unique<base::win::ScopedCOMInitializer>(
           base::win::ScopedCOMInitializer::kMTA);
   bool success = updater::InitializeCOMSecurity();
-  DCHECK(success) << "InitializeCOMSecurity() failed.";
+  CHECK(success) << "InitializeCOMSecurity() failed.";
 
   // Some tests will fail if two tests try to launch test_process.exe
   // simultaneously, so run the tests serially. This will still shard them and

@@ -82,6 +82,8 @@ div{
   ],
   "showRulers": true,
   "showExtensionLines": true,
+  "showAccessibilityInfo": true,
+  "colorFormat": "hex",
   "elementInfo": {
     "tagName": "div",
     "idValue": "div",
@@ -89,7 +91,9 @@ div{
     "nodeHeight": "80",
     "isKeyboardFocusable": false,
     "accessibleName": "",
-    "accessibleRole": "generic"
+    "accessibleRole": "generic",
+    "layoutObjectName": "LayoutNGBlockFlow",
+    "showAccessibilityInfo": true
   }
 }
 

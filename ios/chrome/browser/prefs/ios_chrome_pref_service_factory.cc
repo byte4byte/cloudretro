@@ -7,8 +7,8 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/check.h"
 #include "base/feature_list.h"
-#include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "components/policy/core/browser/browser_policy_connector.h"
@@ -52,7 +52,7 @@ void PrepareFactory(sync_preferences::PrefServiceSyncableFactory* factory,
   factory->set_user_prefs(base::MakeRefCounted<JsonPrefStore>(
       pref_filename, std::unique_ptr<PrefFilter>(), pref_io_task_runner));
 
-  factory->set_read_error_callback(base::Bind(&HandleReadError));
+  factory->set_read_error_callback(base::BindRepeating(&HandleReadError));
   factory->SetPrefModelAssociatorClient(
       IOSChromePrefModelAssociatorClient::GetInstance());
 }

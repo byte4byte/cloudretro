@@ -19,9 +19,9 @@ TP_BINARY_NAME = 'trace_processor_shell'
 EXPORT_JSON_QUERY_TEMPLATE = 'select export_json(%s)\n'
 METRICS_PATH = os.path.realpath(os.path.join(os.path.dirname(__file__),
                                              'metrics'))
+POWER_PROFILE_SQL = 'power_profile.sql'
 
-
-MetricFiles = namedtuple('MetricFiles', ('sql', 'proto'))
+MetricFiles = namedtuple('MetricFiles', ('sql', 'proto', 'internal_metric'))
 
 
 class InvalidTraceProcessorOutput(Exception):
@@ -69,15 +69,18 @@ def _RunTraceProcessor(*args):
 
 
 def _CreateMetricFiles(metric_name):
-  # Currently assuming all metric files live in tbmv3/metrics directory. We will
-  # revise this decision later.
-  metric_files = MetricFiles(
-      sql=os.path.join(METRICS_PATH, metric_name + '.sql'),
-      proto=os.path.join(METRICS_PATH, metric_name + '.proto'))
-  for filetype, path in metric_files._asdict().iteritems():
-    if not os.path.isfile(path):
-      raise RuntimeError('metric %s file not found at %s' % (filetype, path))
-  return metric_files
+  # Currently assuming all metric files live in tbmv3/metrics directory unless
+  # the metrics are compiled into trace processor. We will revise this decision
+  # later.
+  sql_file = os.path.join(METRICS_PATH, metric_name + '.sql')
+  proto_file = os.path.join(METRICS_PATH, metric_name + '.proto')
+  internal_metric = False
+  if not (os.path.isfile(sql_file) and os.path.isfile(proto_file)):
+    # Metric files not found - metric may be compiled into trace processor.
+    internal_metric = True
+  return MetricFiles(sql=sql_file,
+                     proto=proto_file,
+                     internal_metric=internal_metric)
 
 
 def _ScopedHistogramName(metric_name, histogram_name):
@@ -185,7 +188,8 @@ def _PluckField(json_dict, field_path):
     return _PluckField(field_value, path_tail)
 
 
-def RunMetric(trace_processor_path, trace_file, metric_name):
+def RunMetric(trace_processor_path, trace_file, metric_name,
+              fetch_power_profile=False):
   """Run a TBMv3 metric using trace processor.
 
   Args:
@@ -199,12 +203,21 @@ def RunMetric(trace_processor_path, trace_file, metric_name):
   """
   trace_processor_path = _EnsureTraceProcessor(trace_processor_path)
   metric_files = _CreateMetricFiles(metric_name)
-  output = _RunTraceProcessor(
+  if metric_files.internal_metric:
+    metric_name_arg = metric_name
+  else:
+    metric_name_arg = metric_files.sql
+  command_args = [
       trace_processor_path,
-      '--run-metrics', metric_files.sql,
+      '--run-metrics', metric_name_arg,
       '--metrics-output', 'json',
       trace_file,
-  )
+  ]
+  if fetch_power_profile:
+    power_profile_sql = binary_deps_manager.FetchDataFile(POWER_PROFILE_SQL)
+    command_args[1:1] = ['--pre-metrics', power_profile_sql]
+
+  output = _RunTraceProcessor(*command_args)
   measurements = json.loads(output)
 
   histograms = histogram_set.HistogramSet()

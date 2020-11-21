@@ -46,7 +46,7 @@ namespace blink {
 
 class ExceptionState;
 class ExecutionContext;
-class LocalFrame;
+class LocalDOMWindow;
 class SpeechRecognitionController;
 
 class MODULES_EXPORT SpeechRecognition final
@@ -55,13 +55,12 @@ class MODULES_EXPORT SpeechRecognition final
       public ExecutionContextLifecycleObserver,
       public mojom::blink::SpeechRecognitionSessionClient,
       public PageVisibilityObserver {
-  USING_GARBAGE_COLLECTED_MIXIN(SpeechRecognition);
   DEFINE_WRAPPERTYPEINFO();
 
  public:
   static SpeechRecognition* Create(ExecutionContext*);
 
-  SpeechRecognition(LocalFrame*, ExecutionContext*);
+  SpeechRecognition(LocalDOMWindow*);
   ~SpeechRecognition() override;
 
   // SpeechRecognition.idl implemementation.
@@ -122,7 +121,7 @@ class MODULES_EXPORT SpeechRecognition final
   DEFINE_ATTRIBUTE_EVENT_LISTENER(start, kStart)
   DEFINE_ATTRIBUTE_EVENT_LISTENER(end, kEnd)
 
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
 
  private:
   void OnConnectionError();

@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "base/memory/ptr_util.h"
+#include "build/chromeos_buildflags.h"
 #include "components/feedback/feedback_report.h"
 #include "components/feedback/feedback_util.h"
 #include "components/feedback/proto/common.pb.h"
@@ -17,7 +18,7 @@
 
 namespace {
 
-#if defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS) || BUILDFLAG(IS_LACROS)
 constexpr int kChromeOSProductId = 208;
 #else
 constexpr int kChromeBrowserProductId = 237;
@@ -112,6 +113,10 @@ void FeedbackCommon::AddLogs(SystemLogsMap logs) {
     logs.insert(logs.begin(), logs.end());
 }
 
+bool FeedbackCommon::RemoveLog(std::string name) {
+  return logs_.erase(name) == 1;
+}
+
 void FeedbackCommon::PrepareReport(
     userfeedback::ExtensionSubmit* feedback_data) const {
   // Unused field, needs to be 0 though.
@@ -119,7 +124,7 @@ void FeedbackCommon::PrepareReport(
 
   // Set whether we're reporting from ChromeOS or Chrome on another platform.
   userfeedback::ChromeData chrome_data;
-#if defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS) || BUILDFLAG(IS_LACROS)
   const userfeedback::ChromeData_ChromePlatform chrome_platform =
       userfeedback::ChromeData_ChromePlatform_CHROME_OS;
   const int default_product_id = kChromeOSProductId;

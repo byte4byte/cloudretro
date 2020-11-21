@@ -42,9 +42,32 @@ public class ChromeColors {
      * @return The primary background color.
      */
     public static @ColorInt int getPrimaryBackgroundColor(Resources res, boolean forceDarkBgColor) {
-        return forceDarkBgColor
-                ? ApiCompatibilityUtils.getColor(res, org.chromium.ui.R.color.default_bg_color_dark)
-                : ApiCompatibilityUtils.getColor(res, org.chromium.ui.R.color.default_bg_color);
+        return forceDarkBgColor ? ApiCompatibilityUtils.getColor(res, R.color.default_bg_color_dark)
+                                : ApiCompatibilityUtils.getColor(res, R.color.default_bg_color);
+    }
+
+    /**
+     * Returns the large text primary style based on the given parameter.
+     *
+     * @param forceLightTextColor When true, returns the light-mode large text primary style;
+     *         otherwise returns adaptive large text primary style.
+     * @return The large text primary style.
+     */
+    public static int getLargeTextPrimaryStyle(boolean forceLightTextColor) {
+        return forceLightTextColor ? R.style.TextAppearance_TextLarge_Primary_Light
+                                   : R.style.TextAppearance_TextLarge_Primary;
+    }
+
+    /**
+     * Returns the medium text secondary style based on the given parameter.
+     *
+     * @param forceLightTextColor When true, returns the light-mode medium text secondary style;
+     *         otherwise returns adaptive medium text secondary style.
+     * @return The medium text secondary style.
+     */
+    public static int getMediumTextSecondaryStyle(boolean forceLightTextColor) {
+        return forceLightTextColor ? R.style.TextAppearance_TextMedium_Secondary_Light
+                                   : R.style.TextAppearance_TextMedium_Secondary;
     }
 
     /**

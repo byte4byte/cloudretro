@@ -10,6 +10,7 @@
 #include "third_party/blink/public/mojom/serial/serial.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/active_script_wrappable.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
+#include "third_party/blink/renderer/core/dom/events/event_target.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/heap/heap_allocator.h"
@@ -29,21 +30,24 @@ class ScriptState;
 class Serial;
 class SerialOptions;
 class SerialOutputSignals;
+class SerialPortInfo;
 class SerialPortUnderlyingSink;
 class SerialPortUnderlyingSource;
 class WritableStream;
 
-class SerialPort final : public ScriptWrappable,
+class SerialPort final : public EventTargetWithInlineData,
                          public ActiveScriptWrappable<SerialPort>,
                          public device::mojom::blink::SerialPortClient {
   DEFINE_WRAPPERTYPEINFO();
-  USING_GARBAGE_COLLECTED_MIXIN(SerialPort);
 
  public:
   explicit SerialPort(Serial* parent, mojom::blink::SerialPortInfoPtr info);
   ~SerialPort() override;
 
   // Web-exposed functions
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(connect, kConnect)
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(disconnect, kDisconnect)
+  SerialPortInfo* getInfo();
   ScriptPromise open(ScriptState*,
                      const SerialOptions* options,
                      ExceptionState&);
@@ -57,17 +61,26 @@ class SerialPort final : public ScriptWrappable,
 
   const base::UnguessableToken& token() const { return info_->token; }
 
-  void UnderlyingSourceClosed();
-  void UnderlyingSinkClosed();
   ScriptPromise ContinueClose(ScriptState*);
   void AbortClose();
+  void StreamsClosed();
+
+  void Flush(device::mojom::blink::SerialPortFlushMode mode,
+             device::mojom::blink::SerialPort::FlushCallback callback);
+  void Drain(device::mojom::blink::SerialPort::DrainCallback callback);
+  void UnderlyingSourceClosed();
+  void UnderlyingSinkClosed();
 
   void ContextDestroyed();
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
 
   // ActiveScriptWrappable
-  ExecutionContext* GetExecutionContext() const;
   bool HasPendingActivity() const override;
+
+  // EventTargetWithInlineData
+  ExecutionContext* GetExecutionContext() const override;
+  const AtomicString& InterfaceName() const override;
+  DispatchEventResult DispatchEventInternal(Event& event) override;
 
   // SerialPortClient
   void OnReadError(device::mojom::blink::SerialReceiveError) override;
@@ -77,14 +90,8 @@ class SerialPort final : public ScriptWrappable,
   bool CreateDataPipe(mojo::ScopedDataPipeProducerHandle* producer,
                       mojo::ScopedDataPipeConsumerHandle* consumer);
   void OnConnectionError();
-  void OnOpen(mojo::ScopedDataPipeConsumerHandle,
-              mojo::ScopedDataPipeProducerHandle,
-              mojo::PendingReceiver<device::mojom::blink::SerialPortClient>,
-              bool success);
-  void InitializeReadableStream(ScriptState*,
-                                mojo::ScopedDataPipeConsumerHandle);
-  void InitializeWritableStream(ScriptState*,
-                                mojo::ScopedDataPipeProducerHandle);
+  void OnOpen(mojo::PendingReceiver<device::mojom::blink::SerialPortClient>,
+              mojo::PendingRemote<device::mojom::blink::SerialPort>);
   void OnGetSignals(ScriptPromiseResolver*,
                     device::mojom::blink::SerialPortControlSignalsPtr);
   void OnSetSignals(ScriptPromiseResolver*, bool success);

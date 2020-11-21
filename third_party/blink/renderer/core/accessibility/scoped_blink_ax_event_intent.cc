@@ -12,13 +12,35 @@ namespace blink {
 ScopedBlinkAXEventIntent::ScopedBlinkAXEventIntent(
     const BlinkAXEventIntent& intent,
     Document* document)
-    : intent_(intent), document_(document) {
+    : document_(document) {
+  DCHECK(document_);
+  DCHECK(document_->IsActive());
+
+  if (!intent.is_initialized())
+    return;
+  intents_.push_back(intent);
+
+  if (AXObjectCache* cache = document_->ExistingAXObjectCache()) {
+    AXObjectCache::BlinkAXEventIntentsSet& active_intents =
+        cache->ActiveEventIntents();
+    active_intents.insert(intent);
+  }
+}
+
+ScopedBlinkAXEventIntent::ScopedBlinkAXEventIntent(
+    const Vector<BlinkAXEventIntent>& intents,
+    Document* document)
+    : intents_(intents), document_(document) {
   DCHECK(document_);
   DCHECK(document_->IsActive());
   if (AXObjectCache* cache = document_->ExistingAXObjectCache()) {
     AXObjectCache::BlinkAXEventIntentsSet& active_intents =
         cache->ActiveEventIntents();
-    active_intents.insert(intent);
+
+    for (const auto& intent : intents) {
+      if (intent.is_initialized())
+        active_intents.insert(intent);
+    }
   }
 }
 
@@ -30,8 +52,11 @@ ScopedBlinkAXEventIntent::~ScopedBlinkAXEventIntent() {
   if (AXObjectCache* cache = document_->ExistingAXObjectCache()) {
     AXObjectCache::BlinkAXEventIntentsSet& active_intents =
         cache->ActiveEventIntents();
-    DCHECK(active_intents.Contains(intent_));
-    active_intents.erase(intent_);
+
+    for (const auto& intent : intents_) {
+      DCHECK(active_intents.Contains(intent));
+      active_intents.erase(intent);
+    }
   }
 }
 

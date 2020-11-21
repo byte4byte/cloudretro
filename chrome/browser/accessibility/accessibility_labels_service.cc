@@ -6,12 +6,16 @@
 
 #include "base/metrics/histogram_functions.h"
 #include "base/no_destructor.h"
+#include "base/strings/string_split.h"
 #include "build/build_config.h"
 #include "chrome/browser/accessibility/accessibility_state_utils.h"
+#include "chrome/browser/language/url_language_histogram_factory.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_iterator.h"
 #include "chrome/common/channel_info.h"
 #include "chrome/common/pref_names.h"
+#include "components/language/core/browser/pref_names.h"
+#include "components/language/core/browser/url_language_histogram.h"
+#include "components/language_usage_metrics/language_usage_metrics.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
 #include "components/sync_preferences/pref_service_syncable.h"
@@ -28,7 +32,14 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_iterator.h"
+#else
+#include "base/android/jni_android.h"
+#include "chrome/browser/image_descriptions/jni_headers/ImageDescriptionsController_jni.h"
+#include "content/public/browser/web_contents.h"
 #endif
+
+using LanguageInfo = language::UrlLanguageHistogram::LanguageInfo;
 
 namespace {
 
@@ -48,7 +59,7 @@ GetImageAnnotatorBinderOverride() {
 
 class ImageAnnotatorClient : public image_annotation::Annotator::Client {
  public:
-  ImageAnnotatorClient() = default;
+  explicit ImageAnnotatorClient(Profile* profile) : profile_(profile) {}
   ~ImageAnnotatorClient() override = default;
 
   // image_annotation::Annotator::Client implementation:
@@ -57,7 +68,55 @@ class ImageAnnotatorClient : public image_annotation::Annotator::Client {
     data_decoder_.GetService()->BindJsonParser(std::move(receiver));
   }
 
+  std::vector<std::string> GetAcceptLanguages() override {
+    std::vector<std::string> accept_languages;
+    const PrefService* pref_service = profile_->GetPrefs();
+    std::string accept_languages_pref =
+        pref_service->GetString(language::prefs::kAcceptLanguages);
+    for (std::string lang :
+         base::SplitString(accept_languages_pref, ",", base::TRIM_WHITESPACE,
+                           base::SPLIT_WANT_NONEMPTY)) {
+      accept_languages.push_back(lang);
+    }
+    return accept_languages;
+  }
+
+  std::vector<std::string> GetTopLanguages() override {
+    // The UrlLanguageHistogram includes the frequency of all languages
+    // of pages the user has visited, and some of these might be rare or
+    // even mistakes. Set a minimum threshold so that we're only returning
+    // languages that account for a nontrivial amount of browsing time.
+    // The purpose of this list is to handle the case where users might
+    // not be setting their accept languages correctly, we want a way to
+    // detect the primary languages a user actually reads.
+    const float kMinTopLanguageFrequency = 0.1;
+
+    std::vector<std::string> top_languages;
+    language::UrlLanguageHistogram* url_language_histogram =
+        UrlLanguageHistogramFactory::GetForBrowserContext(profile_);
+    std::vector<LanguageInfo> language_infos =
+        url_language_histogram->GetTopLanguages();
+    for (const LanguageInfo& info : language_infos) {
+      if (info.frequency >= kMinTopLanguageFrequency)
+        top_languages.push_back(info.language_code);
+    }
+    return top_languages;
+  }
+
+  void RecordLanguageMetrics(const std::string& page_language,
+                             const std::string& requested_language) override {
+    base::UmaHistogramSparse(
+        "Accessibility.ImageLabels.PageLanguage",
+        language_usage_metrics::LanguageUsageMetrics::ToLanguageCode(
+            page_language));
+    base::UmaHistogramSparse(
+        "Accessibility.ImageLabels.RequestLanguage",
+        language_usage_metrics::LanguageUsageMetrics::ToLanguageCode(
+            requested_language));
+  }
+
  private:
+  Profile* const profile_;
   data_decoder::DataDecoder data_decoder_;
 
   DISALLOW_COPY_AND_ASSIGN(ImageAnnotatorClient);
@@ -76,6 +135,14 @@ void AccessibilityLabelsService::RegisterProfilePrefs(
   registry->RegisterBooleanPref(
       prefs::kAccessibilityImageLabelsOptInAccepted, false,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+#if defined(OS_ANDROID)
+  registry->RegisterBooleanPref(
+      prefs::kAccessibilityImageLabelsEnabledAndroid, false,
+      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+  registry->RegisterBooleanPref(
+      prefs::kAccessibilityImageLabelsOnlyOnWifi, true,
+      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+#endif
 }
 
 // static
@@ -86,6 +153,12 @@ void AccessibilityLabelsService::InitOffTheRecordPrefs(
       prefs::kAccessibilityImageLabelsEnabled, false);
   off_the_record_profile->GetPrefs()->SetBoolean(
       prefs::kAccessibilityImageLabelsOptInAccepted, false);
+#if defined(OS_ANDROID)
+  off_the_record_profile->GetPrefs()->SetBoolean(
+      prefs::kAccessibilityImageLabelsEnabledAndroid, false);
+  off_the_record_profile->GetPrefs()->SetBoolean(
+      prefs::kAccessibilityImageLabelsOnlyOnWifi, true);
+#endif
 }
 
 void AccessibilityLabelsService::Init() {
@@ -95,7 +168,11 @@ void AccessibilityLabelsService::Init() {
 
   pref_change_registrar_.Init(profile_->GetPrefs());
   pref_change_registrar_.Add(
+#if !defined(OS_ANDROID)
       prefs::kAccessibilityImageLabelsEnabled,
+#else
+      prefs::kAccessibilityImageLabelsEnabledAndroid,
+#endif
       base::BindRepeating(
           &AccessibilityLabelsService::OnImageLabelsEnabledChanged,
           weak_factory_.GetWeakPtr()));
@@ -119,7 +196,11 @@ ui::AXMode AccessibilityLabelsService::GetAXMode() {
   if (base::FeatureList::IsEnabled(
           features::kExperimentalAccessibilityLabels)) {
     bool enabled = profile_->GetPrefs()->GetBoolean(
+#if !defined(OS_ANDROID)
         prefs::kAccessibilityImageLabelsEnabled);
+#else
+        prefs::kAccessibilityImageLabelsEnabledAndroid);
+#endif
     ax_mode.set_mode(ui::AXMode::kLabelImages, enabled);
   }
 
@@ -131,8 +212,8 @@ void AccessibilityLabelsService::EnableLabelsServiceOnce() {
     return;
   }
 
-  // TODO(crbug.com/905419): Implement for Android, which does not support
-  // BrowserList::GetInstance.
+  // For Android, we call through the JNI (see below) and send the web contents
+  // directly, since Android does not support BrowserList::GetInstance.
 #if !defined(OS_ANDROID)
   Browser* browser = chrome::FindLastActiveWithProfile(profile_);
   if (!browser)
@@ -161,7 +242,7 @@ void AccessibilityLabelsService::BindImageAnnotator(
       service_ = std::make_unique<image_annotation::ImageAnnotationService>(
           std::move(service_receiver), APIKeyForChannel(),
           profile_->GetURLLoaderFactory(),
-          std::make_unique<ImageAnnotatorClient>());
+          std::make_unique<ImageAnnotatorClient>(profile_));
     }
   }
 
@@ -174,8 +255,6 @@ void AccessibilityLabelsService::OverrideImageAnnotatorBinderForTesting(
 }
 
 void AccessibilityLabelsService::OnImageLabelsEnabledChanged() {
-  // TODO(dmazzoni) Implement for Android, which doesn't support
-  // AllTabContentses(). crbug.com/905419
 #if !defined(OS_ANDROID)
   bool enabled = profile_->GetPrefs()->GetBoolean(
                      prefs::kAccessibilityImageLabelsEnabled) &&
@@ -189,6 +268,15 @@ void AccessibilityLabelsService::OnImageLabelsEnabledChanged() {
     ax_mode.set_mode(ui::AXMode::kLabelImages, enabled);
     web_contents->SetAccessibilityMode(ax_mode);
   }
+#else
+  bool enabled = profile_->GetPrefs()->GetBoolean(
+                     prefs::kAccessibilityImageLabelsEnabledAndroid) &&
+                 accessibility_state_utils::IsScreenReaderEnabled();
+
+  // Android does not support AllTabContentses(), so we will get all web
+  // contents from the state and set the new AXMode there.
+  content::BrowserAccessibilityState::GetInstance()
+      ->SetImageLabelsModeForProfile(enabled, profile_);
 #endif
 }
 
@@ -200,3 +288,21 @@ void AccessibilityLabelsService::UpdateAccessibilityLabelsHistograms() {
                             profile_->GetPrefs()->GetBoolean(
                                 prefs::kAccessibilityImageLabelsEnabled));
 }
+
+#if defined(OS_ANDROID)
+void JNI_ImageDescriptionsController_GetImageDescriptionsOnce(
+    JNIEnv* env,
+    const base::android::JavaParamRef<jobject>& j_web_contents) {
+  content::WebContents* web_contents =
+      content::WebContents::FromJavaWebContents(j_web_contents);
+
+  ui::AXActionData action_data;
+  action_data.action = ax::mojom::Action::kAnnotatePageImages;
+
+  std::vector<content::RenderFrameHost*> frames = web_contents->GetAllFrames();
+  for (content::RenderFrameHost* frame : frames) {
+    if (frame->IsRenderFrameLive())
+      frame->AccessibilityPerformAction(action_data);
+  }
+}
+#endif

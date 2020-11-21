@@ -40,15 +40,18 @@ LayoutHTMLCanvas::LayoutHTMLCanvas(HTMLCanvasElement* element)
 }
 
 PaintLayerType LayoutHTMLCanvas::LayerTypeRequired() const {
+  NOT_DESTROYED();
   return kNormalPaintLayer;
 }
 
 void LayoutHTMLCanvas::PaintReplaced(const PaintInfo& paint_info,
                                      const PhysicalOffset& paint_offset) const {
+  NOT_DESTROYED();
   HTMLCanvasPainter(*this).PaintReplaced(paint_info, paint_offset);
 }
 
 void LayoutHTMLCanvas::CanvasSizeChanged() {
+  NOT_DESTROYED();
   IntSize canvas_size = To<HTMLCanvasElement>(GetNode())->Size();
   LayoutSize zoomed_size(canvas_size.Width() * StyleRef().EffectiveZoom(),
                          canvas_size.Height() * StyleRef().EffectiveZoom());
@@ -61,27 +64,13 @@ void LayoutHTMLCanvas::CanvasSizeChanged() {
   if (!Parent())
     return;
 
-  if (!IntrinsicLogicalWidthsDirty())
-    SetIntrinsicLogicalWidthsDirty();
-
-  LayoutSize old_size = Size();
-  UpdateLogicalWidth();
-  UpdateLogicalHeight();
-  if (old_size == Size() && !HasOverrideLogicalWidth() &&
-      !HasOverrideLogicalHeight()) {
-    // If we have an override size, then we're probably a flex item, and the
-    // check above is insufficient because updateLogical{Width,Height} just
-    // used the override size. We actually have to mark ourselves as needing
-    // layout so the flex algorithm can run and compute our size correctly.
-    return;
-  }
-
-  if (!SelfNeedsLayout())
-    SetNeedsLayout(layout_invalidation_reason::kSizeChanged);
+  SetIntrinsicLogicalWidthsDirty();
+  SetNeedsLayout(layout_invalidation_reason::kSizeChanged);
 }
 
 void LayoutHTMLCanvas::InvalidatePaint(
     const PaintInvalidatorContext& context) const {
+  NOT_DESTROYED();
   auto* element = To<HTMLCanvasElement>(GetNode());
   if (element->IsDirty())
     element->DoDeferredPaintInvalidation();
@@ -90,6 +79,7 @@ void LayoutHTMLCanvas::InvalidatePaint(
 }
 
 CompositingReasons LayoutHTMLCanvas::AdditionalCompositingReasons() const {
+  NOT_DESTROYED();
   if (To<HTMLCanvasElement>(GetNode())->ShouldBeDirectComposited())
     return CompositingReason::kCanvas;
   return CompositingReason::kNone;
@@ -97,11 +87,13 @@ CompositingReasons LayoutHTMLCanvas::AdditionalCompositingReasons() const {
 
 void LayoutHTMLCanvas::StyleDidChange(StyleDifference diff,
                                       const ComputedStyle* old_style) {
+  NOT_DESTROYED();
   LayoutReplaced::StyleDidChange(diff, old_style);
   To<HTMLCanvasElement>(GetNode())->StyleDidChange(old_style, StyleRef());
 }
 
 void LayoutHTMLCanvas::WillBeDestroyed() {
+  NOT_DESTROYED();
   LayoutReplaced::WillBeDestroyed();
   To<HTMLCanvasElement>(GetNode())->LayoutObjectDestroyed();
 }

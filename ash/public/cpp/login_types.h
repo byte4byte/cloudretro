@@ -66,6 +66,9 @@ enum class OobeDialogState {
   // Showing login UI provided by a Chrome extension using chrome.loginScreenUi
   // API.
   EXTENSION_LOGIN = 14,
+
+  // Showing user creation screen.
+  USER_CREATION = 15,
 };
 
 // Supported multi-profile user behavior values.
@@ -206,8 +209,10 @@ struct ASH_PUBLIC_EXPORT PublicAccountInfo {
   PublicAccountInfo& operator=(const PublicAccountInfo& other);
   PublicAccountInfo& operator=(PublicAccountInfo&& other);
 
-  // The domain name displayed in the login screen UI.
-  base::Optional<std::string> enterprise_domain;
+  // The name of the device manager displayed in the login screen UI for
+  // device-level management. May be either a domain (foo.com) or an email
+  // address (user@foo.com).
+  base::Optional<std::string> device_enterprise_manager;
 
   // A list of available user locales.
   std::vector<LocaleItem> available_locales;
@@ -271,8 +276,21 @@ struct ASH_PUBLIC_EXPORT LoginUserInfo {
   // Show pin pad for password for this user or not.
   bool show_pin_pad_for_password = false;
 
+  // True if the display password button should be visible on the login/lock
+  // screen for this user.
+  bool show_display_password_button = false;
+
+  // The name of the entity that manages this user's account displayed in the
+  // login screen UI for user-level management. Will be either a domain name
+  // (foo.com) or the email address of the admin (some_user@foo.com).
+  // This is only set if the relevant user is managed.
+  base::Optional<std::string> user_account_manager;
+
   // Contains the public account information if user type is PUBLIC_ACCOUNT.
   base::Optional<PublicAccountInfo> public_account_info;
+
+  // True if this user chooses to use 24 hour clock in preference.
+  bool use_24hour_clock = false;
 };
 
 enum class AuthDisabledReason {
@@ -314,18 +332,6 @@ struct ASH_PUBLIC_EXPORT AuthDisabledData {
   // If true media will be suspended and media controls will be unavailable on
   // lock screen.
   bool disable_lock_screen_media = false;
-};
-
-// Possible reasons why the parent access code is required. This corresponds to
-// actions that children can't perform on a Chromebook, but their parents can on
-// their behalf.
-enum class ParentAccessRequestReason {
-  // Unlock a Chromebook that is locked due to a Time Limit policy.
-  kUnlockTimeLimits,
-  // Update values on the date time dialog.
-  kChangeTime,
-  // Update values on the timezone settings page.
-  kChangeTimezone,
 };
 
 // Parameters and callbacks for a security token PIN request that is to be shown

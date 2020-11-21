@@ -11,6 +11,7 @@ var EXAMPLE_URL_2 = 'http://shmlexample.com/';
 GEN('#include "chrome/browser/engagement/site_engagement_service.h"');
 GEN('#include "chrome/browser/engagement/site_engagement_service_factory.h"');
 GEN('#include "chrome/browser/ui/browser.h"');
+GEN('#include "content/public/test/browser_test.h"');
 
 function SiteEngagementBrowserTest() {}
 
@@ -66,7 +67,8 @@ TEST_F('SiteEngagementBrowserTest', 'All', function() {
     });
   }
 
-  setup(function() {
+  setup(async function() {
+    await import('chrome://test/mojo_webui_test_support.js');
     cells = getCells();
   });
 

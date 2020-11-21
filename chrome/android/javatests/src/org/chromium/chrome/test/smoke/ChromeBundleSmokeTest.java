@@ -8,7 +8,8 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.SmallTest;
+
+import androidx.test.filters.SmallTest;
 
 import org.junit.Assert;
 import org.junit.Before;
@@ -31,7 +32,7 @@ import org.chromium.chrome.test.pagecontroller.utils.UiLocatorHelper;
 @RunWith(BaseJUnit4ClassRunner.class)
 public class ChromeBundleSmokeTest {
     private static final String TARGET_ACTIVITY =
-            "org.chromium.chrome.features.test_dummy.TestDummyActivity";
+            "org.chromium.chrome.browser.test_dummy.TestDummyActivity";
 
     public ChromeUiAutomatorTestRule mRule = new ChromeUiAutomatorTestRule();
     public ChromeUiApplicationTestRule mChromeUiRule = new ChromeUiApplicationTestRule();

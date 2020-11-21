@@ -21,11 +21,29 @@ URL. As result, this document needs to be self-contained, hence inline scripts.
       .links line {
         stroke: #999;
         stroke-opacity: 0.6;
+        stroke-width: 1;
+      }
+
+      .dashed-links line {
+        marker-start: url(#arrowToSource);
+        stroke: #999;
+        stroke-dasharray: 3;
+        stroke-opacity: 0.6;
+        stroke-width: 1;
+      }
+
+      #arrowToSource {
+        fill: #999;
+        stroke: #999;
       }
 
       .nodes circle {
         stroke: #000;
         stroke-width: 1.5px;
+      }
+
+      .nodes circle.pinned {
+        stroke: red;
       }
 
       .dead image {
@@ -42,22 +60,21 @@ URL. As result, this document needs to be self-contained, hence inline scripts.
         border: 0;
         border-radius: 8px;
         padding: 2px;
-        pointer-events: none;
         position: absolute;
         text-align: center;
       }
 
-      td {
+      tr {
         font: 10px sans-serif;
       }
 
-      td.key {
-        text-align: end;
-      }
-
-      td.heading {
+      tr.heading > td {
         font-weight: bold;
         text-align: center;
+      }
+
+      tr.value > td:nth-child(1) {
+        text-align: end;
       }
 
     </style>
@@ -71,6 +88,13 @@ ${javascript_file}
   </head>
   <body>
     <div id="toolTips" width="100%" height="100%"></div>
-    <svg id="graphBody" width="100%" height="100%"></svg>
+    <svg id="graphBody" width="100%" height="100%">
+      <defs>
+        <marker id="arrowToSource" viewBox="0 -5 10 10" refX="-12" refY="0"
+                markerWidth="9" markerHeight="6" orient="auto">
+          <path d="M15,-7 L0,0 L15,7" />
+        </marker>
+      </defs>
+    </svg>
   </body>
 </html>

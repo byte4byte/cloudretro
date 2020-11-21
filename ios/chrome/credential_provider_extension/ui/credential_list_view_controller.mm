@@ -5,8 +5,11 @@
 #import "ios/chrome/credential_provider_extension/ui/credential_list_view_controller.h"
 
 #include "base/mac/foundation_util.h"
+#include "ios/chrome/common/app_group/app_group_metrics.h"
 #import "ios/chrome/common/credential_provider/credential.h"
 #import "ios/chrome/common/ui/colors/semantic_color_names.h"
+#import "ios/chrome/common/ui/util/pointer_interaction_util.h"
+#import "ios/chrome/credential_provider_extension/metrics_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -19,6 +22,27 @@ NSString* kCellIdentifier = @"clvcCell";
 
 const CGFloat kHeaderHeight = 70;
 }
+
+#if defined(__IPHONE_13_4)
+// This cell just adds a simple hover pointer interaction to the TableViewCell.
+@interface CredentialListCell : UITableViewCell
+@end
+
+@implementation CredentialListCell
+
+- (instancetype)initWithStyle:(UITableViewCellStyle)style
+              reuseIdentifier:(NSString*)reuseIdentifier {
+  self = [super initWithStyle:style reuseIdentifier:reuseIdentifier];
+  if (self) {
+    if (@available(iOS 13.4, *)) {
+      [self addInteraction:[[ViewPointerInteraction alloc] init]];
+    }
+  }
+  return self;
+}
+
+@end
+#endif  // defined(__IPHONE_13_4)
 
 @interface CredentialListViewController () <UITableViewDataSource,
                                             UISearchResultsUpdating>
@@ -42,38 +66,35 @@ const CGFloat kHeaderHeight = 70;
   [super viewDidLoad];
   self.title =
       NSLocalizedString(@"IDS_IOS_CREDENTIAL_PROVIDER_CREDENTIAL_LIST_TITLE",
-                        @"AutofFill Chrome Password");
+                        @"AutoFill Chrome Password");
   self.view.backgroundColor = [UIColor colorNamed:kBackgroundColor];
-
   self.navigationItem.rightBarButtonItem = [self navigationCancelButton];
 
   self.searchController =
       [[UISearchController alloc] initWithSearchResultsController:nil];
   self.searchController.searchResultsUpdater = self;
   self.searchController.obscuresBackgroundDuringPresentation = NO;
-  self.searchController.searchBar.translucent = YES;
   self.searchController.searchBar.barTintColor =
       [UIColor colorNamed:kBackgroundColor];
+  // Add en empty space at the bottom of the list, the size of the search bar,
+  // to allow scrolling up enough to see last result, otherwise it remains
+  // hidden under the accessories.
+  self.tableView.tableFooterView =
+      [[UIView alloc] initWithFrame:self.searchController.searchBar.frame];
+  self.navigationItem.searchController = self.searchController;
+  self.navigationItem.hidesSearchBarWhenScrolling = NO;
 
-  self.tableView.tableHeaderView = self.searchController.searchBar;
-  self.tableView.tableFooterView = [[UIView alloc] initWithFrame:CGRectZero];
-
-  self.navigationController.navigationBar.translucent = YES;
   self.navigationController.navigationBar.barTintColor =
       [UIColor colorNamed:kBackgroundColor];
   self.navigationController.navigationBar.tintColor =
       [UIColor colorNamed:kBlueColor];
   self.navigationController.navigationBar.shadowImage = [[UIImage alloc] init];
-  [self.navigationController.navigationBar
-      setBackgroundImage:[[UIImage alloc] init]
-           forBarMetrics:UIBarMetricsDefault];
 
   // Presentation of searchController will walk up the view controller hierarchy
   // until it finds the root view controller or one that defines a presentation
   // context. Make this class the presentation context so that the search
   // controller does not present on top of the navigation controller.
   self.definesPresentationContext = YES;
-
   [self.tableView registerClass:[UITableViewHeaderFooterView class]
       forHeaderFooterViewReuseIdentifier:kHeaderIdentifier];
 }
@@ -85,6 +106,7 @@ const CGFloat kHeaderHeight = 70;
   self.suggestedPasswords = suggested;
   self.allPasswords = all;
   [self.tableView reloadData];
+  [self.tableView layoutIfNeeded];
 }
 
 #pragma mark - UITableViewDataSource
@@ -123,31 +145,25 @@ const CGFloat kHeaderHeight = 70;
   UITableViewCell* cell =
       [tableView dequeueReusableCellWithIdentifier:kCellIdentifier];
   if (!cell) {
+#if defined(__IPHONE_13_4)
+    cell =
+        [[CredentialListCell alloc] initWithStyle:UITableViewCellStyleSubtitle
+                                  reuseIdentifier:kCellIdentifier];
+#else
     cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle
                                   reuseIdentifier:kCellIdentifier];
+#endif  // defined(__IPHONE_13_4)
     cell.accessoryView = [self infoIconButton];
   }
 
-  cell.backgroundColor = [UIColor colorNamed:kBackgroundColor];
-  cell.contentView.backgroundColor = [UIColor colorNamed:kBackgroundColor];
-
   id<Credential> credential = [self credentialForIndexPath:indexPath];
-  if (credential.favicon.length) {
-    // TODO(crbug.com/1045454): draw actual icon.
-    cell.imageView.image = [[UIImage imageNamed:@"default_world_favicon"]
-        imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
-  } else {
-    cell.imageView.image = [[UIImage imageNamed:@"default_world_favicon"]
-        imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
-    cell.imageView.tintColor = [UIColor colorNamed:kPlaceholderImageTintColor];
-  }
-  cell.imageView.contentMode = UIViewContentModeScaleAspectFit;
-  cell.accessoryView.backgroundColor = [UIColor colorNamed:kBackgroundColor];
-  cell.textLabel.text = credential.user;
+  cell.textLabel.text = credential.serviceName;
   cell.textLabel.textColor = [UIColor colorNamed:kTextPrimaryColor];
-  cell.detailTextLabel.text = credential.serviceName;
+  cell.detailTextLabel.text = credential.user;
   cell.detailTextLabel.textColor = [UIColor colorNamed:kTextSecondaryColor];
-  cell.selectionStyle = UITableViewCellSelectionStyleNone;
+  cell.selectionStyle = UITableViewCellSelectionStyleDefault;
+  cell.backgroundColor = [UIColor colorNamed:kBackgroundColor];
+  cell.accessibilityTraits |= UIAccessibilityTraitButton;
 
   return cell;
 }
@@ -169,10 +185,20 @@ const CGFloat kHeaderHeight = 70;
   return kHeaderHeight;
 }
 
+- (void)tableView:(UITableView*)tableView
+    didSelectRowAtIndexPath:(NSIndexPath*)indexPath {
+  UpdateUMACountForKey(app_group::kCredentialExtensionPasswordUseCount);
+  id<Credential> credential = [self credentialForIndexPath:indexPath];
+  [self.delegate userSelectedCredential:credential];
+}
+
 #pragma mark - UISearchResultsUpdating
 
 - (void)updateSearchResultsForSearchController:
     (UISearchController*)searchController {
+  if (searchController.searchBar.text.length) {
+    UpdateUMACountForKey(app_group::kCredentialExtensionSearchCount);
+  }
   [self.delegate updateResultsWithFilter:searchController.searchBar.text];
 }
 
@@ -200,6 +226,27 @@ const CGFloat kHeaderHeight = 70;
   [button addTarget:self
                 action:@selector(infoIconButtonTapped:event:)
       forControlEvents:UIControlEventTouchUpInside];
+  button.accessibilityLabel = NSLocalizedString(
+      @"IDS_IOS_CREDENTIAL_PROVIDER_SHOW_DETAILS_ACCESSIBILITY_LABEL",
+      @"Show Details.");
+
+#if defined(__IPHONE_13_4)
+  if (@available(iOS 13.4, *)) {
+    button.pointerInteractionEnabled = YES;
+    button.pointerStyleProvider = ^UIPointerStyle*(
+        UIButton* button, __unused UIPointerEffect* proposedEffect,
+        __unused UIPointerShape* proposedShape) {
+      UITargetedPreview* preview =
+          [[UITargetedPreview alloc] initWithView:button];
+      UIPointerHighlightEffect* effect =
+          [UIPointerHighlightEffect effectWithPreview:preview];
+      UIPointerShape* shape =
+          [UIPointerShape shapeWithRoundedRect:button.frame
+                                  cornerRadius:button.frame.size.width / 2];
+      return [UIPointerStyle styleWithEffect:effect shape:shape];
+    };
+  }
+#endif  // defined(__IPHONE_13_4)
 
   return button;
 }

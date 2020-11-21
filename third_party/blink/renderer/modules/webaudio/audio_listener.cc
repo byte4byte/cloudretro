@@ -121,7 +121,7 @@ AudioListener::AudioListener(BaseAudioContext& context)
 
 AudioListener::~AudioListener() = default;
 
-void AudioListener::Trace(Visitor* visitor) {
+void AudioListener::Trace(Visitor* visitor) const {
   visitor->Trace(position_x_);
   visitor->Trace(position_y_);
   visitor->Trace(position_z_);
@@ -150,15 +150,15 @@ void AudioListener::RemovePanner(PannerHandler& panner) {
 }
 
 bool AudioListener::HasSampleAccurateValues() const {
-  return positionX()->Handler().HasSampleAccurateValuesTimeline() ||
-         positionY()->Handler().HasSampleAccurateValuesTimeline() ||
-         positionZ()->Handler().HasSampleAccurateValuesTimeline() ||
-         forwardX()->Handler().HasSampleAccurateValuesTimeline() ||
-         forwardY()->Handler().HasSampleAccurateValuesTimeline() ||
-         forwardZ()->Handler().HasSampleAccurateValuesTimeline() ||
-         upX()->Handler().HasSampleAccurateValuesTimeline() ||
-         upY()->Handler().HasSampleAccurateValuesTimeline() ||
-         upZ()->Handler().HasSampleAccurateValuesTimeline();
+  return positionX()->Handler().HasSampleAccurateValues() ||
+         positionY()->Handler().HasSampleAccurateValues() ||
+         positionZ()->Handler().HasSampleAccurateValues() ||
+         forwardX()->Handler().HasSampleAccurateValues() ||
+         forwardY()->Handler().HasSampleAccurateValues() ||
+         forwardZ()->Handler().HasSampleAccurateValues() ||
+         upX()->Handler().HasSampleAccurateValues() ||
+         upY()->Handler().HasSampleAccurateValues() ||
+         upZ()->Handler().HasSampleAccurateValues();
 }
 
 bool AudioListener::IsAudioRate() const {

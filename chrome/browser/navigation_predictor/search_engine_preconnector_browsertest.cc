@@ -19,6 +19,7 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/search_engines/template_url_service.h"
 #include "components/ukm/test_ukm_recorder.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "net/base/features.h"
 #include "net/dns/mock_host_resolver.h"
@@ -139,8 +140,9 @@ class SearchEnginePreconnectorNoDelaysBrowserTest
   DISALLOW_COPY_AND_ASSIGN(SearchEnginePreconnectorNoDelaysBrowserTest);
 };
 
+// Test routinely flakes on the Mac10.11 Tests bot (https://crbug.com/1141028).
 IN_PROC_BROWSER_TEST_F(SearchEnginePreconnectorNoDelaysBrowserTest,
-                       PreconnectSearch) {
+                       DISABLED_PreconnectSearch) {
   // Put the fake search URL to be preconnected in foreground.
   NavigationPredictorKeyedServiceFactory::GetForProfile(
       Profile::FromBrowserContext(browser()->profile()))
@@ -339,7 +341,7 @@ class SearchEnginePreconnectorGoogleOnlyBrowserTest
            {net::features::kNetUnusedIdleSocketTimeout,
             {{"unused_idle_socket_timeout_seconds", "60"}}}},
           {
-              {features::kPreconnectToSearchNonGoogle, {{}}},
+              features::kPreconnectToSearchNonGoogle,
           });
     }
   }

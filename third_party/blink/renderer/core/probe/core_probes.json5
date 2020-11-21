@@ -24,6 +24,11 @@
         "ExecuteScript",
       ]
     },
+    InspectorIssueReporter: {
+      probes: [
+        "DidFailLoading",
+      ]
+    },
     InspectorAnimationAgent: {
       probes: [
         "AnimationPlayStateChanged",
@@ -45,11 +50,15 @@
     InspectorCSSAgent: {
       probes: [
         "ActiveStyleSheetsUpdated",
+        "DidMutateStyleSheet",
         "DocumentDetached",
         "FontsUpdated",
         "ForcePseudoState",
         "MediaQueryResultChanged",
         "WillChangeStyleElement",
+        "LocalFontsEnabled",
+        "DidUpdateComputedStyle",
+        "RecalculateStyle",
       ]
     },
     InspectorDOMAgent: {
@@ -95,6 +104,7 @@
         "DidCloseAudioContext",
         "DidResumeAudioContext",
         "DidSuspendAudioContext",
+        "OnContentSecurityPolicyViolation",
       ]
     },
     InspectorDOMSnapshotAgent: {
@@ -107,8 +117,11 @@
       probes: [
         "ApplyAcceptLanguageOverride",
         "ApplyUserAgentOverride",
+        "ApplyUserAgentMetadataOverride",
         "FrameStartedLoading",
         "PrepareRequest",
+        "GetDisabledImageTypes",
+        "WillCommitLoad",
       ]
     },
     InspectorLayerTreeAgent: {
@@ -178,6 +191,7 @@
         "DidResizeMainFrame",
         "DidRunJavaScriptDialog",
         "DomContentLoadedEventFired",
+        "DidOpenDocument",
         "FileChooserOpened",
         "FrameAttachedToParent",
         "FrameClearedScheduledNavigation",

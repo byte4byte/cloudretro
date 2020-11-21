@@ -33,6 +33,12 @@ class IOSBlockingPageControllerClient
       const std::string& app_locale);
   ~IOSBlockingPageControllerClient() override;
 
+  // security_interstitials::ControllerClient implementation.
+  void Proceed() override;
+  void GoBack() override;
+  bool CanGoBack() override;
+  void OpenEnhancedProtectionSettings() override;
+
   void SetWebInterstitial(web::WebInterstitial* web_interstitial);
 
   // web::WebStateObserver implementation.
@@ -40,21 +46,22 @@ class IOSBlockingPageControllerClient
 
   const std::string& GetApplicationLocale() const override;
 
- private:
+ protected:
+  // The WebState passed on initialization.
+  web::WebState* web_state() const { return web_state_; }
+
   // security_interstitials::ControllerClient implementation.
   bool CanLaunchDateAndTimeSettings() override;
   void LaunchDateAndTimeSettings() override;
-  void GoBack() override;
-  bool CanGoBack() override;
   bool CanGoBackBeforeNavigation() override;
   void GoBackAfterNavigationCommitted() override;
-  void Proceed() override;
   void Reload() override;
   void OpenUrlInCurrentTab(const GURL& url) override;
   void OpenUrlInNewForegroundTab(const GURL& url) override;
   PrefService* GetPrefService() override;
   const std::string GetExtendedReportingPrefName() const override;
 
+ private:
   // Closes the tab. Called in cases where a user clicks "Back to safety" and
   // it's not possible to go back.
   void Close();

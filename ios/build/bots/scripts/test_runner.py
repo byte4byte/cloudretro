@@ -9,7 +9,6 @@ import signal
 import sys
 
 import collections
-import distutils.version
 import logging
 import os
 import psutil
@@ -19,11 +18,13 @@ import subprocess
 import threading
 import time
 
-import coverage_util
+import file_util
 import gtest_utils
 import iossim_util
 import standard_json_util as sju
 import test_apps
+import xcode_log_parser
+import xcode_util
 import xctest_utils
 
 LOGGER = logging.getLogger(__name__)
@@ -49,6 +50,11 @@ class TestRunnerError(Error):
   pass
 
 
+class DeviceError(TestRunnerError):
+  """Base class for physical device related errors."""
+  pass
+
+
 class AppLaunchError(TestRunnerError):
   """The app failed to launch."""
   pass
@@ -61,21 +67,21 @@ class AppNotFoundError(TestRunnerError):
       'App does not exist: %s' % app_path)
 
 
-class SystemAlertPresentError(TestRunnerError):
+class SystemAlertPresentError(DeviceError):
   """System alert is shown on the device."""
   def __init__(self):
     super(SystemAlertPresentError, self).__init__(
       'System alert is shown on the device.')
 
 
-class DeviceDetectionError(TestRunnerError):
+class DeviceDetectionError(DeviceError):
   """Unexpected number of devices detected."""
   def __init__(self, udids):
     super(DeviceDetectionError, self).__init__(
       'Expected one device, found %s:\n%s' % (len(udids), '\n'.join(udids)))
 
 
-class DeviceRestartError(TestRunnerError):
+class DeviceRestartError(DeviceError):
   """Error restarting a device."""
   def __init__(self):
     super(DeviceRestartError, self).__init__('Error restarting a device')
@@ -95,7 +101,7 @@ class SimulatorNotFoundError(TestRunnerError):
         'Simulator does not exist: %s' % iossim_path)
 
 
-class TestDataExtractionError(TestRunnerError):
+class TestDataExtractionError(DeviceError):
   """Error extracting test data or crash reports from a device."""
   def __init__(self):
     super(TestDataExtractionError, self).__init__('Failed to extract test data')
@@ -106,6 +112,14 @@ class XcodeVersionNotFoundError(TestRunnerError):
   def __init__(self, xcode_version):
     super(XcodeVersionNotFoundError, self).__init__(
         'Xcode version not found: %s' % xcode_version)
+
+
+class XCTestConfigError(TestRunnerError):
+  """Error related with XCTest config."""
+
+  def __init__(self, message):
+    super(XCTestConfigError,
+          self).__init__('Incorrect config related with XCTest: %s' % message)
 
 
 class XCTestPlugInNotFoundError(TestRunnerError):
@@ -148,19 +162,6 @@ def get_device_ios_version(udid):
   return subprocess.check_output(['ideviceinfo',
                                   '--udid', udid,
                                   '-k', 'ProductVersion']).strip()
-
-
-def is_iOS13_or_higher_device(udid):
-  """Checks whether device with udid has iOS 13.0+.
-
-  Args:
-    udid: (str) iOS device UDID.
-
-  Returns:
-    True for iOS 13.0+ devices otherwise false.
-  """
-  return (distutils.version.LooseVersion(get_device_ios_version(udid)) >=
-          distutils.version.LooseVersion('13.0'))
 
 
 def defaults_write(d, key, value):
@@ -297,24 +298,6 @@ def get_current_xcode_info():
   }
 
 
-def get_xctest_from_app(app):
-  """Gets xctest path for an app.
-
-  Args:
-    app: (str) A path to an app.
-
-  Returns:
-    The xctest path.
-  """
-  plugins_dir = os.path.join(app, 'PlugIns')
-  if not os.path.exists(plugins_dir):
-    return None
-  for plugin in os.listdir(plugins_dir):
-    if plugin.endswith('.xctest'):
-      return os.path.join(plugins_dir, plugin)
-  return None
-
-
 class TestRunner(object):
   """Base class containing common functionality."""
 
@@ -372,8 +355,6 @@ class TestRunner(object):
     self.test_args = test_args or []
     self.test_cases = test_cases or []
     self.xctest_path = ''
-    # TODO(crbug.com/1006881): Separate "running style" from "parser style"
-    #  for XCtests and Gtests.
     self.xctest = xctest
 
     self.test_results = {}
@@ -468,6 +449,33 @@ class TestRunner(object):
       shutil.rmtree(DERIVED_DATA)
       os.mkdir(DERIVED_DATA)
 
+  def process_xcresult_dir(self):
+    """Copies artifacts & diagnostic logs, zips and removes .xcresult dir."""
+    # .xcresult dir only exists when using Xcode 11+ and running as XCTest.
+    if not xcode_util.using_xcode_11_or_higher() or not self.xctest:
+      LOGGER.info('Skip processing xcresult directory.')
+
+    xcresult_paths = []
+    # Warning: This piece of code assumes .xcresult folder is directly under
+    # self.out_dir. This is true for TestRunner subclasses in this file.
+    # xcresult folder path is whatever passed in -resultBundlePath to xcodebuild
+    # command appended with '.xcresult' suffix.
+    for filename in os.listdir(self.out_dir):
+      full_path = os.path.join(self.out_dir, filename)
+      if full_path.endswith('.xcresult') and os.path.isdir(full_path):
+        xcresult_paths.append(full_path)
+
+    log_parser = xcode_log_parser.get_parser()
+    for xcresult in xcresult_paths:
+      # This is what was passed in -resultBundlePath to xcodebuild command.
+      result_bundle_path = os.path.splitext(xcresult)[0]
+      log_parser.copy_artifacts(result_bundle_path)
+      log_parser.export_diagnostic_data(result_bundle_path)
+      # result_bundle_path is a symlink to xcresult directory.
+      if os.path.islink(result_bundle_path):
+        os.unlink(result_bundle_path)
+      file_util.zip_and_remove_folder(xcresult)
+
   def run_tests(self, cmd=None):
     """Runs passed-in tests.
 
@@ -516,10 +524,8 @@ class TestRunner(object):
       GTestResult instance.
     """
     result = gtest_utils.GTestResult(cmd)
-    if self.xctest:
-      parser = xctest_utils.XCTestLogParser()
-    else:
-      parser = gtest_utils.GTestLogParser()
+
+    parser = gtest_utils.GTestLogParser()
 
     # TODO(crbug.com/812705): Implement test sharding for unit tests.
     # TODO(crbug.com/812712): Use thread pool for DeviceTestRunner as well.
@@ -535,9 +541,6 @@ class TestRunner(object):
     LOGGER.debug('Stdout flushed after test process.')
     returncode = proc.returncode
 
-    if self.xctest and parser.SystemAlertPresent():
-      raise SystemAlertPresentError()
-
     LOGGER.debug('Processing test results.')
     for test in parser.FailedTests(include_flaky=True):
       # Test cases are named as <test group>.<test case>. If the test case
@@ -548,6 +551,10 @@ class TestRunner(object):
         result.failed_tests[test] = parser.FailureDescription(test)
 
     result.passed_tests.extend(parser.PassedTests(include_flaky=True))
+
+    # Only GTest outputs compiled tests in a json file.
+    result.disabled_tests_from_compiled_tests_file.extend(
+        parser.DisabledTestsFromCompiledTestsFile())
 
     LOGGER.info('%s returned %s\n', cmd[0], returncode)
 
@@ -560,12 +567,27 @@ class TestRunner(object):
     """Launches the test app."""
     self.set_up()
     destination = 'id=%s' % self.udid
+    # When current |launch| method is invoked, this is running a unit test
+    # target. For simulators, '--xctest' is passed to test runner scripts to
+    # make it run XCTest based unit test.
     if self.xctest:
-      test_app = test_apps.EgtestsApp(
-          self.app_path,
-          included_tests=self.test_cases,
-          env_vars=self.env_vars,
-          test_args=self.test_args)
+      # TODO(crbug.com/1085603): Pass in test runner an arg to determine if it's
+      # device test or simulator test and test the arg here.
+      if self.__class__.__name__ == 'SimulatorTestRunner':
+        test_app = test_apps.SimulatorXCTestUnitTestsApp(
+            self.app_path,
+            included_tests=self.test_cases,
+            env_vars=self.env_vars,
+            test_args=self.test_args)
+      elif self.__class__.__name__ == 'DeviceTestRunner':
+        test_app = test_apps.DeviceXCTestUnitTestsApp(
+            self.app_path,
+            included_tests=self.test_cases,
+            env_vars=self.env_vars,
+            test_args=self.test_args)
+      else:
+        raise XCTestConfigError('Wrong config. TestRunner.launch() called from'
+                                ' an unexpected class.')
     else:
       test_app = test_apps.GTestsApp(
           self.app_path,
@@ -592,6 +614,7 @@ class TestRunner(object):
       passed = result.passed_tests
       failed = result.failed_tests
       flaked = result.flaked_tests
+      disabled = result.disabled_tests_from_compiled_tests_file
 
       try:
         while result.crashed and result.crashed_test:
@@ -610,6 +633,9 @@ class TestRunner(object):
           passed.extend(result.passed_tests)
           failed.update(result.failed_tests)
           flaked.update(result.flaked_tests)
+          if not disabled:
+            disabled = result.disabled_tests_from_compiled_tests_file
+
       except OSError as e:
         if e.errno == errno.E2BIG:
           LOGGER.error('Too many test cases to resume.')
@@ -620,6 +646,7 @@ class TestRunner(object):
       # pass before entering the retry block below.
       # For each retry that passes, we want to mark it separately as passed
       # (ie/ "FAIL PASS"), with is_flaky=True.
+      # TODO(crbug.com/1132476): Report failed GTest logs to ResultSink.
       output = sju.StdJson(passed=passed, failed=failed, flaked=flaked)
 
       # Retry failed test cases.
@@ -642,6 +669,9 @@ class TestRunner(object):
             # Save the result of the latest run for each test.
             retry_results[test] = retry_result
 
+      output.mark_all_skipped(disabled)
+      output.finalize()
+
       # Build test_results.json.
       # Check if if any of the retries crashed in addition to the original run.
       interrupted = (result.crashed or
@@ -655,6 +685,8 @@ class TestRunner(object):
       self.test_results['tests'] = output.tests
 
       self.logs['passed tests'] = passed
+      if disabled:
+        self.logs['disabled tests'] = disabled
       if flaked:
         self.logs['flaked tests'] = flaked
       if failed:
@@ -784,7 +816,7 @@ class SimulatorTestRunner(TestRunner):
   def extract_test_data(self):
     """Extracts data emitted by the test."""
     if hasattr(self, 'use_clang_coverage') and self.use_clang_coverage:
-      coverage_util.move_raw_coverage_data(self.udid, self.out_dir)
+      file_util.move_raw_coverage_data(self.udid, self.out_dir)
 
     # Find the Documents directory of the test app. The app directory names
     # don't correspond with any known information, so we have to examine them
@@ -839,12 +871,16 @@ class SimulatorTestRunner(TestRunner):
     self.retrieve_crash_reports()
     LOGGER.debug('Retrieving derived data.')
     self.retrieve_derived_data()
+    LOGGER.debug('Processing xcresult folder.')
+    self.process_xcresult_dir()
     LOGGER.debug('Making desktop screenshots.')
     self.screenshot_desktop()
     LOGGER.debug('Killing simulators.')
     self.kill_simulators()
     LOGGER.debug('Wiping simulator.')
     self.wipe_simulator()
+    LOGGER.debug('Deleting simulator.')
+    self.deleteSimulator(self.udid)
     if os.path.exists(self.homedir):
       shutil.rmtree(self.homedir, ignore_errors=True)
       self.homedir = ''
@@ -901,7 +937,7 @@ class SimulatorTestRunner(TestRunner):
       A dict of environment variables.
     """
     env = super(SimulatorTestRunner, self).get_launch_env()
-    if self.xctest_path:
+    if self.xctest:
       env['NSUnbufferedIO'] = 'YES'
     return env
 
@@ -955,13 +991,6 @@ class DeviceTestRunner(TestRunner):
     if len(self.udid.splitlines()) != 1:
       raise DeviceDetectionError(self.udid)
 
-    is_iOS13 = is_iOS13_or_higher_device(self.udid)
-
-    # GTest-based unittests are invoked via XCTest on iOS 13+ devices
-    # but produce GTest-style log output that is parsed with a GTestLogParser.
-    if xctest or is_iOS13:
-      if is_iOS13:
-        self.xctest_path = get_xctest_from_app(self.app_path)
     self.restart = restart
 
   def uninstall_apps(self):
@@ -1039,14 +1068,9 @@ class DeviceTestRunner(TestRunner):
     self.screenshot_desktop()
     self.retrieve_derived_data()
     self.extract_test_data()
+    self.process_xcresult_dir()
     self.retrieve_crash_reports()
     self.uninstall_apps()
-
-  def get_command_line_args_xctest_unittests(self, filtered_tests):
-    command_line_args = ['--enable-run-ios-unittests-with-xctest']
-    if filtered_tests:
-      command_line_args.append('--gtest_filter=%s' % filtered_tests)
-    return command_line_args
 
   def get_launch_command(self, test_app, out_dir, destination, shards=1):
     """Returns the command that can be used to launch the test app.
@@ -1060,21 +1084,7 @@ class DeviceTestRunner(TestRunner):
     Returns:
       A list of strings forming the command to launch the test.
     """
-    if self.xctest_path:
-      command_line_args = test_app.test_args
-
-      if not self.xctest:
-        filtered_tests = []
-        if test_app.included_tests:
-          filtered_tests = test_apps.get_gtest_filter(
-              test_app.included_tests, invert=False)
-        elif test_app.excluded_tests:
-          filtered_tests = test_apps.get_gtest_filter(
-            test_app.excluded_tests, invert=True)
-        command_line_args.append(
-            self.get_command_line_args_xctest_unittests(filtered_tests))
-      if command_line_args:
-        test_app.test_args = command_line_args
+    if self.xctest:
       return test_app.command(out_dir, destination, shards)
 
     cmd = [
@@ -1119,7 +1129,7 @@ class DeviceTestRunner(TestRunner):
       A dict of environment variables.
     """
     env = super(DeviceTestRunner, self).get_launch_env()
-    if self.xctest_path:
+    if self.xctest:
       env['NSUnbufferedIO'] = 'YES'
       # e.g. ios_web_shell_egtests
       env['APP_TARGET_NAME'] = os.path.splitext(

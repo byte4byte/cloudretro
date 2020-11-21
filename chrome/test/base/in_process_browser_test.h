@@ -6,21 +6,21 @@
 #define CHROME_TEST_BASE_IN_PROCESS_BROWSER_TEST_H_
 
 #include <memory>
+#include <string>
 
-#include "base/compiler_specific.h"
 #include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/ref_counted.h"
 #include "base/run_loop.h"
 #include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_base.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/page_transition_types.h"
 
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
 #include "ui/base/test/scoped_fake_full_keyboard_access.h"
 #endif
 
@@ -28,11 +28,11 @@ namespace base {
 
 class CommandLine;
 
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
 namespace mac {
 class ScopedNSAutoreleasePool;
 }  // namespace mac
-#endif  // defined(OS_MACOSX)
+#endif  // defined(OS_MAC)
 
 #if defined(OS_WIN)
 namespace win {
@@ -50,9 +50,9 @@ class ViewsDelegate;
 class Browser;
 class MainThreadStackSamplingProfiler;
 class Profile;
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
 class ScopedBundleSwizzlerMac;
-#endif  // defined(OS_MACOSX)
+#endif  // defined(OS_MAC)
 
 // Base class for tests that bring up Browser instances.
 // Writing tests with InProcessBrowserTest is slightly different than that of
@@ -69,6 +69,10 @@ class ScopedBundleSwizzlerMac;
 //   InProcessBrowserTest::SetUp(). (But see also BrowserTestBase's
 //   SetUpOnMainThread(), SetUpInProcessBrowserTestFixture(), and other related
 //   methods for a cleaner alternative).
+//
+// To include the default implementation of RunTestOnMainThread() and TestBody()
+// for Gtests, it's also necessary to include the file
+// "content/public/test/browser_test.h"
 //
 // The following hook methods are called in sequence before BrowserMain(), so
 // no browser has been created yet. They are mainly for setting up the
@@ -124,7 +128,8 @@ class InProcessBrowserTest : public content::BrowserTestBase {
   explicit InProcessBrowserTest(
       std::unique_ptr<views::ViewsDelegate> views_delegate);
 #endif
-
+  InProcessBrowserTest(const InProcessBrowserTest&) = delete;
+  InProcessBrowserTest& operator=(const InProcessBrowserTest&) = delete;
   ~InProcessBrowserTest() override;
 
   // Configures everything for an in process browser test, then invokes
@@ -223,6 +228,14 @@ class InProcessBrowserTest : public content::BrowserTestBase {
   // is omitted, the currently active profile will be used.
   Browser* CreateIncognitoBrowser(Profile* profile = nullptr);
 
+#if !defined(OS_ANDROID) && !defined(CHROME_OS)
+  // Similar to |CreateBrowser|, but creates a Guest browser.
+  // To create a Guest browser for ChromeOS, you need to add proper switches to
+  // commandline while setting up the test. For an example see
+  // AppListClientGuestModeBrowserTest::SetUpCommandLine.
+  Browser* CreateGuestBrowser();
+#endif
+
   // Creates a browser for a popup window with a single tab (about:blank), waits
   // for the tab to finish loading, and shows the browser.
   Browser* CreateBrowserForPopup(Profile* profile);
@@ -235,22 +248,23 @@ class InProcessBrowserTest : public content::BrowserTestBase {
   // the navigation to complete, and show the browser's window.
   void AddBlankTabAndShow(Browser* browser);
 
-#if !defined OS_MACOSX
+#if !defined OS_MAC && !BUILDFLAG(IS_CHROMEOS_LACROS)
   // Return a CommandLine object that is used to relaunch the browser_test
   // binary as a browser process. This function is deliberately not defined on
   // the Mac because re-using an existing browser process when launching from
   // the command line isn't a concept that we support on the Mac; AppleEvents
   // are the Mac solution for the same need. Any test based on these functions
-  // doesn't apply to the Mac.
+  // doesn't apply to the Mac. Likewise, Lacros is always launched by ash, and
+  // not by the the process restarting itself.
   base::CommandLine GetCommandLineForRelaunch();
 #endif
 
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
   // Returns the autorelease pool in use inside RunTestOnMainThreadLoop().
   base::mac::ScopedNSAutoreleasePool* AutoreleasePool() const {
     return autorelease_pool_;
   }
-#endif  // OS_MACOSX
+#endif  // OS_MAC
 
   // Returns the test data path used by the embedded test server.
   base::FilePath GetChromeTestDataDir() const;
@@ -262,6 +276,10 @@ class InProcessBrowserTest : public content::BrowserTestBase {
   void set_open_about_blank_on_browser_launch(bool value) {
     open_about_blank_on_browser_launch_ = value;
   }
+
+  // Runs scheduled layouts on all Widgets using
+  // Widget::LayoutRootViewIfNecessary(). No-op outside of Views.
+  void RunScheduledLayouts();
 
  private:
   void Initialize();
@@ -296,7 +314,7 @@ class InProcessBrowserTest : public content::BrowserTestBase {
 
   base::test::ScopedFeatureList scoped_feature_list_;
 
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
   base::mac::ScopedNSAutoreleasePool* autorelease_pool_ = nullptr;
   std::unique_ptr<ScopedBundleSwizzlerMac> bundle_swizzler_;
 
@@ -305,7 +323,7 @@ class InProcessBrowserTest : public content::BrowserTestBase {
   // more consistent with other platforms, where most views are focusable by
   // default.
   ui::test::ScopedFakeFullKeyboardAccess faked_full_keyboard_access_;
-#endif  // OS_MACOSX
+#endif  // OS_MAC
 
 #if defined(OS_WIN)
   std::unique_ptr<base::win::ScopedCOMInitializer> com_initializer_;
@@ -316,8 +334,6 @@ class InProcessBrowserTest : public content::BrowserTestBase {
 #endif
 
   std::unique_ptr<MainThreadStackSamplingProfiler> sampling_profiler_;
-
-  DISALLOW_COPY_AND_ASSIGN(InProcessBrowserTest);
 };
 
 // When including either in_process_browser_test.h or android_browser_test.h

@@ -17,24 +17,19 @@ import org.chromium.base.CollectionUtil;
 import org.chromium.base.Consumer;
 import org.chromium.base.PackageManagerUtils;
 import org.chromium.base.metrics.RecordUserAction;
-import org.chromium.chrome.browser.feature_engagement.TrackerFactory;
+import org.chromium.base.supplier.Supplier;
 import org.chromium.chrome.browser.firstrun.FirstRunStatus;
 import org.chromium.chrome.browser.locale.LocaleManager;
-import org.chromium.chrome.browser.omnibox.geo.GeolocationHeader;
-import org.chromium.chrome.browser.profiles.Profile;
-import org.chromium.chrome.browser.search_engines.TemplateUrlServiceFactory;
+import org.chromium.chrome.browser.share.ChromeShareExtras;
+import org.chromium.chrome.browser.share.ShareDelegate;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.tab.TabLaunchType;
 import org.chromium.chrome.browser.tab.TabUtils;
 import org.chromium.chrome.browser.tab.TabWebContentsObserver;
-import org.chromium.chrome.browser.tabmodel.TabModelSelector;
-import org.chromium.components.feature_engagement.EventConstants;
+import org.chromium.components.browser_ui.share.ShareParams;
 import org.chromium.content.R;
 import org.chromium.content_public.browser.ActionModeCallbackHelper;
-import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.SelectionPopupController;
 import org.chromium.content_public.browser.WebContents;
-import org.chromium.ui.base.PageTransition;
 
 import java.util.HashSet;
 import java.util.List;
@@ -55,19 +50,23 @@ public class ChromeActionModeHandler {
      * @param activityTabProvider {@link ActivityTabProvider} instance.
      * @param actionBarObserver observer called when the contextual action bar's visibility
      *        has changed.
+     * @param searchCallback Callback to run when search action is selected in the action mode.
+     * @param shareDelegateSupplier The {@link Supplier} of the {@link ShareDelegate} that will be
+     *        notified when a share action is performed.
      */
-    public ChromeActionModeHandler(
-            ActivityTabProvider activityTabProvider, Consumer<Boolean> actionBarObserver) {
+    public ChromeActionModeHandler(ActivityTabProvider activityTabProvider,
+            Consumer<Boolean> actionBarObserver, Callback<String> searchCallback,
+            Supplier<ShareDelegate> shareDelegateSupplier) {
         mInitWebContentsObserver = (webContents) -> {
             SelectionPopupController.fromWebContents(webContents)
-                    .setActionModeCallback(
-                            new ActionModeCallback(mActiveTab, webContents, actionBarObserver));
+                    .setActionModeCallback(new ActionModeCallback(mActiveTab, webContents,
+                            actionBarObserver, searchCallback, shareDelegateSupplier));
         };
 
         mActivityTabTabObserver =
                 new ActivityTabProvider.ActivityTabTabObserver(activityTabProvider) {
                     @Override
-                    public void onObservingDifferentTab(Tab tab) {
+                    public void onObservingDifferentTab(Tab tab, boolean hint) {
                         // ActivityTabProvider will null out the tab passed to
                         // onObservingDifferentTab when the tab is non-interactive (e.g. when
                         // entering the TabSwitcher), but in those cases we actually still want to
@@ -87,14 +86,25 @@ public class ChromeActionModeHandler {
 
     @VisibleForTesting
     static class ActionModeCallback implements ActionMode.Callback {
+        /**
+         * Android Intent size limitations prevent sending over a megabyte of data. Limit
+         * query lengths to 100kB because other things may be added to the Intent.
+         */
+        private static final int MAX_SHARE_QUERY_LENGTH_CHARS = 100000;
+
         private final Tab mTab;
         private final ActionModeCallbackHelper mHelper;
         private final Consumer<Boolean> mActionBarObserver;
+        private final Callback<String> mSearchCallback;
+        private final Supplier<ShareDelegate> mShareDelegateSupplier;
 
-        protected ActionModeCallback(Tab tab, WebContents webContents, Consumer<Boolean> observer) {
+        ActionModeCallback(Tab tab, WebContents webContents, Consumer<Boolean> observer,
+                Callback<String> searchCallback, Supplier<ShareDelegate> shareDelegateSupplier) {
             mTab = tab;
             mHelper = getActionModeCallbackHelper(webContents);
             mActionBarObserver = observer;
+            mSearchCallback = searchCallback;
+            mShareDelegateSupplier = shareDelegateSupplier;
         }
 
         @VisibleForTesting
@@ -122,6 +132,7 @@ public class ChromeActionModeHandler {
 
         @Override
         public boolean onPrepareActionMode(ActionMode mode, Menu menu) {
+            recordUserAction();
             notifyContextualActionBarVisibilityChanged(true);
             boolean res = mHelper.onPrepareActionMode(mode, menu);
             Set<String> browsers = getPackageNames(PackageManagerUtils.queryAllWebBrowsersInfo());
@@ -153,6 +164,16 @@ public class ChromeActionModeHandler {
                 LocaleManager.getInstance().showSearchEnginePromoIfNeeded(
                         TabUtils.getActivity(mTab), callback);
                 mHelper.finishActionMode();
+            } else if (mShareDelegateSupplier.get().isSharingHubV15Enabled()
+                    && item.getItemId() == R.id.select_action_menu_share) {
+                mShareDelegateSupplier.get().share(
+                        new ShareParams.Builder(mTab.getWindowAndroid(), /*url=*/"", /*title=*/"")
+                                .setText(sanitizeTextForShare(mHelper.getSelectedText()))
+                                .build(),
+                        new ChromeShareExtras.Builder()
+                                .setSaveLastUsed(true)
+                                .setIsUserHighlightedText(true)
+                                .build());
             } else {
                 return mHelper.onActionItemClicked(mode, item);
             }
@@ -175,33 +196,24 @@ public class ChromeActionModeHandler {
             return set;
         }
 
-        /**
-         * Generate the LoadUrlParams necessary to load the specified search query.
-         */
-        @VisibleForTesting
-        protected LoadUrlParams generateUrlParamsForSearch(String query) {
-            String url = TemplateUrlServiceFactory.get().getUrlForSearchQuery(query);
-            String headers = GeolocationHeader.getGeoHeader(url, mTab);
-
-            LoadUrlParams loadUrlParams = new LoadUrlParams(url);
-            loadUrlParams.setVerbatimHeaders(headers);
-            loadUrlParams.setTransitionType(PageTransition.GENERATED);
-            return loadUrlParams;
-        }
-
         private void search(String searchText) {
             RecordUserAction.record("MobileActionMode.WebSearch");
-            TabModelSelector selector = TabModelSelector.from(mTab);
-            if (selector == null) return;
+            mSearchCallback.onResult(searchText);
+        }
 
-            String query = ActionModeCallbackHelper.sanitizeQuery(
-                    searchText, ActionModeCallbackHelper.MAX_SEARCH_QUERY_LENGTH);
-            if (TextUtils.isEmpty(query)) return;
+        private void recordUserAction() {
+            if (mHelper.supportsFloatingActionMode()) {
+                RecordUserAction.record("MobileActionBarShown.Floating");
+            } else {
+                RecordUserAction.record("MobileActionBarShown.Toolbar");
+            }
+        }
 
-            TrackerFactory.getTrackerForProfile(Profile.fromWebContents(mTab.getWebContents()))
-                    .notifyEvent(EventConstants.WEB_SEARCH_PERFORMED);
-            selector.openNewTab(generateUrlParamsForSearch(query),
-                    TabLaunchType.FROM_LONGPRESS_FOREGROUND, mTab, mTab.isIncognito());
+        private static String sanitizeTextForShare(String text) {
+            if (TextUtils.isEmpty(text) || text.length() < MAX_SHARE_QUERY_LENGTH_CHARS) {
+                return text;
+            }
+            return text.substring(0, MAX_SHARE_QUERY_LENGTH_CHARS) + "…";
         }
     }
 }

@@ -11,6 +11,9 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/version_info/channel.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/test/browser_test.h"
+#include "extensions/browser/extension_action.h"
+#include "extensions/browser/extension_action_manager.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/features/feature_channel.h"
 #include "extensions/test/extension_test_message_listener.h"
@@ -56,7 +59,7 @@ IN_PROC_BROWSER_TEST_F(ManifestV3BrowserTest, ProgrammaticScriptInjection) {
            "background": {
              "service_worker": "worker.js"
            },
-           "permissions": ["tabs"],
+           "permissions": ["tabs", "scripting"],
            "host_permissions": ["*://example.com/*"]
          })";
   constexpr char kWorker[] =
@@ -67,15 +70,26 @@ IN_PROC_BROWSER_TEST_F(ManifestV3BrowserTest, ProgrammaticScriptInjection) {
            let url = new URL(tab.url);
            if (url.hostname != 'example.com')
              return;
+           // The tabs API equivalents of script injection are removed in MV3.
+           chrome.test.assertEq(undefined, chrome.tabs.executeScript);
+           chrome.test.assertEq(undefined, chrome.tabs.insertCSS);
+
            chrome.tabs.onUpdated.removeListener(listener);
-           chrome.tabs.executeScript(
-               tabId,
-               {code: "document.title = 'My New Title'; document.title;"},
+
+           function injectedFunction() {
+             document.title = 'My New Title';
+             return document.title;
+           }
+           chrome.scripting.executeScript(
+               {
+                 target: {tabId: tabId},
+                 function: injectedFunction,
+               },
                (results) => {
                  chrome.test.assertNoLastError();
                  chrome.test.assertTrue(!!results);
                  chrome.test.assertEq(1, results.length);
-                 chrome.test.assertEq('My New Title', results[0]);
+                 chrome.test.assertEq('My New Title', results[0].result);
                  chrome.test.notifyPass();
                });
          });
@@ -113,13 +127,18 @@ IN_PROC_BROWSER_TEST_F(ManifestV3BrowserTest, ActionAPI) {
   constexpr char kWorker[] =
       R"(chrome.action.onClicked.addListener((tab) => {
            chrome.test.assertTrue(!!tab);
-           chrome.test.notifyPass();
+           chrome.action.setIcon({path: 'blue_icon.png'}, () => {
+             chrome.test.notifyPass();
+           });
          });
          chrome.test.sendMessage('ready');)";
 
   TestExtensionDir test_dir;
   test_dir.WriteManifest(kManifest);
   test_dir.WriteFile(FILE_PATH_LITERAL("worker.js"), kWorker);
+  test_dir.CopyFileTo(
+      test_data_dir_.AppendASCII("api_test/icon_rgb_0_0_255.png"),
+      FILE_PATH_LITERAL("blue_icon.png"));
 
   ExtensionTestMessageListener listener("ready", /*will_reply=*/false);
   const Extension* extension = LoadMv3Extension(test_dir.UnpackedPath());
@@ -131,9 +150,16 @@ IN_PROC_BROWSER_TEST_F(ManifestV3BrowserTest, ActionAPI) {
   ASSERT_EQ(1, action_test_util->NumberOfBrowserActions());
   EXPECT_EQ(extension->id(), action_test_util->GetExtensionId(0));
 
+  ExtensionAction* const action =
+      ExtensionActionManager::Get(profile())->GetExtensionAction(*extension);
+  ASSERT_TRUE(action);
+  EXPECT_FALSE(action->HasIcon(ExtensionAction::kDefaultTabId));
+
   ResultCatcher catcher;
   action_test_util->Press(0);
   ASSERT_TRUE(catcher.GetNextResult()) << catcher.message();
+
+  EXPECT_TRUE(action->HasIcon(ExtensionAction::kDefaultTabId));
 }
 
 }  // namespace extensions

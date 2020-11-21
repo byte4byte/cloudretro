@@ -9,10 +9,13 @@
 #include "base/bind.h"
 #include "chrome/browser/apps/app_service/app_service_proxy.h"
 #include "chrome/browser/apps/app_service/app_service_proxy_factory.h"
+#include "chrome/browser/apps/intent_helper/intent_picker_helpers.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/common/chrome_features.h"
+#include "content/public/browser/navigation_handle.h"
 #include "ui/gfx/favicon_size.h"
 #include "ui/gfx/image/image.h"
 
@@ -30,8 +33,8 @@ apps::mojom::AppType GetAppType(apps::PickerEntryType picker_entry_type) {
     case apps::PickerEntryType::kWeb:
       app_type = apps::mojom::AppType::kWeb;
       break;
-    case apps::PickerEntryType::kMacNative:
-      app_type = apps::mojom::AppType::kMacNative;
+    case apps::PickerEntryType::kMacOs:
+      app_type = apps::mojom::AppType::kMacOs;
       break;
   }
   return app_type;
@@ -102,17 +105,34 @@ void IntentPickerTabHelper::LoadAppIcon(
   apps::AppServiceProxy* proxy =
       apps::AppServiceProxyFactory::GetForProfile(profile);
 
-  if (!proxy) {
-    std::move(callback).Run(std::move(apps));
-    return;
-  }
-
   constexpr bool allow_placeholder_icon = false;
-  proxy->LoadIcon(app_type, app_id, apps::mojom::IconCompression::kUncompressed,
-                  gfx::kFaviconSize, allow_placeholder_icon,
+  auto icon_type =
+      (base::FeatureList::IsEnabled(features::kAppServiceAdaptiveIcon))
+          ? apps::mojom::IconType::kStandard
+          : apps::mojom::IconType::kUncompressed;
+  proxy->LoadIcon(app_type, app_id, icon_type, gfx::kFaviconSize,
+                  allow_placeholder_icon,
                   base::BindOnce(&IntentPickerTabHelper::OnAppIconLoaded,
                                  weak_factory_.GetWeakPtr(), std::move(apps),
                                  std::move(callback), index));
+}
+
+void IntentPickerTabHelper::DidFinishNavigation(
+    content::NavigationHandle* navigation_handle) {
+  // For a http/https scheme URL navigation, we will check if the
+  // url can be handled by some apps, and show intent picker icon
+  // or bubble if there are some apps available. We only want to check this if
+  // the navigation happens in the main frame, and the navigation is not the
+  // same document with same URL.
+  // TODO(crbug.com/826982): Check is not error page here. Adding this check
+  // will break the browser test, given this is a refactor CL, will add check in
+  // follow up CL.
+  if (navigation_handle->IsInMainFrame() && navigation_handle->HasCommitted() &&
+      (!navigation_handle->IsSameDocument() ||
+       navigation_handle->GetURL() != navigation_handle->GetPreviousURL()) &&
+      navigation_handle->GetURL().SchemeIsHTTPOrHTTPS()) {
+    apps::MaybeShowIntentPicker(navigation_handle);
+  }
 }
 
 WEB_CONTENTS_USER_DATA_KEY_IMPL(IntentPickerTabHelper)

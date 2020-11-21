@@ -45,19 +45,14 @@ bool HasPointChanged(const WebTouchPoint& point_1,
 // static
 const base::FeatureParam<std::string>
     PassthroughTouchEventQueue::kSkipTouchEventFilterType{
-        &features::kSkipTouchEventFilter,
-        features::kSkipTouchEventFilterTypeParamName,
-        features::kSkipTouchEventFilterTypeParamValueDiscrete};
+        &blink::features::kSkipTouchEventFilter,
+        blink::features::kSkipTouchEventFilterTypeParamName,
+        blink::features::kSkipTouchEventFilterTypeParamValueDiscrete};
 
 PassthroughTouchEventQueue::TouchEventWithLatencyInfoAndAckState::
     TouchEventWithLatencyInfoAndAckState(const TouchEventWithLatencyInfo& event)
     : TouchEventWithLatencyInfo(event),
       ack_state_(blink::mojom::InputEventResultState::kUnknown) {}
-
-bool PassthroughTouchEventQueue::TouchEventWithLatencyInfoAndAckState::
-operator<(const TouchEventWithLatencyInfoAndAckState& other) const {
-  return event.unique_touch_event_id < other.event.unique_touch_event_id;
-}
 
 PassthroughTouchEventQueue::PassthroughTouchEventQueue(
     PassthroughTouchEventQueueClient* client,
@@ -136,13 +131,7 @@ void PassthroughTouchEventQueue::ProcessTouchAck(
                                           should_stop_timeout_monitor))
     return;
 
-  auto touch_event_iter = outstanding_touches_.begin();
-  while (touch_event_iter != outstanding_touches_.end()) {
-    if (unique_touch_event_id == touch_event_iter->event.unique_touch_event_id)
-      break;
-    ++touch_event_iter;
-  }
-
+  auto touch_event_iter = outstanding_touches_.find(unique_touch_event_id);
   if (touch_event_iter == outstanding_touches_.end())
     return;
 
@@ -154,22 +143,16 @@ void PassthroughTouchEventQueue::ProcessTouchAck(
   AckCompletedEvents();
 }
 
-void PassthroughTouchEventQueue::OnGestureScrollEvent(
-    const GestureEventWithLatencyInfo& gesture_event) {
-  if (gesture_event.event.GetType() ==
-      blink::WebInputEvent::Type::kGestureScrollUpdate) {
-    send_touch_events_async_ = true;
-  }
-}
-
 void PassthroughTouchEventQueue::OnGestureEventAck(
     const GestureEventWithLatencyInfo& event,
     blink::mojom::InputEventResultState ack_result) {
-  // Turn events sent during gesture scrolls to be async.
-  if (event.event.GetType() ==
-      blink::WebInputEvent::Type::kGestureScrollUpdate) {
-    send_touch_events_async_ =
-        (ack_result == blink::mojom::InputEventResultState::kConsumed);
+  // When the scroll finishes allow TouchEvents to be blocking again.
+  if (event.event.GetType() == blink::WebInputEvent::Type::kGestureScrollEnd) {
+    send_touch_events_async_ = false;
+  } else if (event.event.GetType() ==
+                 blink::WebInputEvent::Type::kGestureScrollUpdate &&
+             ack_result == blink::mojom::InputEventResultState::kConsumed) {
+    send_touch_events_async_ = true;
   }
 }
 
@@ -334,7 +317,7 @@ bool PassthroughTouchEventQueue::ShouldFilterForEvent(
   // If the experiment is enabled and all events are forwarded, always skip
   // filtering.
   if (events_to_always_forward_ ==
-      features::kSkipTouchEventFilterTypeParamValueAll)
+      blink::features::kSkipTouchEventFilterTypeParamValueAll)
     return false;
   // If the experiment is enabled and only discrete events are forwarded,
   // always run filtering for touchmove events only.

@@ -55,6 +55,7 @@ cr.define('cr.login', function() {
    *   isLoginPrimaryAccount: boolean,
    *   email: string,
    *   constrained: string,
+   *   platformVersion: string,
    *   readOnlyEmail: boolean,
    *   service: string,
    *   dontResizeNonEmbeddedPages: boolean,
@@ -125,6 +126,9 @@ cr.define('cr.login', function() {
                      // Default is |true|.
     'flow',          // One of 'default', 'enterprise', or 'theftprotection'.
     'enterpriseDisplayDomain',     // Current domain name to be displayed.
+    'enterpriseDomainManager',     // Manager of the current domain. Can be
+                                   // either a domain name (foo.com) or an email
+                                   // address (admin@foo.com).
     'enterpriseEnrollmentDomain',  // Domain in which hosting device is (or
                                    // should be) enrolled.
     'emailDomain',                 // Value used to prefill domain for email.
@@ -133,8 +137,6 @@ cr.define('cr.login', function() {
     'platformVersion',           // Version of the OS build.
     'releaseChannel',            // Installation channel.
     'endpointGen',               // Current endpoint generation.
-    'menuGuestMode',             // Enables "Guest mode" menu item
-    'menuKeyboardOptions',       // Enables "Keyboard options" menu item
     'menuEnterpriseEnrollment',  // Enables "Enterprise enrollment" menu item.
     'lsbReleaseBoard',           // Chrome OS Release board name
     'isFirstUser',               // True if this is non-enterprise device,
@@ -172,6 +174,16 @@ cr.define('cr.login', function() {
     'samlAclUrl',
   ];
 
+  /**
+   * Extract domain name from an URL.
+   * @param {string} url An URL string.
+   * @return {string} The host name of the URL.
+   */
+  function extractDomain(url) {
+    const a = document.createElement('a');
+    a.href = url;
+    return a.hostname;
+  }
 
   /**
    * Handlers for the HTML5 messages received from Gaia.
@@ -198,6 +210,9 @@ cr.define('cr.login', function() {
     },
     'backButton'(msg) {
       this.dispatchEvent(new CustomEvent('backButton', {detail: msg.show}));
+    },
+    'getAccounts'(msg) {
+      this.dispatchEvent(new Event('getAccounts'));
     },
     'showView'(msg) {
       this.dispatchEvent(new Event('showView'));
@@ -319,6 +334,7 @@ cr.define('cr.login', function() {
       this.onePasswordCallback = null;
       this.insecureContentBlockedCallback = null;
       this.samlApiUsedCallback = null;
+      this.recordSAMLProviderCallback = null;
       this.missingGaiaInfoCallback = null;
       /**
        * Callback allowing to request whether the specified user which
@@ -586,6 +602,14 @@ cr.define('cr.login', function() {
       this.isLoaded_ = true;
     }
 
+    /**
+     * Called in response to 'getAccounts' event.
+     * @param {Array<string>} accounts list of emails
+     */
+    getAccountsResponse(accounts) {
+      this.sendMessageToWebview('accountsListed', accounts);
+    }
+
     constructInitialFrameUrl_(data) {
       if (data.doSamlRedirect) {
         let url = this.idpOrigin_ + SAML_REDIRECTION_PATH;
@@ -616,6 +640,9 @@ cr.define('cr.login', function() {
       if (data.enterpriseDisplayDomain) {
         url = appendParam(url, 'manageddomain', data.enterpriseDisplayDomain);
       }
+      if (data.enterpriseDomainManager) {
+        url = appendParam(url, 'devicemanager', data.enterpriseDomainManager);
+      }
       if (data.clientVersion) {
         url = appendParam(url, 'client_version', data.clientVersion);
       }
@@ -628,26 +655,15 @@ cr.define('cr.login', function() {
       if (data.endpointGen) {
         url = appendParam(url, 'endpoint_gen', data.endpointGen);
       }
-      let mi = '';
-      if (data.menuGuestMode) {
-        mi += 'gm,';
-      }
-      if (data.menuKeyboardOptions) {
-        mi += 'ko,';
-      }
       if (data.menuEnterpriseEnrollment) {
-        mi += 'ee,';
-      }
-      if (mi.length) {
-        url = appendParam(url, 'mi', mi);
+        url = appendParam(url, 'mi', 'ee');
       }
 
+      if (data.lsbReleaseBoard) {
+        url = appendParam(url, 'chromeos_board', data.lsbReleaseBoard);
+      }
       if (data.isFirstUser) {
         url = appendParam(url, 'is_first_user', 'true');
-
-        if (data.lsbReleaseBoard) {
-          url = appendParam(url, 'chromeos_board', data.lsbReleaseBoard);
-        }
       }
       if (data.obfuscatedOwnerId) {
         url = appendParam(url, 'obfuscated_owner_id', data.obfuscatedOwnerId);
@@ -811,7 +827,7 @@ cr.define('cr.login', function() {
         } else if (headerName == LOCATION_HEADER) {
           // If the "choose what to sync" checkbox was clicked, then the
           // continue URL will contain a source=3 field.
-          assert(header.value);
+          assert(header.value !== undefined);
           const location = decodeURIComponent(header.value);
           this.chooseWhatToSync_ = !!location.match(/(\?|&)source=3($|&)/);
         }
@@ -862,11 +878,22 @@ cr.define('cr.login', function() {
     }
 
     /**
-     * Invoked to send a HTML5 message to the webview element.
-     * @param {Object} payload Payload of the HTML5 message.
+     * Invoked to send a HTML5 message with attached data to the webview
+     * element.
+     * @param {string} messageType Type of the HTML5 message.
+     * @param {Object=} messageData Data to be attached to the message.
      */
-    sendMessageToWebview(payload) {
+    sendMessageToWebview(messageType, messageData = null) {
       const currentUrl = this.webview_.src;
+      let payload = undefined;
+      if (messageData) {
+        payload = {type: messageType, data: messageData};
+      } else {
+        // TODO(crbug.com/1116343): Use new message format when it will be
+        // available in production.
+        payload = messageType;
+      }
+
       this.webview_.contentWindow.postMessage(payload, currentUrl);
     }
 
@@ -935,6 +962,12 @@ cr.define('cr.login', function() {
             this.onGotIsSamlUserPasswordless_.bind(
                 this, this.email_, this.gaiaId_));
         return;
+      }
+
+      if (this.recordSAMLProviderCallback && this.authFlow == AuthFlow.SAML) {
+        // Makes distinction between different SAML providers
+        this.recordSAMLProviderCallback(
+            this.samlHandler_.x509certificate || '');
       }
 
       if (this.isSamlUserPasswordless_ && this.authFlow == AuthFlow.SAML &&
@@ -1126,7 +1159,6 @@ cr.define('cr.login', function() {
         return;
       }
 
-      this.authDomain = this.samlHandler_.authDomain;
       this.authFlow = AuthFlow.SAML;
 
       this.webview_.focus();
@@ -1208,13 +1240,6 @@ cr.define('cr.login', function() {
           console.error('Authenticator: contentWindow is null.');
         }
 
-        if (this.authMode == AuthMode.DEFAULT) {
-          chrome.send('metricsHandler:recordBooleanHistogram', [
-            'ChromeOS.GAIA.AuthenticatorContentWindowNull',
-            !this.webview_.contentWindow
-          ]);
-        }
-
         this.fireReadyEvent_();
         // Focus webview after dispatching event when webview is already
         // visible.
@@ -1255,6 +1280,9 @@ cr.define('cr.login', function() {
     onLoadCommit_(e) {
       if (this.gaiaId_) {
         this.maybeCompleteAuth_();
+      }
+      if (e.isTopLevel) {
+        this.authDomain = extractDomain(e.url);
       }
     }
 

@@ -6,8 +6,9 @@
 
 #include <stdint.h>
 
+#include "base/check.h"
 #include "base/lazy_instance.h"
-#include "base/logging.h"
+#include "base/notreached.h"
 #include "base/synchronization/lock.h"
 #include "third_party/icu/source/common/unicode/ubrk.h"
 #include "third_party/icu/source/common/unicode/uchar.h"
@@ -47,18 +48,26 @@ template <UBreakIteratorType break_type>
 class DefaultLocaleBreakIteratorCache {
  public:
   DefaultLocaleBreakIteratorCache()
-      : main_(nullptr), main_could_be_leased_(true) {
-    UErrorCode status = U_ZERO_ERROR;
-    main_ = ubrk_open(break_type, nullptr, nullptr, 0, &status);
-    if (U_FAILURE(status)) {
+      : main_status_(U_ZERO_ERROR),
+        main_(nullptr),
+        main_could_be_leased_(true) {
+    main_ = ubrk_open(break_type, nullptr, nullptr, 0, &main_status_);
+    if (U_FAILURE(main_status_)) {
       NOTREACHED() << "ubrk_open failed for type " << break_type
-                   << " with error " << status;
+                   << " with error " << main_status_;
     }
   }
 
   virtual ~DefaultLocaleBreakIteratorCache() { ubrk_close(main_); }
 
   UBreakIterator* Lease(UErrorCode& status) {
+    if (U_FAILURE(status)) {
+      return nullptr;
+    }
+    if (U_FAILURE(main_status_)) {
+      status = main_status_;
+      return nullptr;
+    }
     {
       AutoLock scoped_lock(lock_);
       if (main_could_be_leased_) {
@@ -69,11 +78,11 @@ class DefaultLocaleBreakIteratorCache {
     }
     // The main_ is already leased out to some other places, return a new
     // object instead.
-    // TODO(ftang) call ubrk_safeClone(main_, ...) after the fix of ICU-21079
     UBreakIterator* result =
         ubrk_open(break_type, nullptr, nullptr, 0, &status);
     if (U_FAILURE(status)) {
-      NOTREACHED() << "ubrk_open failed with error " << status;
+      NOTREACHED() << "ubrk_open failed for type " << break_type
+                   << " with error " << status;
     }
     return result;
   }
@@ -91,19 +100,20 @@ class DefaultLocaleBreakIteratorCache {
   }
 
  private:
+  UErrorCode main_status_;
   UBreakIterator* main_;
-  bool main_could_be_leased_;
+  bool main_could_be_leased_ GUARDED_BY(lock_);
   Lock lock_;
 };
 
-static LazyInstance<DefaultLocaleBreakIteratorCache<UBRK_CHARACTER>>::
-    DestructorAtExit char_break_cache = LAZY_INSTANCE_INITIALIZER;
-static LazyInstance<DefaultLocaleBreakIteratorCache<UBRK_WORD>>::
-    DestructorAtExit word_break_cache = LAZY_INSTANCE_INITIALIZER;
-static LazyInstance<DefaultLocaleBreakIteratorCache<UBRK_SENTENCE>>::
-    DestructorAtExit sentence_break_cache = LAZY_INSTANCE_INITIALIZER;
-static LazyInstance<DefaultLocaleBreakIteratorCache<UBRK_LINE>>::
-    DestructorAtExit line_break_cache = LAZY_INSTANCE_INITIALIZER;
+static LazyInstance<DefaultLocaleBreakIteratorCache<UBRK_CHARACTER>>::Leaky
+    char_break_cache = LAZY_INSTANCE_INITIALIZER;
+static LazyInstance<DefaultLocaleBreakIteratorCache<UBRK_WORD>>::Leaky
+    word_break_cache = LAZY_INSTANCE_INITIALIZER;
+static LazyInstance<DefaultLocaleBreakIteratorCache<UBRK_SENTENCE>>::Leaky
+    sentence_break_cache = LAZY_INSTANCE_INITIALIZER;
+static LazyInstance<DefaultLocaleBreakIteratorCache<UBRK_LINE>>::Leaky
+    line_break_cache = LAZY_INSTANCE_INITIALIZER;
 
 }  // namespace
 
@@ -167,10 +177,16 @@ bool BreakIterator::Init() {
       return false;
   }
 
-  ubrk_setText(static_cast<UBreakIterator*>(iter_), string_.data(),
-               static_cast<int32_t>(string_.size()), &status);
-  if (U_FAILURE(status)) {
+  if (U_FAILURE(status) || iter_ == nullptr) {
     return false;
+  }
+
+  if (string_.data() != nullptr) {
+    ubrk_setText(static_cast<UBreakIterator*>(iter_), string_.data(),
+                 static_cast<int32_t>(string_.size()), &status);
+    if (U_FAILURE(status)) {
+      return false;
+    }
   }
 
   // Move the iterator to the beginning of the string.
@@ -281,7 +297,7 @@ bool BreakIterator::IsGraphemeBoundary(size_t position) const {
 }
 
 string16 BreakIterator::GetString() const {
-  return GetStringPiece().as_string();
+  return string16(GetStringPiece());
 }
 
 StringPiece16 BreakIterator::GetStringPiece() const {

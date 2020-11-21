@@ -6,7 +6,7 @@
 
 #include "ui/aura/client/cursor_client_observer.h"
 #include "ui/base/cursor/cursor_size.h"
-#include "ui/base/mojom/cursor_type.mojom-shared.h"
+#include "ui/base/cursor/mojom/cursor_type.mojom-shared.h"
 #include "ui/display/display.h"
 
 namespace aura {
@@ -32,6 +32,10 @@ void TestCursorClient::SetCursor(gfx::NativeCursor cursor) {
 
 gfx::NativeCursor TestCursorClient::GetCursor() const {
   return ui::mojom::CursorType::kNull;
+}
+
+void TestCursorClient::SetCursorForced(gfx::NativeCursor cursor) {
+  SetCursor(cursor);
 }
 
 void TestCursorClient::ShowCursor() {

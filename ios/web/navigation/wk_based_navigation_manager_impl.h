@@ -95,12 +95,10 @@ class WKBasedNavigationManagerImpl : public NavigationManagerImpl {
   void OnNavigationStarted(const GURL& url) override;
   void DetachFromWebView() override;
   void AddTransientItem(const GURL& url) override;
-  void AddPendingItem(
-      const GURL& url,
-      const web::Referrer& referrer,
-      ui::PageTransition navigation_type,
-      NavigationInitiationType initiation_type,
-      UserAgentOverrideOption user_agent_override_option) override;
+  void AddPendingItem(const GURL& url,
+                      const web::Referrer& referrer,
+                      ui::PageTransition navigation_type,
+                      NavigationInitiationType initiation_type) override;
   void CommitPendingItem() override;
   void CommitPendingItem(std::unique_ptr<NavigationItemImpl> item) override;
   std::unique_ptr<web::NavigationItemImpl> ReleasePendingItem() override;
@@ -235,10 +233,6 @@ class WKBasedNavigationManagerImpl : public NavigationManagerImpl {
       RestoreItemListType list_type,
       std::vector<std::unique_ptr<NavigationItem>> items_restored);
 
-  // Restores the state of the |restored_visible_item_| in the last committed
-  // item.
-  void RestoreVisibleItemState();
-
   // Restores the specified navigation session in the current web view. This
   // differs from Restore() in that it doesn't reset the current navigation
   // history to empty before restoring. It simply appends the restored session
@@ -287,6 +281,8 @@ class WKBasedNavigationManagerImpl : public NavigationManagerImpl {
   std::unique_ptr<NavigationItemImpl> empty_window_open_item_;
 
   // The transient item in main frame.
+  // TODO(crbug.com/1028755): Remove the transient item once SafeBrowsing is
+  // launched.
   std::unique_ptr<NavigationItemImpl> transient_item_;
 
   // A placeholder item used when CanTrustLastCommittedItem

@@ -3,14 +3,15 @@
 // found in the LICENSE file.
 
 // clang-format off
-import {CrSettingsPrefs} from 'chrome://settings/settings.js';
-import {LanguagesBrowserProxyImpl} from 'chrome://settings/lazy_load.js';
-import {FakeSettingsPrivate} from 'chrome://test/settings/fake_settings_private.m.js';
-import {getFakeLanguagePrefs} from 'chrome://test/settings/fake_language_settings_private.m.js';
-import {TestLanguagesBrowserProxy} from 'chrome://test/settings/test_languages_browser_proxy.m.js';
 import {isChromeOS, isWindows} from 'chrome://resources/js/cr.m.js';
-import {fakeDataBind} from 'chrome://test/test_util.m.js';
 import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+import {LanguagesBrowserProxyImpl} from 'chrome://settings/lazy_load.js';
+import {CrSettingsPrefs} from 'chrome://settings/settings.js';
+import {getFakeLanguagePrefs} from 'chrome://test/settings/fake_language_settings_private.m.js';
+import {FakeSettingsPrivate} from 'chrome://test/settings/fake_settings_private.m.js';
+import {TestLanguagesBrowserProxy} from 'chrome://test/settings/test_languages_browser_proxy.m.js';
+import {fakeDataBind} from 'chrome://test/test_util.m.js';
+
 // clang-format on
 
 suite('settings-languages', function() {
@@ -37,8 +38,7 @@ suite('settings-languages', function() {
 
   setup(function() {
     const settingsPrefs = document.createElement('settings-prefs');
-    const settingsPrivate =
-        new FakeSettingsPrivate(getFakeLanguagePrefs());
+    const settingsPrivate = new FakeSettingsPrivate(getFakeLanguagePrefs());
     settingsPrefs.initialize(settingsPrivate);
     document.body.appendChild(settingsPrefs);
 
@@ -138,7 +138,7 @@ suite('settings-languages', function() {
     test('modifying input methods', function() {
       assertEquals(2, languageHelper.languages.inputMethods.enabled.length);
       const inputMethods = languageHelper.getInputMethodsForLanguage('en-US');
-      assertEquals(3, inputMethods.length);
+      assertEquals(4, inputMethods.length);
 
       // We can remove one input method.
       const dvorak =
@@ -152,7 +152,7 @@ suite('settings-languages', function() {
 
       // Add input methods for Swahili.
       const sw = '_comp_ime_abcdefghijklmnopqrstuvwxyzabcdefxkb:sw:sw';
-      const swUS = '_comp_ime_abcdefghijklmnopqrstuvwxyzabcdefxkb:us:sw';
+      const swUS = 'ime_abcdefghijklmnopqrstuvwxyzabcdefxkb:us:sw';
       languageHelper.addInputMethod(sw);
       languageHelper.addInputMethod(swUS);
       assertEquals(3, languageHelper.languages.inputMethods.enabled.length);
@@ -165,7 +165,7 @@ suite('settings-languages', function() {
       // English which is still enabled.
       assertTrue(languageHelper.languages.inputMethods.enabled.some(function(
           inputMethod) {
-        return inputMethod.id == swUS;
+        return inputMethod.id === swUS;
       }));
     });
   }

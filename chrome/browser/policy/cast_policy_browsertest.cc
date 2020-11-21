@@ -11,6 +11,7 @@
 #include "components/policy/core/common/policy_map.h"
 #include "components/policy/policy_constants.h"
 #include "components/prefs/pref_service.h"
+#include "content/public/test/browser_test.h"
 
 namespace policy {
 
@@ -22,8 +23,8 @@ class MediaRouterPolicyTest : public PolicyTest {
     PolicyTest::SetUpInProcessBrowserTestFixture();
     PolicyMap policies;
     policies.Set(key::kEnableMediaRouter, POLICY_LEVEL_MANDATORY,
-                 POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD,
-                 std::make_unique<base::Value>(enable), nullptr);
+                 POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD, base::Value(enable),
+                 nullptr);
     provider_.UpdateChromePolicy(policies);
   }
 };
@@ -46,8 +47,8 @@ class MediaRouterActionPolicyTest : public PolicyTest {
     PolicyTest::SetUpInProcessBrowserTestFixture();
     PolicyMap policies;
     policies.Set(key::kShowCastIconInToolbar, POLICY_LEVEL_MANDATORY,
-                 POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD,
-                 std::make_unique<base::Value>(enable), nullptr);
+                 POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD, base::Value(enable),
+                 nullptr);
     provider_.UpdateChromePolicy(policies);
   }
 };
@@ -76,7 +77,7 @@ class MediaRouterCastAllowAllIPsPolicyTest
     PolicyMap policies;
     policies.Set(key::kMediaRouterCastAllowAllIPs, POLICY_LEVEL_MANDATORY,
                  POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD,
-                 std::make_unique<base::Value>(is_enabled()), nullptr);
+                 base::Value(is_enabled()), nullptr);
     provider_.UpdateChromePolicy(policies);
   }
 

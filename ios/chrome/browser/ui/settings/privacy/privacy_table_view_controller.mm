@@ -4,8 +4,11 @@
 
 #import "ios/chrome/browser/ui/settings/privacy/privacy_table_view_controller.h"
 
-#include "base/logging.h"
+#include "base/check.h"
 #import "base/mac/foundation_util.h"
+#include "base/metrics/user_metrics.h"
+#include "base/metrics/user_metrics_action.h"
+#include "components/content_settings/core/common/features.h"
 #include "components/handoff/pref_names_ios.h"
 #import "components/prefs/ios/pref_observer_bridge.h"
 #include "components/prefs/pref_change_registrar.h"
@@ -15,6 +18,7 @@
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/chrome/browser/browsing_data/browsing_data_features.h"
 #import "ios/chrome/browser/main/browser.h"
+#include "ios/chrome/browser/pref_names.h"
 #import "ios/chrome/browser/ui/commands/open_new_tab_command.h"
 #import "ios/chrome/browser/ui/page_info/features.h"
 #import "ios/chrome/browser/ui/settings/cells/settings_switch_cell.h"
@@ -22,9 +26,11 @@
 #import "ios/chrome/browser/ui/settings/privacy/privacy_navigation_commands.h"
 #import "ios/chrome/browser/ui/settings/settings_navigation_controller.h"
 #import "ios/chrome/browser/ui/settings/settings_table_view_controller_constants.h"
+#import "ios/chrome/browser/ui/settings/utils/pref_backed_boolean.h"
 #import "ios/chrome/browser/ui/table_view/cells/table_view_detail_icon_item.h"
 #import "ios/chrome/browser/ui/table_view/cells/table_view_link_header_footer_item.h"
 #include "ios/chrome/browser/ui/ui_feature_flags.h"
+#import "ios/chrome/common/ui/reauthentication/reauthentication_protocol.h"
 #include "ios/chrome/grit/ios_chromium_strings.h"
 #include "ios/chrome/grit/ios_strings.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -40,17 +46,17 @@ NSString* const kPrivacyTableViewId = @"kPrivacyTableViewId";
 namespace {
 
 typedef NS_ENUM(NSInteger, SectionIdentifier) {
-  SectionIdentifierWebServices = kSectionIdentifierEnumZero,
-  SectionIndentifierCookies,
-  SectionIdentifierClearBrowsingData,
+  SectionIdentifierPrivacyContent = kSectionIdentifierEnumZero,
+  SectionIdentifierWebServices,
+
 };
 
 typedef NS_ENUM(NSInteger, ItemType) {
-  ItemTypeOtherDevicesHandoff = kItemTypeEnumZero,
-  ItemTypeCookies,
-  ItemTypeClearBrowsingDataClear,
+  ItemTypeClearBrowsingDataClear = kItemTypeEnumZero,
   // Footer to suggest the user to open Sync and Google services settings.
-  ItemTypeClearBrowsingDataFooter,
+  ItemTypePrivacyFooter,
+  ItemTypeOtherDevicesHandoff,
+  ItemTypeIncognitoReauth,
 };
 
 // Only used in this class to openn the Sync and Google services settings.
@@ -59,7 +65,8 @@ const char kGoogleServicesSettingsURL[] = "settings://open_google_services";
 
 }  // namespace
 
-@interface PrivacyTableViewController () <PrefObserverDelegate> {
+@interface PrivacyTableViewController () <BooleanObserver,
+                                          PrefObserverDelegate> {
   ChromeBrowserState* _browserState;  // weak
 
   // Pref observer to track changes to prefs.
@@ -74,13 +81,23 @@ const char kGoogleServicesSettingsURL[] = "settings://open_google_services";
 // Browser.
 @property(nonatomic, readonly) Browser* browser;
 
+// Accessor for the incognito reauth pref.
+@property(nonatomic, strong) PrefBackedBoolean* incognitoReauthPref;
+
+// Switch item for toggling incognito reauth.
+@property(nonatomic, strong) SettingsSwitchItem* incognitoReauthItem;
+
+// Authentication module used when the user toggles the biometric auth on.
+@property(nonatomic, strong) id<ReauthenticationProtocol> reauthModule;
+
 @end
 
 @implementation PrivacyTableViewController
 
 #pragma mark - Initialization
 
-- (instancetype)initWithBrowser:(Browser*)browser {
+- (instancetype)initWithBrowser:(Browser*)browser
+         reauthenticationModule:(id<ReauthenticationProtocol>)reauthModule {
   DCHECK(browser);
   UITableViewStyle style = base::FeatureList::IsEnabled(kSettingsRefresh)
                                ? UITableViewStylePlain
@@ -88,6 +105,7 @@ const char kGoogleServicesSettingsURL[] = "settings://open_google_services";
   self = [super initWithStyle:style];
   if (self) {
     _browser = browser;
+    _reauthModule = reauthModule;
     _browserState = browser->GetBrowserState();
     self.title =
         l10n_util::GetNSString(IDS_OPTIONS_ADVANCED_SECTION_TITLE_PRIVACY);
@@ -100,6 +118,13 @@ const char kGoogleServicesSettingsURL[] = "settings://open_google_services";
     // screen.
     _prefObserverBridge->ObserveChangesForPreference(
         prefs::kIosHandoffToOtherDevices, &_prefChangeRegistrar);
+
+    if (base::FeatureList::IsEnabled(kIncognitoAuthentication)) {
+      _incognitoReauthPref = [[PrefBackedBoolean alloc]
+          initWithPrefService:GetApplicationContext()->GetLocalState()
+                     prefName:prefs::kIncognitoAuthenticationSetting];
+      [_incognitoReauthPref setObserver:self];
+    }
   }
   return self;
 }
@@ -126,25 +151,25 @@ const char kGoogleServicesSettingsURL[] = "settings://open_google_services";
   [super loadModel];
 
   TableViewModel* model = self.tableViewModel;
-
-  // Web Services Section
+  [model addSectionWithIdentifier:SectionIdentifierPrivacyContent];
   [model addSectionWithIdentifier:SectionIdentifierWebServices];
+
+  // Clear Browsing item.
+  [model addItem:[self clearBrowsingDetailItem]
+      toSectionWithIdentifier:SectionIdentifierPrivacyContent];
+
+  [model setFooter:[self showPrivacyFooterItem]
+      forSectionWithIdentifier:SectionIdentifierPrivacyContent];
+
+  // Web Services item.
   [model addItem:[self handoffDetailItem]
       toSectionWithIdentifier:SectionIdentifierWebServices];
 
-  if (base::FeatureList::IsEnabled(kPageInfoChromeGuard)) {
-    // Cookies Section
-    [model addSectionWithIdentifier:SectionIndentifierCookies];
-    [model addItem:[self cookiesItem]
-        toSectionWithIdentifier:SectionIndentifierCookies];
+  if (base::FeatureList::IsEnabled(kIncognitoAuthentication)) {
+    // Incognito authentication item.
+    [model addItem:self.incognitoReauthItem
+        toSectionWithIdentifier:SectionIdentifierWebServices];
   }
-
-  // Clear Browsing Section
-  [model addSectionWithIdentifier:SectionIdentifierClearBrowsingData];
-  [model addItem:[self clearBrowsingDetailItem]
-      toSectionWithIdentifier:SectionIdentifierClearBrowsingData];
-  [model setFooter:[self showClearBrowsingDataFooterItem]
-      forSectionWithIdentifier:SectionIdentifierClearBrowsingData];
 }
 
 #pragma mark - Model Objects
@@ -165,23 +190,15 @@ const char kGoogleServicesSettingsURL[] = "settings://open_google_services";
 
 // Creates TableViewHeaderFooterItem instance to show a link to open the Sync
 // and Google services settings.
-- (TableViewHeaderFooterItem*)showClearBrowsingDataFooterItem {
-  TableViewLinkHeaderFooterItem* showClearBrowsingDataFooterItem =
+- (TableViewHeaderFooterItem*)showPrivacyFooterItem {
+  TableViewLinkHeaderFooterItem* showPrivacyFooterItem =
       [[TableViewLinkHeaderFooterItem alloc]
-          initWithType:ItemTypeClearBrowsingDataFooter];
-  showClearBrowsingDataFooterItem.text =
+          initWithType:ItemTypePrivacyFooter];
+  showPrivacyFooterItem.text =
       l10n_util::GetNSString(IDS_IOS_OPTIONS_PRIVACY_GOOGLE_SERVICES_FOOTER);
-  showClearBrowsingDataFooterItem.linkURL = GURL(kGoogleServicesSettingsURL);
+  showPrivacyFooterItem.linkURL = GURL(kGoogleServicesSettingsURL);
 
-  return showClearBrowsingDataFooterItem;
-}
-
-// Returns TableViewHeaderFooterItem instance to open Cookies screen.
-- (TableViewItem*)cookiesItem {
-  return [self detailItemWithType:ItemTypeCookies
-                          titleId:IDS_IOS_OPTIONS_PRIVACY_COOKIES
-                       detailText:nil
-          accessibilityIdentifier:kSettingsCookiesCellId];
+  return showPrivacyFooterItem;
 }
 
 - (TableViewItem*)clearBrowsingDetailItem {
@@ -189,6 +206,20 @@ const char kGoogleServicesSettingsURL[] = "settings://open_google_services";
                           titleId:IDS_IOS_CLEAR_BROWSING_DATA_TITLE
                        detailText:nil
           accessibilityIdentifier:kSettingsClearBrowsingDataCellId];
+}
+
+- (SettingsSwitchItem*)incognitoReauthItem {
+  DCHECK(base::FeatureList::IsEnabled(kIncognitoAuthentication));
+
+  if (_incognitoReauthItem) {
+    return _incognitoReauthItem;
+  }
+  _incognitoReauthItem =
+      [[SettingsSwitchItem alloc] initWithType:ItemTypeIncognitoReauth];
+  // TODO(crbug.com/1138892) : add localized string.
+  _incognitoReauthItem.text = @"[Test String] Incognito Authentication";
+  _incognitoReauthItem.on = self.incognitoReauthPref.value;
+  return _incognitoReauthItem;
 }
 
 - (TableViewDetailIconItem*)detailItemWithType:(NSInteger)type
@@ -205,6 +236,16 @@ const char kGoogleServicesSettingsURL[] = "settings://open_google_services";
   detailItem.accessibilityIdentifier = accessibilityIdentifier;
 
   return detailItem;
+}
+
+#pragma mark - SettingsControllerProtocol
+
+- (void)reportDismissalUserAction {
+  base::RecordAction(base::UserMetricsAction("MobilePrivacySettingsClose"));
+}
+
+- (void)reportBackUserAction {
+  base::RecordAction(base::UserMetricsAction("MobilePrivacySettingsBack"));
 }
 
 #pragma mark - UITableViewDelegate
@@ -232,13 +273,31 @@ const char kGoogleServicesSettingsURL[] = "settings://open_google_services";
     case ItemTypeClearBrowsingDataClear:
       [self.handler showClearBrowsingData];
       break;
-    case ItemTypeCookies:
-      [self.handler showCookies];
-      break;
     default:
       break;
   }
   [tableView deselectRowAtIndexPath:indexPath animated:YES];
+}
+
+#pragma mark - UITableViewDataSource
+
+- (UITableViewCell*)tableView:(UITableView*)tableView
+        cellForRowAtIndexPath:(NSIndexPath*)indexPath {
+  UITableViewCell* cell = [super tableView:tableView
+                     cellForRowAtIndexPath:indexPath];
+
+  ItemType itemType = static_cast<ItemType>(
+      [self.tableViewModel itemTypeForIndexPath:indexPath]);
+
+  if (itemType == ItemTypeIncognitoReauth) {
+    SettingsSwitchCell* switchCell =
+        base::mac::ObjCCastStrict<SettingsSwitchCell>(cell);
+    [switchCell.switchView addTarget:self
+                              action:@selector(switchTapped:)
+                    forControlEvents:UIControlEventTouchUpInside];
+  }
+
+  return cell;
 }
 
 #pragma mark - PrefObserverDelegate
@@ -255,6 +314,14 @@ const char kGoogleServicesSettingsURL[] = "settings://open_google_services";
   }
 }
 
+#pragma mark - BooleanObserver
+
+- (void)booleanDidChange:(id<ObservableBoolean>)observableBoolean {
+  // Update the cell.
+  self.incognitoReauthItem.on = self.incognitoReauthPref.value;
+  [self reconfigureCellsForItems:@[ self.incognitoReauthItem ]];
+}
+
 #pragma mark - TableViewLinkHeaderFooterItemDelegate
 
 - (void)view:(TableViewLinkHeaderFooterView*)view didTapLinkURL:(GURL)URL {
@@ -264,6 +331,36 @@ const char kGoogleServicesSettingsURL[] = "settings://open_google_services";
     [self.dispatcher showGoogleServicesSettingsFromViewController:self];
   } else {
     [super view:view didTapLinkURL:URL];
+  }
+}
+
+#pragma mark - private
+
+- (void)switchTapped:(UISwitch*)switchView {
+  if (switchView.isOn) {
+    if (![self.reauthModule canAttemptReauth]) {
+      // TODO(crbug.com/1148818): add error message here or maybe even disable
+      // the switch?
+      switchView.on = false;
+    } else {
+      __weak PrivacyTableViewController* weakSelf = self;
+      // TODO(crbug.com/1138892): add localized text
+      [self.reauthModule
+          attemptReauthWithLocalizedReason:
+              @"[Test String] Authenticate for incognito access"
+                      canReusePreviousAuth:false
+                                   handler:^(ReauthenticationResult result) {
+                                     BOOL success =
+                                         (result ==
+                                          ReauthenticationResult::kSuccess);
+                                     [switchView setOn:success animated:YES];
+                                     weakSelf.incognitoReauthPref.value =
+                                         success;
+                                   }];
+    }
+  } else {
+    // No need to authenticate, just update pref.
+    self.incognitoReauthPref.value = false;
   }
 }
 

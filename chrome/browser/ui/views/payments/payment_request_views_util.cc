@@ -41,7 +41,6 @@
 #include "ui/views/background.h"
 #include "ui/views/border.h"
 #include "ui/views/bubble/bubble_frame_view.h"
-#include "ui/views/controls/button/button.h"
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/controls/button/image_button_factory.h"
 #include "ui/views/controls/image_view.h"
@@ -49,7 +48,6 @@
 #include "ui/views/controls/styled_label.h"
 #include "ui/views/layout/box_layout.h"
 #include "ui/views/layout/grid_layout.h"
-#include "ui/views/layout/layout_provider.h"
 #include "ui/views/painter.h"
 #include "ui/views/view.h"
 
@@ -130,7 +128,7 @@ std::unique_ptr<views::View> GetShippingAddressLabel(
   base::string16 name = profile.GetInfo(autofill::NAME_FULL, locale);
 
   base::string16 address =
-      GetShippingAddressLabelFormAutofillProfile(profile, locale);
+      GetShippingAddressLabelFromAutofillProfile(profile, locale);
 
   base::string16 phone =
       autofill::i18n::GetFormattedPhoneNumberForDisplay(profile, locale);
@@ -141,8 +139,8 @@ std::unique_ptr<views::View> GetShippingAddressLabel(
 
 std::unique_ptr<views::Label> GetLabelForMissingInformation(
     const base::string16& missing_info) {
-  std::unique_ptr<views::Label> label =
-      std::make_unique<views::Label>(missing_info, CONTEXT_BODY_TEXT_SMALL);
+  std::unique_ptr<views::Label> label = std::make_unique<views::Label>(
+      missing_info, CONTEXT_DIALOG_BODY_TEXT_SMALL);
   label->SetID(static_cast<int>(DialogViewID::PROFILE_LABEL_ERROR));
   // Missing information typically has a nice shade of blue.
   label->SetEnabledColor(label->GetNativeTheme()->GetSystemColor(
@@ -178,15 +176,9 @@ class PaymentRequestRowBorderPainter : public views::Painter {
 
 }  // namespace
 
-int GetActualDialogWidth() {
-  static int actual_width =
-      views::LayoutProvider::Get()->GetSnappedDialogWidth(kDialogMinWidth);
-  return actual_width;
-}
-
 void PopulateSheetHeaderView(bool show_back_arrow,
                              std::unique_ptr<views::View> header_content_view,
-                             views::ButtonListener* listener,
+                             views::Button::PressedCallback back_arrow_callback,
                              views::View* container,
                              std::unique_ptr<views::Background> background) {
   SkColor background_color = background->get_color();
@@ -203,8 +195,8 @@ void PopulateSheetHeaderView(bool show_back_arrow,
   views::ColumnSet* columns = layout->AddColumnSet(0);
   // A column for the optional back arrow.
   columns->AddColumn(views::GridLayout::LEADING, views::GridLayout::CENTER,
-                     views::GridLayout::kFixedSize, views::GridLayout::USE_PREF,
-                     0, 0);
+                     views::GridLayout::kFixedSize,
+                     views::GridLayout::ColumnSize::kUsePreferred, 0, 0);
 
   constexpr int kPaddingBetweenArrowAndTitle = 8;
   if (show_back_arrow)
@@ -213,21 +205,20 @@ void PopulateSheetHeaderView(bool show_back_arrow,
 
   // A column for the title.
   columns->AddColumn(views::GridLayout::FILL, views::GridLayout::CENTER, 1.0,
-                     views::GridLayout::USE_PREF, 0, 0);
+                     views::GridLayout::ColumnSize::kUsePreferred, 0, 0);
 
   layout->StartRow(views::GridLayout::kFixedSize, 0);
   if (!show_back_arrow) {
     layout->SkipColumns(1);
   } else {
-    auto back_arrow = views::CreateVectorImageButton(listener);
+    auto back_arrow =
+        views::CreateVectorImageButton(std::move(back_arrow_callback));
     views::SetImageFromVectorIcon(
         back_arrow.get(), vector_icons::kBackArrowIcon,
         color_utils::GetColorWithMaxContrast(background_color));
     constexpr int kBackArrowSize = 16;
     back_arrow->SetSize(gfx::Size(kBackArrowSize, kBackArrowSize));
     back_arrow->SetFocusBehavior(views::View::FocusBehavior::ALWAYS);
-    back_arrow->set_tag(
-        static_cast<int>(PaymentRequestCommonTags::BACK_BUTTON_TAG));
     back_arrow->SetID(static_cast<int>(DialogViewID::BACK_BUTTON));
     back_arrow->SetAccessibleName(l10n_util::GetStringUTF16(IDS_PAYMENTS_BACK));
     layout->AddView(std::move(back_arrow));
@@ -238,13 +229,16 @@ void PopulateSheetHeaderView(bool show_back_arrow,
 
 std::unique_ptr<views::ImageView> CreateAppIconView(
     int icon_resource_id,
-    gfx::ImageSkia img,
+    const SkBitmap* icon_bitmap,
     const base::string16& tooltip_text,
     float opacity) {
   std::unique_ptr<views::ImageView> icon_view =
       std::make_unique<views::ImageView>();
-  icon_view->set_can_process_events_within_subtree(false);
-  if (!img.isNull() || !icon_resource_id) {
+  icon_view->SetCanProcessEventsWithinSubtree(false);
+  if (icon_bitmap || !icon_resource_id) {
+    gfx::ImageSkia img = gfx::ImageSkia::CreateFrom1xBitmap(
+                             (icon_bitmap ? *icon_bitmap : SkBitmap()))
+                             .DeepCopy();
     icon_view->SetImage(img);
     float width = base::checked_cast<float>(img.width());
     float height = base::checked_cast<float>(img.height());
@@ -263,7 +257,7 @@ std::unique_ptr<views::ImageView> CreateAppIconView(
     // Images from |icon_resource_id| are 32x20 credit cards.
     icon_view->SetImageSize(gfx::Size(32, 20));
   }
-  icon_view->set_tooltip_text(tooltip_text);
+  icon_view->SetTooltipText(tooltip_text);
   icon_view->SetPaintToLayer();
   icon_view->layer()->SetFillsBoundsOpaquely(false);
   icon_view->layer()->SetOpacity(opacity);
@@ -283,11 +277,14 @@ std::unique_ptr<views::View> CreateProductLogoFooterView() {
   // Adds the Chrome logo image.
   std::unique_ptr<views::ImageView> chrome_logo =
       std::make_unique<views::ImageView>();
-  chrome_logo->set_can_process_events_within_subtree(false);
-  chrome_logo->SetImage(ui::ResourceBundle::GetSharedInstance()
-                            .GetImageNamed(IDR_PRODUCT_LOGO_NAME_22)
-                            .AsImageSkia());
-  chrome_logo->set_tooltip_text(l10n_util::GetStringUTF16(IDS_PRODUCT_NAME));
+  chrome_logo->SetCanProcessEventsWithinSubtree(false);
+  chrome_logo->SetImage(
+      ui::ResourceBundle::GetSharedInstance()
+          .GetImageNamed(content_view->GetNativeTheme()->ShouldUseDarkColors()
+                             ? IDR_PRODUCT_LOGO_NAME_22_WHITE
+                             : IDR_PRODUCT_LOGO_NAME_22)
+          .AsImageSkia());
+  chrome_logo->SetTooltipText(l10n_util::GetStringUTF16(IDS_PRODUCT_NAME));
   content_view->AddChildView(std::move(chrome_logo));
 
   return content_view;
@@ -319,20 +316,22 @@ std::unique_ptr<views::View> GetContactInfoLabel(
     AddressStyleType type,
     const std::string& locale,
     const autofill::AutofillProfile& profile,
-    const PaymentOptionsProvider& options,
+    bool request_payer_name,
+    bool request_payer_email,
+    bool request_payer_phone,
     const PaymentsProfileComparator& comp,
     base::string16* accessible_content) {
   DCHECK(accessible_content);
-  base::string16 name = options.request_payer_name()
+  base::string16 name = request_payer_name
                             ? profile.GetInfo(autofill::NAME_FULL, locale)
                             : base::string16();
 
   base::string16 phone =
-      options.request_payer_phone()
+      request_payer_phone
           ? autofill::i18n::GetFormattedPhoneNumberForDisplay(profile, locale)
           : base::string16();
 
-  base::string16 email = options.request_payer_email()
+  base::string16 email = request_payer_email
                              ? profile.GetInfo(autofill::EMAIL_ADDRESS, locale)
                              : base::string16();
 
@@ -448,7 +447,7 @@ std::unique_ptr<views::View> CreateWarningView(const base::string16& message,
 
   if (show_icon) {
     auto warning_icon = std::make_unique<views::ImageView>();
-    warning_icon->set_can_process_events_within_subtree(false);
+    warning_icon->SetCanProcessEventsWithinSubtree(false);
     warning_icon->SetImage(gfx::CreateVectorIcon(
         vector_icons::kWarningIcon, 16,
         warning_icon->GetNativeTheme()->GetSystemColor(

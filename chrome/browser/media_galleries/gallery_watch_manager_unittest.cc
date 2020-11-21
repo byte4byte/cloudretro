@@ -61,10 +61,10 @@ class GalleryWatchManagerTest : public GalleryWatchManagerObserver,
         test_user_manager_(std::make_unique<chromeos::ScopedTestUserManager>()),
 #endif
         profile_(new TestingProfile()),
-        gallery_prefs_(NULL),
+        gallery_prefs_(nullptr),
         expect_gallery_changed_(false),
         expect_gallery_watch_dropped_(false),
-        pending_loop_(NULL) {
+        pending_loop_(nullptr) {
   }
 
   ~GalleryWatchManagerTest() override {}
@@ -381,8 +381,8 @@ TEST_F(GalleryWatchManagerTest, TestWatchOperation) {
 
   base::RunLoop success_loop;
   ExpectGalleryChanged(&success_loop);
-  ASSERT_EQ(4, base::WriteFile(temp_dir.GetPath().AppendASCII("fake file"),
-                               "blah", 4));
+  ASSERT_TRUE(
+      base::WriteFile(temp_dir.GetPath().AppendASCII("fake file"), "blah"));
   success_loop.Run();
 }
 
@@ -400,8 +400,8 @@ TEST_F(GalleryWatchManagerTest, TestWatchOperationAfterProfileShutdown) {
   // Trigger a watch that should have been removed when the profile was
   // destroyed to catch regressions. crbug.com/467627
   base::RunLoop run_loop;
-  ASSERT_EQ(4, base::WriteFile(temp_dir.GetPath().AppendASCII("fake file"),
-                               "blah", 4));
+  ASSERT_TRUE(
+      base::WriteFile(temp_dir.GetPath().AppendASCII("fake file"), "blah"));
   run_loop.RunUntilIdle();
 }
 

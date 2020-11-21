@@ -7,25 +7,31 @@ package org.chromium.chrome.browser.webauth.authenticator;
 import android.Manifest.permission;
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.bluetooth.BluetoothAdapter;
 import android.content.Context;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.graphics.drawable.Drawable;
+import android.hardware.usb.UsbAccessory;
+import android.hardware.usb.UsbManager;
 import android.os.Bundle;
-import android.view.Gravity;
+import android.view.ContextThemeWrapper;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.View.OnClickListener;
 import android.view.ViewGroup;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
-import android.widget.ProgressBar;
 import android.widget.TextView;
 
+import androidx.appcompat.app.AlertDialog;
+import androidx.core.content.res.ResourcesCompat;
 import androidx.fragment.app.Fragment;
 
-import org.chromium.chrome.R;
+import org.chromium.base.Log;
 import org.chromium.ui.base.ActivityAndroidPermissionDelegate;
 import org.chromium.ui.base.AndroidPermissionDelegate;
-import org.chromium.ui.widget.ButtonCompat;
 import org.chromium.ui.widget.Toast;
 
 import java.lang.ref.WeakReference;
@@ -33,70 +39,155 @@ import java.lang.ref.WeakReference;
 /**
  * A fragment that provides a UI for scanning caBLE v2 QR codes.
  */
-public class CableAuthenticatorUI extends Fragment
-        implements OnClickListener, QRScanDialog.Callback, CableAuthenticator.Callback {
+public class CableAuthenticatorUI
+        extends Fragment implements OnClickListener, QRScanDialog.Callback {
+    private static final String TAG = "CableAuthenticatorUI";
+
+    // ENABLE_BLUETOOTH_REQUEST_CODE is a random int used to identify responses
+    // to a request to enable Bluetooth. (Request codes can only be 16-bit.)
+    private static final int ENABLE_BLUETOOTH_REQUEST_CODE = 64907;
+
+    private static final String ACTIVITY_CLASS_NAME_EXTRA =
+            "org.chromium.chrome.modules.cablev2_authenticator.ActivityClassName";
+    private static final String FCM_EXTRA = "org.chromium.chrome.modules.cablev2_authenticator.FCM";
+    private static final String NETWORK_CONTEXT_EXTRA =
+            "org.chromium.chrome.modules.cablev2_authenticator.NetworkContext";
+    private static final String REGISTRATION_EXTRA =
+            "org.chromium.chrome.modules.cablev2_authenticator.Registration";
+    private static final String SERVER_LINK_EXTRA =
+            "org.chromium.chrome.browser.webauth.authenticator.ServerLink";
+
+    private enum Mode {
+        QR, // Triggered from Settings; can scan QR code to start handshake.
+        FCM, // Triggered by user selecting notification; handshake already running.
+        USB, // Triggered by connecting via USB.
+        SERVER_LINK, // Triggered by GMSCore forwarding from GAIA.
+    }
+    private Mode mMode;
     private AndroidPermissionDelegate mPermissionDelegate;
     private CableAuthenticator mAuthenticator;
+    private LinearLayout mQRButton;
+    private LinearLayout mUnlinkButton;
+    private ImageView mHeader;
+    private TextView mStatusText;
 
-    private ButtonCompat mQRButton;
-    private ProgressBar mSpinner;
-    private TextView mStatus;
+    // The following two members store a pending QR-scan result while Bluetooth
+    // is enabled.
+    private String mPendingQRCode;
+    private boolean mPendingShouldLink;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         final Context context = getContext();
+
+        Bundle arguments = getArguments();
+        final UsbAccessory accessory =
+                (UsbAccessory) arguments.getParcelable(UsbManager.EXTRA_ACCESSORY);
+        final byte[] serverLink = arguments.getByteArray(SERVER_LINK_EXTRA);
+        if (accessory != null) {
+            mMode = Mode.USB;
+        } else if (arguments.getBoolean(FCM_EXTRA)) {
+            mMode = Mode.FCM;
+        } else if (serverLink != null) {
+            mMode = Mode.SERVER_LINK;
+        } else {
+            mMode = Mode.QR;
+        }
+
+        Log.i(TAG, "Starting in mode " + mMode.toString());
+
+        final long networkContext = arguments.getLong(NETWORK_CONTEXT_EXTRA);
+        final long registration = arguments.getLong(REGISTRATION_EXTRA);
+        final String activityClassName = arguments.getString(ACTIVITY_CLASS_NAME_EXTRA);
+
         mPermissionDelegate = new ActivityAndroidPermissionDelegate(
                 new WeakReference<Activity>((Activity) context));
-        mAuthenticator = new CableAuthenticator(getContext(), this);
+        mAuthenticator = new CableAuthenticator(getContext(), this, networkContext, registration,
+                activityClassName, mMode == Mode.FCM, accessory, serverLink);
     }
 
     @Override
     @SuppressLint("SetTextI18n")
     public View onCreateView(
             LayoutInflater inflater, ViewGroup container, Bundle savedInstanceState) {
-        // Shows a placeholder UI that provides a very basic animation and status text informing of
-        // progress, as well as a button to scan QR codes.
-
-        // TODO: should check FEATURE_BLUETOOTH with
-        // https://developer.android.com/reference/android/content/pm/PackageManager.html#hasSystemFeature(java.lang.String)
-        // TODO: strings should be translated but this will be replaced during
-        // the UI process.
         getActivity().setTitle("Security Key");
 
-        final Context context = getContext();
+        switch (mMode) {
+            case USB:
+                return inflater.inflate(R.layout.cablev2_usb_attached, container, false);
 
-        ProgressBar mSpinner = new ProgressBar(context);
-        mSpinner.setIndeterminate(true);
-        mSpinner.setPadding(0, 60, 0, 60);
+            case FCM:
+                return inflater.inflate(R.layout.cablev2_fcm, container, false);
 
-        mStatus = new TextView(context);
-        mStatus.setText("Looking for known devices nearby");
-        mStatus.setPadding(0, 60, 0, 60);
+            case SERVER_LINK:
+                View v = inflater.inflate(R.layout.cablev2_serverlink, container, false);
+                mStatusText = v.findViewById(R.id.status_text);
+                return v;
 
-        mQRButton = new ButtonCompat(context, R.style.TextButtonThemeOverlay);
-        mQRButton.setText("Connect a new device");
-        mQRButton.setOnClickListener(this);
+            case QR:
+                // TODO: should check FEATURE_BLUETOOTH with
+                // https://developer.android.com/reference/android/content/pm/PackageManager.html#hasSystemFeature(java.lang.String)
+                // TODO: strings should be translated but this will be replaced during
+                // the UI process.
 
-        LinearLayout layout = new LinearLayout(context);
-        layout.setOrientation(LinearLayout.VERTICAL);
-        layout.setGravity(Gravity.CENTER_HORIZONTAL);
-        layout.addView(mSpinner);
-        layout.addView(mStatus,
-                new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT));
-        layout.addView(mQRButton,
-                new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT));
+                v = inflater.inflate(R.layout.cablev2_qr_scan, container, false);
+                mQRButton = v.findViewById(R.id.qr_scan);
+                mQRButton.setOnClickListener(this);
 
-        return layout;
+                mHeader = v.findViewById(R.id.qr_image);
+                setHeader(R.style.idle);
+
+                mUnlinkButton = v.findViewById(R.id.unlink);
+                mUnlinkButton.setOnClickListener(this);
+
+                return v;
+        }
+
+        assert false;
+        return null;
+    }
+
+    /**
+     * Updates the header image to be shown in a new "style". The Android
+     * style system is used to make certain elements appear as a QR handshake
+     * progresses.
+     */
+    private void setHeader(int style) {
+        ContextThemeWrapper theme = new ContextThemeWrapper(getContext(), style);
+        Drawable drawable =
+                ResourcesCompat.getDrawable(getResources(), R.drawable.header, theme.getTheme());
+        mHeader.setImageDrawable(drawable);
     }
 
     /**
      * Called when the button to scan a QR code is pressed.
      */
     @Override
+    @SuppressLint("SetTextI18n")
     public void onClick(View v) {
+        if (v == mUnlinkButton) {
+            // TODO: localise strings.
+            new AlertDialog.Builder(getContext())
+                    .setTitle("Unlink all devices")
+                    .setMessage("Do you want to unlink all previously connected devices?"
+                            + " You will need to scan a QR code from a given device in"
+                            + " order to use it again."
+                            + " No credentials will be deleted.")
+                    .setIcon(android.R.drawable.ic_dialog_alert)
+                    .setPositiveButton(android.R.string.ok,
+                            new DialogInterface.OnClickListener() {
+                                @Override
+                                public void onClick(DialogInterface dialog, int whichButton) {
+                                    mAuthenticator.unlinkAllDevices();
+                                }
+                            })
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .show();
+            return;
+        }
+
+        assert (v == mQRButton);
         // If camera permission is already available, show the scanning
         // dialog.
         final Context context = getContext();
@@ -125,9 +216,42 @@ public class CableAuthenticatorUI extends Fragment
      */
     @Override
     @SuppressLint("SetTextI18n")
-    public void onQRCode(String value) {
-        mStatus.setText("Looking for your new device nearby");
-        mAuthenticator.onQRCode(value);
+    public void onQRCode(String value, boolean link) {
+        setHeader(R.style.step1);
+
+        BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
+        if (adapter.isEnabled()) {
+            mAuthenticator.onQRCode(value, link);
+        } else {
+            mPendingQRCode = value;
+            mPendingShouldLink = link;
+            startActivityForResult(new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE),
+                    ENABLE_BLUETOOTH_REQUEST_CODE);
+        }
+    }
+
+    void onStatus(int code) {
+        switch (mMode) {
+            case QR:
+                // These values must match up with the Status enum in v2_authenticator.h
+                if (code == 1) {
+                    setHeader(R.style.step2);
+                } else if (code == 2) {
+                    setHeader(R.style.step3);
+                } else if (code == 3) {
+                    setHeader(R.style.step4);
+                }
+                break;
+
+            case SERVER_LINK:
+                mStatusText.setText(String.valueOf(code));
+                break;
+
+            case FCM:
+            case USB:
+                // In FCM mode, the handshake is done before the UI appears. For
+                // USB everything should happen immediately.
+        }
     }
 
     /**
@@ -137,36 +261,34 @@ public class CableAuthenticatorUI extends Fragment
     @Override
     public void onRequestPermissionsResult(
             int requestCode, String[] permissions, int[] grantResults) {
-        mPermissionDelegate = null;
-
         if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
             (new QRScanDialog(this)).show(getFragmentManager(), "dialog");
         }
     }
 
     @Override
-    public void onDestroy() {
-        super.onDestroy();
+    public void onStop() {
+        super.onStop();
         mAuthenticator.close();
     }
 
     @Override
     public void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == ENABLE_BLUETOOTH_REQUEST_CODE) {
+            String qrCode = mPendingQRCode;
+            mPendingQRCode = null;
+            mAuthenticator.onQRCode(qrCode, mPendingShouldLink);
+            return;
+        }
+
         mAuthenticator.onActivityResult(requestCode, resultCode, data);
     }
 
-    @Override
     @SuppressLint("SetTextI18n")
-    public void onAuthenticatorConnected() {
-        getActivity().runOnUiThread(() -> {
-            mStatus.setText("Connected. Verifying it's you.");
-            mQRButton.setEnabled(false);
-        });
-    }
+    void onAuthenticatorConnected() {}
 
-    @Override
-    public void onAuthenticatorResult(CableAuthenticator.Result result) {
+    void onAuthenticatorResult(CableAuthenticator.Result result) {
         getActivity().runOnUiThread(() -> {
             // TODO: Temporary UI, needs i18n.
             String toast = "An error occured. Please try again.";
@@ -187,7 +309,27 @@ public class CableAuthenticatorUI extends Fragment
                     break;
             }
             Toast.makeText(getActivity(), toast, Toast.LENGTH_SHORT).show();
-            getActivity().finish();
         });
+    }
+
+    void onComplete() {
+        getActivity().runOnUiThread(() -> { getActivity().finish(); });
+    }
+
+    /**
+     * onCloudMessage is called by {@link CableAuthenticatorModuleProvider} when a GCM message is
+     * received.
+     */
+    public static void onCloudMessage(
+            long event, long systemNetworkContext, long registration, String activityClassName) {
+        BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
+        if (adapter.isEnabled()) {
+            CableAuthenticator.onCloudMessage(event, systemNetworkContext, registration,
+                    activityClassName, /*needToDisableBluetooth=*/false);
+            return;
+        }
+
+        new PendingCloudMessage(
+                adapter, event, systemNetworkContext, registration, activityClassName);
     }
 }

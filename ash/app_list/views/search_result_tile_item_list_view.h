@@ -21,25 +21,22 @@ class Textfield;
 namespace ash {
 
 class AppListViewDelegate;
-class SearchResultPageView;
 
 // Displays a list of SearchResultTileItemView.
 class APP_LIST_EXPORT SearchResultTileItemListView
     : public SearchResultContainerView {
  public:
-  SearchResultTileItemListView(SearchResultPageView* search_result_page_view,
-                               views::Textfield* search_box,
+  SearchResultTileItemListView(views::Textfield* search_box,
                                AppListViewDelegate* view_delegate);
+  SearchResultTileItemListView(const SearchResultTileItemListView&) = delete;
+  SearchResultTileItemListView& operator=(const SearchResultTileItemListView&) =
+      delete;
   ~SearchResultTileItemListView() override;
 
   // Overridden from SearchResultContainerView:
   SearchResultTileItemView* GetResultViewAt(size_t index) override;
-  void NotifyFirstResultYIndex(int y_index) override;
-  int GetYSize() override;
-  SearchResultBaseView* GetFirstResultView() override;
 
   // Overridden from views::View:
-  bool OnKeyPressed(const ui::KeyEvent& event) override;
   const char* GetClassName() const override;
   void Layout() override;
 
@@ -73,20 +70,16 @@ class APP_LIST_EXPORT SearchResultTileItemListView
   std::vector<views::Separator*> separator_views_;
 
   // Owned by the views hierarchy.
-  SearchResultPageView* const search_result_page_view_ = nullptr;
   views::Textfield* search_box_ = nullptr;
   views::BoxLayout* layout_ = nullptr;
 
   base::string16 recent_playstore_query_;
 
   base::OneShotTimer playstore_impression_timer_;
-  const bool is_play_store_app_search_enabled_;
 
   const bool is_app_reinstall_recommendation_enabled_;
 
   const size_t max_search_result_tiles_;
-
-  DISALLOW_COPY_AND_ASSIGN(SearchResultTileItemListView);
 };
 
 }  // namespace ash

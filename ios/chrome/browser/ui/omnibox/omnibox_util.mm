@@ -4,7 +4,7 @@
 
 #import "ios/chrome/browser/ui/omnibox/omnibox_util.h"
 
-#include "base/logging.h"
+#include "base/notreached.h"
 #include "base/strings/utf_string_conversions.h"
 #include "ios/chrome/browser/ui/ui_feature_flags.h"
 #include "ios/chrome/grit/ios_theme_resources.h"
@@ -20,6 +20,9 @@ OmniboxSuggestionIconType GetOmniboxSuggestionIconTypeForAutocompleteMatchType(
     bool is_starred) {
   if (is_starred)
     return BOOKMARK;
+
+  // TODO(crbug.com/1122669): Handle trending zero-prefix suggestions by
+  // checking the match subtype similar to AutocompleteMatch::GetVectorIcon().
 
   switch (type) {
     case AutocompleteMatchType::BOOKMARK_TITLE:
@@ -55,6 +58,8 @@ OmniboxSuggestionIconType GetOmniboxSuggestionIconTypeForAutocompleteMatchType(
     case AutocompleteMatchType::CALCULATOR:
       return CALCULATOR;
     case AutocompleteMatchType::EXTENSION_APP_DEPRECATED:
+    case AutocompleteMatchType::TILE_SUGGESTION:
+    case AutocompleteMatchType::TILE_NAVSUGGEST:
     case AutocompleteMatchType::NUM_TYPES:
       NOTREACHED();
       return DEFAULT_FAVICON;
@@ -88,7 +93,6 @@ LocationBarSecurityIconType GetLocationBarSecurityIconTypeForSecurityState(
       if (security_state::ShouldShowDangerTriangleForWarningLevel())
         return NOT_SECURE_WARNING;
       return INFO;
-    case security_state::EV_SECURE:
     case security_state::SECURE:
     case security_state::SECURE_WITH_POLICY_INSTALLED_CERT:
       return SECURE;

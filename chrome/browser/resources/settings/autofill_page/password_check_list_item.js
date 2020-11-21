@@ -3,15 +3,15 @@
 // found in the LICENSE file.
 
 /**
- * @fileoverview PasswordCheckListItem represents one leaked credential in the
- * list of compromised passwords.
+ * @fileoverview PasswordCheckListItem represents one insecure credential in the
+ * list of insecure passwords.
  */
 
 import 'chrome://resources/cr_elements/cr_icon_button/cr_icon_button.m.js';
 import 'chrome://resources/cr_elements/cr_icons_css.m.js';
 import 'chrome://resources/js/action_link.js';
 import '../settings_shared_css.m.js';
-import '../site_favicon.m.js';
+import '../site_favicon.js';
 import './passwords_shared_css.js';
 
 import {assert, assertNotReached} from 'chrome://resources/js/assert.m.js';
@@ -19,9 +19,12 @@ import {FocusRowBehavior} from 'chrome://resources/js/cr/ui/focus_row_behavior.m
 import {I18nBehavior} from 'chrome://resources/js/i18n_behavior.m.js';
 import {html, Polymer} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
-import {loadTimeData} from '../i18n_setup.m.js';
-import {OpenWindowProxyImpl} from '../open_window_proxy.m.js';
+import {loadTimeData} from '../i18n_setup.js';
+import {OpenWindowProxyImpl} from '../open_window_proxy.js';
 
+// <if expr="chromeos">
+import {BlockingRequestManager} from './blocking_request_manager.js';
+// </if>
 import {PasswordManagerImpl, PasswordManagerProxy} from './password_manager_proxy.js';
 
 Polymer({
@@ -30,9 +33,14 @@ Polymer({
   _template: html`{__html_template__}`,
 
   properties: {
+    // <if expr="chromeos">
+    /** @type {BlockingRequestManager} */
+    tokenRequestManager: Object,
+    // </if>
+
     /**
      * The password that is being displayed.
-     * @type {!PasswordManagerProxy.CompromisedCredential}
+     * @type {!PasswordManagerProxy.InsecureCredential}
      */
     item: Object,
 
@@ -66,11 +74,20 @@ Polymer({
   },
 
   /**
+   * Returns true if |item| is compromised credential, otherwise returns false.
+   * @return {boolean}
+   * @private
+   */
+  isCompromisedItem_() {
+    return !!this.item.compromisedInfo;
+  },
+
+  /**
    * @return {string}
    * @private
    */
   getCompromiseType_() {
-    switch (this.item.compromiseType) {
+    switch (this.item.compromisedInfo.compromiseType) {
       case chrome.passwordsPrivate.CompromiseType.PHISHED:
         return loadTimeData.getString('phishedPassword');
       case chrome.passwordsPrivate.CompromiseType.LEAKED:
@@ -80,7 +97,8 @@ Polymer({
     }
 
     assertNotReached(
-        'Can\'t find a string for type: ' + this.item.compromiseType);
+        'Can\'t find a string for type: ' +
+        this.item.compromisedInfo.compromiseType);
   },
 
   /**
@@ -143,14 +161,17 @@ Polymer({
     this.passwordManager_.recordPasswordCheckInteraction(
         PasswordManagerProxy.PasswordCheckInteraction.SHOW_PASSWORD);
     this.passwordManager_
-        .getPlaintextCompromisedPassword(
+        .getPlaintextInsecurePassword(
             assert(this.item), chrome.passwordsPrivate.PlaintextReason.VIEW)
         .then(
-            compromisedCredential => {
-              this.set('item', compromisedCredential);
+            insecureCredential => {
+              this.set('item', insecureCredential);
             },
             error => {
-              this.hidePassword();
+              // <if expr="chromeos">
+              // If no password was found, refresh auth token and retry.
+              this.tokenRequestManager.request(this.showPassword.bind(this));
+              // </if>
             });
   },
 

@@ -9,7 +9,7 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/values.h"
@@ -162,7 +162,7 @@ void VpnThreadExtensionFunction::SignalCallCompletionSuccess() {
 
 void VpnThreadExtensionFunction::SignalCallCompletionSuccessWithId(
     const std::string& configuration_id) {
-  Respond(OneArgument(std::make_unique<base::Value>(configuration_id)));
+  Respond(OneArgument(base::Value(configuration_id)));
 }
 
 void VpnThreadExtensionFunction::SignalCallCompletionSuccessWithWarning(

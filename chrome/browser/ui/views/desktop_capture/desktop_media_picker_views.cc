@@ -9,7 +9,6 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/task/post_task.h"
 #include "build/build_config.h"
 #include "chrome/browser/media/webrtc/desktop_media_list.h"
 #include "chrome/browser/media/webrtc/desktop_media_picker_manager.h"
@@ -63,9 +62,8 @@ DesktopMediaPickerDialogView::DesktopMediaPickerDialogView(
     DesktopMediaPickerViews* parent,
     std::vector<std::unique_ptr<DesktopMediaList>> source_lists)
     : parent_(parent), modality_(params.modality) {
-  DialogDelegate::SetButtonLabel(
-      ui::DIALOG_BUTTON_OK,
-      l10n_util::GetStringUTF16(IDS_DESKTOP_MEDIA_PICKER_SHARE));
+  SetButtonLabel(ui::DIALOG_BUTTON_OK,
+                 l10n_util::GetStringUTF16(IDS_DESKTOP_MEDIA_PICKER_SHARE));
   const ChromeLayoutProvider* provider = ChromeLayoutProvider::Get();
 
   std::unique_ptr<views::Checkbox> audio_share_checkbox;
@@ -73,8 +71,7 @@ DesktopMediaPickerDialogView::DesktopMediaPickerDialogView(
     audio_share_checkbox = std::make_unique<views::Checkbox>(
         l10n_util::GetStringUTF16(IDS_DESKTOP_MEDIA_PICKER_AUDIO_SHARE));
     audio_share_checkbox->SetChecked(params.approve_audio_by_default);
-    audio_share_checkbox_ =
-        DialogDelegate::SetExtraView(std::move(audio_share_checkbox));
+    audio_share_checkbox_ = SetExtraView(std::move(audio_share_checkbox));
   }
 
   SetLayoutManager(std::make_unique<views::BoxLayout>(
@@ -129,7 +126,8 @@ DesktopMediaPickerDialogView::DesktopMediaPickerDialogView(
         screen_scroll_view->ClipHeightTo(
             kGenericScreenStyle.item_size.height(),
             kGenericScreenStyle.item_size.height() * 2);
-        screen_scroll_view->SetHideHorizontalScrollBar(true);
+        screen_scroll_view->SetHorizontalScrollBarMode(
+            views::ScrollView::ScrollBarMode::kDisabled);
 
         panes.push_back(
             std::make_pair(screen_title_text, std::move(screen_scroll_view)));
@@ -159,7 +157,8 @@ DesktopMediaPickerDialogView::DesktopMediaPickerDialogView(
 
         window_scroll_view->ClipHeightTo(kWindowStyle.item_size.height(),
                                          kWindowStyle.item_size.height() * 2);
-        window_scroll_view->SetHideHorizontalScrollBar(true);
+        window_scroll_view->SetHorizontalScrollBarMode(
+            views::ScrollView::ScrollBarMode::kDisabled);
 
         panes.push_back(
             std::make_pair(window_title_text, std::move(window_scroll_view)));
@@ -217,17 +216,17 @@ DesktopMediaPickerDialogView::DesktopMediaPickerDialogView(
     widget =
         constrained_window::ShowWebModalDialogViews(this, params.web_contents);
   } else {
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
     // On Mac, MODAL_TYPE_CHILD with a null parent isn't allowed - fall back to
     // MODAL_TYPE_WINDOW.
     modality_ = ui::MODAL_TYPE_WINDOW;
 #endif
-    widget = DialogDelegate::CreateDialogWidget(this, params.context, nullptr);
+    widget = CreateDialogWidget(this, params.context, nullptr);
     widget->Show();
   }
   chrome::RecordDialogCreation(chrome::DialogIdentifier::DESKTOP_MEDIA_PICKER);
 
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
   // On Mac, even modals are shown using separate native windows.
   bool is_separate_native_window = true;
 #else
@@ -245,7 +244,7 @@ DesktopMediaPickerDialogView::DesktopMediaPickerDialogView(
     // Set native window ID if the windows is outside Ash.
     dialog_window_id.id = AcceleratedWidgetToDesktopMediaId(
         widget->GetNativeWindow()->GetHost()->GetAcceleratedWidget());
-#elif defined(OS_MACOSX)
+#elif defined(OS_MAC)
     // On Mac, the window_id in DesktopMediaID is the same as the actual native
     // window ID. Note that assuming this is a bit of a layering violation; the
     // fact that this code makes that assumption is documented at the code that
@@ -271,11 +270,8 @@ void DesktopMediaPickerDialogView::OnSourceTypeSwitched(int index) {
   if (audio_share_checkbox_) {
     switch (source_types_[index]) {
       case DesktopMediaID::TYPE_SCREEN:
-#if defined(USE_CRAS) || defined(OS_WIN)
-        audio_share_checkbox_->SetVisible(true);
-#else
-        audio_share_checkbox_->SetVisible(false);
-#endif
+        audio_share_checkbox_->SetVisible(
+            DesktopMediaPickerViews::kScreenAudioShareSupportedOnPlatform);
         break;
       case DesktopMediaID::TYPE_WINDOW:
         audio_share_checkbox_->SetVisible(false);
@@ -344,7 +340,8 @@ base::string16 DesktopMediaPickerDialogView::GetWindowTitle() const {
 bool DesktopMediaPickerDialogView::IsDialogButtonEnabled(
     ui::DialogButton button) const {
   return button != ui::DIALOG_BUTTON_OK ||
-         GetSelectedController()->GetSelection().has_value();
+         GetSelectedController()->GetSelection().has_value() ||
+         accepted_source_.has_value();
 }
 
 views::View* DesktopMediaPickerDialogView::GetInitiallyFocusedView() {
@@ -352,6 +349,7 @@ views::View* DesktopMediaPickerDialogView::GetInitiallyFocusedView() {
 }
 
 bool DesktopMediaPickerDialogView::Accept() {
+  DCHECK(IsDialogButtonEnabled(ui::DIALOG_BUTTON_OK));
   // Ok button should only be enabled when a source is selected.
   base::Optional<DesktopMediaID> source_optional =
       accepted_source_.has_value() ? accepted_source_
@@ -448,6 +446,8 @@ void DesktopMediaPickerDialogView::OnSourceListLayoutChanged() {
   GetWidget()->CenterWindow(new_size);
 }
 
+constexpr bool DesktopMediaPickerViews::kScreenAudioShareSupportedOnPlatform;
+
 DesktopMediaPickerViews::DesktopMediaPickerViews() : dialog_(nullptr) {}
 
 DesktopMediaPickerViews::~DesktopMediaPickerViews() {
@@ -480,8 +480,8 @@ void DesktopMediaPickerViews::NotifyDialogResult(DesktopMediaID source) {
 
   // Notify the |callback_| asynchronously because it may need to destroy
   // DesktopMediaPicker.
-  base::PostTask(FROM_HERE, {content::BrowserThread::UI},
-                 base::BindOnce(std::move(callback_), source));
+  content::GetUIThreadTaskRunner({})->PostTask(
+      FROM_HERE, base::BindOnce(std::move(callback_), source));
 }
 
 // static

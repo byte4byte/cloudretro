@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "base/strings/string16.h"
+#include "build/build_config.h"
 #include "components/autofill/core/common/form_field_data.h"
 #include "components/autofill/core/common/mojom/autofill_types.mojom-shared.h"
 #include "components/autofill/core/common/renderer_id.h"
@@ -76,8 +77,10 @@ struct FormData {
   base::string16 name;
   // Titles of form's buttons.
   ButtonTitleList button_titles;
-  // The URL (minus query parameters) containing the form.
+  // The URL (minus query parameters and fragment) containing the form.
   GURL url;
+  // The full URL, including query parameters and fragment.
+  GURL full_url;
   // The action target of the form.
   GURL action;
   // If the form in the DOM has an empty action attribute, the |action| field in
@@ -112,7 +115,13 @@ struct FormData {
   std::vector<FieldRendererId> username_predictions;
   // True if this is a Gaia form which should be skipped on saving.
   bool is_gaia_with_skip_save_password_form = false;
+#if defined(OS_IOS)
+  std::string frame_id;
+#endif
 };
+
+// Whether any of the fields in |form| is a non-empty password field.
+bool FormHasNonEmptyPasswordField(const FormData& form);
 
 // For testing.
 std::ostream& operator<<(std::ostream& os, const FormData& form);

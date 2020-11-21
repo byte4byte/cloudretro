@@ -9,7 +9,12 @@
 
 #include "base/files/file_path.h"
 #include "content/browser/native_io/native_io_host.h"
+#include "content/browser/native_io/native_io_quota_client.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "services/network/public/cpp/is_potentially_trustworthy.h"
+#include "storage/browser/quota/quota_client_type.h"
+#include "storage/browser/quota/quota_manager_proxy.h"
+#include "storage/browser/quota/special_storage_policy.h"
 #include "storage/common/database/database_identifier.h"
 #include "third_party/blink/public/mojom/native_io/native_io.mojom.h"
 #include "url/origin.h"
@@ -30,8 +35,19 @@ base::FilePath GetNativeIORootPath(const base::FilePath& profile_root) {
 
 }  // namespace
 
-NativeIOContext::NativeIOContext(const base::FilePath& profile_root)
-    : root_path_(GetNativeIORootPath(profile_root)) {}
+NativeIOContext::NativeIOContext(
+    const base::FilePath& profile_root,
+    storage::SpecialStoragePolicy* special_storage_policy,
+    storage::QuotaManagerProxy* quota_manager_proxy)
+    : root_path_(GetNativeIORootPath(profile_root)),
+      special_storage_policy_(special_storage_policy) {
+  if (quota_manager_proxy) {
+    quota_manager_proxy->RegisterClient(
+        base::MakeRefCounted<NativeIOQuotaClient>(),
+        storage::QuotaClientType::kNativeIO,
+        {blink::mojom::StorageType::kTemporary});
+  }
+}
 
 NativeIOContext::~NativeIOContext() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
@@ -44,6 +60,15 @@ void NativeIOContext::BindReceiver(
 
   auto it = hosts_.find(origin);
   if (it == hosts_.end()) {
+    // This feature should only be exposed to potentially trustworthy origins
+    // (https://w3c.github.io/webappsec-secure-contexts/#is-origin-trustworthy).
+    // Notably this includes the https and chrome-extension schemes, among
+    // others.
+    if (!network::IsOriginPotentiallyTrustworthy(origin)) {
+      mojo::ReportBadMessage("Called NativeIO from an insecure context");
+      return;
+    }
+
     base::FilePath origin_root_path = RootPathForOrigin(origin);
     if (origin_root_path.empty()) {
       // NativeIO is not supported for the origin.
@@ -78,15 +103,6 @@ base::FilePath NativeIOContext::RootPathForOrigin(const url::Origin& origin) {
   // TODO(pwnall): Implement in-memory files instead of bouncing in incognito.
   if (root_path_.empty())
     return root_path_;
-
-  // This feature is only exposed to secure origins. This typically means https.
-  // The most notable exception is http://localhost. Command-line flags may
-  // cause other http origins to be considered secure.
-  //
-  // TODO(pwnall): Get consensus on the schemes we want to support. For example,
-  //               maybe chrome-extension:// should get access as well?
-  if (!origin.GetURL().SchemeIsHTTPOrHTTPS())
-    return base::FilePath();
 
   std::string origin_identifier = storage::GetIdentifierFromOrigin(origin);
   base::FilePath origin_path = root_path_.AppendASCII(origin_identifier);

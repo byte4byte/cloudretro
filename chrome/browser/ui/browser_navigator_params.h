@@ -88,6 +88,12 @@ struct NavigateParams {
   GURL url;
   content::Referrer referrer;
 
+  // The routing id of the initiator of the navigation. This is best effort: it
+  // is only defined for some renderer-initiated navigations (e.g., not drag and
+  // drop), and the frame with the corresponding routing ID may have been
+  // deleted before the navigation begins.
+  content::GlobalFrameRoutingId initiator_routing_id;
+
   // The origin of the initiator of the navigation.
   base::Optional<url::Origin> initiator_origin;
 
@@ -96,7 +102,7 @@ struct NavigateParams {
 
   // The browser-global ID of the frame to navigate, or
   // content::RenderFrameHost::kNoFrameTreeNodeId for the main frame.
-  int frame_tree_node_id = -1;
+  int frame_tree_node_id = content::RenderFrameHost::kNoFrameTreeNodeId;
 
   // Any redirect URLs that occurred for this navigation before |url|.
   // Usually empty.

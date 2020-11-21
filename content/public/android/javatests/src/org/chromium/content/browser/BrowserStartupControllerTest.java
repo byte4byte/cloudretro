@@ -5,9 +5,9 @@
 package org.chromium.content.browser;
 
 import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.SmallTest;
 
-import org.junit.After;
+import androidx.test.filters.SmallTest;
+
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
@@ -16,7 +16,6 @@ import org.junit.runner.RunWith;
 import org.chromium.base.library_loader.LibraryProcessType;
 import org.chromium.base.library_loader.LoaderErrors;
 import org.chromium.base.library_loader.ProcessInitException;
-import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.task.PostTask;
 import org.chromium.base.test.BaseJUnit4ClassRunner;
 import org.chromium.content_public.browser.BrowserStartupController.StartupCallback;
@@ -33,9 +32,9 @@ public class BrowserStartupControllerTest {
     private static class TestBrowserStartupController extends BrowserStartupControllerImpl {
         private int mStartupResult;
         private boolean mLibraryLoadSucceeds;
-        private int mServiceManagerLaunchCounter;
+        private int mMinimalBrowserLaunchCounter;
         private int mFullBrowserLaunchCounter;
-        private boolean mServiceManagerStarted;
+        private boolean mMinimalBrowserStarted;
 
         @Override
         void prepareToStartBrowserProcess(boolean singleProcess, Runnable completionCallback) {
@@ -52,13 +51,13 @@ public class BrowserStartupControllerTest {
         void recordStartupUma() {}
 
         @Override
-        int contentMainStart(boolean startServiceManagerOnly) {
-            if (startServiceManagerOnly) {
-                mServiceManagerLaunchCounter++;
+        int contentMainStart(boolean startMinimalBrowser) {
+            if (startMinimalBrowser) {
+                mMinimalBrowserLaunchCounter++;
             } else {
                 mFullBrowserLaunchCounter++;
             }
-            return kickOffStartup(startServiceManagerOnly);
+            return kickOffStartup(startMinimalBrowser);
         }
 
         @Override
@@ -67,16 +66,16 @@ public class BrowserStartupControllerTest {
             BrowserStartupControllerImpl.browserStartupComplete(mStartupResult);
         }
 
-        private int kickOffStartup(boolean startServiceManagerOnly) {
+        private int kickOffStartup(boolean startMinimalBrowser) {
             // Post to the UI thread to emulate what would happen in a real scenario.
             PostTask.postTask(UiThreadTaskTraits.DEFAULT, new Runnable() {
                 @Override
                 public void run() {
-                    if (!mServiceManagerStarted) {
-                        BrowserStartupControllerImpl.serviceManagerStartupComplete();
-                        mServiceManagerStarted = true;
+                    if (!mMinimalBrowserStarted) {
+                        BrowserStartupControllerImpl.minimalBrowserStartupComplete();
+                        mMinimalBrowserStarted = true;
                     }
-                    if (!startServiceManagerOnly) {
+                    if (!startMinimalBrowser) {
                         BrowserStartupControllerImpl.browserStartupComplete(mStartupResult);
                     }
                 }
@@ -84,8 +83,8 @@ public class BrowserStartupControllerTest {
             return mStartupResult;
         }
 
-        private int serviceManagerLaunchCounter() {
-            return mServiceManagerLaunchCounter;
+        private int minimalBrowserLaunchCounter() {
+            return mMinimalBrowserLaunchCounter;
         }
 
         private int fullBrowserLaunchCounter() {
@@ -116,16 +115,10 @@ public class BrowserStartupControllerTest {
     @Before
     public void setUp() {
         mController = new TestBrowserStartupController();
-        RecordHistogram.setDisabledForTests(true);
         // Setting the static singleton instance field enables more correct testing, since it is
         // is possible to call {@link BrowserStartupController#browserStartupComplete(int)} instead
         // of {@link BrowserStartupController#executeEnqueuedCallbacks(int, boolean)} directly.
         BrowserStartupControllerImpl.overrideInstanceForTest(mController);
-    }
-
-    @After
-    public void tearDown() {
-        RecordHistogram.setDisabledForTests(false);
     }
 
     @Test
@@ -450,13 +443,13 @@ public class BrowserStartupControllerTest {
 
     @Test
     @SmallTest
-    public void testAsynchronousStartServiceManagerThenStartFullBrowser() {
+    public void testAsynchronousStartMinimalBrowserThenStartFullBrowser() {
         mController.mStartupResult = BrowserStartupControllerImpl.STARTUP_SUCCESS;
         mController.mLibraryLoadSucceeds = true;
         final TestStartupCallback callback1 = new TestStartupCallback();
         final TestStartupCallback callback2 = new TestStartupCallback();
 
-        // Kick off the asynchronous startup requests to start ServiceManagerOnly.
+        // Kick off the asynchronous startup requests to start a minimal browser.
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             try {
                 mController.startBrowserProcessesAsync(
@@ -471,7 +464,7 @@ public class BrowserStartupControllerTest {
         });
 
         Assert.assertEquals("The service manager should have been launched once.", 1,
-                mController.serviceManagerLaunchCounter());
+                mController.minimalBrowserLaunchCounter());
 
         // Wait for callbacks to complete.
         InstrumentationRegistry.getInstrumentation().waitForIdleSync();
@@ -514,7 +507,7 @@ public class BrowserStartupControllerTest {
 
     @Test
     @SmallTest
-    public void testMultipleAsynchronousStartServiceManagerRequests() {
+    public void testMultipleAsynchronousStartMinimalBrowserRequests() {
         mController.mStartupResult = BrowserStartupControllerImpl.STARTUP_SUCCESS;
         mController.mLibraryLoadSucceeds = true;
         final TestStartupCallback callback1 = new TestStartupCallback();
@@ -542,7 +535,7 @@ public class BrowserStartupControllerTest {
         });
 
         Assert.assertEquals("The service manager should have been launched once.", 1,
-                mController.serviceManagerLaunchCounter());
+                mController.minimalBrowserLaunchCounter());
 
         // Wait for callbacks to complete.
         InstrumentationRegistry.getInstrumentation().waitForIdleSync();
@@ -559,7 +552,7 @@ public class BrowserStartupControllerTest {
 
     @Test
     @SmallTest
-    public void testConsecutiveAsynchronousStartServiceManagerRequests() {
+    public void testConsecutiveAsynchronousStartMinimalBrowserRequests() {
         mController.mStartupResult = BrowserStartupControllerImpl.STARTUP_SUCCESS;
         mController.mLibraryLoadSucceeds = true;
         final TestStartupCallback callback1 = new TestStartupCallback();
@@ -589,7 +582,7 @@ public class BrowserStartupControllerTest {
         });
 
         Assert.assertEquals("The service manager should have been launched once.", 1,
-                mController.serviceManagerLaunchCounter());
+                mController.minimalBrowserLaunchCounter());
 
         // Wait for callbacks to complete.
         InstrumentationRegistry.getInstrumentation().waitForIdleSync();
@@ -606,7 +599,7 @@ public class BrowserStartupControllerTest {
 
     @Test
     @SmallTest
-    public void testMultipleAsynchronousStartServiceManagerAndFullBrowserRequests() {
+    public void testMultipleAsynchronousStartMinimalBrowserAndFullBrowserRequests() {
         mController.mStartupResult = BrowserStartupControllerImpl.STARTUP_SUCCESS;
         mController.mLibraryLoadSucceeds = true;
         final TestStartupCallback callback1 = new TestStartupCallback();
@@ -634,7 +627,7 @@ public class BrowserStartupControllerTest {
         });
 
         Assert.assertEquals("The service manager should have been launched once.", 1,
-                mController.serviceManagerLaunchCounter());
+                mController.minimalBrowserLaunchCounter());
 
         // Wait for callbacks to complete.
         InstrumentationRegistry.getInstrumentation().waitForIdleSync();
@@ -652,7 +645,7 @@ public class BrowserStartupControllerTest {
 
     @Test
     @SmallTest
-    public void testAsynchronousStartServiceManagerThenSynchronousStartFullBrowser() {
+    public void testAsynchronousStartMinimalBrowserThenSynchronousStartFullBrowser() {
         mController.mStartupResult = BrowserStartupControllerImpl.STARTUP_SUCCESS;
         mController.mLibraryLoadSucceeds = true;
         final TestStartupCallback callback1 = new TestStartupCallback();
@@ -680,7 +673,7 @@ public class BrowserStartupControllerTest {
         });
         // Wait for callbacks to complete.
         Assert.assertEquals("The service manager should have been launched once.", 1,
-                mController.serviceManagerLaunchCounter());
+                mController.minimalBrowserLaunchCounter());
 
         Assert.assertEquals("The browser process should have been launched once.", 1,
                 mController.fullBrowserLaunchCounter());
@@ -693,7 +686,7 @@ public class BrowserStartupControllerTest {
 
     @Test
     @SmallTest
-    public void testAsynchronousStartServiceManagerAlongWithSynchronousStartFullBrowser() {
+    public void testAsynchronousStartMinimalBrowserAlongWithSynchronousStartFullBrowser() {
         mController.mStartupResult = BrowserStartupControllerImpl.STARTUP_SUCCESS;
         mController.mLibraryLoadSucceeds = true;
         final TestStartupCallback callback1 = new TestStartupCallback();
@@ -719,7 +712,7 @@ public class BrowserStartupControllerTest {
         });
         // Wait for callbacks to complete.
         Assert.assertEquals("The service manager should have been launched once.", 1,
-                mController.serviceManagerLaunchCounter());
+                mController.minimalBrowserLaunchCounter());
 
         Assert.assertEquals("The browser process should have been launched once.", 1,
                 mController.fullBrowserLaunchCounter());
@@ -732,7 +725,7 @@ public class BrowserStartupControllerTest {
 
     @Test
     @SmallTest
-    public void testSynchronousStartFullBrowserThenAsynchronousStartServiceManager() {
+    public void testSynchronousStartFullBrowserThenAsynchronousStartMinimalBrowser() {
         mController.mStartupResult = BrowserStartupControllerImpl.STARTUP_SUCCESS;
         mController.mLibraryLoadSucceeds = true;
         final TestStartupCallback callback1 = new TestStartupCallback();
@@ -758,7 +751,7 @@ public class BrowserStartupControllerTest {
         // Wait for callbacks to complete.
         InstrumentationRegistry.getInstrumentation().waitForIdleSync();
         Assert.assertEquals("The service manager should not have been launched.", 0,
-                mController.serviceManagerLaunchCounter());
+                mController.minimalBrowserLaunchCounter());
 
         Assert.assertEquals("The browser process should have been launched once.", 1,
                 mController.fullBrowserLaunchCounter());

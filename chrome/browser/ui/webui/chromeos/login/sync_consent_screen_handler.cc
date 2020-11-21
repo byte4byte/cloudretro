@@ -6,11 +6,14 @@
 
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/values.h"
 #include "chrome/browser/chromeos/login/screens/sync_consent_screen.h"
 #include "chrome/grit/generated_resources.h"
 #include "chromeos/constants/chromeos_features.h"
 #include "components/login/localized_values_builder.h"
+#include "components/user_manager/user_manager.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/chromeos/devicetype_utils.h"
 
 namespace {
 
@@ -39,7 +42,7 @@ void GetConsentIDs(const std::unordered_set<int>& known_ids,
   }
 
   // The strings returned by the WebUI are not free-form, they must belong into
-  // a pre-determined set of strings (stored in |string_to_grd_id_map_|). As
+  // a pre-determined set of strings (stored in `string_to_grd_id_map_`). As
   // this has privacy and legal implications, CHECK the integrity of the strings
   // received from the renderer process before recording the consent.
   for (const std::string& text : consent_description) {
@@ -93,6 +96,10 @@ void SyncConsentScreenHandler::DeclareLocalizedValues(
       "syncConsentScreenPersonalizeGoogleServicesName",
       IDS_LOGIN_SYNC_CONSENT_SCREEN_PERSONALIZE_GOOGLE_SERVICES_NAME, builder);
   RememberLocalizedValue(
+      "syncConsentScreenPersonalizeGoogleServicesDescriptionSupervisedUser",
+      IDS_LOGIN_SYNC_CONSENT_SCREEN_PERSONALIZE_GOOGLE_SERVICES_DESCRIPTION_SUPERVISED_USER,
+      builder);
+  RememberLocalizedValue(
       "syncConsentScreenPersonalizeGoogleServicesDescription",
       IDS_LOGIN_SYNC_CONSENT_SCREEN_PERSONALIZE_GOOGLE_SERVICES_DESCRIPTION,
       builder);
@@ -105,14 +112,20 @@ void SyncConsentScreenHandler::DeclareLocalizedValues(
                          builder);
 
   // SplitSettingsSync strings.
+  RememberLocalizedValue("syncConsentScreenSubtitle",
+                         IDS_LOGIN_SYNC_CONSENT_SCREEN_SUBTITLE, builder);
   RememberLocalizedValue("syncConsentScreenOsSyncName",
                          IDS_LOGIN_SYNC_CONSENT_SCREEN_OS_SYNC_NAME, builder);
   RememberLocalizedValue("syncConsentScreenOsSyncDescription",
                          IDS_LOGIN_SYNC_CONSENT_SCREEN_OS_SYNC_DESCRIPTION,
                          builder);
-  RememberLocalizedValue(
-      "syncConsentReviewBrowserSyncOptions",
-      IDS_LOGIN_SYNC_CONSENT_SCREEN_REVIEW_BROWSER_SYNC_OPTIONS, builder);
+  RememberLocalizedValue("syncConsentScreenChromeBrowserSyncName",
+                         IDS_LOGIN_SYNC_CONSENT_SCREEN_CHROME_BROWSER_SYNC_NAME,
+                         builder);
+  RememberLocalizedValue("syncConsentScreenAccept",
+                         IDS_LOGIN_SYNC_CONSENT_SCREEN_ACCEPT2, builder);
+  RememberLocalizedValue("syncConsentScreenDecline",
+                         IDS_LOGIN_SYNC_CONSENT_SCREEN_DECLINE2, builder);
 }
 
 void SyncConsentScreenHandler::Bind(SyncConsentScreen* screen) {
@@ -121,7 +134,13 @@ void SyncConsentScreenHandler::Bind(SyncConsentScreen* screen) {
 }
 
 void SyncConsentScreenHandler::Show() {
-  ShowScreen(kScreenId);
+  auto* user_manager = user_manager::UserManager::Get();
+  base::DictionaryValue data;
+  data.SetBoolean("isChildAccount", user_manager->IsLoggedInAsChildUser());
+  data.SetString("deviceType", ui::GetChromeOSDeviceName());
+  data.SetBoolean("splitSettingsSyncEnabled",
+                  chromeos::features::IsSplitSettingsSyncEnabled());
+  ShowScreenWithData(kScreenId, &data);
 }
 
 void SyncConsentScreenHandler::Hide() {}
@@ -139,13 +158,8 @@ void SyncConsentScreenHandler::RegisterMessages() {
               &SyncConsentScreenHandler::HandleContinueWithDefaults);
   AddCallback("login.SyncConsentScreen.acceptAndContinue",
               &SyncConsentScreenHandler::HandleAcceptAndContinue);
-}
-
-void SyncConsentScreenHandler::GetAdditionalParameters(
-    base::DictionaryValue* parameters) {
-  parameters->SetBoolean("splitSettingsSyncEnabled",
-                         chromeos::features::IsSplitSettingsSyncEnabled());
-  BaseScreenHandler::GetAdditionalParameters(parameters);
+  AddCallback("login.SyncConsentScreen.declineAndContinue",
+              &SyncConsentScreenHandler::HandleDeclineAndContinue);
 }
 
 void SyncConsentScreenHandler::HandleContinueAndReview(
@@ -188,16 +202,26 @@ void SyncConsentScreenHandler::HandleContinueWithDefaults(
 
 void SyncConsentScreenHandler::HandleAcceptAndContinue(
     const login::StringList& consent_description,
+    const std::string& consent_confirmation) {
+  Continue(consent_description, consent_confirmation, UserChoice::kAccepted);
+}
+
+void SyncConsentScreenHandler::HandleDeclineAndContinue(
+    const login::StringList& consent_description,
+    const std::string& consent_confirmation) {
+  Continue(consent_description, consent_confirmation, UserChoice::kDeclined);
+}
+
+void SyncConsentScreenHandler::Continue(
+    const login::StringList& consent_description,
     const std::string& consent_confirmation,
-    bool enable_os_sync,
-    bool review_browser_sync) {
+    UserChoice choice) {
   DCHECK(chromeos::features::IsSplitSettingsSyncEnabled());
   std::vector<int> consent_description_ids;
   int consent_confirmation_id;
   GetConsentIDs(known_string_ids_, consent_description, consent_confirmation,
                 &consent_description_ids, &consent_confirmation_id);
-  screen_->OnAcceptAndContinue(consent_description_ids, consent_confirmation_id,
-                               enable_os_sync, review_browser_sync);
+  screen_->OnContinue(consent_description_ids, consent_confirmation_id, choice);
 
   SyncConsentScreen::SyncConsentScreenTestDelegate* test_delegate =
       screen_->GetDelegateForTesting();

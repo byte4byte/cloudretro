@@ -5,7 +5,6 @@
 #include "ui/color/color_mixers.h"
 
 #import <Cocoa/Cocoa.h>
-#include "base/logging.h"
 #import "skia/ext/skia_utils_mac.h"
 #include "ui/color/color_mixer.h"
 #include "ui/color/color_provider.h"
@@ -33,14 +32,12 @@ void AddNativeUiColorMixer(ColorProvider* provider, bool dark_window) {
   mixer.AddSet(
       {kColorSetNative,
        {
-           {kColorButtonPressedBackgroundShade,
-            SkColorSetA(SK_ColorBLACK, 0x10)},
            {kColorFocusableBorderFocused,
             SkColorSetA(skia::NSSystemColorToSkColor(
                             [NSColor keyboardFocusIndicatorColor]),
                         0x66)},
            {kColorMenuBorder, SkColorSetA(SK_ColorBLACK, 0x60)},
-           {kColorMenuItemDisabledForeground,
+           {kColorMenuItemForegroundDisabled,
             skia::NSSystemColorToSkColor([NSColor disabledControlTextColor])},
            {kColorMenuItemForeground,
             skia::NSSystemColorToSkColor([NSColor controlTextColor])},
@@ -49,8 +46,8 @@ void AddNativeUiColorMixer(ColorProvider* provider, bool dark_window) {
                 [NSColor selectedTextBackgroundColor])},
        }});
 
-  mixer[kColorMenuItemHighlightedForeground] = {kColorPrimaryForeground};
-  mixer[kColorMenuItemSelectedForeground] = {kColorPrimaryForeground};
+  mixer[kColorMenuItemForegroundHighlighted] = {kColorPrimaryForeground};
+  mixer[kColorMenuItemForegroundSelected] = {kColorPrimaryForeground};
 
   if (@available(macOS 10.14, *)) {
     mixer[kColorTableBackgroundAlternate] = {skia::NSSystemColorToSkColor(

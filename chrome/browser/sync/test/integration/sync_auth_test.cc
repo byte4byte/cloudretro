@@ -5,7 +5,6 @@
 #include "base/macros.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/metrics/histogram_tester.h"
-#include "base/test/scoped_feature_list.h"
 #include "base/threading/platform_thread.h"
 #include "base/time/time.h"
 #include "chrome/browser/signin/identity_manager_factory.h"
@@ -22,6 +21,7 @@
 #include "components/sync/driver/profile_sync_service.h"
 #include "components/sync/driver/sync_driver_switches.h"
 #include "components/sync/driver/sync_token_status.h"
+#include "content/public/test/browser_test.h"
 #include "google_apis/gaia/google_service_auth_error.h"
 #include "net/base/net_errors.h"
 #include "net/http/http_status_code.h"
@@ -335,9 +335,8 @@ IN_PROC_BROWSER_TEST_F(SyncAuthTest, SyncPausedState) {
   if (base::FeatureList::IsEnabled(switches::kStopSyncInPausedState)) {
     // Sync should have shut itself down.
     EXPECT_EQ(GetSyncService(0)->GetTransportState(),
-              syncer::SyncService::TransportState::DISABLED);
-    EXPECT_TRUE(GetSyncService(0)->HasDisableReason(
-        syncer::SyncService::DISABLE_REASON_PAUSED));
+              syncer::SyncService::TransportState::PAUSED);
+    EXPECT_FALSE(GetSyncService(0)->IsEngineInitialized());
   } else {
     ASSERT_TRUE(AttemptToTriggerAuthError());
 
@@ -404,9 +403,8 @@ IN_PROC_BROWSER_TEST_F(SyncAuthTest, ShouldTrackDeletionsInSyncPausedState) {
   if (base::FeatureList::IsEnabled(switches::kStopSyncInPausedState)) {
     // Sync should have shut itself down.
     EXPECT_EQ(GetSyncService(0)->GetTransportState(),
-              syncer::SyncService::TransportState::DISABLED);
-    EXPECT_TRUE(GetSyncService(0)->HasDisableReason(
-        syncer::SyncService::DISABLE_REASON_PAUSED));
+              syncer::SyncService::TransportState::PAUSED);
+    EXPECT_FALSE(GetSyncService(0)->IsEngineInitialized());
   } else {
     ASSERT_TRUE(AttemptToTriggerAuthError());
 

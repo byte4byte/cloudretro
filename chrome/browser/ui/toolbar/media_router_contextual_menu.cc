@@ -13,7 +13,6 @@
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/media/router/event_page_request_manager.h"
 #include "chrome/browser/media/router/event_page_request_manager_factory.h"
-#include "chrome/browser/media/router/media_router_factory.h"
 #include "chrome/browser/media/router/media_router_feature.h"
 #include "chrome/browser/media/router/mojo/media_router_mojo_impl.h"
 #include "chrome/browser/profiles/profile.h"
@@ -26,6 +25,7 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/media_router/common/pref_names.h"
 #include "components/prefs/pref_service.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
 #include "components/strings/grit/components_strings.h"
@@ -51,47 +51,46 @@ MediaRouterContextualMenu::MediaRouterContextualMenu(Browser* browser,
                                                      Observer* observer)
     : browser_(browser),
       observer_(observer),
-      menu_model_(std::make_unique<ui::SimpleMenuModel>(this)) {
-  menu_model_->AddItemWithStringId(IDC_MEDIA_ROUTER_ABOUT,
-                                   IDS_MEDIA_ROUTER_ABOUT);
-  menu_model_->AddSeparator(ui::NORMAL_SEPARATOR);
-  menu_model_->AddItemWithStringId(IDC_MEDIA_ROUTER_LEARN_MORE, IDS_LEARN_MORE);
-  menu_model_->AddItemWithStringId(IDC_MEDIA_ROUTER_HELP,
-                                   IDS_MEDIA_ROUTER_HELP);
-  if (shown_by_policy) {
-    menu_model_->AddItemWithStringId(IDC_MEDIA_ROUTER_SHOWN_BY_POLICY,
-                                     IDS_MEDIA_ROUTER_SHOWN_BY_POLICY);
-    // TODO (kylixrd): Review the use of the hard-coded color constant.
-    menu_model_->SetIcon(
-        menu_model_->GetIndexOfCommandId(IDC_MEDIA_ROUTER_SHOWN_BY_POLICY),
-        ui::ImageModel::FromVectorIcon(vector_icons::kBusinessIcon,
-                                       gfx::kChromeIconGrey, 16));
-  } else {
-    menu_model_->AddCheckItemWithStringId(
-        IDC_MEDIA_ROUTER_ALWAYS_SHOW_TOOLBAR_ACTION,
-        IDS_MEDIA_ROUTER_ALWAYS_SHOW_TOOLBAR_ACTION);
-  }
-  menu_model_->AddCheckItemWithStringId(IDC_MEDIA_ROUTER_TOGGLE_MEDIA_REMOTING,
-                                        IDS_MEDIA_ROUTER_TOGGLE_MEDIA_REMOTING);
-  if (!browser_->profile()->IsOffTheRecord()) {
-    menu_model_->AddSeparator(ui::NORMAL_SEPARATOR);
-    menu_model_->AddCheckItemWithStringId(
-        IDC_MEDIA_ROUTER_CLOUD_SERVICES_TOGGLE,
-        IDS_MEDIA_ROUTER_CLOUD_SERVICES_TOGGLE);
-
-    if (browser->profile()->GetPrefs()->GetBoolean(
-            prefs::kUserFeedbackAllowed)) {
-      menu_model_->AddItemWithStringId(IDC_MEDIA_ROUTER_REPORT_ISSUE,
-                                       IDS_MEDIA_ROUTER_REPORT_ISSUE);
-    }
-  }
-}
+      shown_by_policy_(shown_by_policy) {}
 
 MediaRouterContextualMenu::~MediaRouterContextualMenu() = default;
 
 std::unique_ptr<ui::SimpleMenuModel>
-MediaRouterContextualMenu::TakeMenuModel() {
-  return std::move(menu_model_);
+MediaRouterContextualMenu::CreateMenuModel() {
+  auto menu_model = std::make_unique<ui::SimpleMenuModel>(this);
+  menu_model->AddItemWithStringId(IDC_MEDIA_ROUTER_ABOUT,
+                                  IDS_MEDIA_ROUTER_ABOUT);
+  menu_model->AddSeparator(ui::NORMAL_SEPARATOR);
+  menu_model->AddItemWithStringId(IDC_MEDIA_ROUTER_LEARN_MORE, IDS_LEARN_MORE);
+  menu_model->AddItemWithStringId(IDC_MEDIA_ROUTER_HELP, IDS_MEDIA_ROUTER_HELP);
+  if (shown_by_policy_) {
+    menu_model->AddItemWithStringId(IDC_MEDIA_ROUTER_SHOWN_BY_POLICY,
+                                    IDS_MEDIA_ROUTER_SHOWN_BY_POLICY);
+    // TODO (kylixrd): Review the use of the hard-coded color constant.
+    menu_model->SetIcon(
+        menu_model->GetIndexOfCommandId(IDC_MEDIA_ROUTER_SHOWN_BY_POLICY),
+        ui::ImageModel::FromVectorIcon(vector_icons::kBusinessIcon,
+                                       gfx::kChromeIconGrey, 16));
+  } else {
+    menu_model->AddCheckItemWithStringId(
+        IDC_MEDIA_ROUTER_ALWAYS_SHOW_TOOLBAR_ACTION,
+        IDS_MEDIA_ROUTER_ALWAYS_SHOW_TOOLBAR_ACTION);
+  }
+  menu_model->AddCheckItemWithStringId(IDC_MEDIA_ROUTER_TOGGLE_MEDIA_REMOTING,
+                                       IDS_MEDIA_ROUTER_TOGGLE_MEDIA_REMOTING);
+  if (!browser_->profile()->IsOffTheRecord()) {
+    menu_model->AddSeparator(ui::NORMAL_SEPARATOR);
+    menu_model->AddCheckItemWithStringId(
+        IDC_MEDIA_ROUTER_CLOUD_SERVICES_TOGGLE,
+        IDS_MEDIA_ROUTER_CLOUD_SERVICES_TOGGLE);
+
+    if (browser_->profile()->GetPrefs()->GetBoolean(
+            prefs::kUserFeedbackAllowed)) {
+      menu_model->AddItemWithStringId(IDC_MEDIA_ROUTER_REPORT_ISSUE,
+                                      IDS_MEDIA_ROUTER_REPORT_ISSUE);
+    }
+  }
+  return menu_model;
 }
 
 bool MediaRouterContextualMenu::GetAlwaysShowActionPref() const {
@@ -108,11 +107,13 @@ bool MediaRouterContextualMenu::IsCommandIdChecked(int command_id) const {
   PrefService* pref_service = browser_->profile()->GetPrefs();
   switch (command_id) {
     case IDC_MEDIA_ROUTER_CLOUD_SERVICES_TOGGLE:
-      return pref_service->GetBoolean(prefs::kMediaRouterEnableCloudServices);
+      return pref_service->GetBoolean(
+          media_router::prefs::kMediaRouterEnableCloudServices);
     case IDC_MEDIA_ROUTER_ALWAYS_SHOW_TOOLBAR_ACTION:
       return GetAlwaysShowActionPref();
     case IDC_MEDIA_ROUTER_TOGGLE_MEDIA_REMOTING:
-      return pref_service->GetBoolean(prefs::kMediaRouterMediaRemotingEnabled);
+      return pref_service->GetBoolean(
+          media_router::prefs::kMediaRouterMediaRemotingEnabled);
     default:
       return false;
   }
@@ -181,10 +182,12 @@ void MediaRouterContextualMenu::MenuClosed(ui::SimpleMenuModel* source) {
 
 void MediaRouterContextualMenu::ToggleCloudServices() {
   PrefService* pref_service = browser_->profile()->GetPrefs();
-  if (pref_service->GetBoolean(prefs::kMediaRouterCloudServicesPrefSet)) {
+  if (pref_service->GetBoolean(
+          media_router::prefs::kMediaRouterCloudServicesPrefSet)) {
     pref_service->SetBoolean(
-        prefs::kMediaRouterEnableCloudServices,
-        !pref_service->GetBoolean(prefs::kMediaRouterEnableCloudServices));
+        media_router::prefs::kMediaRouterEnableCloudServices,
+        !pref_service->GetBoolean(
+            media_router::prefs::kMediaRouterEnableCloudServices));
   } else {
     // If the user hasn't enabled cloud services before, show the opt-in dialog.
     media_router::ShowCloudServicesDialog(browser_);
@@ -194,8 +197,9 @@ void MediaRouterContextualMenu::ToggleCloudServices() {
 void MediaRouterContextualMenu::ToggleMediaRemoting() {
   PrefService* pref_service = browser_->profile()->GetPrefs();
   pref_service->SetBoolean(
-      prefs::kMediaRouterMediaRemotingEnabled,
-      !pref_service->GetBoolean(prefs::kMediaRouterMediaRemotingEnabled));
+      media_router::prefs::kMediaRouterMediaRemotingEnabled,
+      !pref_service->GetBoolean(
+          media_router::prefs::kMediaRouterMediaRemotingEnabled));
 }
 
 void MediaRouterContextualMenu::ReportIssue() {

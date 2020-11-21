@@ -9,7 +9,7 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/test/test_timeouts.h"
 #include "base/values.h"
@@ -100,7 +100,7 @@ TEST_F(JsonSplicerImplTest, FailedJsonDictSplice) {
             base::DictionaryValue* dict;
             ASSERT_TRUE(value->GetAsDictionary(&dict));
             ASSERT_TRUE(IsDaysOfWeek(dict));
-            std::string blank = "";
+            std::string blank;
             ASSERT_FALSE(RemoveKeyFromDictionary(dict, blank));
             ASSERT_TRUE(IsDaysOfWeek(dict));
             std::string random = "aoeu";
@@ -155,7 +155,7 @@ TEST_F(JsonSplicerImplTest, FailedJsonListSplice) {
             ASSERT_TRUE(value.has_value());
             base::Value::ConstListView list = value->GetList();
             ASSERT_TRUE(IsDaysOfWeek(list));
-            std::string blank = "";
+            std::string blank;
             ASSERT_FALSE(RemoveValueFromList(&*value, blank));
             ASSERT_TRUE(IsDaysOfWeek(list));
             std::string random = "aoeu";

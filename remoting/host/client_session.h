@@ -126,6 +126,8 @@ class ClientSession : public protocol::HostStub,
   void DeliverClientMessage(const protocol::ExtensionMessage& message) override;
   void SelectDesktopDisplay(
       const protocol::SelectDesktopDisplayRequest& select_display) override;
+  void ControlPeerConnection(
+      const protocol::PeerConnectionParameters& parameters) override;
 
   // protocol::ConnectionToClient::EventHandler interface.
   void OnConnectionAuthenticating() override;
@@ -133,6 +135,7 @@ class ClientSession : public protocol::HostStub,
   void CreateMediaStreams() override;
   void OnConnectionChannelsConnected() override;
   void OnConnectionClosed(protocol::ErrorCode error) override;
+  void OnTransportProtocolChange(const std::string& protocol) override;
   void OnRouteChange(const std::string& channel_name,
                      const protocol::TransportRoute& route) override;
   void OnIncomingDataChannel(
@@ -197,6 +200,10 @@ class ClientSession : public protocol::HostStub,
       std::unique_ptr<protocol::MessagePipe> pipe);
 
   void CreateFileTransferMessageHandler(
+      const std::string& channel_name,
+      std::unique_ptr<protocol::MessagePipe> pipe);
+
+  void CreateRtcLogTransferMessageHandler(
       const std::string& channel_name,
       std::unique_ptr<protocol::MessagePipe> pipe);
 

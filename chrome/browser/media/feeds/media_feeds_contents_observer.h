@@ -11,9 +11,9 @@
 #include "content/public/browser/web_contents_user_data.h"
 #include "mojo/public/cpp/bindings/associated_remote.h"
 
-namespace media_history {
-class MediaHistoryKeyedService;
-}  // namespace media_history
+namespace media_feeds {
+class MediaFeedsService;
+}  // namespace media_feeds
 
 namespace url {
 class Origin;
@@ -32,6 +32,7 @@ class MediaFeedsContentsObserver
   void DidFinishNavigation(content::NavigationHandle* handle) override;
   void DidFinishLoad(content::RenderFrameHost* render_frame_host,
                      const GURL& validated_url) override;
+  void WebContentsDestroyed() override;
 
   void SetClosureForTest(base::RepeatingClosure callback) {
     test_closure_ = std::move(callback);
@@ -45,7 +46,13 @@ class MediaFeedsContentsObserver
   void DidFindMediaFeed(const url::Origin& origin,
                         const base::Optional<GURL>& url);
 
-  media_history::MediaHistoryKeyedService* GetService();
+  media_feeds::MediaFeedsService* GetService();
+
+  void ResetFeed();
+
+  // The last origin that the web contents navigated too. Used for resetting
+  // feeds based on user navigation.
+  base::Optional<url::Origin> last_origin_;
 
   // The test closure will be called once we have checked the page for a media
   // feed.
@@ -56,4 +63,4 @@ class MediaFeedsContentsObserver
   WEB_CONTENTS_USER_DATA_KEY_DECL();
 };
 
-#endif  // CHROME_BROWSER_MEDIA_HISTORY_MEDIA_HISTORY_CONTENTS_OBSERVER_H_
+#endif  // CHROME_BROWSER_MEDIA_FEEDS_MEDIA_FEEDS_CONTENTS_OBSERVER_H_

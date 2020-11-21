@@ -1,5 +1,4 @@
-# tags: [ Android Fuchsia IOS IOS12.2 IOS13.0 Linux Mac Mac10.10 Mac10.11 Mac10.12 Retina
-#         Mac10.13 Win Win7 Win10 ]
+# tags: [ Android Fuchsia Linux Mac Mac10.12 Mac10.13 Win Win7 Win10 ]
 # tags: [ Release Debug ]
 # results: [ Timeout Crash Pass Failure Slow Skip ]
 
@@ -29,8 +28,6 @@ crbug.com/166932 [ Linux ] plugins/fullscreen-plugins-dont-reload.html [ Skip ]
 # These have been failing since at least chrome r203901, blink r151723 (no memory errors, just text failure):
 crbug.com/231357 [ Linux ] editing/execCommand/switch-list-type-with-orphaned-li.html [ Failure ]
 
-crbug.com/333791 [ Linux ] svg/animations/repeatn-event-1b.svg [ Pass Failure ]
-crbug.com/333791 [ Linux ] svg/animations/repeatn-event-1d.svg [ Pass Failure ]
 crbug.com/192172 [ Linux ] compositing/rtl/rtl-iframe-absolute-overflow.html [ Failure Pass ]
 crbug.com/192172 [ Linux ] compositing/rtl/rtl-iframe-fixed-overflow-scrolled.html [ Failure Pass ]
 crbug.com/192172 [ Linux ] compositing/rtl/rtl-iframe-fixed-overflow.html [ Failure Pass ]
@@ -79,3 +76,5 @@ crbug.com/989365 [ Linux ] external/wpt/cookie-store/serviceworker_cookiechange_
 
 crbug.com/1048597 [ Linux ] virtual/android/fullscreen/video-scrolled-iframe.html [ Pass Timeout ]
 
+# Sheriff 2020-08-25
+crbug.com/1121429 fast/selectors/placeholder-shown-style-update.html [ Pass Crash ]

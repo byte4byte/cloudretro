@@ -7,7 +7,8 @@
 #include <utility>
 
 #include "base/auto_reset.h"
-#include "base/logging.h"
+#include "base/check_op.h"
+#include "base/notreached.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
 #include "ui/aura/window_observer.h"
@@ -22,7 +23,7 @@
 #include "ui/views/widget/native_widget_private.h"
 #include "ui/views/widget/widget.h"
 
-#if !defined(OS_MACOSX)
+#if !defined(OS_APPLE)
 #include "ui/aura/window.h"
 #endif
 
@@ -30,7 +31,7 @@ namespace views {
 
 namespace internal {
 
-#if !defined(OS_MACOSX)
+#if !defined(OS_APPLE)
 // This class adds itself as the pre target handler for the |window|
 // passed in. It currently handles touch events and forwards them to the
 // controller. Reason for this approach is views does not get raw touch
@@ -77,16 +78,16 @@ class PreMenuEventDispatchHandler : public ui::EventHandler,
 
   DISALLOW_COPY_AND_ASSIGN(PreMenuEventDispatchHandler);
 };
-#endif  // OS_MACOSX
+#endif  // OS_APPLE
 
 void TransferGesture(Widget* source, Widget* target) {
-#if defined(OS_MACOSX)
+#if defined(OS_APPLE)
   NOTIMPLEMENTED();
-#else   // !defined(OS_MACOSX)
+#else   // !defined(OS_APPLE)
   source->GetGestureRecognizer()->TransferEventsTo(
       source->GetNativeView(), target->GetNativeView(),
       ui::TransferTouchesBehavior::kDontCancel);
-#endif  // defined(OS_MACOSX)
+#endif  // defined(OS_APPLE)
 }
 
 }  // namespace internal
@@ -102,6 +103,7 @@ MenuHost::MenuHost(SubmenuView* submenu)
 MenuHost::~MenuHost() {
   if (owner_)
     owner_->RemoveObserver(this);
+  CHECK(!IsInObserverList());
 }
 
 void MenuHost::InitMenuHost(Widget* parent,
@@ -126,7 +128,9 @@ void MenuHost::InitMenuHost(Widget* parent,
   // If MenuHost has no parent widget, it needs to be marked
   // Activatable, so that calling Show in ShowMenuHost will
   // get keyboard focus.
-  if (parent == nullptr)
+  const bool take_focus =
+      menu_controller && menu_controller->should_take_keyboard_focus();
+  if (parent == nullptr || take_focus)
     params.activatable = Widget::InitParams::ACTIVATABLE_YES;
 #if defined(OS_WIN)
   // On Windows use the software compositor to ensure that we don't block
@@ -136,7 +140,7 @@ void MenuHost::InitMenuHost(Widget* parent,
 #endif
   Init(std::move(params));
 
-#if !defined(OS_MACOSX)
+#if !defined(OS_APPLE)
   pre_dispatch_handler_ =
       std::make_unique<internal::PreMenuEventDispatchHandler>(
           menu_controller, submenu_, GetNativeView());
@@ -159,10 +163,13 @@ void MenuHost::ShowMenuHost(bool do_capture) {
   // Doing a capture may make us get capture lost. Ignore it while we're in the
   // process of showing.
   base::AutoReset<bool> reseter(&ignore_capture_lost_, true);
-  ShowInactive();
+  MenuController* menu_controller =
+      submenu_->GetMenuItem()->GetMenuController();
+  if (menu_controller && menu_controller->should_take_keyboard_focus())
+    Show();
+  else
+    ShowInactive();
   if (do_capture) {
-    MenuController* menu_controller =
-        submenu_->GetMenuItem()->GetMenuController();
     if (menu_controller && menu_controller->send_gesture_events_to_owner()) {
       // TransferGesture when owner needs gesture events so that the incoming
       // touch events after MenuHost is created are properly translated into
@@ -171,11 +178,6 @@ void MenuHost::ShowMenuHost(bool do_capture) {
     } else {
       GetGestureRecognizer()->CancelActiveTouchesExcept(nullptr);
     }
-#if defined(MACOSX)
-    // Cancel existing touches, so we don't miss some touch release/cancel
-    // events due to the menu taking capture.
-    GetGestureRecognizer()->CancelActiveTouchesExcept(nullptr);
-#endif  // defined (OS_MACOSX)
     // If MenuHost has no parent widget, it needs to call Show to get focus,
     // so that it will get keyboard events.
     if (owner_ == nullptr)
@@ -201,7 +203,7 @@ void MenuHost::DestroyMenuHost() {
   HideMenuHost();
   destroying_ = true;
   static_cast<MenuHostRootView*>(GetRootView())->ClearSubmenu();
-#if !defined(OS_MACOSX)
+#if !defined(OS_APPLE)
   pre_dispatch_handler_.reset();
 #endif
   Close();

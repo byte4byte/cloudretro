@@ -4,7 +4,7 @@
 
 package org.chromium.content.browser.accessibility;
 
-import android.support.test.filters.SmallTest;
+import androidx.test.filters.SmallTest;
 
 import org.junit.Assert;
 import org.junit.Before;
@@ -12,9 +12,9 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.test.BaseJUnit4ClassRunner;
-import org.chromium.base.test.util.RetryOnFailure;
 
 import java.util.HashMap;
+import java.util.HashSet;
 
 /**
  * Test suite to ensure that |AccessibilityEventDispatcher| behaves appropriately.
@@ -56,7 +56,7 @@ public class AccessibilityEventDispatcherTest {
                 mEventDispatched = true;
                 return true;
             }
-        }, mEventDelays);
+        }, mEventDelays, new HashSet<Integer>());
 
         mRunnablePosted = false;
         mRunnableRemoved = false;
@@ -68,7 +68,6 @@ public class AccessibilityEventDispatcherTest {
      */
     @Test
     @SmallTest
-    @RetryOnFailure
     public void testEnqueue_notThrottle() {
         mDispatcher.enqueueEvent(1, 1);
 
@@ -83,7 +82,6 @@ public class AccessibilityEventDispatcherTest {
      */
     @Test
     @SmallTest
-    @RetryOnFailure
     public void testEnqueue_noPreviousEvents() {
         mDispatcher.enqueueEvent(1, 2);
 
@@ -100,7 +98,6 @@ public class AccessibilityEventDispatcherTest {
      */
     @Test
     @SmallTest
-    @RetryOnFailure
     public void testEnqueue_noRecentPreviousEvents() throws InterruptedException {
         // Send first event through as normal
         mDispatcher.enqueueEvent(1, 2);
@@ -129,7 +126,6 @@ public class AccessibilityEventDispatcherTest {
      */
     @Test
     @SmallTest
-    @RetryOnFailure
     public void testEnqueue_recentEventsInQueue() {
         // Send first event through as normal
         mDispatcher.enqueueEvent(1, 3);

@@ -16,10 +16,10 @@
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/optional.h"
+#include "base/scoped_observer.h"
 #include "build/build_config.h"
 #include "chrome/browser/search/background/ntp_background_service.h"
 #include "chrome/browser/search/background/ntp_background_service_observer.h"
-#include "chrome/browser/search/search_provider_observer.h"
 #include "components/history/core/browser/history_types.h"
 #include "components/image_fetcher/core/image_fetcher_impl.h"
 #include "components/keyed_service/core/keyed_service.h"
@@ -37,14 +37,19 @@
 #error "Instant is only used on desktop";
 #endif
 
-class InstantIOContext;
 class InstantServiceObserver;
 class Profile;
+class SearchProviderObserver;
 struct CollectionImage;
 struct InstantMostVisitedInfo;
 struct NtpTheme;
 
+namespace base {
+class Clock;
+}  // namespace base
+
 namespace content {
+class BrowserContext;
 class RenderProcessHost;
 }  // namespace content
 
@@ -69,11 +74,17 @@ class InstantService : public KeyedService,
   bool IsInstantProcess(int process_id) const;
 
   // Adds/Removes InstantService observers.
-  void AddObserver(InstantServiceObserver* observer);
+  virtual void AddObserver(InstantServiceObserver* observer);
   void RemoveObserver(InstantServiceObserver* observer);
 
   // Register prefs associated with the NTP.
   static void RegisterProfilePrefs(PrefRegistrySimple* registry);
+
+  // Determine if this chrome-search: request is coming from an Instant render
+  // process.
+  static bool ShouldServiceRequest(const GURL& url,
+                                   content::BrowserContext* browser_context,
+                                   int render_process_id);
 
 #if defined(UNIT_TEST)
   int GetInstantProcessCount() const {
@@ -122,7 +133,7 @@ class InstantService : public KeyedService,
   bool ToggleShortcutsVisibility(bool do_notify);
 
   // Invoked to update theme information for the NTP.
-  void UpdateNtpTheme();
+  virtual void UpdateNtpTheme();
 
   // Invoked when a background pref update is received via sync, triggering
   // an update of theme info.
@@ -131,9 +142,6 @@ class InstantService : public KeyedService,
   // Invoked by the InstantController to update most visited items details for
   // NTP.
   void UpdateMostVisitedInfo();
-
-  // Sends the current NTP URL to a renderer process.
-  void SendNewTabPageURLToRenderer(content::RenderProcessHost* rph);
 
   // Invoked when the background is reset on the NTP.
   void ResetCustomBackgroundInfo();
@@ -304,8 +312,6 @@ class InstantService : public KeyedService,
   base::ObserverList<InstantServiceObserver>::Unchecked observers_;
 
   content::NotificationRegistrar registrar_;
-
-  scoped_refptr<InstantIOContext> instant_io_context_;
 
   // Data source for NTP tiles (aka Most Visited tiles). May be null.
   std::unique_ptr<ntp_tiles::MostVisitedSites> most_visited_sites_;

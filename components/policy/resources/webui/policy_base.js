@@ -42,6 +42,7 @@ cr.define('policy', function() {
    *    error: string,
    *    value: any,
    *    deprecated: ?boolean,
+   *    future: ?boolean,
    *    allSourcesMerged: ?boolean,
    *    conflicts: ?Array<!Conflict>,
    * }}
@@ -89,15 +90,15 @@ cr.define('policy', function() {
      */
     setLabelAndShow_(labelName, labelValue, needsToBeShown = true) {
       const labelElement = this.querySelector(labelName);
-      labelElement.textContent = labelValue || '';
+      labelElement.textContent = labelValue ? ' ' + labelValue : '';
       if (needsToBeShown) {
         labelElement.parentElement.hidden = false;
       }
     },
     /**
      * Populate the box with the given cloud policy status.
-     * @param {string} scope The policy scope, either "device", "machine", or
-     *     "user".
+     * @param {string} scope The policy scope, either "device", "machine",
+     *     "user", or "updater".
      * @param {Object} status Dictionary with information about the status.
      */
     initialize(scope, status) {
@@ -144,6 +145,15 @@ cr.define('policy', function() {
             '.machine-enrollment-token', status.enrollmentToken);
         this.setLabelAndShow_('.machine-enrollment-name', status.machine);
         this.setLabelAndShow_('.machine-enrollment-domain', status.domain);
+      } else if (scope === 'updater') {
+        this.querySelector('.legend').textContent =
+            loadTimeData.getString('statusUpdater');
+        if (status.version) {
+          this.setLabelAndShow_('.version', status.version);
+        }
+        if (status.domain) {
+          this.setLabelAndShow_('.enterprise-enrollment-domain', status.domain);
+        }
       } else {
         // For user policy, set the appropriate title and populate the topmost
         // status item with the username that policies apply to.
@@ -161,15 +171,20 @@ cr.define('policy', function() {
                   status.isAffiliated ? 'isAffiliatedYes' : 'isAffiliatedNo'));
         }
       }
-      this.setLabelAndShow_(
-          '.time-since-last-refresh', status.timeSinceLastRefresh, false);
-      this.setLabelAndShow_('.refresh-interval', status.refreshInterval, false);
-      this.setLabelAndShow_('.status', status.status, false);
-      this.setLabelAndShow_(
-          '.policy-push',
-          loadTimeData.getString(
-              status.policiesPushAvailable ? 'policiesPushOn' :
-                                             'policiesPushOff'));
+      if (status.timeSinceLastRefresh) {
+        this.setLabelAndShow_(
+            '.time-since-last-refresh', status.timeSinceLastRefresh);
+      }
+
+      if (scope !== 'updater') {
+        this.setLabelAndShow_('.refresh-interval', status.refreshInterval);
+        this.setLabelAndShow_('.status', status.status);
+        this.setLabelAndShow_(
+            '.policy-push',
+            loadTimeData.getString(
+                status.policiesPushAvailable ? 'policiesPushOn' :
+                                               'policiesPushOff'));
+      }
     },
   };
 
@@ -224,6 +239,9 @@ cr.define('policy', function() {
     decorate() {
       const toggle = this.querySelector('.policy.row .toggle');
       toggle.addEventListener('click', this.toggleExpanded_.bind(this));
+
+      const copy = this.querySelector('.copy-value');
+      copy.addEventListener('click', this.copyValue_.bind(this));
     },
 
     /** @param {Policy} policy */
@@ -248,6 +266,9 @@ cr.define('policy', function() {
 
       /** @private {boolean} */
       this.deprecated_ = !!policy.deprecated;
+
+      /** @private {boolean} */
+      this.future_ = !!policy.future;
 
       // Populate the name column.
       const nameDisplay = this.querySelector('.name .link span');
@@ -283,6 +304,9 @@ cr.define('policy', function() {
         const valueDisplay = this.querySelector('.value');
         valueDisplay.textContent = truncatedValue;
 
+        const copyLink = this.querySelector('.copy .link');
+        copyLink.title =
+            loadTimeData.getStringF('policyCopyValue', policy.name);
 
         const valueRowContentDisplay = this.querySelector('.value.row .value');
         valueRowContentDisplay.textContent = policy.value;
@@ -298,6 +322,8 @@ cr.define('policy', function() {
             this.hasErrors_ ? loadTimeData.getString('error') : '';
         const deprecationNotice =
             this.deprecated_ ? loadTimeData.getString('deprecated') : '';
+        const futureNotice =
+            this.future_ ? loadTimeData.getString('future') : '';
         const warningsNotice =
             this.hasWarnings_ ? loadTimeData.getString('warning') : '';
         const conflictsNotice = this.hasConflicts_ && !this.isMergedValue_ ?
@@ -307,8 +333,8 @@ cr.define('policy', function() {
             this.policy.ignored ? loadTimeData.getString('ignored') : '';
         const notice =
             [
-              errorsNotice, deprecationNotice, warningsNotice, ignoredNotice,
-              conflictsNotice
+              errorsNotice, deprecationNotice, futureNotice, warningsNotice,
+              ignoredNotice, conflictsNotice
             ].filter(x => !!x)
                 .join(', ') ||
             loadTimeData.getString('ok');
@@ -326,6 +352,27 @@ cr.define('policy', function() {
         const messagesDisplay = this.querySelector('.messages');
         messagesDisplay.textContent = loadTimeData.getString('unset');
       }
+    },
+
+    /**
+     * Copies the policy's value to the clipboard.
+     * @private
+     */
+    copyValue_() {
+      const policyValueDisplay = this.querySelector('.value.row .value');
+
+      // Select the text that will be copied.
+      const selection = window.getSelection();
+      const range = window.document.createRange();
+      range.selectNodeContents(policyValueDisplay);
+      selection.removeAllRanges();
+      selection.addRange(range);
+
+      // Copy the policy value to the clipboard.
+      navigator.clipboard.writeText(policyValueDisplay.innerText)
+          .catch(error => {
+            console.error('Unable to copy policy value to clipboard:', error);
+          });
     },
 
     /**
@@ -482,6 +529,10 @@ cr.define('policy', function() {
 
       $('export-policies').onclick = function(event) {
         chrome.send('exportPoliciesJSON');
+      };
+
+      $('copy-policies').onclick = function(event) {
+        chrome.send('copyPoliciesJSON');
       };
 
       $('show-unset').onchange = function() {

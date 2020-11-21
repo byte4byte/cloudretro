@@ -66,13 +66,13 @@ cr.define('user_manager.create_profile_tests', function() {
         // Create shortcut checkbox is invisible.
         const createShortcutCheckbox =
             createProfileElement.$.createShortcutCheckbox;
-        assertTrue(createShortcutCheckbox.clientHeight == 0);
+        assertTrue(createShortcutCheckbox.clientHeight === 0);
 
         // Enter a profile name.
         createProfileElement.$.nameInput.value = 'profile name';
 
         // Simulate clicking 'Create'.
-        MockInteractions.tap(createProfileElement.$.save);
+        createProfileElement.$.save.click();
 
         return browserProxy.whenCalled('createProfile').then(function(args) {
           assertEquals('profile name', args.profileName);
@@ -85,13 +85,13 @@ cr.define('user_manager.create_profile_tests', function() {
         return new Promise(function(resolve, reject) {
           // Create is not in progress. We expect to leave the page.
           createProfileElement.addEventListener('change-page', function(event) {
-            if (event.detail.page == 'user-pods-page') {
+            if (event.detail.page === 'user-pods-page') {
               resolve();
             }
           });
 
           // Simulate clicking 'Cancel'.
-          MockInteractions.tap(createProfileElement.$.cancel);
+          createProfileElement.$.cancel.click();
         });
       });
 
@@ -99,7 +99,7 @@ cr.define('user_manager.create_profile_tests', function() {
         return new Promise(function(resolve, reject) {
           // Create was successful. We expect to leave the page.
           createProfileElement.addEventListener('change-page', function(event) {
-            if (event.detail.page == 'user-pods-page') {
+            if (event.detail.page === 'user-pods-page') {
               resolve();
             }
           });
@@ -108,7 +108,7 @@ cr.define('user_manager.create_profile_tests', function() {
           createProfileElement.$.nameInput.value = 'profile name';
 
           // Simulate clicking 'Create'.
-          MockInteractions.tap(createProfileElement.$.save);
+          createProfileElement.$.save.click();
 
           browserProxy.whenCalled('createProfile').then(function(args) {
             // The paper-spinner is active when create is in progress.
@@ -129,7 +129,7 @@ cr.define('user_manager.create_profile_tests', function() {
         createProfileElement.$.nameInput.value = 'profile name';
 
         // Simulate clicking 'Create'.
-        MockInteractions.tap(createProfileElement.$.save);
+        createProfileElement.$.save.click();
 
         return browserProxy.whenCalled('createProfile').then(function(args) {
           cr.webUIListenerCallback('create-profile-error', 'Error Message');
@@ -147,7 +147,7 @@ cr.define('user_manager.create_profile_tests', function() {
         createProfileElement.$.nameInput.value = 'foo';
 
         // Simulate clicking 'Create'.
-        MockInteractions.tap(createProfileElement.$.save);
+        createProfileElement.$.save.click();
 
         return browserProxy.whenCalled('createProfile').then(function(args) {
           cr.webUIListenerCallback('create-profile-warning', 'Warning Message');
@@ -222,10 +222,10 @@ cr.define('user_manager.create_profile_tests', function() {
         assertTrue(createShortcutCheckbox.checked);
 
         // Simulate unchecking the create shortcut checkbox.
-        MockInteractions.tap(createShortcutCheckbox);
+        createShortcutCheckbox.click();
 
         // Simulate clicking 'Create'.
-        MockInteractions.tap(createProfileElement.$.save);
+        createProfileElement.$.save.click();
 
         return browserProxy.whenCalled('createProfile').then(function(args) {
           assertEquals('profile name', args.profileName);
@@ -244,7 +244,7 @@ cr.define('user_manager.create_profile_tests', function() {
         assertTrue(createShortcutCheckbox.checked);
 
         // Simulate clicking 'Create'.
-        MockInteractions.tap(createProfileElement.$.save);
+        createProfileElement.$.save.click();
 
         return browserProxy.whenCalled('createProfile').then(function(args) {
           assertEquals('profile name', args.profileName);

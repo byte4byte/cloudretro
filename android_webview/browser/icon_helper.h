@@ -45,10 +45,9 @@ class IconHelper : public content::WebContentsObserver {
 
   // From WebContentsObserver
   void DidUpdateFaviconURL(
+      content::RenderFrameHost* render_frame_host,
       const std::vector<blink::mojom::FaviconURLPtr>& candidates) override;
-  void DidStartNavigationToPendingEntry(
-      const GURL& url,
-      content::ReloadType reload_type) override;
+  void DidStartNavigation(content::NavigationHandle* navigation) override;
 
   void DownloadFaviconCallback(
       int id,

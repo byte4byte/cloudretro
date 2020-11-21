@@ -65,8 +65,6 @@ class AssistantWebViewImpl : public ash::AssistantWebView,
   void RenderViewHostChanged(content::RenderViewHost* old_host,
                              content::RenderViewHost* new_host) override;
   void NavigationEntriesDeleted() override;
-  void DidAttachInterstitialPage() override;
-  void DidDetachInterstitialPage() override;
 
  private:
   void InitWebContents(Profile* profile);
@@ -85,7 +83,7 @@ class AssistantWebViewImpl : public ash::AssistantWebView,
   const InitParams params_;
 
   std::unique_ptr<content::WebContents> web_contents_;
-  std::unique_ptr<views::WebView> web_view_;
+  views::WebView* web_view_ = nullptr;
 
   // Whether or not the embedded |web_contents_| can go back.
   bool can_go_back_ = false;

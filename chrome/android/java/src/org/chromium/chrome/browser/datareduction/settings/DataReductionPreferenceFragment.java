@@ -11,6 +11,7 @@ import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
 
+import androidx.preference.Preference;
 import androidx.preference.PreferenceFragmentCompat;
 import androidx.vectordrawable.graphics.drawable.VectorDrawableCompat;
 
@@ -19,10 +20,11 @@ import org.chromium.base.IntentUtils;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.datareduction.DataReductionPromoUtils;
 import org.chromium.chrome.browser.datareduction.DataReductionProxyUma;
-import org.chromium.chrome.browser.help.HelpAndFeedback;
+import org.chromium.chrome.browser.feedback.HelpAndFeedbackLauncherImpl;
 import org.chromium.chrome.browser.infobar.PreviewsLitePageInfoBar;
 import org.chromium.chrome.browser.net.spdyproxy.DataReductionProxySettings;
 import org.chromium.chrome.browser.net.spdyproxy.DataReductionProxySettings.ContentLengths;
+import org.chromium.chrome.browser.previews.HttpsImageCompressionUtils;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.settings.ChromeManagedPreferenceDelegate;
 import org.chromium.components.browser_ui.settings.ChromeSwitchPreference;
@@ -39,6 +41,7 @@ public class DataReductionPreferenceFragment extends PreferenceFragmentCompat {
     public static final String FROM_MAIN_MENU = "FromMainMenu";
 
     public static final String PREF_DATA_REDUCTION_SWITCH = "data_reduction_switch";
+    public static final String PREF_LEARN_MORE_KEY = "data_reduction_learn_more";
 
     // This is the same as Chromium data_reduction_proxy::switches::kEnableDataReductionProxy.
     private static final String ENABLE_DATA_REDUCTION_PROXY = "enable-spdy-proxy-auth";
@@ -47,6 +50,7 @@ public class DataReductionPreferenceFragment extends PreferenceFragmentCompat {
     private boolean mWasEnabledAtCreation;
     private boolean mFromMainMenu;
     private boolean mFromInfobar;
+    private boolean mFromLiteModeHttpsImageCompressionInfoBar;
 
     @Override
     public void onCreatePreferences(Bundle savedInstanceState, String rootKey) {
@@ -62,6 +66,8 @@ public class DataReductionPreferenceFragment extends PreferenceFragmentCompat {
         mFromMainMenu = IntentUtils.safeGetBoolean(getArguments(), FROM_MAIN_MENU, false);
         mFromInfobar = IntentUtils.safeGetBoolean(
                 getArguments(), PreviewsLitePageInfoBar.FROM_INFOBAR, false);
+        mFromLiteModeHttpsImageCompressionInfoBar = IntentUtils.safeGetBoolean(getArguments(),
+                HttpsImageCompressionUtils.FROM_LITE_MODE_HTTPS_IMAGE_COMPRESSION_INFOBAR, false);
     }
 
     @Override
@@ -90,6 +96,16 @@ public class DataReductionPreferenceFragment extends PreferenceFragmentCompat {
                 statusChange = mIsEnabled ? DataReductionProxyUma.ACTION_INFOBAR_OFF_TO_ON
                                           : DataReductionProxyUma.ACTION_INFOBAR_OFF_TO_OFF;
             }
+        } else if (mFromLiteModeHttpsImageCompressionInfoBar) {
+            if (mWasEnabledAtCreation) {
+                statusChange = mIsEnabled
+                        ? DataReductionProxyUma.ACTION_HTTPS_IMAGE_COMPRESSION_INFOBAR_ON_TO_ON
+                        : DataReductionProxyUma.ACTION_HTTPS_IMAGE_COMPRESSION_INFOBAR_ON_TO_OFF;
+            } else {
+                statusChange = mIsEnabled
+                        ? DataReductionProxyUma.ACTION_HTTPS_IMAGE_COMPRESSION_INFOBAR_OFF_TO_ON
+                        : DataReductionProxyUma.ACTION_HTTPS_IMAGE_COMPRESSION_INFOBAR_OFF_TO_OFF;
+            }
         } else if (mWasEnabledAtCreation) {
             statusChange = mIsEnabled ? DataReductionProxyUma.ACTION_ON_TO_ON
                                       : DataReductionProxyUma.ACTION_ON_TO_OFF;
@@ -112,7 +128,7 @@ public class DataReductionPreferenceFragment extends PreferenceFragmentCompat {
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
         if (item.getItemId() == R.id.menu_id_targeted_help) {
-            HelpAndFeedback.getInstance().show(getActivity(),
+            HelpAndFeedbackLauncherImpl.getInstance().show(getActivity(),
                     getString(R.string.help_context_data_reduction),
                     Profile.getLastUsedRegularProfile(), null);
             return true;
@@ -142,6 +158,15 @@ public class DataReductionPreferenceFragment extends PreferenceFragmentCompat {
         } else {
             SettingsUtils.addPreferencesFromResource(
                     this, R.xml.data_reduction_preferences_off_lite_mode);
+
+            // Configure "Learn more" link.
+            Preference learnMorePreference = findPreference(PREF_LEARN_MORE_KEY);
+            learnMorePreference.setOnPreferenceClickListener(preference -> {
+                HelpAndFeedbackLauncherImpl.getInstance().show(getActivity(),
+                        getString(R.string.help_context_data_reduction),
+                        Profile.getLastUsedRegularProfile(), null);
+                return true;
+            });
         }
         mIsEnabled = isEnabled;
     }

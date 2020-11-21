@@ -14,6 +14,7 @@ import tempfile
 import unittest
 
 from core.tbmv3 import run_tbmv3_metric
+from core.tbmv3 import trace_processor
 
 from tracing.value import histogram_set
 
@@ -59,3 +60,29 @@ class RunTbmv3MetricIntegrationTests(unittest.TestCase):
     self.assertEqual(hist.unit, DUMMY_HISTOGRAM_UNIT)
     self.assertEqual(hist.num_values, 1)
     self.assertEqual(hist.average, 42)
+
+  def testRunAllTbmv3Metrics(self):
+    """Run all existing TBMv3 metrics on an empty trace.
+
+    This test checks for syntax errors in SQL and proto files.
+    """
+    for filename in os.listdir(trace_processor.METRICS_PATH):
+      name, ext = os.path.splitext(filename)
+      if ext == '.sql':
+        run_tbmv3_metric.Main([
+            '--trace', self.trace_path,
+            '--metric', name,
+            '--outfile', self.outfile_path,
+        ])
+
+  def testRunInternalTBMv3Metric(self):
+    """Run metric that is compiled into Trace Processor."""
+    # This won't produce any histograms because trace_metadata proto is not
+    # annotated. Check only that it doesn't throw errors. 'trace_metadata'
+    # metric is relatively unlikely to be removed from Perfetto, but if it
+    # is, we will have to pick a different metric.
+    run_tbmv3_metric.Main([
+        '--trace', self.trace_path,
+        '--metric', 'trace_metadata',
+        '--outfile', self.outfile_path,
+    ])

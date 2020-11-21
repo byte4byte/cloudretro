@@ -9,12 +9,9 @@
 GEN('#include "chromeos/components/help_app_ui/test/help_app_ui_browsertest.h"');
 
 GEN('#include "chromeos/constants/chromeos_features.h"');
+GEN('#include "content/public/test/browser_test.h"');
 
 const HOST_ORIGIN = 'chrome://help-app';
-
-// Test driver initialised in setUp and used in tests to interact with the
-// untrusted context.
-let driver = null;
 
 var HelpAppUIBrowserTest = class extends testing.Test {
   /** @override */
@@ -32,13 +29,17 @@ var HelpAppUIBrowserTest = class extends testing.Test {
   }
 
   /** @override */
-  get featureList() {
-    return {enabled: ['chromeos::features::kHelpAppV2']};
+  get isAsync() {
+    return true;
   }
 
   /** @override */
-  get isAsync() {
-    return true;
+  get featureList() {
+    return {
+      enabled: [
+        'chromeos::features::kHelpAppSearchServiceIntegration',
+      ]
+    };
   }
 
   /** @override */
@@ -50,52 +51,22 @@ var HelpAppUIBrowserTest = class extends testing.Test {
   get runAccessibilityChecks() {
     return false;
   }
-
-  /** @override */
-  setUp() {
-    super.setUp();
-    driver = new GuestDriver(GUEST_ORIGIN);
-  }
-
-  /** @override */
-  tearDown() {
-    driver.tearDown();
-    super.tearDown();
-  }
 };
 
 // Tests that chrome://help-app goes somewhere instead of 404ing or crashing.
 TEST_F('HelpAppUIBrowserTest', 'HasChromeSchemeURL', () => {
-  const guest = document.querySelector('iframe');
+  const guest = /** @type {!HTMLIFrameElement} */ (
+      document.querySelector('iframe'));
 
   assertEquals(document.location.origin, HOST_ORIGIN);
-  assertEquals(guest.src, GUEST_ORIGIN + '/app.html');
+  assertEquals(guest.src, GUEST_ORIGIN + '/');
   testDone();
 });
 
 // Tests that we have localised information in the HTML like title and lang.
 TEST_F('HelpAppUIBrowserTest', 'HasTitleAndLang', () => {
   assertEquals(document.documentElement.lang, 'en');
-  assertEquals(document.title, 'Discover');
-  testDone();
-});
-
-// Tests that trusted context can successfully send a request to open the
-// feedback dialog and receive a response.
-TEST_F('HelpAppUIBrowserTest', 'CanOpenFeedbackDialog', async () => {
-  const result = await help_app.handler.openFeedbackDialog();
-
-  assertEquals(result.errorMessage, '');
-  testDone();
-});
-
-// Tests that untrusted context can successfully send a request to open the
-// feedback dialog and receive a response.
-TEST_F('HelpAppUIBrowserTest', 'GuestCanOpenFeedbackDialog', async () => {
-  const result = await driver.sendPostMessageRequest('feedback');
-
-  // No error message from opening feedback dialog.
-  assertEquals(result.errorMessage, '');
+  assertEquals(document.title, 'Explore');
   testDone();
 });
 
@@ -103,6 +74,16 @@ TEST_F('HelpAppUIBrowserTest', 'GuestCanOpenFeedbackDialog', async () => {
 // See implementations in help_app_guest_ui_browsertest.js.
 
 TEST_F('HelpAppUIBrowserTest', 'GuestHasLang', async () => {
-  await driver.runTestInGuest('GuestHasLang');
+  await runTestInGuest('GuestHasLang');
+  testDone();
+});
+
+TEST_F('HelpAppUIBrowserTest', 'GuestCanSearchWithHeadings', async () => {
+  await runTestInGuest('GuestCanSearchWithHeadings');
+  testDone();
+});
+
+TEST_F('HelpAppUIBrowserTest', 'GuestCanClearSearchIndex', async () => {
+  await runTestInGuest('GuestCanClearSearchIndex');
   testDone();
 });

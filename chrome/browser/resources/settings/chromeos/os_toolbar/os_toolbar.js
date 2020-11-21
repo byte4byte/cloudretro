@@ -20,18 +20,18 @@ Polymer({
     // True when the toolbar is displaying in narrow mode.
     narrow: {
       type: Boolean,
+      value: false,
       reflectToAttribute: true,
-      readonly: true,
-      notify: true,
     },
 
     /**
-     * The threshold at which the toolbar will change from normal to narrow
-     * mode, in px.
+     * True when the toolbar is displaying in an extremely narrow mode that the
+     * viewport may cutoff an OsSettingsSearchBox with a specific px width.
+     * @private
      */
-    narrowThreshold: {
-      type: Number,
-      value: 900,
+    isSearchBoxCutoff_: {
+      type: Boolean,
+      reflectToAttribute: true,
     },
 
     /** @private */
@@ -53,9 +53,11 @@ Polymer({
   /** @return {?CrToolbarSearchFieldElement} */
   getSearchField() {
     if (this.newOsSettingsSearch_) {
-      assertNotReached(
-          'New OS Search should not be using OsToolbar.getSearchField()');
+      return /** @type {?CrToolbarSearchFieldElement} */ (
+          this.shadowRoot.querySelector('os-settings-search-box')
+              .$$('cr-toolbar-search-field'));
     }
+    // TODO(crbug/1080777): Remove when new settings search complete.
     return /** @type {?CrToolbarSearchFieldElement} */ (
         this.$$('cr-toolbar-search-field'));
   },

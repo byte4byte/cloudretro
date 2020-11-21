@@ -10,6 +10,7 @@
 #include "base/task/thread_pool.h"
 #include "base/task_runner.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "content/browser/child_process_security_policy_impl.h"
 #include "content/public/browser/network_context_client_base.h"
 #include "mojo/public/cpp/bindings/remote.h"
@@ -152,24 +153,6 @@ void NetworkContextClientBase::OnClearSiteData(
   std::move(callback).Run();
 }
 
-void NetworkContextClientBase::OnCookiesChanged(
-    bool is_service_worker,
-    int32_t process_id,
-    int32_t routing_id,
-    const GURL& url,
-    const net::SiteForCookies& site_for_cookies,
-    const std::vector<net::CookieWithStatus>& cookie_list,
-    const base::Optional<std::string>& devtools_request_id) {}
-
-void NetworkContextClientBase::OnCookiesRead(
-    bool is_service_worker,
-    int32_t process_id,
-    int32_t routing_id,
-    const GURL& url,
-    const net::SiteForCookies& site_for_cookies,
-    const std::vector<net::CookieWithStatus>& cookie_list,
-    const base::Optional<std::string>& devtools_request_id) {}
-
 #if defined(OS_ANDROID)
 void NetworkContextClientBase::OnGenerateHttpNegotiateAuthToken(
     const std::string& server_auth_token,
@@ -181,8 +164,17 @@ void NetworkContextClientBase::OnGenerateHttpNegotiateAuthToken(
 }
 #endif
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 void NetworkContextClientBase::OnTrustAnchorUsed() {}
 #endif
+
+void NetworkContextClientBase::OnTrustTokenIssuanceDivertedToSystem(
+    network::mojom::FulfillTrustTokenIssuanceRequestPtr request,
+    OnTrustTokenIssuanceDivertedToSystemCallback callback) {
+  auto response = network::mojom::FulfillTrustTokenIssuanceAnswer::New();
+  response->status =
+      network::mojom::FulfillTrustTokenIssuanceAnswer::Status::kNotFound;
+  std::move(callback).Run(std::move(response));
+}
 
 }  // namespace content

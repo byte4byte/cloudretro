@@ -18,6 +18,8 @@
 #include "content/public/browser/browser_thread.h"
 #include "extensions/common/constants.h"
 
+using content_settings::CookieControlsMode;
+
 // static
 scoped_refptr<content_settings::CookieSettings>
 CookieSettingsFactory::GetForProfile(Profile* profile) {
@@ -38,8 +40,7 @@ CookieSettingsFactory::CookieSettingsFactory()
   DependsOn(HostContentSettingsMapFactory::GetInstance());
 }
 
-CookieSettingsFactory::~CookieSettingsFactory() {
-}
+CookieSettingsFactory::~CookieSettingsFactory() = default;
 
 void CookieSettingsFactory::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
@@ -56,26 +57,17 @@ content::BrowserContext* CookieSettingsFactory::GetBrowserContextToUse(
 scoped_refptr<RefcountedKeyedService>
 CookieSettingsFactory::BuildServiceInstanceFor(
     content::BrowserContext* context) const {
-  Profile* profile = static_cast<Profile*>(context);
+  Profile* profile = Profile::FromBrowserContext(context);
   PrefService* prefs = profile->GetPrefs();
 
-  // Migrate BlockThirdPartyCookies to CookieControlsMode pref.
-  if (prefs->IsUserModifiablePreference(prefs::kBlockThirdPartyCookies) &&
-      prefs->GetBoolean(prefs::kBlockThirdPartyCookies) &&
-      prefs->GetInteger(prefs::kCookieControlsMode) !=
-          static_cast<int>(content_settings::CookieControlsMode::kOn)) {
-    prefs->SetInteger(
-        prefs::kCookieControlsMode,
-        static_cast<int>(content_settings::CookieControlsMode::kOn));
-  }
-
   // Record cookie setting histograms.
-  base::UmaHistogramBoolean("Privacy.ThirdPartyCookieBlockingSetting",
-                            prefs->GetBoolean(prefs::kBlockThirdPartyCookies));
-  base::UmaHistogramEnumeration(
-      "Privacy.CookieControlsSetting",
-      static_cast<content_settings::CookieControlsMode>(
-          prefs->GetInteger(prefs::kCookieControlsMode)));
+  auto cookie_controls_mode = static_cast<CookieControlsMode>(
+      prefs->GetInteger(prefs::kCookieControlsMode));
+  base::UmaHistogramBoolean(
+      "Privacy.ThirdPartyCookieBlockingSetting",
+      cookie_controls_mode == CookieControlsMode::kBlockThirdParty);
+  base::UmaHistogramEnumeration("Privacy.CookieControlsSetting",
+                                cookie_controls_mode);
   // The DNT setting is only vaguely cookie-related. However, there is currently
   // no DNT-related code that is executed once per Profile lifetime, and
   // creating a new BrowserContextKeyedService to record this metric would be

@@ -27,8 +27,10 @@
 #include "chrome/installer/util/install_service_work_item.h"
 #include "chrome/installer/util/self_cleaning_temp_dir.h"
 #include "chrome/installer/util/work_item_list.h"
+#include "chrome/updater/app/server/win/updater_idl.h"
+#include "chrome/updater/app/server/win/updater_internal_idl.h"
+#include "chrome/updater/app/server/win/updater_legacy_idl.h"
 #include "chrome/updater/constants.h"
-#include "chrome/updater/server/win/updater_idl.h"
 #include "chrome/updater/util.h"
 #include "chrome/updater/win/constants.h"
 #include "chrome/updater/win/setup/setup_util.h"
@@ -49,7 +51,8 @@ void AddComServerWorkItems(HKEY root,
   }
 
   for (const auto& clsid :
-       {__uuidof(UpdaterClass), __uuidof(GoogleUpdate3WebUserClass)}) {
+       {__uuidof(UpdaterClass), __uuidof(UpdaterInternalClass),
+        __uuidof(GoogleUpdate3WebUserClass)}) {
     const base::string16 clsid_reg_path = GetComServerClsidRegistryPath(clsid);
 
     // Delete any old registrations first.
@@ -84,32 +87,16 @@ void AddComServiceWorkItems(const base::FilePath& com_service_path,
                             WorkItemList* list) {
   DCHECK(list);
   DCHECK(::IsUserAnAdmin());
-  const HKEY root = HKEY_LOCAL_MACHINE;
 
   if (com_service_path.empty()) {
     LOG(DFATAL) << "com_service_path is invalid.";
     return;
   }
 
-  const base::string16 clsid_reg_path = GetComServiceClsidRegistryPath();
-  const base::string16 appid_reg_path = GetComServiceAppidRegistryPath();
-
-  // Delete any old registrations first.
-  for (const auto& reg_path : {clsid_reg_path, appid_reg_path}) {
-    for (const auto& key_flag : {KEY_WOW64_32KEY, KEY_WOW64_64KEY})
-      list->AddDeleteRegKeyWorkItem(root, reg_path, key_flag);
-  }
-
   list->AddWorkItem(new installer::InstallServiceWorkItem(
       kWindowsServiceName, kWindowsServiceName,
-      base::CommandLine(com_service_path)));
-
-  list->AddCreateRegKeyWorkItem(root, clsid_reg_path, WorkItem::kWow64Default);
-  list->AddSetRegValueWorkItem(root, clsid_reg_path, WorkItem::kWow64Default,
-                               L"AppID", GetComServiceClsid(), true);
-  list->AddCreateRegKeyWorkItem(root, appid_reg_path, WorkItem::kWow64Default);
-  list->AddSetRegValueWorkItem(root, appid_reg_path, WorkItem::kWow64Default,
-                               L"LocalService", kWindowsServiceName, true);
+      base::CommandLine(com_service_path), base::ASCIIToUTF16(UPDATER_KEY),
+      {__uuidof(UpdaterServiceClass)}, {}));
 }
 
 // Adds work items to register the COM Interfaces with Windows.
@@ -122,10 +109,7 @@ void AddComInterfacesWorkItems(HKEY root,
     return;
   }
 
-  for (const auto& iid :
-       {__uuidof(IUpdater), __uuidof(IUpdaterObserver),
-        __uuidof(ICompleteStatus), __uuidof(IGoogleUpdate3Web),
-        __uuidof(IAppBundleWeb), __uuidof(IAppWeb), __uuidof(ICurrentState)}) {
+  for (const auto& iid : GetInterfaces()) {
     const base::string16 iid_reg_path = GetComIidRegistryPath(iid);
     const base::string16 typelib_reg_path = GetComTypeLibRegistryPath(iid);
 
@@ -147,19 +131,21 @@ void AddComInterfacesWorkItems(HKEY root,
                                   WorkItem::kWow64Default);
     list->AddSetRegValueWorkItem(root, iid_reg_path + L"\\TypeLib",
                                  WorkItem::kWow64Default, L"",
-                                 base::win::String16FromGUID(iid), true);
+                                 base::win::WStringFromGUID(iid), true);
 
     // The TypeLib registration for the Ole Automation marshaler.
+    const base::FilePath qualified_typelib_path =
+        typelib_path.Append(GetComTypeLibResourceIndex(iid));
     list->AddCreateRegKeyWorkItem(root, typelib_reg_path + L"\\1.0\\0\\win32",
                                   WorkItem::kWow64Default);
     list->AddSetRegValueWorkItem(root, typelib_reg_path + L"\\1.0\\0\\win32",
                                  WorkItem::kWow64Default, L"",
-                                 typelib_path.value(), true);
+                                 qualified_typelib_path.value(), true);
     list->AddCreateRegKeyWorkItem(root, typelib_reg_path + L"\\1.0\\0\\win64",
                                   WorkItem::kWow64Default);
     list->AddSetRegValueWorkItem(root, typelib_reg_path + L"\\1.0\\0\\win64",
                                  WorkItem::kWow64Default, L"",
-                                 typelib_path.value(), true);
+                                 qualified_typelib_path.value(), true);
   }
 }
 
@@ -209,9 +195,9 @@ int Setup(bool is_machine) {
     LOG(ERROR) << "GetTempDir failed.";
     return -1;
   }
-  base::FilePath product_dir;
-  if (!GetProductDirectory(&product_dir)) {
-    LOG(ERROR) << "GetProductDirectory failed.";
+  base::FilePath versioned_dir;
+  if (!GetVersionedDirectory(&versioned_dir)) {
+    LOG(ERROR) << "GetVersionedDirectory failed.";
     return -1;
   }
   base::FilePath exe_path;
@@ -234,13 +220,13 @@ int Setup(bool is_machine) {
   }
 
   // All source files are installed in a flat directory structure inside the
-  // install directory, hence the BaseName function call below.
+  // versioned directory, hence the BaseName function call below.
   std::unique_ptr<WorkItemList> install_list(WorkItem::CreateWorkItemList());
   for (const auto& file : setup_files) {
-    const base::FilePath target_path = product_dir.Append(file.BaseName());
+    const base::FilePath target_path = versioned_dir.Append(file.BaseName());
     const base::FilePath source_path = source_dir.Append(file);
-    install_list->AddCopyTreeWorkItem(source_path.value(), target_path.value(),
-                                      temp_dir.value(), WorkItem::ALWAYS);
+    install_list->AddCopyTreeWorkItem(source_path, target_path, temp_dir,
+                                      WorkItem::ALWAYS);
   }
 
   for (const auto& key_path :
@@ -257,30 +243,29 @@ int Setup(bool is_machine) {
 
   static constexpr base::FilePath::StringPieceType kUpdaterExe =
       FILE_PATH_LITERAL("updater.exe");
-  AddComServerWorkItems(key, product_dir.Append(kUpdaterExe),
+  AddComServerWorkItems(key, versioned_dir.Append(kUpdaterExe),
                         install_list.get());
 
-  if (is_machine)
-    AddComServiceWorkItems(product_dir.Append(kUpdaterExe), install_list.get());
+  if (is_machine) {
+    AddComServiceWorkItems(versioned_dir.Append(kUpdaterExe),
+                           install_list.get());
+  }
 
-  AddComInterfacesWorkItems(key, product_dir.Append(kUpdaterExe),
+  AddComInterfacesWorkItems(key, versioned_dir.Append(kUpdaterExe),
                             install_list.get());
 
-  base::CommandLine run_updater_ua_command(product_dir.Append(kUpdaterExe));
-  run_updater_ua_command.AppendSwitch(kUpdateAppsSwitch);
+  base::CommandLine run_updater_wake_command(versioned_dir.Append(kUpdaterExe));
+  run_updater_wake_command.AppendSwitch(kWakeSwitch);
 
-  // TODO(sorin) remove "single-process" when the updater COM client works.
-  // crbug.com/1053729.
-  run_updater_ua_command.AppendSwitch(kSingleProcessSwitch);
 #if !defined(NDEBUG)
-  run_updater_ua_command.AppendSwitch(kEnableLoggingSwitch);
-  run_updater_ua_command.AppendSwitchASCII(kLoggingModuleSwitch,
-                                           "*/chrome/updater/*=2");
+  run_updater_wake_command.AppendSwitch(kEnableLoggingSwitch);
+  run_updater_wake_command.AppendSwitchASCII(kLoggingModuleSwitch,
+                                             "*/chrome/updater/*=2");
 #endif
-  if (!install_list->Do() || !RegisterUpdateAppsTask(run_updater_ua_command)) {
+  if (!install_list->Do() || !RegisterWakeTask(run_updater_wake_command)) {
     LOG(ERROR) << "Install failed, rolling back...";
     install_list->Rollback();
-    UnregisterUpdateAppsTask();
+    UnregisterWakeTask();
     LOG(ERROR) << "Rollback complete.";
     return -1;
   }

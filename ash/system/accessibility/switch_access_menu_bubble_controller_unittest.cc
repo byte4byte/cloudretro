@@ -10,9 +10,8 @@
 #include "ash/system/accessibility/switch_access_back_button_view.h"
 #include "ash/system/accessibility/switch_access_menu_button.h"
 #include "ash/system/accessibility/switch_access_menu_view.h"
+#include "ash/system/unified/unified_system_tray.h"
 #include "ash/test/ash_test_base.h"
-#include "base/command_line.h"
-#include "ui/accessibility/accessibility_switches.h"
 
 namespace ash {
 
@@ -28,10 +27,8 @@ class SwitchAccessMenuBubbleControllerTest : public AshTestBase {
 
   // AshTestBase:
   void SetUp() override {
-    base::CommandLine::ForCurrentProcess()->AppendSwitch(
-        ::switches::kEnableExperimentalAccessibilitySwitchAccess);
     AshTestBase::SetUp();
-    Shell::Get()->accessibility_controller()->SetSwitchAccessEnabled(true);
+    Shell::Get()->accessibility_controller()->switch_access().SetEnabled(true);
   }
 
   SwitchAccessMenuBubbleController* GetBubbleController() {
@@ -77,8 +74,8 @@ TEST_F(SwitchAccessMenuBubbleControllerTest, ShowBackButton) {
   GetBubbleController()->ShowBackButton(anchor_rect);
 
   gfx::Rect bounds = GetBackButtonBounds();
-  EXPECT_EQ(bounds.width(), 36);
-  EXPECT_EQ(bounds.height(), 36);
+  EXPECT_GT(bounds.width(), 36);
+  EXPECT_GT(bounds.height(), 36);
 }
 
 TEST_F(SwitchAccessMenuBubbleControllerTest, ShowMenu) {
@@ -118,6 +115,38 @@ TEST_F(SwitchAccessMenuBubbleControllerTest, SetActions) {
   EXPECT_EQ("increment", GetName(buttons[2]));
   EXPECT_EQ("decrement", GetName(buttons[3]));
   EXPECT_EQ("settings", GetName(buttons[4]));
+}
+
+TEST_F(SwitchAccessMenuBubbleControllerTest, AvoidsShelfBubble) {
+  const struct {
+    session_manager::SessionState session_state;
+    std::string name;
+  } kTestCases[]{
+      {session_manager::SessionState::OOBE, "OOBE"},
+      {session_manager::SessionState::LOGIN_PRIMARY, "LOGIN_PRIMARY"},
+      {session_manager::SessionState::ACTIVE, "ACTIVE"},
+      {session_manager::SessionState::LOCKED, "LOCKED"},
+  };
+
+  for (auto test : kTestCases) {
+    GetSessionControllerClient()->SetSessionState(test.session_state);
+    // Set up the switch access menu and the shelf
+    auto* system_tray = GetPrimaryUnifiedSystemTray();
+    system_tray->ShowBubble(true /* show_by_click */);
+    gfx::Rect tray_bubble_bounds = system_tray->GetBubbleBoundsInScreen();
+
+    // Try to show the menu in the center of the tray bubble.
+    gfx::Rect anchor(tray_bubble_bounds.CenterPoint(), gfx::Size());
+    GetBubbleController()->ShowMenu(anchor,
+                                    {"select", "scrollDown", "settings"});
+    SwitchAccessMenuView* menu = GetMenuView();
+    ASSERT_TRUE(menu) << test.name;
+    gfx::Rect menu_bounds = menu->GetBoundsInScreen();
+
+    // Expect that the menu is shown somewhere that doesn't overlap the system
+    // tray bubble.
+    EXPECT_FALSE(menu_bounds.Intersects(tray_bubble_bounds)) << test.name;
+  }
 }
 
 }  // namespace ash

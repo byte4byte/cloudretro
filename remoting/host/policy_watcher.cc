@@ -13,10 +13,12 @@
 #include "base/compiler_specific.h"
 #include "base/files/file_path.h"
 #include "base/location.h"
+#include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/single_thread_task_runner.h"
 #include "base/values.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "components/policy/core/common/async_policy_loader.h"
 #include "components/policy/core/common/async_policy_provider.h"
 #include "components/policy/core/common/policy_namespace.h"
@@ -33,7 +35,7 @@
 
 #if defined(OS_WIN)
 #include "components/policy/core/common/policy_loader_win.h"
-#elif defined(OS_MACOSX)
+#elif defined(OS_APPLE)
 #include "components/policy/core/common/policy_loader_mac.h"
 #include "components/policy/core/common/preferences_mac.h"
 #elif defined(OS_POSIX) && !defined(OS_ANDROID)
@@ -91,7 +93,7 @@ std::unique_ptr<base::DictionaryValue> CopyChromotingPoliciesIntoDictionary(
       new base::DictionaryValue());
   for (const auto& entry : current) {
     const std::string& key = entry.first;
-    const base::Value* value = entry.second.value.get();
+    const base::Value* value = entry.second.value();
 
     // Copying only Chromoting-specific policies helps avoid false alarms
     // raised by NormalizePolicies below (such alarms shutdown the host).
@@ -180,8 +182,9 @@ std::unique_ptr<base::DictionaryValue> PolicyWatcher::GetDefaultPolicies() {
   result->SetString(key::kRemoteAccessHostUdpPortRange, "");
   result->SetBoolean(key::kRemoteAccessHostAllowUiAccessForRemoteAssistance,
                      false);
-#if !defined(OS_CHROMEOS)
+#if !BUILDFLAG(IS_CHROMEOS_ASH)
   result->SetBoolean(key::kRemoteAccessHostAllowFileTransfer, true);
+  result->SetBoolean(key::kRemoteAccessHostEnableUserInterface, true);
 #endif
   return result;
 }
@@ -400,7 +403,7 @@ std::unique_ptr<PolicyWatcher> PolicyWatcher::CreateWithTaskRunner(
 #if defined(OS_WIN)
   policy_loader.reset(new policy::PolicyLoaderWin(
       file_task_runner, L"SOFTWARE\\Policies\\Google\\Chrome"));
-#elif defined(OS_MACOSX)
+#elif defined(OS_APPLE)
   CFStringRef bundle_id = CFSTR("com.google.Chrome");
   policy_loader.reset(new policy::PolicyLoaderMac(
       file_task_runner,
@@ -419,7 +422,7 @@ std::unique_ptr<PolicyWatcher> PolicyWatcher::CreateWithTaskRunner(
   return base::WrapUnique(new PolicyWatcher(
       owned_policy_service.get(), std::move(owned_policy_service), nullptr,
       CreateSchemaRegistry()));
-#elif defined(OS_CHROMEOS)
+#elif BUILDFLAG(IS_CHROMEOS_ASH)
   NOTREACHED() << "CreateWithPolicyService() should be used on ChromeOS.";
   return nullptr;
 #else

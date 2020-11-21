@@ -6,10 +6,12 @@
 
 #include <memory>
 
+#include "base/check.h"
 #include "base/json/json_writer.h"
-#include "base/logging.h"
+#include "base/notreached.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/values.h"
+#import "components/previous_session_info/previous_session_info.h"
 #import "ios/chrome/browser/crash_report/breakpad_helper.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -78,11 +80,11 @@ const int kMaximumBreakpadValueSize = 255;
     NOTREACHED();
     return;
   }
-  breakpad_helper::AddReportParameter(
-      _crashReportKey,
-      [NSString stringWithCString:stateAsJson.c_str()
-                         encoding:[NSString defaultCStringEncoding]],
-      true);
+  NSString* value = base::SysUTF8ToNSString(stateAsJson);
+  breakpad_helper::AddReportParameter(_crashReportKey, value, /*async=*/true);
+  [[PreviousSessionInfo sharedInstance]
+      setReportParameterValue:value
+                       forKey:_crashReportKey];
 }
 
 @end

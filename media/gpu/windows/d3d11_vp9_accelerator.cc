@@ -13,6 +13,8 @@
 
 namespace media {
 
+using DecodeStatus = VP9Decoder::VP9Accelerator::Status;
+
 #define RETURN_ON_HR_FAILURE(expr_name, expr)                                  \
   do {                                                                         \
     HRESULT expr_value = (expr);                                               \
@@ -36,17 +38,17 @@ CreateSubsampleMappingBlock(const std::vector<SubsampleEntry>& from) {
 D3D11VP9Accelerator::D3D11VP9Accelerator(
     D3D11VideoDecoderClient* client,
     MediaLog* media_log,
-    ComD3D11VideoDecoder video_decoder,
     ComD3D11VideoDevice video_device,
     std::unique_ptr<VideoContextWrapper> video_context)
     : client_(client),
       media_log_(media_log),
       status_feedback_(0),
-      video_decoder_(std::move(video_decoder)),
       video_device_(std::move(video_device)),
       video_context_(std::move(video_context)) {
   DCHECK(client);
   DCHECK(media_log_);
+  client->SetDecoderCB(base::BindRepeating(
+      &D3D11VP9Accelerator::SetVideoDecoder, base::Unretained(this)));
 }
 
 D3D11VP9Accelerator::~D3D11VP9Accelerator() {}
@@ -101,7 +103,6 @@ void D3D11VP9Accelerator::CopyFrameParams(const D3D11VP9Picture& pic,
   COPY_PARAM(frame_context_idx);
   COPY_PARAM(reset_frame_context);
   COPY_PARAM(allow_high_precision_mv);
-  COPY_PARAM(refresh_frame_context);
   COPY_PARAM(frame_parallel_decoding_mode);
   COPY_PARAM(intra_only);
   COPY_PARAM(frame_context_idx);
@@ -112,7 +113,7 @@ void D3D11VP9Accelerator::CopyFrameParams(const D3D11VP9Picture& pic,
   pic_params->BitDepthMinus8Luma = pic_params->BitDepthMinus8Chroma =
       pic.frame_hdr->bit_depth - 8;
 
-  pic_params->CurrPic.Index7Bits = pic.level();
+  pic_params->CurrPic.Index7Bits = pic.picture_index();
   pic_params->frame_type = !pic.frame_hdr->IsKeyframe();
 
   COPY_PARAM(subsampling_x);
@@ -125,6 +126,18 @@ void D3D11VP9Accelerator::CopyFrameParams(const D3D11VP9Picture& pic,
   SET_PARAM(log2_tile_rows, tile_rows_log2);
 #undef COPY_PARAM
 #undef SET_PARAM
+
+  // This is taken, approximately, from libvpx.
+  gfx::Size this_frame_size(pic.frame_hdr->frame_width,
+                            pic.frame_hdr->frame_height);
+  pic_params->use_prev_in_find_mv_refs = last_frame_size_ == this_frame_size &&
+                                         !pic.frame_hdr->error_resilient_mode &&
+                                         !pic.frame_hdr->intra_only &&
+                                         last_show_frame_;
+
+  // TODO(liberato): So, uh, do we ever need to reset this?
+  last_frame_size_ = this_frame_size;
+  last_show_frame_ = pic.frame_hdr->show_frame;
 }
 
 void D3D11VP9Accelerator::CopyReferenceFrames(
@@ -139,7 +152,7 @@ void D3D11VP9Accelerator::CopyReferenceFrames(
     if (ref_pic) {
       scoped_refptr<D3D11VP9Picture> our_ref_pic(
           static_cast<D3D11VP9Picture*>(ref_pic.get()));
-      pic_params->ref_frame_map[i].Index7Bits = our_ref_pic->level();
+      pic_params->ref_frame_map[i].Index7Bits = our_ref_pic->picture_index();
       pic_params->ref_frame_coded_width[i] = texture_descriptor.Width;
       pic_params->ref_frame_coded_height[i] = texture_descriptor.Height;
     } else {
@@ -174,19 +187,16 @@ void D3D11VP9Accelerator::CopyLoopFilterParams(
 
   // base::size(...) doesn't work well in an array initializer.
   DCHECK_EQ(4lu, base::size(pic_params->ref_deltas));
-  int ref_deltas[4] = {0};
   for (size_t i = 0; i < base::size(pic_params->ref_deltas); i++) {
-    if (loop_filter_params.update_ref_deltas[i])
-      ref_deltas[i] = loop_filter_params.ref_deltas[i];
-    pic_params->ref_deltas[i] = ref_deltas[i];
+    // The update_ref_deltas[i] is _only_ for parsing! it allows omission of the
+    // 6 bytes that would otherwise be needed for a new value to overwrite the
+    // global one. It has nothing to do with setting the ref_deltas here.
+    pic_params->ref_deltas[i] = loop_filter_params.ref_deltas[i];
   }
 
-  int mode_deltas[2] = {0};
   DCHECK_EQ(2lu, base::size(pic_params->mode_deltas));
   for (size_t i = 0; i < base::size(pic_params->mode_deltas); i++) {
-    if (loop_filter_params.update_mode_deltas[i])
-      mode_deltas[i] = loop_filter_params.mode_deltas[i];
-    pic_params->mode_deltas[i] = mode_deltas[i];
+    pic_params->mode_deltas[i] = loop_filter_params.mode_deltas[i];
   }
 }
 
@@ -326,7 +336,7 @@ bool D3D11VP9Accelerator::SubmitDecoderBuffer(
 #undef RELEASE_BUFFER
 }
 
-bool D3D11VP9Accelerator::SubmitDecode(
+DecodeStatus D3D11VP9Accelerator::SubmitDecode(
     scoped_refptr<VP9Picture> picture,
     const Vp9SegmentationParams& segmentation_params,
     const Vp9LoopFilterParams& loop_filter_params,
@@ -335,7 +345,7 @@ bool D3D11VP9Accelerator::SubmitDecode(
   D3D11VP9Picture* pic = static_cast<D3D11VP9Picture*>(picture.get());
 
   if (!BeginFrame(*pic))
-    return false;
+    return DecodeStatus::kFail;
 
   DXVA_PicParams_VP9 pic_params = {};
   CopyFrameParams(*pic, &pic_params);
@@ -347,13 +357,17 @@ bool D3D11VP9Accelerator::SubmitDecode(
   CopyHeaderSizeAndID(&pic_params, *pic);
 
   if (!SubmitDecoderBuffer(pic_params, *pic))
-    return false;
+    return DecodeStatus::kFail;
 
-  RETURN_ON_HR_FAILURE(DecoderEndFrame,
-                       video_context_->DecoderEndFrame(video_decoder_.Get()));
+  HRESULT hr = video_context_->DecoderEndFrame(video_decoder_.Get());
+  if (FAILED(hr)) {
+    RecordFailure("DecoderEndFrame", logging::SystemErrorCodeToString(hr));
+    return DecodeStatus::kFail;
+  }
+
   if (on_finished_cb)
     std::move(on_finished_cb).Run();
-  return true;
+  return DecodeStatus::kOk;
 }
 
 bool D3D11VP9Accelerator::OutputPicture(scoped_refptr<VP9Picture> picture) {
@@ -368,6 +382,10 @@ bool D3D11VP9Accelerator::IsFrameContextRequired() const {
 bool D3D11VP9Accelerator::GetFrameContext(scoped_refptr<VP9Picture> picture,
                                           Vp9FrameContext* frame_context) {
   return false;
+}
+
+void D3D11VP9Accelerator::SetVideoDecoder(ComD3D11VideoDecoder video_decoder) {
+  video_decoder_ = std::move(video_decoder);
 }
 
 }  // namespace media

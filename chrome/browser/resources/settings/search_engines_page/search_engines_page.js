@@ -23,7 +23,7 @@ import {WebUIListenerBehavior} from 'chrome://resources/js/web_ui_listener_behav
 import {afterNextRender, html, Polymer} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
 import {GlobalScrollTargetBehavior} from '../global_scroll_target_behavior.m.js';
-import {routes} from '../route.m.js';
+import {routes} from '../route.js';
 
 import {SearchEngine, SearchEnginesBrowserProxyImpl, SearchEnginesInfo} from './search_engines_browser_proxy.m.js';
 
@@ -204,7 +204,7 @@ Polymer({
    * @private
    */
   computeMatchingEngines_(list) {
-    if (this.filter == '') {
+    if (this.filter === '') {
       return list;
     }
 
@@ -222,6 +222,6 @@ Polymer({
    * @private
    */
   showNoResultsMessage_(list, filteredList) {
-    return list.length > 0 && filteredList.length == 0;
+    return list.length > 0 && filteredList.length === 0;
   },
 });

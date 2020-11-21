@@ -24,6 +24,7 @@
 #include "mojo/public/cpp/bindings/associated_remote.h"
 #include "printing/backend/print_backend.h"
 #include "printing/buildflags/buildflags.h"
+#include "printing/mojom/print.mojom.h"
 #include "printing/print_job_constants.h"
 
 namespace base {
@@ -79,7 +80,7 @@ class PrintPreviewHandler : public content::WebUIMessageHandler,
   // Send the print preset options from the document.
   void SendPrintPresetOptions(bool disable_scaling,
                               int copies,
-                              int duplex,
+                              mojom::DuplexMode duplex,
                               int request_id);
 
   // Send the print preview page count and fit to page scaling
@@ -213,8 +214,8 @@ class PrintPreviewHandler : public content::WebUIMessageHandler,
   void HandleShowSystemDialog(const base::ListValue* args);
 #endif
 
-  // Opens a new tab to allow the user to sign into cloud print. |args| holds
-  // a boolean indicating whether the user is adding an account.
+  // Opens a new tab to allow the user to add an account to sign into cloud
+  // print. |args| is unused.
   void HandleSignin(const base::ListValue* args);
 
   // Called when the tab opened by HandleSignIn() is closed.
@@ -233,9 +234,9 @@ class PrintPreviewHandler : public content::WebUIMessageHandler,
   // preview is displayed.
   void HandleGetInitialSettings(const base::ListValue* args);
 
-  // Opens printer settings in the Chrome OS Settings App or the
-  // chrome://settings page.
-  void HandleOpenPrinterSettings(const base::ListValue* args);
+  // Opens printer settings in the Chrome OS Settings App or OS's printer manger
+  // dialog. |args| is unused.
+  void HandleManagePrinters(const base::ListValue* args);
 
 #if defined(OS_CHROMEOS)
   // Gets the EULA URL.
@@ -314,8 +315,9 @@ class PrintPreviewHandler : public content::WebUIMessageHandler,
   // Called to initiate a status request for a printer.
   void HandleRequestPrinterStatusUpdate(const base::ListValue* args);
 
-  // Invokes Web UI Listener "printer-status-update" with new printer status.
-  void OnPrinterStatusUpdated(const base::Value& cups_printer_status);
+  // Resolves callback with printer status.
+  void OnPrinterStatusUpdated(const std::string& callback_id,
+                              const base::Value& cups_printer_status);
 #endif
 
   // A count of how many requests received to regenerate preview data.

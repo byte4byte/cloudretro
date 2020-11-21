@@ -102,6 +102,7 @@ namespace http://www.w3.org/1999/xhtml
     property firstChild
     property firstElementChild
     property focus
+    property getAnimations
     property getAttribute
     property getAttributeNS
     property getAttributeNames
@@ -240,7 +241,10 @@ namespace http://www.w3.org/1999/xhtml
     property ontouchend
     property ontouchmove
     property ontouchstart
+    property ontransitioncancel
     property ontransitionend
+    property ontransitionrun
+    property ontransitionstart
     property onvolumechange
     property onwaiting
     property onwebkitanimationend
@@ -270,6 +274,7 @@ namespace http://www.w3.org/1999/xhtml
     property removeChild
     property removeEventListener
     property replaceChild
+    property replaceChildren
     property replaceWith
     property requestFullscreen
     property requestPointerLock
@@ -394,6 +399,7 @@ html element audio
     property playbackRate
     property played
     property preload
+    property preservesPitch
     property readyState
     property remote
     property seekable
@@ -920,6 +926,7 @@ html element select
 html element shadow
     property getDistributedNodes
 html element slot
+    property assign
     property assignedElements
     property assignedNodes
     property name
@@ -1134,6 +1141,7 @@ html element video
     property playsInline
     property poster
     property preload
+    property preservesPitch
     property readyState
     property remote
     property requestPictureInPicture
@@ -1255,6 +1263,7 @@ namespace http://www.w3.org/2000/svg
     property firstChild
     property firstElementChild
     property focus
+    property getAnimations
     property getAttribute
     property getAttributeNS
     property getAttributeNames
@@ -1383,7 +1392,10 @@ namespace http://www.w3.org/2000/svg
     property ontouchend
     property ontouchmove
     property ontouchstart
+    property ontransitioncancel
     property ontransitionend
+    property ontransitionrun
+    property ontransitionstart
     property onvolumechange
     property onwaiting
     property onwebkitanimationend
@@ -1413,6 +1425,7 @@ namespace http://www.w3.org/2000/svg
     property removeChild
     property removeEventListener
     property replaceChild
+    property replaceChildren
     property replaceWith
     property requestFullscreen
     property requestPointerLock

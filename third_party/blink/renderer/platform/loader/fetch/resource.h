@@ -62,11 +62,9 @@ class Clock;
 
 namespace blink {
 
-class CachedMetadataHandler;
-class CachedMetadataSender;
+class BlobDataHandle;
 class FetchParameters;
 class ResourceClient;
-class ResourceFetcher;
 class ResourceFinishObserver;
 class ResourceLoader;
 class ResponseBodyLoaderDrainableInterface;
@@ -99,8 +97,6 @@ enum class ResourceType : uint8_t {
 // with the loader to obtain the resource from the network.
 class PLATFORM_EXPORT Resource : public GarbageCollected<Resource>,
                                  public MemoryPressureListener {
-  USING_GARBAGE_COLLECTED_MIXIN(Resource);
-
  public:
   // An enum representing whether a resource match with another resource.
   // There are three kinds of status.
@@ -144,20 +140,11 @@ class PLATFORM_EXPORT Resource : public GarbageCollected<Resource>,
 
     // Match fails due to different request headers.
     kRequestHeadersDoNotMatch,
-
-    // Match fails due to different image placeholder policies.
-    kImagePlaceholder,
-  };
-
-  // Used by reloadIfLoFiOrPlaceholderImage().
-  enum ReloadLoFiOrPlaceholderPolicy {
-    kReloadIfNeeded,
-    kReloadAlways,
   };
 
   ~Resource() override;
 
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
 
   virtual WTF::TextEncoding Encoding() const { return WTF::TextEncoding(); }
   virtual void AppendData(const char*, size_t);
@@ -180,7 +167,9 @@ class PLATFORM_EXPORT Resource : public GarbageCollected<Resource>,
     return resource_request_;
   }
   const ResourceRequestHead& LastResourceRequest() const;
-  const ResourceResponse* LastResourceResponse() const;
+  const ResourceResponse& LastResourceResponse() const;
+  // Returns zero if there are no redirects.
+  size_t RedirectChainSize() const;
 
   virtual void SetRevalidatingRequest(const ResourceRequestHead&);
 
@@ -237,7 +226,7 @@ class PLATFORM_EXPORT Resource : public GarbageCollected<Resource>,
 
   size_t DecodedSize() const { return decoded_size_; }
   size_t OverheadSize() const { return overhead_size_; }
-  size_t CodeCacheSize() const;
+  virtual size_t CodeCacheSize() const { return 0; }
 
   bool IsLoaded() const { return status_ > ResourceStatus::kPending; }
 
@@ -275,8 +264,8 @@ class PLATFORM_EXPORT Resource : public GarbageCollected<Resource>,
   const ResourceResponse& GetResponse() const { return response_; }
 
   // Sets the serialized metadata retrieved from the platform's cache.
-  // Subclasses of Resource that support cached metadata should override this
-  // method with one that fills the current CachedMetadataHandler.
+  // The default implementation does nothing. Subclasses interested in the data
+  // should implement the resource-specific behavior.
   virtual void SetSerializedCachedMetadata(mojo_base::BigBuffer data);
 
   AtomicString HttpContentType() const;
@@ -379,12 +368,6 @@ class PLATFORM_EXPORT Resource : public GarbageCollected<Resource>,
   virtual void OnMemoryDump(WebMemoryDumpLevelOfDetail,
                             WebProcessMemoryDump*) const;
 
-  // If this Resource is ImageResource and has the Lo-Fi response headers or is
-  // a placeholder, reload the full original image with the Lo-Fi state set to
-  // off and optionally bypassing the cache.
-  virtual void ReloadIfLoFiOrPlaceholderImage(ResourceFetcher*,
-                                              ReloadLoFiOrPlaceholderPolicy) {}
-
   // Used to notify ImageResourceContent of the start of actual loading.
   // JavaScript calls or client/observer notifications are disallowed inside
   // NotifyStartLoad().
@@ -396,8 +379,6 @@ class PLATFORM_EXPORT Resource : public GarbageCollected<Resource>,
   static const char* ResourceTypeToString(
       ResourceType,
       const AtomicString& fetch_initiator_name);
-
-  static blink::mojom::CodeCacheType ResourceTypeToCodeCacheType(ResourceType);
 
   class ProhibitAddRemoveClientInScope : public base::AutoReset<bool> {
    public:
@@ -427,18 +408,6 @@ class PLATFORM_EXPORT Resource : public GarbageCollected<Resource>,
            ResourceType,
            const ResourceLoaderOptions&);
 
-  // Returns true if the resource has finished any processing it wanted to do
-  // after loading. Should only be used to decide whether to call
-  // NotifyFinished.
-  //
-  // By default this is the same as being loaded (i.e. no processing), but it is
-  // used by ScriptResource to signal that streaming JavaScript compilation
-  // completed. Note that classes overloading this method should also overload
-  // NotifyFinished to not call Resource::NotifyFinished until this value
-  // becomes true.
-  // TODO(hiroshige): Remove this when ScriptResourceContent is introduced.
-  virtual bool IsFinishedInternal() const { return IsLoaded(); }
-
   virtual void NotifyDataReceived(const char* data, size_t size);
   virtual void NotifyFinished();
 
@@ -467,6 +436,11 @@ class PLATFORM_EXPORT Resource : public GarbageCollected<Resource>,
            finished_clients_.Contains(client);
   }
 
+  bool IsSuccessfulRevalidationResponse(
+      const ResourceResponse& response) const {
+    return IsCacheValidator() && response.HttpStatusCode() == 304;
+  }
+
   struct RedirectPair {
     DISALLOW_NEW();
 
@@ -490,23 +464,13 @@ class PLATFORM_EXPORT Resource : public GarbageCollected<Resource>,
   }
 
   void SetCachePolicyBypassingCache();
-  void SetPreviewsState(WebURLRequest::PreviewsState);
+  void SetPreviewsState(PreviewsState);
   void ClearRangeRequestHeader();
 
   SharedBuffer* Data() const { return data_.get(); }
   void ClearData();
 
   virtual void SetEncoding(const String&) {}
-
-  // Create a handler for the cached metadata of this resource. Subclasses of
-  // Resource that support cached metadata should override this method with one
-  // that creates an appropriate CachedMetadataHandler implementation, and
-  // override SetSerializedCachedMetadata with an implementation that fills the
-  // cache handler.
-  virtual CachedMetadataHandler* CreateCachedMetadataHandler(
-      std::unique_ptr<CachedMetadataSender> send_callback);
-
-  CachedMetadataHandler* CacheHandler() { return cache_handler_.Get(); }
 
  private:
   friend class ResourceLoader;
@@ -526,8 +490,6 @@ class PLATFORM_EXPORT Resource : public GarbageCollected<Resource>,
 
   ResourceType type_;
   ResourceStatus status_;
-
-  Member<CachedMetadataHandler> cache_handler_;
 
   base::Optional<ResourceError> error_;
 
@@ -618,11 +580,6 @@ class NonTextResourceFactory : public ResourceFactory {
     return Create(request, options);
   }
 };
-
-#define DEFINE_RESOURCE_TYPE_CASTS(typeName)                          \
-  DEFINE_TYPE_CASTS(typeName##Resource, Resource, resource,           \
-                    resource->GetType() == ResourceType::k##typeName, \
-                    resource.GetType() == ResourceType::k##typeName)
 
 }  // namespace blink
 

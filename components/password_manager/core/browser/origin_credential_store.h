@@ -9,32 +9,29 @@
 
 #include "base/containers/span.h"
 #include "base/strings/string16.h"
-#include "base/util/type_safety/strong_alias.h"
+#include "base/types/strong_alias.h"
 #include "url/gurl.h"
 #include "url/origin.h"
 
-namespace autofill {
-struct PasswordForm;
-}
-
 namespace password_manager {
+
+struct PasswordForm;
 
 // Encapsulates the data from the password manager backend as used by the UI.
 class UiCredential {
  public:
   using IsPublicSuffixMatch =
-      util::StrongAlias<class IsPublicSuffixMatchTag, bool>;
+      base::StrongAlias<class IsPublicSuffixMatchTag, bool>;
 
   using IsAffiliationBasedMatch =
-      util::StrongAlias<class IsAffiliationBasedMatchTag, bool>;
+      base::StrongAlias<class IsAffiliationBasedMatchTag, bool>;
 
   UiCredential(base::string16 username,
                base::string16 password,
                url::Origin origin,
                IsPublicSuffixMatch is_public_suffix_match,
                IsAffiliationBasedMatch is_affiliation_based_match);
-  UiCredential(const autofill::PasswordForm& form,
-               const url::Origin& affiliated_origin);
+  UiCredential(const PasswordForm& form, const url::Origin& affiliated_origin);
   UiCredential(UiCredential&&);
   UiCredential(const UiCredential&);
   UiCredential& operator=(UiCredential&&);
@@ -93,13 +90,12 @@ class OriginCredentialStore {
   // Returns references to the held credentials (or an empty set if aren't any).
   base::span<const UiCredential> GetCredentials() const;
 
-  // Initializes the blacklisted status with either |kNeverBlacklisted|
-  // or |kIsBlacklisted|.
-  void InitializeBlacklistedStatus(bool is_blacklisted);
-
-  // Updates the blacklsited status as a result of a use action. The status
-  // can only change from |kWasBlacklsited| to |kIsBlacklisted| or vice-versa.
-  void UpdateBlacklistedStatus(bool is_blacklisted);
+  // Sets the blacklisted status. The possible transitions are:
+  // (*, is_blacklisted = true) -> kIsBlacklisted
+  // ((kIsBlacklisted|kWasBlacklisted), is_blacklisted = false)
+  //      -> kWasBlacklisted
+  // (kNeverBlacklisted, is_blacklisted = false) -> kNeverBlacklisted
+  void SetBlacklistedStatus(bool is_blacklisted);
 
   // Returns the blacklsited status for |origin_|.
   BlacklistedStatus GetBlacklistedStatus() const;

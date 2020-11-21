@@ -28,7 +28,7 @@ import {I18nBehavior} from 'chrome://resources/js/i18n_behavior.m.js';
 import {WebUIListenerBehavior} from 'chrome://resources/js/web_ui_listener_behavior.m.js';
 import {html, Polymer} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
-import {loadTimeData} from '../i18n_setup.m.js';
+import {loadTimeData} from '../i18n_setup.js';
 
 import {IncompatibleApplication, IncompatibleApplicationsBrowserProxyImpl} from './incompatible_applications_browser_proxy.js';
 
@@ -124,7 +124,7 @@ Polymer({
   onIncompatibleApplicationRemoved_(applicationName) {
     // Find the index of the element.
     const index = this.applications_.findIndex(function(application) {
-      return application.name == applicationName;
+      return application.name === applicationName;
     });
 
     assert(index !== -1);

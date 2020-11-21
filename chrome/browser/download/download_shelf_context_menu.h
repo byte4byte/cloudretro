@@ -33,7 +33,7 @@ class DownloadShelfContextMenu : public ui::SimpleMenuModel::Delegate,
   explicit DownloadShelfContextMenu(DownloadUIModel* download);
 
   // Returns the correct menu model depending on the state of the download item.
-  // Returns NULL if the download was destroyed.
+  // Returns nullptr if the download was destroyed.
   ui::SimpleMenuModel* GetMenuModel();
 
   // ui::SimpleMenuModel::Delegate:
@@ -60,6 +60,8 @@ class DownloadShelfContextMenu : public ui::SimpleMenuModel::Delegate,
   ui::SimpleMenuModel* GetMaliciousMenuModel(bool is_download);
   ui::SimpleMenuModel* GetDeepScanningMenuModel(bool is_download);
   ui::SimpleMenuModel* GetMixedContentDownloadMenuModel();
+
+  void AddAutoOpenToMenu(ui::SimpleMenuModel* model);
 
   // We show slightly different menus if the download is in progress vs. if the
   // download has finished.

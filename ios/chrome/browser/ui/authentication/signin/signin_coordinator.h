@@ -14,6 +14,9 @@
 
 class Browser;
 @class ChromeIdentity;
+namespace syncer {
+enum class KeyRetrievalTriggerForUMA;
+}  // namespace syncer
 
 // Main class for sign-in coordinator. This class should not be instantiated
 // directly, this should be done using the class methods.
@@ -23,9 +26,8 @@ class Browser;
 // This completion needs to be set before calling -[SigninCoordinator start].
 @property(nonatomic, copy) SigninCoordinatorCompletionCallback signinCompletion;
 
-// Returns YES if the Google services settings view is presented.
-// TODO(crbug.com/971989): This property exists for the implementation
-// transition.
+// Returns YES if the Advanced settings sign-in. This view has to present the
+// Google services settings.
 @property(nonatomic, assign, readonly, getter=isSettingsViewPresented)
     BOOL settingsViewPresented;
 
@@ -98,11 +100,25 @@ class Browser;
 // Vault for the primary identity. This is done with ChromeTrustedVaultService.
 // Related to IOSTrustedVaultClient.
 // |viewController| presents the sign-in.
+// |retrievalTrigger| UI elements where the trusted vault reauth has been
+// triggered.
 + (instancetype)
     trustedVaultReAuthenticationCoordiantorWithBaseViewController:
-        (UIViewController*)viewcontroller
+        (UIViewController*)viewController
                                                           browser:
-                                                              (Browser*)browser;
+                                                              (Browser*)browser
+                                                 retrievalTrigger:
+                                                     (syncer::
+                                                          KeyRetrievalTriggerForUMA)
+                                                         retrievalTrigger;
+
+// Returns a coordinator to display the account consistency promo with a list
+// of accounts available on the device for sign-in.
+// |viewController| presents the promo.
++ (instancetype)
+    consistencyPromoSigninCoordinatorWithBaseViewController:
+        (UIViewController*)viewController
+                                                    browser:(Browser*)browser;
 
 // Interrupts the sign-in flow.
 // |signinCompletion(SigninCoordinatorResultInterrupted, nil)| is guaranteed to

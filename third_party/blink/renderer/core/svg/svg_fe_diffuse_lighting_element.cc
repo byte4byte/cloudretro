@@ -22,6 +22,10 @@
 #include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
 #include "third_party/blink/renderer/core/svg/graphics/filters/svg_filter_builder.h"
+#include "third_party/blink/renderer/core/svg/svg_animated_number.h"
+#include "third_party/blink/renderer/core/svg/svg_animated_number_optional_number.h"
+#include "third_party/blink/renderer/core/svg/svg_animated_string.h"
+#include "third_party/blink/renderer/core/svg/svg_fe_light_element.h"
 #include "third_party/blink/renderer/platform/graphics/filters/fe_diffuse_lighting.h"
 #include "third_party/blink/renderer/platform/graphics/filters/filter.h"
 #include "third_party/blink/renderer/platform/heap/heap.h"
@@ -50,7 +54,15 @@ SVGFEDiffuseLightingElement::SVGFEDiffuseLightingElement(Document& document)
   AddToPropertyMap(in1_);
 }
 
-void SVGFEDiffuseLightingElement::Trace(Visitor* visitor) {
+SVGAnimatedNumber* SVGFEDiffuseLightingElement::kernelUnitLengthX() {
+  return kernel_unit_length_->FirstNumber();
+}
+
+SVGAnimatedNumber* SVGFEDiffuseLightingElement::kernelUnitLengthY() {
+  return kernel_unit_length_->SecondNumber();
+}
+
+void SVGFEDiffuseLightingElement::Trace(Visitor* visitor) const {
   visitor->Trace(diffuse_constant_);
   visitor->Trace(surface_scale_);
   visitor->Trace(kernel_unit_length_);
@@ -110,7 +122,8 @@ bool SVGFEDiffuseLightingElement::SetFilterEffectAttribute(
 }
 
 void SVGFEDiffuseLightingElement::SvgAttributeChanged(
-    const QualifiedName& attr_name) {
+    const SvgAttributeChangedParams& params) {
+  const QualifiedName& attr_name = params.name;
   if (attr_name == svg_names::kSurfaceScaleAttr ||
       attr_name == svg_names::kDiffuseConstantAttr ||
       attr_name == svg_names::kLightingColorAttr) {
@@ -125,7 +138,7 @@ void SVGFEDiffuseLightingElement::SvgAttributeChanged(
     return;
   }
 
-  SVGFilterPrimitiveStandardAttributes::SvgAttributeChanged(attr_name);
+  SVGFilterPrimitiveStandardAttributes::SvgAttributeChanged(params);
 }
 
 void SVGFEDiffuseLightingElement::LightElementAttributeChanged(

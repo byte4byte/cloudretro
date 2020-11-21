@@ -38,6 +38,7 @@ bool IsWhitelistedPermissionType(PermissionType permission) {
     // default.
     case PermissionType::STORAGE_ACCESS_GRANT:
       return true;
+
     case PermissionType::MIDI_SYSEX:
     case PermissionType::NOTIFICATIONS:
     case PermissionType::PROTECTED_MEDIA_IDENTIFIER:
@@ -53,6 +54,8 @@ bool IsWhitelistedPermissionType(PermissionType permission) {
     case PermissionType::VR:
     case PermissionType::AR:
     case PermissionType::CAMERA_PAN_TILT_ZOOM:
+    case PermissionType::WINDOW_PLACEMENT:
+    case PermissionType::FONT_ACCESS:
       return false;
   }
 

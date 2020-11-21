@@ -4,7 +4,7 @@
 
 #import "ios/chrome/browser/ui/badges/badge_view_controller.h"
 
-#include "base/logging.h"
+#include "base/check.h"
 #import "ios/chrome/browser/ui/badges/badge_button.h"
 #import "ios/chrome/browser/ui/badges/badge_button_factory.h"
 #import "ios/chrome/browser/ui/badges/badge_constants.h"
@@ -91,14 +91,14 @@ const CGFloat kUpdateDisplayedBadgeAnimationDamping = 0.85;
   self.fullScreenBadge = nil;
   if (displayedBadgeItem) {
     BadgeButton* newButton = [self.buttonFactory
-        getBadgeButtonForBadgeType:displayedBadgeItem.badgeType];
+        badgeButtonForBadgeType:displayedBadgeItem.badgeType];
     [newButton setAccepted:displayedBadgeItem.badgeState & BadgeStateAccepted
                   animated:NO];
     self.displayedBadge = newButton;
   }
   if (fullscreenBadgeItem) {
     self.fullScreenBadge = [self.buttonFactory
-        getBadgeButtonForBadgeType:fullscreenBadgeItem.badgeType];
+        badgeButtonForBadgeType:fullscreenBadgeItem.badgeType];
   }
 }
 
@@ -108,7 +108,7 @@ const CGFloat kUpdateDisplayedBadgeAnimationDamping = 0.85;
     if (!self.fullScreenBadge ||
         self.fullScreenBadge.badgeType != fullscreenBadgeItem.badgeType) {
       BadgeButton* newButton = [self.buttonFactory
-          getBadgeButtonForBadgeType:fullscreenBadgeItem.badgeType];
+          badgeButtonForBadgeType:fullscreenBadgeItem.badgeType];
       self.fullScreenBadge = newButton;
     }
   } else {
@@ -123,11 +123,14 @@ const CGFloat kUpdateDisplayedBadgeAnimationDamping = 0.85;
              animated:YES];
     } else {
       BadgeButton* newButton = [self.buttonFactory
-          getBadgeButtonForBadgeType:displayedBadgeItem.badgeType];
+          badgeButtonForBadgeType:displayedBadgeItem.badgeType];
       [newButton setAccepted:displayedBadgeItem.badgeState & BadgeStateAccepted
                     animated:NO];
       self.displayedBadge = newButton;
     }
+    // Disable button if banner is being displayed.
+    [self.displayedBadge
+        setEnabled:!(displayedBadgeItem.badgeState & BadgeStatePresented)];
   } else {
     self.displayedBadge = nil;
   }

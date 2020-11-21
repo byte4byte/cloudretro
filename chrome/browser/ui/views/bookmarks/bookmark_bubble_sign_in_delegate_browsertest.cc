@@ -26,6 +26,7 @@
 #include "components/signin/public/base/account_consistency_method.h"
 #include "components/signin/public/identity_manager/account_info.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/test_utils.h"
 #include "ui/events/event_constants.h"
 #include "ui/gfx/range/range.h"
@@ -62,7 +63,7 @@ void BookmarkBubbleSignInDelegateTest::ReplaceBlank(Browser* browser) {
 void BookmarkBubbleSignInDelegateTest::SignInBrowser(Browser* browser) {
   std::unique_ptr<BubbleSyncPromoDelegate> delegate;
   delegate.reset(new BookmarkBubbleSignInDelegate(browser));
-  delegate->OnEnableSync(AccountInfo(), false /* is_default_promo_account */);
+  delegate->OnEnableSync(AccountInfo());
 }
 
 IN_PROC_BROWSER_TEST_F(BookmarkBubbleSignInDelegateTest, OnSignInLinkClicked) {
@@ -130,8 +131,8 @@ IN_PROC_BROWSER_TEST_F(BookmarkBubbleSignInDelegateTest, BrowserRemoved) {
 
   int starting_tab_count = extra_browser->tab_strip_model()->count();
 
-  std::unique_ptr<BubbleSyncPromoDelegate> delegate;
-  delegate.reset(new BookmarkBubbleSignInDelegate(browser()));
+  std::unique_ptr<BubbleSyncPromoDelegate> delegate =
+      std::make_unique<BookmarkBubbleSignInDelegate>(browser());
 
   BrowserList::SetLastActive(extra_browser);
 
@@ -140,7 +141,7 @@ IN_PROC_BROWSER_TEST_F(BookmarkBubbleSignInDelegateTest, BrowserRemoved) {
   browser()->tab_strip_model()->CloseAllTabs();
   content::RunAllPendingInMessageLoop();
 
-  delegate->OnEnableSync(AccountInfo(), false /* is_default_promo_account */);
+  delegate->OnEnableSync(AccountInfo());
 
   int tab_count = extra_browser->tab_strip_model()->count();
   // A new tab should have been opened in the extra browser, which should be

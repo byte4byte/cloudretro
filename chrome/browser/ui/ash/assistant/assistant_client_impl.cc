@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "ash/public/cpp/assistant/assistant_interface_binder.h"
+#include "ash/public/cpp/assistant/controller/assistant_interaction_controller.h"
 #include "ash/public/cpp/network_config_service.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/assistant/assistant_util.h"
@@ -14,12 +15,13 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/signin/identity_manager_factory.h"
 #include "chrome/browser/ui/ash/assistant/assistant_context_util.h"
-#include "chrome/browser/ui/ash/assistant/assistant_image_downloader.h"
 #include "chrome/browser/ui/ash/assistant/assistant_setup.h"
 #include "chrome/browser/ui/ash/assistant/assistant_web_view_factory_impl.h"
 #include "chrome/browser/ui/ash/assistant/conversation_starters_client_impl.h"
 #include "chrome/browser/ui/ash/assistant/device_actions_delegate_impl.h"
-#include "chrome/browser/ui/ash/assistant/proactive_suggestions_client_impl.h"
+#include "chromeos/components/bloom/public/cpp/bloom_controller.h"
+#include "chromeos/components/bloom/public/cpp/bloom_controller_factory.h"
+#include "chromeos/components/bloom/public/cpp/bloom_screenshot_delegate.h"
 #include "chromeos/constants/chromeos_features.h"
 #include "chromeos/constants/chromeos_switches.h"
 #include "chromeos/services/assistant/public/cpp/features.h"
@@ -33,6 +35,7 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/service_process_host.h"
 #include "content/public/common/content_switches.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
 
 AssistantClientImpl::AssistantClientImpl() {
   auto* session_manager = session_manager::SessionManager::Get();
@@ -53,7 +56,7 @@ AssistantClientImpl::~AssistantClientImpl() {
 
 void AssistantClientImpl::MaybeInit(Profile* profile) {
   if (assistant::IsAssistantAllowedForProfile(profile) !=
-      ash::mojom::AssistantAllowedState::ALLOWED) {
+      chromeos::assistant::AssistantAllowedState::ALLOWED) {
     return;
   }
 
@@ -75,10 +78,9 @@ void AssistantClientImpl::MaybeInit(Profile* profile) {
 
   service_ = std::make_unique<chromeos::assistant::Service>(
       profile->GetURLLoaderFactory()->Clone(),
-      IdentityManagerFactory::GetForProfile(profile), profile->GetPrefs());
+      IdentityManagerFactory::GetForProfile(profile));
   service_->Init();
 
-  assistant_image_downloader_ = std::make_unique<AssistantImageDownloader>();
   assistant_setup_ = std::make_unique<AssistantSetup>();
   assistant_web_view_factory_ =
       std::make_unique<AssistantWebViewFactoryImpl>(profile_);
@@ -88,14 +90,11 @@ void AssistantClientImpl::MaybeInit(Profile* profile) {
         std::make_unique<ConversationStartersClientImpl>(profile_);
   }
 
-  if (chromeos::assistant::features::IsProactiveSuggestionsEnabled()) {
-    proactive_suggestions_client_ =
-        std::make_unique<ProactiveSuggestionsClientImpl>(profile_);
+  if (chromeos::assistant::features::IsBloomEnabled()) {
+    bloom_controller_ = chromeos::bloom::BloomControllerFactory::Create(
+        profile->GetURLLoaderFactory()->Clone(),
+        IdentityManagerFactory::GetForProfile(profile));
   }
-
-  for (auto& receiver : pending_assistant_receivers_)
-    service_->BindAssistant(std::move(receiver));
-  pending_assistant_receivers_.clear();
 }
 
 void AssistantClientImpl::MaybeStartAssistantOptInFlow() {
@@ -103,17 +102,6 @@ void AssistantClientImpl::MaybeStartAssistantOptInFlow() {
     return;
 
   assistant_setup_->MaybeStartAssistantOptInFlow();
-}
-
-void AssistantClientImpl::BindAssistant(
-    mojo::PendingReceiver<chromeos::assistant::mojom::Assistant> receiver) {
-  if (!initialized_) {
-    pending_assistant_receivers_.push_back(std::move(receiver));
-    return;
-  }
-
-  chromeos::assistant::AssistantService::Get()->BindAssistant(
-      std::move(receiver));
 }
 
 void AssistantClientImpl::Observe(int type,
@@ -132,46 +120,13 @@ void AssistantClientImpl::RequestAssistantStructure(
 }
 
 void AssistantClientImpl::OnAssistantStatusChanged(
-    ash::mojom::AssistantState new_state) {
-  ash::AssistantState::Get()->NotifyStatusChanged(new_state);
-}
-
-void AssistantClientImpl::RequestAssistantController(
-    mojo::PendingReceiver<chromeos::assistant::mojom::AssistantController>
-        receiver) {
-  ash::AssistantInterfaceBinder::GetInstance()->BindController(
-      std::move(receiver));
-}
-
-void AssistantClientImpl::RequestAssistantAlarmTimerController(
-    mojo::PendingReceiver<ash::mojom::AssistantAlarmTimerController> receiver) {
-  ash::AssistantInterfaceBinder::GetInstance()->BindAlarmTimerController(
-      std::move(receiver));
-}
-
-void AssistantClientImpl::RequestAssistantNotificationController(
-    mojo::PendingReceiver<ash::mojom::AssistantNotificationController>
-        receiver) {
-  ash::AssistantInterfaceBinder::GetInstance()->BindNotificationController(
-      std::move(receiver));
-}
-
-void AssistantClientImpl::RequestAssistantScreenContextController(
-    mojo::PendingReceiver<ash::mojom::AssistantScreenContextController>
-        receiver) {
-  ash::AssistantInterfaceBinder::GetInstance()->BindScreenContextController(
-      std::move(receiver));
+    chromeos::assistant::AssistantStatus new_status) {
+  ash::AssistantState::Get()->NotifyStatusChanged(new_status);
 }
 
 void AssistantClientImpl::RequestAssistantVolumeControl(
     mojo::PendingReceiver<ash::mojom::AssistantVolumeControl> receiver) {
   ash::AssistantInterfaceBinder::GetInstance()->BindVolumeControl(
-      std::move(receiver));
-}
-
-void AssistantClientImpl::RequestAssistantStateController(
-    mojo::PendingReceiver<ash::mojom::AssistantStateController> receiver) {
-  ash::AssistantInterfaceBinder::GetInstance()->BindStateController(
       std::move(receiver));
 }
 
@@ -196,7 +151,6 @@ void AssistantClientImpl::RequestAudioDecoderFactory(
   content::ServiceProcessHost::Launch(
       std::move(receiver),
       content::ServiceProcessHost::Options()
-          .WithSandboxType(service_manager::SandboxType::kUtility)
           .WithDisplayName("Assistant Audio Decoder Service")
           .Pass());
 }
@@ -228,15 +182,10 @@ void AssistantClientImpl::OnExtendedAccountInfoUpdated(
 }
 
 void AssistantClientImpl::OnUserProfileLoaded(const AccountId& account_id) {
-  // Initialize Assistant when primary user profile is loaded so that it could
-  // be used in post oobe steps. OnUserSessionStarted() is too late
-  // because it happens after post oobe steps
-  Profile* user_profile =
-      chromeos::ProfileHelper::Get()->GetProfileByAccountId(account_id);
-  if (!chromeos::ProfileHelper::IsPrimaryProfile(user_profile))
-    return;
-
-  MaybeInit(user_profile);
+  if (!assistant_state_observer_.IsObservingSources() && !initialized_ &&
+      ash::AssistantState::Get()) {
+    assistant_state_observer_.Add(ash::AssistantState::Get());
+  }
 }
 
 void AssistantClientImpl::OnUserSessionStarted(bool is_primary_user) {
@@ -247,4 +196,13 @@ void AssistantClientImpl::OnUserSessionStarted(bool is_primary_user) {
       !command_line->HasSwitch(switches::kBrowserTest)) {
     MaybeStartAssistantOptInFlow();
   }
+}
+
+void AssistantClientImpl::OnAssistantFeatureAllowedChanged(
+    chromeos::assistant::AssistantAllowedState allowed_state) {
+  if (allowed_state != chromeos::assistant::AssistantAllowedState::ALLOWED)
+    return;
+
+  Profile* profile = ProfileManager::GetActiveUserProfile();
+  MaybeInit(profile);
 }

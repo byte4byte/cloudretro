@@ -7,9 +7,10 @@
 #include <memory>
 
 #include "base/bind.h"
+#include "base/check_op.h"
 #include "base/ios/block_types.h"
-#include "base/logging.h"
 #include "base/metrics/user_metrics.h"
+#include "base/notreached.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
@@ -90,13 +91,13 @@ const int64_t kAuthenticationFlowTimeoutSeconds = 10;
   return self;
 }
 
-- (void)cancelAndDismiss {
+- (void)cancelAndDismissAnimated:(BOOL)animated {
   [_alertCoordinator executeCancelHandler];
   [_alertCoordinator stop];
   if (_navigationController) {
     [_navigationController cleanUpSettings];
     _navigationController = nil;
-    [_delegate dismissPresentingViewControllerAnimated:NO completion:nil];
+    [_delegate dismissPresentingViewControllerAnimated:animated completion:nil];
   }
   [self stopWatchdogTimer];
 }
@@ -122,7 +123,7 @@ const int64_t kAuthenticationFlowTimeoutSeconds = 10;
   _watchdogTimer->Start(
       FROM_HERE,
       base::TimeDelta::FromSeconds(kAuthenticationFlowTimeoutSeconds),
-      base::Bind(onTimeout));
+      base::BindOnce(onTimeout));
 }
 
 - (BOOL)stopWatchdogTimer {

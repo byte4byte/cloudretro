@@ -13,6 +13,7 @@
 #include "components/sync/base/model_type.h"
 #include "components/sync/driver/sync_service.h"
 #include "components/sync/test/fake_server/fake_server.h"
+#include "content/public/test/browser_test.h"
 
 namespace arc {
 
@@ -26,11 +27,12 @@ bool AllProfilesHaveSameArcPackageDetails() {
 class SingleClientArcPackageSyncTest : public SyncTest {
  public:
   SingleClientArcPackageSyncTest() : SyncTest(SINGLE_CLIENT) {}
+  ~SingleClientArcPackageSyncTest() override = default;
 
-  ~SingleClientArcPackageSyncTest() override {}
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(SingleClientArcPackageSyncTest);
+  bool UseVerifier() override {
+    // TODO(crbug.com/1137774): rewrite tests to not use verifier.
+    return true;
+  }
 };
 
 IN_PROC_BROWSER_TEST_F(SingleClientArcPackageSyncTest, ArcPackageEmpty) {

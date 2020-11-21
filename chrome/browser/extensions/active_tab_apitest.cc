@@ -17,6 +17,7 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/sessions/content/session_tab_helper.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/browser/extension_registry.h"
@@ -50,7 +51,6 @@ class ExtensionActiveTabTest : public ExtensionApiTest {
   }
 
  private:
-
   DISALLOW_COPY_AND_ASSIGN(ExtensionActiveTabTest);
 };
 
@@ -250,7 +250,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, FileURLs) {
     // Sanity check the last committed url on the |file_iframe|.
     content::RenderFrameHost* file_iframe = content::FrameMatchingPredicate(
         browser()->tab_strip_model()->GetActiveWebContents(),
-        base::Bind(&content::FrameMatchesName, "file_iframe"));
+        base::BindRepeating(&content::FrameMatchesName, "file_iframe"));
     bool is_file_url = file_iframe->GetLastCommittedURL() == GURL("file:///");
     EXPECT_EQ(allowed, is_file_url)
         << "Unexpected committed url: "

@@ -6,10 +6,11 @@ package org.chromium.chrome.browser.ntp;
 
 import androidx.annotation.Nullable;
 
-import org.chromium.chrome.browser.omnibox.LocationBar.OmniboxFocusReason;
+import org.chromium.chrome.browser.omnibox.OmniboxFocusReason;
 import org.chromium.chrome.browser.omnibox.UrlFocusChangeListener;
 import org.chromium.chrome.browser.omnibox.voice.VoiceRecognitionHandler;
-import org.chromium.chrome.browser.ui.native_page.NativePage;
+
+import java.util.List;
 
 /**
  * Handles user interaction with the fakebox (the URL bar in the NTP and tasks surface).
@@ -31,8 +32,9 @@ public interface FakeboxDelegate {
      * TemplateUrlService#getUrlForSearchQuery(String)} to get a url based on {@code query} and
      * loads that url in the current {@link Tab}.
      * @param query The {@link String} that represents the text query that should be searched for.
+     * @param searchParams A list of params for the search query.
      */
-    void performSearchQuery(String query);
+    void performSearchQuery(String query, List<String> searchParams);
 
     /**
      * @return Whether the URL bar is currently focused.
@@ -40,14 +42,10 @@ public interface FakeboxDelegate {
     boolean isUrlBarFocused();
 
     /**
-     * @return whether the provided native page is the one currently displayed to the user.
-     */
-    boolean isCurrentPage(NativePage nativePage);
-
-    /**
      * Get the {@link VoiceRecognitionHandler}.
      * @return the {@link VoiceRecognitionHandler}
      */
+    @Nullable
     VoiceRecognitionHandler getVoiceRecognitionHandler();
 
     /**

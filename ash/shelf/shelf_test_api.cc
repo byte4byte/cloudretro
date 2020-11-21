@@ -80,8 +80,7 @@ ScrollableShelfInfo ShelfTestApi::GetScrollableShelfInfoForState(
       GetShelfWidget()->GetLayer()->GetAnimator()->is_animating();
 
   const ShelfView* const shelf_view = scrollable_shelf_view->shelf_view_;
-  for (int i = shelf_view->first_visible_index();
-       i <= shelf_view->last_visible_index(); ++i) {
+  for (int i : shelf_view->visible_views_indices()) {
     info.icons_bounds_in_screen.push_back(
         shelf_view->view_model()->view_at(i)->GetBoundsInScreen());
   }
@@ -109,7 +108,7 @@ HotseatInfo ShelfTestApi::GetHotseatInfo() {
   info.swipe_up.swipe_start_location = shelf_widget_bounds.CenterPoint();
 
   // The swipe distance is small enough to avoid the window drag from shelf.
-  const int swipe_distance = ShelfConfig::Get()->GetHotseatFullDragAmount() / 2;
+  const int swipe_distance = hotseat_widget->GetHotseatFullDragAmount() / 2;
 
   gfx::Point swipe_end_location = info.swipe_up.swipe_start_location;
   swipe_end_location.set_y(swipe_end_location.y() - swipe_distance);

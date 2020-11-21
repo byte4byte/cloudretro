@@ -7,7 +7,6 @@
 #include <stdint.h>
 
 #include "base/files/file_path.h"
-#include "base/logging.h"
 #include "components/download/public/common/download_danger_type.h"
 #include "components/download/public/common/download_interrupt_reasons.h"
 #include "components/download/public/common/download_item.h"
@@ -34,13 +33,9 @@ bool CastDownloadManagerDelegate::DetermineDownloadTarget(
       empty, download::DownloadItem::TARGET_DISPOSITION_OVERWRITE,
       download::DOWNLOAD_DANGER_TYPE_MAYBE_DANGEROUS_CONTENT,
       download::DownloadItem::MixedContentStatus::UNKNOWN, empty,
+      base::nullopt /*download_schedule*/,
       download::DOWNLOAD_INTERRUPT_REASON_USER_CANCELED);
   return true;
-}
-
-bool CastDownloadManagerDelegate::ShouldOpenFileBasedOnExtension(
-    const base::FilePath& path) {
-  return false;
 }
 
 bool CastDownloadManagerDelegate::ShouldCompleteDownload(

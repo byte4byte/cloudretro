@@ -7,6 +7,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringize_macros.h"
 #include "base/system/sys_info.h"
+#include "build/chromeos_buildflags.h"
 #include "remoting/base/name_value_map.h"
 
 namespace remoting {
@@ -188,15 +189,13 @@ void ChromotingEvent::AddSystemInfo() {
   SetString(kCpuKey, base::SysInfo::OperatingSystemArchitecture());
   SetString(kOsVersionKey, base::SysInfo::OperatingSystemVersion());
   SetString(kWebAppVersionKey, STRINGIZE(VERSION));
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
   Os os = Os::CHROMOTING_LINUX;
-#elif defined(OS_CHROMEOS)
+#elif BUILDFLAG(IS_CHROMEOS_ASH)
   Os os = Os::CHROMOTING_CHROMEOS;
 #elif defined(OS_IOS)
-  // This needs to precede the OS_MACOSX check since iOS will also define the
-  // OS_MACOSX macro.
   Os os = Os::CHROMOTING_IOS;
-#elif defined(OS_MACOSX)
+#elif defined(OS_MAC)
   Os os = Os::CHROMOTING_MAC;
 #elif defined(OS_WIN)
   Os os = Os::CHROMOTING_WINDOWS;

@@ -18,10 +18,28 @@
 #error "This file requires ARC support."
 #endif
 
+namespace {
+// Callback for HTTP authentication dialogs.  This callback is a standalone
+// function rather than an instance method.  This is to ensure that the callback
+// can be executed regardless of whether the tab helper has been destroyed.
+void OnHTTPAuthOverlayFinished(web::WebStateDelegate::AuthCallback callback,
+                               OverlayResponse* response) {
+  if (response) {
+    HTTPAuthOverlayResponseInfo* auth_info =
+        response->GetInfo<HTTPAuthOverlayResponseInfo>();
+    if (auth_info) {
+      std::move(callback).Run(base::SysUTF8ToNSString(auth_info->username()),
+                              base::SysUTF8ToNSString(auth_info->password()));
+      return;
+    }
+  }
+  std::move(callback).Run(nil, nil);
+}
+}  // namespace
+
 WEB_STATE_USER_DATA_KEY_IMPL(WebStateDelegateTabHelper)
 
-WebStateDelegateTabHelper::WebStateDelegateTabHelper(web::WebState* web_state)
-    : weak_factory_(this) {
+WebStateDelegateTabHelper::WebStateDelegateTabHelper(web::WebState* web_state) {
   web_state->AddObserver(this);
 }
 
@@ -36,8 +54,7 @@ void WebStateDelegateTabHelper::OnAuthRequired(
     web::WebState* source,
     NSURLProtectionSpace* protection_space,
     NSURLCredential* proposed_credential,
-    const web::WebStateDelegate::AuthCallback& callback) {
-  AuthCallback local_callback(callback);
+    web::WebStateDelegate::AuthCallback callback) {
   std::string message = base::SysNSStringToUTF8(
       nsurlprotectionspace_util::MessageForHTTPAuth(protection_space));
   std::string default_username;
@@ -48,8 +65,7 @@ void WebStateDelegateTabHelper::OnAuthRequired(
           nsurlprotectionspace_util::RequesterOrigin(protection_space), message,
           default_username);
   request->GetCallbackManager()->AddCompletionCallback(
-      base::BindOnce(&WebStateDelegateTabHelper::OnHTTPAuthOverlayFinished,
-                     weak_factory_.GetWeakPtr(), callback));
+      base::BindOnce(&OnHTTPAuthOverlayFinished, std::move(callback)));
   OverlayRequestQueue::FromWebState(source, OverlayModality::kWebContentArea)
       ->AddRequest(std::move(request));
 }
@@ -57,25 +73,6 @@ void WebStateDelegateTabHelper::OnAuthRequired(
 #pragma mark - WebStateObserver
 
 void WebStateDelegateTabHelper::WebStateDestroyed(web::WebState* web_state) {
-  java_script_dialog_presenter_.Close();
   web_state->RemoveObserver(this);
 }
 
-#pragma mark - Overlay Callbacks
-
-void WebStateDelegateTabHelper::OnHTTPAuthOverlayFinished(
-    web::WebStateDelegate::AuthCallback callback,
-    OverlayResponse* response) {
-  if (!response) {
-    callback.Run(nil, nil);
-    return;
-  }
-  HTTPAuthOverlayResponseInfo* auth_info =
-      response->GetInfo<HTTPAuthOverlayResponseInfo>();
-  if (!auth_info) {
-    callback.Run(nil, nil);
-    return;
-  }
-  callback.Run(base::SysUTF8ToNSString(auth_info->username()),
-               base::SysUTF8ToNSString(auth_info->password()));
-}

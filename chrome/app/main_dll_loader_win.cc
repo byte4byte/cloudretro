@@ -41,31 +41,20 @@
 #include "chrome/installer/util/util_constants.h"
 #include "content/public/app/sandbox_helper_win.h"
 #include "content/public/common/content_switches.h"
+#include "sandbox/policy/sandbox_type.h"
 #include "sandbox/win/src/sandbox.h"
-#include "services/service_manager/sandbox/switches.h"
 
 namespace {
 // The entry point signature of chrome.dll.
-typedef int (*DLL_MAIN)(HINSTANCE, sandbox::SandboxInterfaceInfo*, int64_t);
+typedef int (*DLL_MAIN)(HINSTANCE,
+                        sandbox::SandboxInterfaceInfo*,
+                        int64_t,
+                        base::PrefetchResultCode);
 
 typedef void (*RelaunchChromeBrowserWithNewCommandLineIfNeededFunc)();
 
-// Loads |module| after setting the CWD to |module|'s directory. Returns a
-// reference to the loaded module on success, or null on error.
-HMODULE LoadModuleWithDirectory(const base::FilePath& module) {
-  ::SetCurrentDirectoryW(module.DirName().value().c_str());
-  base::PreReadFile(module, /*is_executable=*/true);
-  return ::LoadLibraryExW(module.value().c_str(), nullptr,
-                          LOAD_WITH_ALTERED_SEARCH_PATH);
-}
-
 void RecordDidRun(const base::FilePath& dll_path) {
   installer::UpdateDidRunState(true);
-}
-
-bool ProcessTypeUsesMainDll(const std::string& process_type) {
-  return process_type.empty() ||
-         process_type == switches::kCloudPrintServiceProcess;
 }
 
 // Indicates whether a file can be opened using the same flags that
@@ -108,27 +97,28 @@ MainDllLoader::MainDllLoader()
 MainDllLoader::~MainDllLoader() {
 }
 
-HMODULE MainDllLoader::Load(base::FilePath* module) {
-  const base::char16* dll_name = nullptr;
-  if (ProcessTypeUsesMainDll(process_type_)) {
-    dll_name = installer::kChromeDll;
-  } else {
-    dll_name = installer::kChromeDll;
-  }
-
-  *module = GetModulePath(dll_name);
+// static
+MainDllLoader::LoadResult MainDllLoader::Load(base::FilePath* module) {
+  *module = GetModulePath(installer::kChromeDll);
   if (module->empty()) {
-    PLOG(ERROR) << "Cannot find module " << dll_name;
-    return nullptr;
+    PLOG(ERROR) << "Cannot find module " << installer::kChromeDll;
+    return {nullptr, base::PrefetchResultCode::kInvalidFile};
   }
-  HMODULE dll = LoadModuleWithDirectory(*module);
-  if (!dll) {
+  LoadResult load_result = LoadModuleWithDirectory(*module);
+  if (!load_result.handle)
     PLOG(ERROR) << "Failed to load Chrome DLL from " << module->value();
-    return nullptr;
-  }
+  return load_result;
+}
 
-  DCHECK(dll);
-  return dll;
+// static
+MainDllLoader::LoadResult MainDllLoader::LoadModuleWithDirectory(
+    const base::FilePath& module) {
+  ::SetCurrentDirectoryW(module.DirName().value().c_str());
+  base::PrefetchResultCode prefetch_result_code =
+      base::PreReadFile(module, /*is_executable=*/true).code_;
+  HMODULE handle = ::LoadLibraryExW(module.value().c_str(), nullptr,
+                                    LOAD_WITH_ALTERED_SEARCH_PATH);
+  return {handle, prefetch_result_code};
 }
 
 const int kNonBrowserShutdownPriority = 0x280;
@@ -141,11 +131,16 @@ int MainDllLoader::Launch(HINSTANCE instance,
   process_type_ = cmd_line.GetSwitchValueASCII(switches::kProcessType);
 
   // Initialize the sandbox services.
-  sandbox::SandboxInterfaceInfo sandbox_info = {0};
+  sandbox::SandboxInterfaceInfo sandbox_info = {nullptr};
   const bool is_browser = process_type_.empty();
+  const bool is_cloud_print_service =
+      process_type_ == switches::kCloudPrintServiceProcess;
+  // IsUnsandboxedSandboxType() can't be used here because its result can be
+  // gated behind a feature flag, which are not yet initialized.
   const bool is_sandboxed =
-      !cmd_line.HasSwitch(service_manager::switches::kNoSandbox);
-  if (is_browser || is_sandboxed) {
+      sandbox::policy::SandboxTypeFromCommandLine(cmd_line) !=
+      sandbox::policy::SandboxType::kNoSandbox;
+  if (is_browser || is_cloud_print_service || is_sandboxed) {
     // For child processes that are running as --no-sandbox, don't initialize
     // the sandbox info, otherwise they'll be treated as brokers (as if they
     // were the browser).
@@ -153,7 +148,8 @@ int MainDllLoader::Launch(HINSTANCE instance,
   }
 
   base::FilePath file;
-  dll_ = Load(&file);
+  LoadResult load_result = Load(&file);
+  dll_ = load_result.handle;
   if (!dll_)
     return chrome::RESULT_CODE_MISSING_DATA;
 
@@ -171,25 +167,23 @@ int MainDllLoader::Launch(HINSTANCE instance,
   DLL_MAIN chrome_main =
       reinterpret_cast<DLL_MAIN>(::GetProcAddress(dll_, "ChromeMain"));
   int rc = chrome_main(instance, &sandbox_info,
-                       exe_entry_point_ticks.ToInternalValue());
+                       exe_entry_point_ticks.ToInternalValue(),
+                       load_result.prefetch_result_code);
   return rc;
 }
 
 void MainDllLoader::RelaunchChromeBrowserWithNewCommandLineIfNeeded() {
-  if (!dll_)
+  // The relaunch-if-needed behavior is a NOP for processes other than the
+  // browser process, so early out here.
+  if (!dll_ || !process_type_.empty())
     return;
 
   RelaunchChromeBrowserWithNewCommandLineIfNeededFunc relaunch_function =
       reinterpret_cast<RelaunchChromeBrowserWithNewCommandLineIfNeededFunc>(
           ::GetProcAddress(dll_,
                            "RelaunchChromeBrowserWithNewCommandLineIfNeeded"));
-  if (relaunch_function) {
-    relaunch_function();
-  } else if (ProcessTypeUsesMainDll(process_type_)) {
-    LOG(DFATAL) << "Could not find exported function "
-                << "RelaunchChromeBrowserWithNewCommandLineIfNeeded "
-                << "(" << process_type_ << " process)";
-  }
+  CHECK(relaunch_function);
+  relaunch_function();
 }
 
 //=============================================================================

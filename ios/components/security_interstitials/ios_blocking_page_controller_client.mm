@@ -5,7 +5,8 @@
 #include "ios/components/security_interstitials/ios_blocking_page_controller_client.h"
 
 #include "base/bind.h"
-#include "base/logging.h"
+#include "base/check_op.h"
+#include "base/notreached.h"
 #include "base/task/post_task.h"
 #include "components/security_interstitials/core/metrics_helper.h"
 #import "ios/web/public/navigation/navigation_manager.h"
@@ -106,6 +107,10 @@ void IOSBlockingPageControllerClient::OpenUrlInNewForegroundTab(
   web_state_->OpenURL(web::WebState::OpenURLParams(
       url, web::Referrer(), WindowOpenDisposition::NEW_FOREGROUND_TAB,
       ui::PAGE_TRANSITION_LINK, false));
+}
+
+void IOSBlockingPageControllerClient::OpenEnhancedProtectionSettings() {
+  NOTREACHED() << "Enhanced protection is not supported on iOS.";
 }
 
 const std::string& IOSBlockingPageControllerClient::GetApplicationLocale()

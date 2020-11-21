@@ -13,9 +13,9 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/message_loop/message_loop_current.h"
 #include "base/process/process_handle.h"
 #include "base/rand_util.h"
+#include "base/task/current_thread.h"
 #include "base/time/time.h"
 #include "base/timer/elapsed_timer.h"
 #include "mojo/core/broker.h"
@@ -108,7 +108,7 @@ ports::ScopedEvent DeserializeEventMessage(
 // the IO thread is killed, the NodeController can cleanly drop all its peers
 // at that time.
 class ThreadDestructionObserver
-    : public base::MessageLoopCurrent::DestructionObserver {
+    : public base::CurrentThread::DestructionObserver {
  public:
   static void Create(scoped_refptr<base::SingleThreadTaskRunner> task_runner,
                      base::OnceClosure callback) {
@@ -124,14 +124,14 @@ class ThreadDestructionObserver
  private:
   explicit ThreadDestructionObserver(base::OnceClosure callback)
       : callback_(std::move(callback)) {
-    base::MessageLoopCurrent::Get()->AddDestructionObserver(this);
+    base::CurrentThread::Get()->AddDestructionObserver(this);
   }
 
   ~ThreadDestructionObserver() override {
-    base::MessageLoopCurrent::Get()->RemoveDestructionObserver(this);
+    base::CurrentThread::Get()->RemoveDestructionObserver(this);
   }
 
-  // base::MessageLoopCurrent::DestructionObserver:
+  // base::CurrentThread::DestructionObserver:
   void WillDestroyCurrentMessageLoop() override {
     std::move(callback_).Run();
     delete this;
@@ -144,7 +144,7 @@ class ThreadDestructionObserver
 
 }  // namespace
 
-NodeController::~NodeController() {}
+NodeController::~NodeController() = default;
 
 NodeController::NodeController(Core* core)
     : core_(core),
@@ -162,7 +162,7 @@ void NodeController::SetIOTaskRunner(
 }
 
 void NodeController::SendBrokerClientInvitation(
-    base::ProcessHandle target_process,
+    base::Process target_process,
     ConnectionParams connection_params,
     const std::vector<std::pair<std::string, ports::PortRef>>& attached_ports,
     const ProcessErrorCallback& process_error_callback) {
@@ -180,12 +180,10 @@ void NodeController::SendBrokerClientInvitation(
     }
   }
 
-  ScopedProcessHandle scoped_target_process =
-      ScopedProcessHandle::CloneFrom(target_process);
   io_task_runner_->PostTask(
       FROM_HERE,
       base::BindOnce(&NodeController::SendBrokerClientInvitationOnIOThread,
-                     base::Unretained(this), std::move(scoped_target_process),
+                     base::Unretained(this), std::move(target_process),
                      std::move(connection_params), temporary_node_name,
                      process_error_callback));
 }
@@ -194,7 +192,7 @@ void NodeController::AcceptBrokerClientInvitation(
     ConnectionParams connection_params) {
   base::Optional<PlatformHandle> broker_host_handle;
   DCHECK(!GetConfiguration().is_broker_process);
-#if !defined(OS_MACOSX) && !defined(OS_NACL_SFI) && !defined(OS_FUCHSIA)
+#if !defined(OS_APPLE) && !defined(OS_NACL_SFI) && !defined(OS_FUCHSIA)
   if (!connection_params.is_async()) {
     // Use the bootstrap channel for the broker and receive the node's channel
     // synchronously as the first message from the broker.
@@ -303,7 +301,7 @@ int NodeController::MergeLocalPorts(const ports::PortRef& port0,
 
 base::WritableSharedMemoryRegion NodeController::CreateSharedBuffer(
     size_t num_bytes) {
-#if !defined(OS_MACOSX) && !defined(OS_NACL_SFI) && !defined(OS_FUCHSIA)
+#if !defined(OS_APPLE) && !defined(OS_NACL_SFI) && !defined(OS_FUCHSIA)
   // Shared buffer creation failure is fatal, so always use the broker when we
   // have one; unless of course the embedder forces us not to.
   if (!GetConfiguration().force_direct_shared_memory_allocation && broker_)
@@ -361,13 +359,13 @@ void NodeController::DeserializeMessageAsEventForFuzzer(
 }
 
 void NodeController::SendBrokerClientInvitationOnIOThread(
-    ScopedProcessHandle target_process,
+    base::Process target_process,
     ConnectionParams connection_params,
     ports::NodeName temporary_node_name,
     const ProcessErrorCallback& process_error_callback) {
   DCHECK(io_task_runner_->RunsTasksInCurrentSequence());
 
-#if !defined(OS_MACOSX) && !defined(OS_NACL) && !defined(OS_FUCHSIA)
+#if !defined(OS_APPLE) && !defined(OS_NACL) && !defined(OS_FUCHSIA)
   ConnectionParams node_connection_params;
   if (!connection_params.is_async()) {
     // Sync connections usurp the passed endpoint and use it for the sync broker
@@ -377,7 +375,7 @@ void NodeController::SendBrokerClientInvitationOnIOThread(
     node_connection_params = ConnectionParams(node_channel.TakeLocalEndpoint());
     // BrokerHost owns itself.
     BrokerHost* broker_host =
-        new BrokerHost(target_process.get(), std::move(connection_params),
+        new BrokerHost(target_process.Duplicate(), std::move(connection_params),
                        process_error_callback);
     bool channel_ok = broker_host->SendChannel(
         node_channel.TakeRemoteEndpoint().TakePlatformHandle());
@@ -407,11 +405,11 @@ void NodeController::SendBrokerClientInvitationOnIOThread(
                           Channel::HandlePolicy::kAcceptHandles,
                           io_task_runner_, process_error_callback);
 
-#else   // !defined(OS_MACOSX) && !defined(OS_NACL) && !defined(OS_FUCHSIA)
+#else   // !defined(OS_APPLE) && !defined(OS_NACL) && !defined(OS_FUCHSIA)
   scoped_refptr<NodeChannel> channel = NodeChannel::Create(
       this, std::move(connection_params), Channel::HandlePolicy::kAcceptHandles,
       io_task_runner_, process_error_callback);
-#endif  // !defined(OS_MACOSX) && !defined(OS_NACL) && !defined(OS_FUCHSIA)
+#endif  // !defined(OS_APPLE) && !defined(OS_NACL) && !defined(OS_FUCHSIA)
 
   // We set up the invitee channel with a temporary name so it can be identified
   // as a pending invitee if it writes any messages to the channel. We may start
@@ -446,6 +444,7 @@ void NodeController::AcceptBrokerClientInvitationOnIOThread(
       inviter_name_ = ports::kInvalidNodeName;
     }
 
+    const bool leak_endpoint = connection_params.leak_endpoint();
     // At this point we don't know the inviter's name, so we can't yet insert it
     // into our |peers_| map. That will happen as soon as we receive an
     // AcceptInvitee message from them.
@@ -454,7 +453,7 @@ void NodeController::AcceptBrokerClientInvitationOnIOThread(
                             Channel::HandlePolicy::kAcceptHandles,
                             io_task_runner_, ProcessErrorCallback());
 
-    if (connection_params.leak_endpoint()) {
+    if (leak_endpoint) {
       // Prevent the inviter pipe handle from being closed on shutdown. Pipe
       // closure may be used by the inviter to detect that the invited process
       // has terminated. In such cases, the invited process must not be invited
@@ -876,7 +875,7 @@ void NodeController::OnAcceptInvitation(const ports::NodeName& from_node,
 void NodeController::OnAddBrokerClient(const ports::NodeName& from_node,
                                        const ports::NodeName& client_name,
                                        base::ProcessHandle process_handle) {
-  ScopedProcessHandle scoped_process_handle(process_handle);
+  base::Process scoped_process_handle(process_handle);
 
   scoped_refptr<NodeChannel> sender = GetPeerChannel(from_node);
   if (!sender) {
@@ -899,7 +898,7 @@ void NodeController::OnAddBrokerClient(const ports::NodeName& from_node,
 #if defined(OS_WIN)
   // The broker must have a working handle to the client process in order to
   // properly copy other handles to and from the client.
-  if (!scoped_process_handle.is_valid()) {
+  if (!scoped_process_handle.IsValid()) {
     DLOG(ERROR) << "Broker rejecting client with invalid process handle.";
     return;
   }
@@ -992,11 +991,8 @@ void NodeController::OnAcceptBrokerClient(const ports::NodeName& from_node,
   // Feed the broker any pending invitees of our own.
   while (!pending_broker_clients.empty()) {
     const ports::NodeName& invitee_name = pending_broker_clients.front();
-    auto it = pending_invitations_.find(invitee_name);
-    // If for any reason we don't have a pending invitation for the invitee,
-    // there's nothing left to do: we've already swapped the relevant state into
-    // the stack.
-    if (it != pending_invitations_.end()) {
+    auto it = peers_.find(invitee_name);
+    if (it != peers_.end()) {
       broker->AddBrokerClient(invitee_name,
                               it->second->CloneRemoteProcessHandle());
     }
@@ -1312,7 +1308,7 @@ void NodeController::ForceDisconnectProcessForTestingOnIOThread(
   for (auto& peer : peers_) {
     NodeChannel* channel = peer.second.get();
     if (channel->HasRemoteProcessHandle()) {
-      base::Process process(channel->CloneRemoteProcessHandle().release());
+      base::Process process(channel->CloneRemoteProcessHandle());
       if (process.Pid() == process_id)
         peers_to_drop.emplace(peer.first, peer.second);
     }

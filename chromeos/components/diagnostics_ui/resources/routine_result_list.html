@@ -1,0 +1,15 @@
+<style include="diagnostics-shared">
+  #resultListContainer {
+    background-color: var(--google-grey-100);
+    border-radius: 20px;
+    padding: 15px;
+  }
+</style>
+
+<div id="resultListContainer" hidden$="[[hidden]]">
+  <dom-repeat id="resultList" items="[[results_]]">
+    <template>
+      <routine-result-entry item="[[item]]"></routine-result-entry>
+    </template>
+  </dom-repeat>
+</div>

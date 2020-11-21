@@ -1,5 +1,4 @@
 backer@chromium.org
-ericrk@chromium.org
 kbr@chromium.org
 sunnyps@chromium.org
 zmo@chromium.org
@@ -8,6 +7,9 @@ per-file *_ozone*=alexst@chromium.org
 per-file *_ozone*=dnicoara@chromium.org
 per-file *_ozone*=spang@chromium.org
 per-file *surface_control*=khushalsagar@chromium.org
+
+# For Windows Direct Composition and Swap Chain
+magchen@chromium.org
 
 # COMPONENT: Internals>GPU>Internals
 # TEAM: graphics-dev@chromium.org

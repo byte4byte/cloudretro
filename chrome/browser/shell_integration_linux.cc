@@ -24,6 +24,7 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/i18n/file_util_icu.h"
+#include "base/logging.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/nix/xdg_util.h"
 #include "base/path_service.h"
@@ -234,7 +235,7 @@ std::string QuoteCommandLineForDesktopFileExec(
     const base::CommandLine& command_line) {
   // http://standards.freedesktop.org/desktop-entry-spec/latest/ar01s06.html
 
-  std::string quoted_path = "";
+  std::string quoted_path;
   const base::CommandLine::StringVector& argv = command_line.argv();
   for (auto i = argv.begin(); i != argv.end(); ++i) {
     if (i != argv.begin())

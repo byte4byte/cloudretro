@@ -5,10 +5,10 @@
 #include "chrome/browser/extensions/extension_apitest.h"
 
 #include "base/check.h"
-#include "base/macros.h"
 #include "base/scoped_observer.h"
 #include "chrome/browser/notifications/notifier_state_tracker.h"
 #include "chrome/browser/notifications/notifier_state_tracker_factory.h"
+#include "content/public/test/browser_test.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_registry_observer.h"
 #include "ui/message_center/public/cpp/notifier_id.h"
@@ -27,6 +27,9 @@ class ExtensionPermissionUpdater : public ExtensionRegistryObserver {
       : profile_(profile), enabled_(enabled) {
     extension_registry_observer_.Add(ExtensionRegistry::Get(profile));
   }
+  ExtensionPermissionUpdater(const ExtensionPermissionUpdater&) = delete;
+  ExtensionPermissionUpdater& operator=(const ExtensionPermissionUpdater&) =
+      delete;
 
   // ExtensionRegistryObserver overrides:
   void OnExtensionLoaded(content::BrowserContext* browser_context,
@@ -49,8 +52,6 @@ class ExtensionPermissionUpdater : public ExtensionRegistryObserver {
 
   ScopedObserver<ExtensionRegistry, ExtensionRegistryObserver>
       extension_registry_observer_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(ExtensionPermissionUpdater);
 };
 
 using NotificationPermissionContextApiTest = extensions::ExtensionApiTest;

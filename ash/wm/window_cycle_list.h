@@ -10,16 +10,16 @@
 
 #include "ash/ash_export.h"
 #include "ash/wm/window_cycle_controller.h"
-#include "base/macros.h"
 #include "base/scoped_observer.h"
 #include "base/timer/timer.h"
 #include "ui/aura/window_observer.h"
 #include "ui/display/display_observer.h"
 #include "ui/display/screen.h"
+#include "ui/views/view.h"
 
 namespace aura {
-class Window;
 class ScopedWindowTargeter;
+class Window;
 }
 
 namespace views {
@@ -38,14 +38,31 @@ class ASH_EXPORT WindowCycleList : public aura::WindowObserver,
   using WindowList = std::vector<aura::Window*>;
 
   explicit WindowCycleList(const WindowList& windows);
+  WindowCycleList(const WindowCycleList&) = delete;
+  WindowCycleList& operator=(const WindowCycleList&) = delete;
   ~WindowCycleList() override;
 
-  bool empty() const { return windows_.empty(); }
+  // Removes the existing windows and replaces them with |windows|. If
+  // |windows| is empty, cancels cycling.
+  void ReplaceWindows(const WindowList& windows);
 
-  // Cycles to the next or previous window based on |direction|.
+  // Cycles to the next or previous window based on |direction|. This moves the
+  // focus ring to the next/previous window and also scrolls the list.
   void Step(WindowCycleController::Direction direction);
 
-  int current_index() const { return current_index_; }
+  // Scrolls windows in given |direction|. Does not move the focus ring.
+  void ScrollInDirection(WindowCycleController::Direction direction);
+
+  // Moves the focus ring to the respective preview for |window|. Does not
+  // scroll the window cycle list.
+  void SetFocusedWindow(aura::Window* window);
+
+  // Checks whether |event| occurs within the cycle view. Returns false if
+  // |cycle_view_| does not exist.
+  bool IsEventInCycleView(ui::LocatedEvent* event);
+
+  // Returns true if the window list overlay should be shown.
+  bool ShouldShowUi();
 
   void set_user_did_accept(bool user_did_accept) {
     user_did_accept_ = user_did_accept;
@@ -53,11 +70,12 @@ class ASH_EXPORT WindowCycleList : public aura::WindowObserver,
 
  private:
   friend class WindowCycleControllerTest;
+  friend class InteractiveWindowCycleListGestureHandlerTest;
 
   static void DisableInitialDelayForTesting();
-  const views::Widget* widget() const { return cycle_ui_widget_; }
 
   const WindowList& windows() const { return windows_; }
+  const views::Widget* widget() const { return cycle_ui_widget_; }
 
   // aura::WindowObserver overrides:
   // There is a chance a window is destroyed, for example by JS code. We need to
@@ -65,12 +83,13 @@ class ASH_EXPORT WindowCycleList : public aura::WindowObserver,
   // while window cycling.
   void OnWindowDestroying(aura::Window* window) override;
 
-  // display::DisplayObserver overrides:
+  // display::DisplayObserver:
   void OnDisplayMetricsChanged(const display::Display& display,
                                uint32_t changed_metrics) override;
 
-  // Returns true if the window list overlay should be shown.
-  bool ShouldShowUi();
+  // Removes all windows from the window list. Also removes the windows from
+  // |cycle_view_| if |cycle_view_| exists.
+  void RemoveAllWindows();
 
   // Initializes and shows |cycle_view_|.
   void InitWindowCycleView();
@@ -78,6 +97,30 @@ class ASH_EXPORT WindowCycleList : public aura::WindowObserver,
   // Selects a window, which either activates it or expands it in the case of
   // PIP.
   void SelectWindow(aura::Window* window);
+
+  // Scrolls windows by |offset|. Does not move the focus ring. If you want to
+  // scroll the list and move the focus ring in one animation, call
+  // SetFocusedWindow() before this.
+  void Scroll(int offset);
+
+  // Returns the index for the window |offset| away from |current_index_|. Can
+  // only be called if |windows_| is not empty. Also checks that the window for
+  // the returned index exists.
+  int GetOffsettedWindowIndex(int offset) const;
+
+  // Returns the index for |window| in |windows_|. |window| must be in
+  // |windows_|.
+  int GetIndexOfWindow(aura::Window* window) const;
+
+  // Returns the views for the window cycle list.
+  const views::View::Views& GetWindowCycleItemViewsForTesting() const;
+
+  // Returns the window cycle list's target window.
+  const aura::Window* GetTargetWindowForTesting() const;
+
+  WindowCycleView* cycle_view_for_testing() const { return cycle_view_; }
+
+  int current_index_for_testing() const { return current_index_; }
 
   // List of weak pointers to windows to use while cycling with the keyboard.
   // List is built when the user initiates the gesture (i.e. hits alt-tab the
@@ -113,8 +156,6 @@ class ASH_EXPORT WindowCycleList : public aura::WindowObserver,
   // This is needed so that it won't leak keyboard events even if the widget is
   // not activatable.
   std::unique_ptr<aura::ScopedWindowTargeter> window_targeter_;
-
-  DISALLOW_COPY_AND_ASSIGN(WindowCycleList);
 };
 
 }  // namespace ash

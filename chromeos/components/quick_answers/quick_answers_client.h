@@ -9,8 +9,8 @@
 #include <string>
 
 #include "ash/public/cpp/assistant/assistant_state.h"
-#include "ash/public/mojom/assistant_state_controller.mojom.h"
 #include "chromeos/components/quick_answers/result_loader.h"
+#include "chromeos/components/quick_answers/understanding/intent_generator.h"
 
 namespace network {
 namespace mojom {
@@ -23,6 +23,7 @@ namespace quick_answers {
 
 struct QuickAnswer;
 struct QuickAnswersRequest;
+struct IntentInfo;
 enum class IntentType;
 enum class ResultType;
 
@@ -38,7 +39,7 @@ class QuickAnswersDelegate {
       std::unique_ptr<QuickAnswer> quick_answer) {}
 
   // Invoked when the query is rewritten.
-  virtual void OnRequestPreprocessFinish(
+  virtual void OnRequestPreprocessFinished(
       const QuickAnswersRequest& processed_request) {}
 
   // Invoked when feature eligibility changed.
@@ -61,6 +62,11 @@ class QuickAnswersClient : public ash::AssistantStateObserver,
   using ResultLoaderFactoryCallback =
       base::RepeatingCallback<std::unique_ptr<ResultLoader>()>;
 
+  // Method that can be used in tests to change the intent generator returned by
+  // |CreateResultLoader| in tests.
+  using IntentGeneratorFactoryCallback =
+      base::RepeatingCallback<std::unique_ptr<IntentGenerator>()>;
+
   QuickAnswersClient(network::mojom::URLLoaderFactory* url_loader_factory,
                      ash::AssistantState* assistant_state,
                      QuickAnswersDelegate* delegate);
@@ -72,7 +78,7 @@ class QuickAnswersClient : public ash::AssistantStateObserver,
 
   // AssistantStateObserver:
   void OnAssistantFeatureAllowedChanged(
-      ash::mojom::AssistantAllowedState state) override;
+      chromeos::assistant::AssistantAllowedState state) override;
   void OnAssistantSettingsEnabled(bool enabled) override;
   void OnAssistantContextEnabled(bool enabled) override;
   void OnLocaleChanged(const std::string& locale) override;
@@ -84,7 +90,13 @@ class QuickAnswersClient : public ash::AssistantStateObserver,
   void OnQuickAnswerReceived(
       std::unique_ptr<QuickAnswer> quick_answer) override;
 
-  // Send a quick answer request. Virtual for testing.
+  // Send a quick answer request for preprocessing only.
+  void SendRequestForPreprocessing(
+      const QuickAnswersRequest& quick_answers_request);
+  // Fetch quick answers result from the server.
+  void FetchQuickAnswers(const QuickAnswersRequest& processed_request);
+  // Send a quick answer request. The request is preprocessed before fetching
+  // the result from the server. Virtual for testing.
   virtual void SendRequest(const QuickAnswersRequest& quick_answers_request);
 
   // User clicks on the Quick Answers result. Virtual for testing.
@@ -96,26 +108,50 @@ class QuickAnswersClient : public ash::AssistantStateObserver,
   static void SetResultLoaderFactoryForTesting(
       ResultLoaderFactoryCallback* factory);
 
+  static void SetIntentGeneratorFactoryForTesting(
+      IntentGeneratorFactoryCallback* factory);
+
+  static bool IsQuickAnswersAllowedForLocale(const std::string& locale,
+                                             const std::string& runtime_locale);
+
  private:
+  FRIEND_TEST_ALL_PREFIXES(QuickAnswersClientTest, SendRequest);
+  FRIEND_TEST_ALL_PREFIXES(QuickAnswersClientTest,
+                           NotSendRequestForUnknownIntent);
+  FRIEND_TEST_ALL_PREFIXES(QuickAnswersClientTest, PreprocessDefinitionIntent);
+  FRIEND_TEST_ALL_PREFIXES(QuickAnswersClientTest, PreprocessTranslationIntent);
+  FRIEND_TEST_ALL_PREFIXES(QuickAnswersClientTest,
+                           PreprocessUnitConversionIntent);
+
   // Creates a |ResultLoader| instance.
   std::unique_ptr<ResultLoader> CreateResultLoader(IntentType intent_type);
 
+  // Creates an |IntentGenerator| instance.
+  std::unique_ptr<IntentGenerator> CreateIntentGenerator(
+      const QuickAnswersRequest& request,
+      bool skip_fetch);
+
   void NotifyEligibilityChanged();
+  // Preprocesses the |QuickAnswersRequest| and fetch quick answers result. Only
+  // preprocesses the request and skip fetching result if |skip_fetch| is true.
+  void SendRequestInternal(const QuickAnswersRequest& quick_answers_request,
+                           bool skip_fetch);
   void IntentGeneratorCallback(const QuickAnswersRequest& quick_answers_request,
-                               const std::string& intent_text,
-                               IntentType intent_type);
+                               bool skip_fetch,
+                               const IntentInfo& intent_info);
   base::TimeDelta GetImpressionDuration() const;
 
   network::mojom::URLLoaderFactory* url_loader_factory_ = nullptr;
   ash::AssistantState* assistant_state_ = nullptr;
   QuickAnswersDelegate* delegate_ = nullptr;
   std::unique_ptr<ResultLoader> result_loader_;
+  std::unique_ptr<IntentGenerator> intent_generator_;
   bool assistant_enabled_ = false;
   bool assistant_context_enabled_ = false;
   bool quick_answers_settings_enabled_ = false;
   bool locale_supported_ = false;
-  ash::mojom::AssistantAllowedState assistant_allowed_state_ =
-      ash::mojom::AssistantAllowedState::ALLOWED;
+  chromeos::assistant::AssistantAllowedState assistant_allowed_state_ =
+      chromeos::assistant::AssistantAllowedState::ALLOWED;
   bool is_eligible_ = false;
   // Time when the quick answer is received.
   base::TimeTicks quick_answer_received_time_;

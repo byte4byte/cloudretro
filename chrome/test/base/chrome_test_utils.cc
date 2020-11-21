@@ -19,13 +19,26 @@ namespace chrome_test_utils {
 content::WebContents* GetActiveWebContents(PlatformBrowserTest* browser_test) {
 #if defined(OS_ANDROID)
   for (size_t i = 0; i < TabModelList::size(); ++i) {
-    if (TabModelList::get(i)->IsCurrentModel())
+    if (TabModelList::get(i)->IsActiveModel())
       return TabModelList::get(i)->GetActiveWebContents();
   }
   NOTREACHED() << "No active TabModel??";
   return nullptr;
 #else
   return browser_test->browser()->tab_strip_model()->GetActiveWebContents();
+#endif
+}
+
+Profile* GetProfile(PlatformBrowserTest* browser_test) {
+#if defined(OS_ANDROID)
+  for (size_t i = 0; i < TabModelList::size(); ++i) {
+    if (TabModelList::get(i)->IsActiveModel())
+      return TabModelList::get(i)->GetProfile();
+  }
+  NOTREACHED() << "No active TabModel??";
+  return nullptr;
+#else
+  return browser_test->browser()->profile();
 #endif
 }
 

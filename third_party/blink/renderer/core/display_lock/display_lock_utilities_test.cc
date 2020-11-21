@@ -14,16 +14,17 @@
 
 namespace blink {
 
-class DisplayLockUtilitiesTest : public RenderingTest,
-                                 private ScopedCSSSubtreeVisibilityHiddenMatchableForTest {
+class DisplayLockUtilitiesTest
+    : public RenderingTest,
+      private ScopedCSSContentVisibilityHiddenMatchableForTest {
  public:
   DisplayLockUtilitiesTest()
       : RenderingTest(MakeGarbageCollected<SingleChildLocalFrameClient>()),
-        ScopedCSSSubtreeVisibilityHiddenMatchableForTest(true) {}
+        ScopedCSSContentVisibilityHiddenMatchableForTest(true) {}
 
   void LockElement(Element& element, bool activatable) {
     StringBuilder value;
-    value.Append("subtree-visibility: hidden");
+    value.Append("content-visibility: hidden");
     if (activatable)
       value.Append("-matchable");
     element.setAttribute(html_names::kStyleAttr, value.ToAtomicString());
@@ -234,6 +235,12 @@ TEST_F(DisplayLockUtilitiesTest, LockedSubtreeCrossingFrames) {
 
   // Unlock grandparent.
   CommitElement(*grandparent);
+
+  // CommitElement(*grandparent) ran a lifecycle update, but during that update
+  // the iframe document was still throttled, so did not update style. The
+  // iframe document should have become unthrottled at the end of that update,
+  // so it takes an additional lifecycle update to resolve style in the iframe.
+  UpdateAllLifecyclePhasesForTest();
 
   EXPECT_FALSE(
       DisplayLockUtilities::IsInLockedSubtreeCrossingFrames(*grandparent));

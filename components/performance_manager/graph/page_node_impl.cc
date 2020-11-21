@@ -7,7 +7,7 @@
 #include <memory>
 
 #include "base/bind.h"
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "base/stl_util.h"
 #include "base/time/default_tick_clock.h"
 #include "components/performance_manager/graph/frame_node_impl.h"
@@ -34,13 +34,16 @@ PageNodeImpl::PageNodeImpl(const WebContentsProxy& contents_proxy,
 
 PageNodeImpl::~PageNodeImpl() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  DCHECK_EQ(nullptr, opener_frame_node_);
+  DCHECK_EQ(OpenedType::kInvalid, opened_type_);
 }
 
 const WebContentsProxy& PageNodeImpl::contents_proxy() const {
   return contents_proxy_;
 }
 
-void PageNodeImpl::AddFrame(FrameNodeImpl* frame_node) {
+void PageNodeImpl::AddFrame(base::PassKey<FrameNodeImpl>,
+                            FrameNodeImpl* frame_node) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(frame_node);
   DCHECK_EQ(this, frame_node->page_node());
@@ -51,7 +54,8 @@ void PageNodeImpl::AddFrame(FrameNodeImpl* frame_node) {
     main_frame_nodes_.insert(frame_node);
 }
 
-void PageNodeImpl::RemoveFrame(FrameNodeImpl* frame_node) {
+void PageNodeImpl::RemoveFrame(base::PassKey<FrameNodeImpl>,
+                               FrameNodeImpl* frame_node) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(frame_node);
   DCHECK_EQ(this, frame_node->page_node());
@@ -150,6 +154,18 @@ FrameNodeImpl* PageNodeImpl::GetMainFrameNodeImpl() const {
   return *main_frame_nodes_.begin();
 }
 
+FrameNodeImpl* PageNodeImpl::opener_frame_node() const {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  DCHECK(opener_frame_node_ || opened_type_ == OpenedType::kInvalid);
+  return opener_frame_node_;
+}
+
+PageNodeImpl::OpenedType PageNodeImpl::opened_type() const {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  DCHECK(opener_frame_node_ || opened_type_ == OpenedType::kInvalid);
+  return opened_type_;
+}
+
 bool PageNodeImpl::is_visible() const {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return is_visible_.value();
@@ -173,12 +189,6 @@ ukm::SourceId PageNodeImpl::ukm_source_id() const {
 PageNodeImpl::LifecycleState PageNodeImpl::lifecycle_state() const {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return lifecycle_state_.value();
-}
-
-PageNodeImpl::InterventionPolicy PageNodeImpl::origin_trial_freeze_policy()
-    const {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  return origin_trial_freeze_policy_.value();
 }
 
 bool PageNodeImpl::is_holding_weblock() const {
@@ -231,6 +241,43 @@ bool PageNodeImpl::had_form_interaction() const {
   return had_form_interaction_.value();
 }
 
+void PageNodeImpl::SetOpenerFrameNodeAndOpenedType(FrameNodeImpl* opener,
+                                                   OpenedType opened_type) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  DCHECK(opener);
+  DCHECK(graph()->NodeInGraph(opener));
+  DCHECK_NE(this, opener->page_node());
+  DCHECK_NE(OpenedType::kInvalid, opened_type);
+
+  auto* previous_opener = opener_frame_node_;
+  auto previous_type = opened_type_;
+
+  if (previous_opener)
+    previous_opener->RemoveOpenedPage(PassKey(), this);
+  opener_frame_node_ = opener;
+  opened_type_ = opened_type;
+  opener->AddOpenedPage(PassKey(), this);
+
+  for (auto* observer : GetObservers())
+    observer->OnOpenerFrameNodeChanged(this, previous_opener, previous_type);
+}
+
+void PageNodeImpl::ClearOpenerFrameNodeAndOpenedType() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  DCHECK_NE(nullptr, opener_frame_node_);
+  DCHECK_NE(OpenedType::kInvalid, opened_type_);
+
+  auto* previous_opener = opener_frame_node_;
+  auto previous_type = opened_type_;
+
+  opener_frame_node_->RemoveOpenedPage(PassKey(), this);
+  opener_frame_node_ = nullptr;
+  opened_type_ = OpenedType::kInvalid;
+
+  for (auto* observer : GetObservers())
+    observer->OnOpenerFrameNodeChanged(this, previous_opener, previous_type);
+}
+
 void PageNodeImpl::set_usage_estimate_time(
     base::TimeTicks usage_estimate_time) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
@@ -262,12 +309,26 @@ void PageNodeImpl::OnJoiningGraph() {
 void PageNodeImpl::OnBeforeLeavingGraph() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
+  // Sever opener relationships.
+  if (opener_frame_node_)
+    ClearOpenerFrameNodeAndOpenedType();
+
   DCHECK_EQ(0u, frame_node_count_);
 }
 
 const std::string& PageNodeImpl::GetBrowserContextID() const {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return browser_context_id();
+}
+
+const FrameNode* PageNodeImpl::GetOpenerFrameNode() const {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  return opener_frame_node();
+}
+
+PageNodeImpl::OpenedType PageNodeImpl::GetOpenedType() const {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  return opened_type();
 }
 
 bool PageNodeImpl::IsVisible() const {
@@ -298,12 +359,6 @@ ukm::SourceId PageNodeImpl::GetUkmSourceID() const {
 PageNodeImpl::LifecycleState PageNodeImpl::GetLifecycleState() const {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return lifecycle_state();
-}
-
-PageNodeImpl::InterventionPolicy PageNodeImpl::GetOriginTrialFreezePolicy()
-    const {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  return origin_trial_freeze_policy();
 }
 
 bool PageNodeImpl::IsHoldingWebLock() const {
@@ -369,11 +424,6 @@ const WebContentsProxy& PageNodeImpl::GetContentsProxy() const {
 void PageNodeImpl::SetLifecycleState(LifecycleState lifecycle_state) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   lifecycle_state_.SetAndMaybeNotify(this, lifecycle_state);
-}
-
-void PageNodeImpl::SetOriginTrialFreezePolicy(InterventionPolicy policy) {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  origin_trial_freeze_policy_.SetAndMaybeNotify(this, policy);
 }
 
 void PageNodeImpl::SetIsHoldingWebLock(bool is_holding_weblock) {

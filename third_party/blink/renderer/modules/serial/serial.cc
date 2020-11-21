@@ -17,9 +17,9 @@
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
-#include "third_party/blink/renderer/core/frame/local_frame.h"
+#include "third_party/blink/renderer/core/execution_context/navigator_base.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/modules/event_target_modules_names.h"
-#include "third_party/blink/renderer/modules/serial/serial_connection_event.h"
 #include "third_party/blink/renderer/modules/serial/serial_port.h"
 #include "third_party/blink/renderer/platform/heap/heap.h"
 
@@ -41,10 +41,30 @@ String TokenToString(const base::UnguessableToken& token) {
 
 }  // namespace
 
-Serial::Serial(ExecutionContext& execution_context)
-    : ExecutionContextLifecycleObserver(&execution_context),
-      service_(&execution_context),
-      receiver_(this, &execution_context) {}
+const char Serial::kSupplementName[] = "Serial";
+
+Serial* Serial::serial(NavigatorBase& navigator) {
+  ExecutionContext* context = navigator.GetExecutionContext();
+  if (!context ||
+      (!context->IsWindow() && !context->IsDedicatedWorkerGlobalScope())) {
+    // TODO(https://crbug.com/839117): Remove this check once the Exposed
+    // attribute is fixed to only expose this property in dedicated workers.
+    return nullptr;
+  }
+
+  Serial* serial = Supplement<NavigatorBase>::From<Serial>(navigator);
+  if (!serial) {
+    serial = MakeGarbageCollected<Serial>(navigator);
+    ProvideTo(navigator, serial);
+  }
+  return serial;
+}
+
+Serial::Serial(NavigatorBase& navigator)
+    : Supplement<NavigatorBase>(navigator),
+      ExecutionContextLifecycleObserver(navigator.GetExecutionContext()),
+      service_(navigator.GetExecutionContext()),
+      receiver_(this, navigator.GetExecutionContext()) {}
 
 ExecutionContext* Serial::GetExecutionContext() const {
   return ExecutionContextLifecycleObserver::GetExecutionContext();
@@ -60,13 +80,13 @@ void Serial::ContextDestroyed() {
 }
 
 void Serial::OnPortAdded(mojom::blink::SerialPortInfoPtr port_info) {
-  DispatchEvent(*SerialConnectionEvent::Create(
-      event_type_names::kConnect, GetOrCreatePort(std::move(port_info))));
+  SerialPort* port = GetOrCreatePort(std::move(port_info));
+  port->DispatchEvent(*Event::CreateBubble(event_type_names::kConnect));
 }
 
 void Serial::OnPortRemoved(mojom::blink::SerialPortInfoPtr port_info) {
-  DispatchEvent(*SerialConnectionEvent::Create(
-      event_type_names::kDisconnect, GetOrCreatePort(std::move(port_info))));
+  SerialPort* port = GetOrCreatePort(std::move(port_info));
+  port->DispatchEvent(*Event::CreateBubble(event_type_names::kDisconnect));
 }
 
 ScriptPromise Serial::getPorts(ScriptState* script_state,
@@ -97,21 +117,20 @@ ScriptPromise Serial::getPorts(ScriptState* script_state,
 ScriptPromise Serial::requestPort(ScriptState* script_state,
                                   const SerialPortRequestOptions* options,
                                   ExceptionState& exception_state) {
-  auto* frame = GetFrame();
-  if (!frame || !frame->GetDocument()) {
+  if (!DomWindow()) {
     exception_state.ThrowDOMException(DOMExceptionCode::kNotSupportedError,
                                       kContextGone);
     return ScriptPromise();
   }
 
-  if (!frame->GetDocument()->IsFeatureEnabled(
+  if (!GetExecutionContext()->IsFeatureEnabled(
           mojom::blink::FeaturePolicyFeature::kSerial,
           ReportOptions::kReportOnFailure)) {
     exception_state.ThrowSecurityError(kFeaturePolicyBlocked);
     return ScriptPromise();
   }
 
-  if (!LocalFrame::HasTransientUserActivation(frame)) {
+  if (!LocalFrame::HasTransientUserActivation(DomWindow()->GetFrame())) {
     exception_state.ThrowSecurityError(
         "Must be handling a user gesture to show a permission request.");
     return ScriptPromise();
@@ -157,20 +176,24 @@ ScriptPromise Serial::requestPort(ScriptState* script_state,
   return resolver->Promise();
 }
 
-void Serial::GetPort(
+void Serial::OpenPort(
     const base::UnguessableToken& token,
-    mojo::PendingReceiver<device::mojom::blink::SerialPort> receiver) {
+    device::mojom::blink::SerialConnectionOptionsPtr options,
+    mojo::PendingRemote<device::mojom::blink::SerialPortClient> client,
+    mojom::blink::SerialService::OpenPortCallback callback) {
   EnsureServiceConnection();
-  service_->GetPort(token, std::move(receiver));
+  service_->OpenPort(token, std::move(options), std::move(client),
+                     std::move(callback));
 }
 
-void Serial::Trace(Visitor* visitor) {
+void Serial::Trace(Visitor* visitor) const {
   visitor->Trace(service_);
   visitor->Trace(receiver_);
   visitor->Trace(get_ports_promises_);
   visitor->Trace(request_port_promises_);
   visitor->Trace(port_cache_);
   EventTargetWithInlineData::Trace(visitor);
+  Supplement<NavigatorBase>::Trace(visitor);
   ExecutionContextLifecycleObserver::Trace(visitor);
 }
 

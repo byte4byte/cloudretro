@@ -11,6 +11,7 @@
 #include "base/mac/foundation_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/sys_string_conversions.h"
+#include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #import "ios/chrome/browser/main/browser.h"
 #import "ios/chrome/browser/ui/commands/command_dispatcher.h"
 #import "ios/chrome/browser/ui/fullscreen/fullscreen_controller.h"
@@ -71,6 +72,8 @@
                    forProtocol:@protocol(FakeboxFocuser)];
 
   self.viewController = [[PrimaryToolbarViewController alloc] init];
+  self.viewController.shouldHideOmniboxOnNTP =
+      !self.browser->GetBrowserState()->IsOffTheRecord();
   self.viewController.buttonFactory = [self buttonFactoryWithType:PRIMARY];
   // TODO(crbug.com/1045047): Use HandlerForProtocol after commands protocol
   // clean up.
@@ -145,6 +148,15 @@
                              animated:self.enableAnimationsForOmniboxFocus];
 }
 
+- (id<ViewRevealingAnimatee>)animatee {
+  return self.viewController;
+}
+
+- (void)setPanGestureHandler:
+    (ViewRevealingVerticalPanHandler*)panGestureHandler {
+  self.viewController.panGestureHandler = panGestureHandler;
+}
+
 #pragma mark - PrimaryToolbarViewControllerDelegate
 
 - (void)viewControllerTraitCollectionDidChange:
@@ -166,6 +178,12 @@
     FullscreenController::FromBrowserState(self.browser->GetBrowserState())
         ->ExitFullscreen();
   }
+}
+
+#pragma mark - NewTabPageControllerDelegate
+
+- (UIResponder<UITextInput>*)fakeboxScribbleForwardingTarget {
+  return self.locationBarCoordinator.omniboxScribbleForwardingTarget;
 }
 
 #pragma mark - FakeboxFocuser
@@ -191,7 +209,7 @@
   web::WebState* webState =
       self.browser->GetWebStateList()->GetActiveWebState();
   if (webState && IsVisibleURLNewTabPage(webState)) {
-    self.viewController.view.hidden = IsSplitToolbarMode();
+    self.viewController.view.hidden = IsSplitToolbarMode(self.viewController);
   }
 }
 

@@ -27,7 +27,7 @@
 #include "services/network/public/mojom/trust_tokens.mojom-blink-forward.h"
 #include "services/network/public/mojom/web_sandbox_flags.mojom-blink.h"
 #include "third_party/blink/public/common/feature_policy/feature_policy.h"
-#include "third_party/blink/public/common/frame/frame_owner_element_type.h"
+#include "third_party/blink/public/mojom/frame/frame_owner_element_type.mojom-blink.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/html/html_frame_element_base.h"
 #include "third_party/blink/renderer/core/html/html_iframe_element_sandbox.h"
@@ -40,10 +40,9 @@ class CORE_EXPORT HTMLIFrameElement final
     : public HTMLFrameElementBase,
       public Supplementable<HTMLIFrameElement> {
   DEFINE_WRAPPERTYPEINFO();
-  USING_GARBAGE_COLLECTED_MIXIN(HTMLIFrameElement);
 
  public:
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
 
   explicit HTMLIFrameElement(Document&);
   ~HTMLIFrameElement() override;
@@ -55,12 +54,11 @@ class CORE_EXPORT HTMLIFrameElement final
   // Returns attributes that should be checked against Trusted Types
   const AttrNameToTrustedType& GetCheckedAttributeTypes() const override;
 
-  ParsedFeaturePolicy ConstructContainerPolicy(
-      Vector<String>* /* messages */) const override;
-  DocumentPolicy::FeatureState ConstructRequiredPolicy() const override;
+  ParsedFeaturePolicy ConstructContainerPolicy() const override;
+  DocumentPolicyFeatureState ConstructRequiredPolicy() const override;
 
-  FrameOwnerElementType OwnerType() const final {
-    return FrameOwnerElementType::kIframe;
+  mojom::blink::FrameOwnerElementType OwnerType() const final {
+    return mojom::blink::FrameOwnerElementType::kIframe;
   }
 
   network::mojom::blink::WebSandboxFlags

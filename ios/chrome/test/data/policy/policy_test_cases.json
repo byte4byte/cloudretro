@@ -46,6 +46,32 @@
     ]
   },
 
+  "CloudManagementEnrollmentToken": {},
+
+  "CloudReportingEnabled": {
+    "os": [ "ios" ],
+    "policy_pref_mapping_test": [
+      {
+        "policies": { "CloudReportingEnabled": true },
+        "prefs": { "enterprise_reporting.chrome_cloud_reporting": { "local_state": true } }
+      }
+    ]
+  },
+
+ "ChromeVariations": {
+    "os": [ "ios" ],
+    "policy_pref_mapping_test": [
+      {
+        "policies": {
+          "ChromeVariations": 1
+        },
+        "prefs": { "variations_restrictions_by_policy": { "local_state": true } }
+      }
+    ]
+  },
+
+  "CloudPolicyOverridesPlatformPolicy": {},
+
   "DefaultPopupsSetting": {
     "os": [ "ios" ],
     "note": "TODO(crbug.com/106682): Flag this with can_be_recommended",
@@ -262,12 +288,32 @@
     ]
   },
 
+  "DisableSafeBrowsingProceedAnyway": {
+    "os": [ "ios" ],
+    "policy_pref_mapping_test": [
+      {
+        "policies": {"DisableSafeBrowsingProceedAnyway": true},
+        "prefs": { "safebrowsing.proceed_anyway_disabled": {}}
+      }
+    ]
+  },
+
   "EditBookmarksEnabled": {
     "os": [ "ios" ],
     "policy_pref_mapping_test": [
       {
         "policies": { "EditBookmarksEnabled": false },
         "prefs": { "bookmarks.editing_enabled": {} }
+      }
+    ]
+  },
+
+  "MetricsReportingEnabled": {
+    "os": [ "ios" ],
+    "policy_pref_mapping_test": [
+      {
+        "policies": { "MetricsReportingEnabled": false },
+        "prefs": { "user_experience_metrics.reporting_enabled": { "local_state": true } }
       }
     ]
   },
@@ -301,6 +347,57 @@
       {
         "policies": { "PopupsBlockedForUrls": ["[*.]google.com"]},
         "prefs": { "profile.managed_popups_blocked_for_urls": {} }
+       }
+     ]
+   },
+
+  "PrintingEnabled":{
+      "os":["ios"],
+      "policy_pref_mapping_test":[
+          {
+              "policies":{"PrintingEnabled": true},
+              "prefs":{
+                "printing.enabled":{
+                  "value": true
+              }
+            }
+          },
+          {
+              "policies":{"PrintingEnabled": false},
+              "prefs":{
+                "printing.enabled":{
+                  "value": false
+              }
+            }
+          }
+      ]
+  },
+
+  "SafeBrowsingEnabled": {
+    "os": [ "ios" ],
+    "can_be_recommended": true,
+    "policy_pref_mapping_test": [
+      {
+        "policies": { "SafeBrowsingEnabled": false },
+        "prefs": { "safebrowsing.enabled": {} }
+      },
+      {
+        "policies": { "SafeBrowsingEnabled": true },
+        "prefs": { "safebrowsing.enabled": {} }
+      }
+    ]
+  },
+
+  "SafeBrowsingProtectionLevel": {
+    "os": [ "ios" ],
+    "can_be_recommended": true,
+    "policy_pref_mapping_test": [
+      {
+        "policies": { "SafeBrowsingProtectionLevel": 2 },
+        "prefs": {
+          "safebrowsing.enabled": { "value": true },
+          "safebrowsing.enhanced": { "value": true }
+        }
       }
     ]
   },
@@ -331,25 +428,40 @@
     ]
   },
 
-  "URLBlacklist": {
+  "TranslateEnabled": {
+    "os": [ "ios" ],
+    "can_be_recommended": true,
+    "policy_pref_mapping_test": [
+      {
+        "policies": {"TranslateEnabled": false},
+        "prefs": { "translate.enabled": {} }
+      }
+    ]
+  },
+
+  "URLBlocklist": {
     "os": [ "ios" ],
     "policy_pref_mapping_test": [
       {
-        "policies": {"URLBlacklist": ["google.com"]},
+        "policies": {"URLBlocklist": ["google.com"]},
         "prefs": { "policy.url_blacklist": {}}
       }
     ]
   },
 
-  "URLWhitelist": {
+  "URLAllowlist": {
     "os": [ "ios" ],
     "policy_pref_mapping_test": [
       {
-        "policies": {"URLWhitelist": ["google.com"]},
+        "policies": {"URLAllowlist": ["google.com"]},
         "prefs": { "policy.url_whitelist": {}}
       }
     ]
   },
 
-  "ManagedBookmarks": {}
+  "ManagedBookmarks": {},
+
+  "EnableExperimentalPolicies":{
+    "note": "This policy has no pref as it is only directly read by the policy system."
+  }
 }

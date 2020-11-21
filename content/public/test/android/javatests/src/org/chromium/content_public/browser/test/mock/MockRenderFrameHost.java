@@ -5,6 +5,7 @@
 package org.chromium.content_public.browser.test.mock;
 
 import org.chromium.base.Callback;
+import org.chromium.content_public.browser.FeaturePolicyFeature;
 import org.chromium.content_public.browser.RenderFrameHost;
 import org.chromium.services.service_manager.InterfaceProvider;
 import org.chromium.url.Origin;
@@ -27,7 +28,7 @@ public class MockRenderFrameHost implements RenderFrameHost {
     public void getCanonicalUrlForSharing(Callback<String> callback) {}
 
     @Override
-    public boolean isPaymentFeaturePolicyEnabled() {
+    public boolean isFeatureEnabled(@FeaturePolicyFeature int feature) {
         return false;
     }
 
@@ -55,12 +56,14 @@ public class MockRenderFrameHost implements RenderFrameHost {
     }
 
     @Override
-    public int performGetAssertionWebAuthSecurityChecks(String relyingPartyId) {
+    public int performGetAssertionWebAuthSecurityChecks(
+            String relyingPartyId, Origin effectiveOrigin) {
         return 0;
     }
 
     @Override
-    public int performMakeCredentialWebAuthSecurityChecks(String relyingPartyId) {
+    public int performMakeCredentialWebAuthSecurityChecks(
+            String relyingPartyId, Origin effectiveOrigin) {
         return 0;
     }
 }

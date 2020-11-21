@@ -5,7 +5,7 @@
 #include "remoting/protocol/pairing_client_authenticator.h"
 
 #include "base/bind.h"
-#include "base/logging.h"
+#include "base/check.h"
 #include "remoting/base/constants.h"
 #include "remoting/protocol/auth_util.h"
 #include "remoting/protocol/channel_authenticator.h"
@@ -58,9 +58,9 @@ void PairingClientAuthenticator::CreateSpakeAuthenticatorWithPin(
   DCHECK(!waiting_for_pin_);
   waiting_for_pin_ = true;
   client_auth_config_.fetch_secret_callback.Run(
-      true, base::Bind(&PairingClientAuthenticator::OnPinFetched,
-                       weak_factory_.GetWeakPtr(), initial_state,
-                       base::Passed(std::move(resume_callback))));
+      true, base::BindRepeating(&PairingClientAuthenticator::OnPinFetched,
+                                weak_factory_.GetWeakPtr(), initial_state,
+                                base::Passed(std::move(resume_callback))));
 }
 
 void PairingClientAuthenticator::OnPinFetched(State initial_state,

@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/core/testing/dummy_modulator.h"
 
+#include "third_party/blink/renderer/bindings/core/v8/module_record.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_value.h"
 #include "third_party/blink/renderer/core/script/module_record_resolver.h"
 
@@ -41,7 +42,7 @@ DummyModulator::DummyModulator()
 
 DummyModulator::~DummyModulator() = default;
 
-void DummyModulator::Trace(Visitor* visitor) {
+void DummyModulator::Trace(Visitor* visitor) const {
   visitor->Trace(resolver_);
   Modulator::Trace(visitor);
 }
@@ -51,8 +52,8 @@ ScriptState* DummyModulator::GetScriptState() {
   return nullptr;
 }
 
-V8CacheOptions DummyModulator::GetV8CacheOptions() const {
-  return kV8CacheOptionsDefault;
+mojom::blink::V8CacheOptions DummyModulator::GetV8CacheOptions() const {
+  return mojom::blink::V8CacheOptions::kDefault;
 }
 
 bool DummyModulator::IsScriptingDisabled() const {
@@ -74,7 +75,7 @@ base::SingleThreadTaskRunner* DummyModulator::TaskRunner() {
 
 void DummyModulator::FetchTree(const KURL&,
                                ResourceFetcher*,
-                               mojom::RequestContextType,
+                               mojom::blink::RequestContextType,
                                network::mojom::RequestDestination,
                                const ScriptFetchOptions&,
                                ModuleScriptCustomFetchType,
@@ -93,7 +94,7 @@ void DummyModulator::FetchSingle(const ModuleScriptFetchRequest&,
 void DummyModulator::FetchDescendantsForInlineScript(
     ModuleScript*,
     ResourceFetcher*,
-    mojom::RequestContextType,
+    mojom::blink::RequestContextType,
     network::mojom::RequestDestination,
     ModuleTreeClient*) {
   NOTREACHED();
@@ -162,22 +163,19 @@ ScriptValue DummyModulator::InstantiateModule(v8::Local<v8::Module>,
   return ScriptValue();
 }
 
-Vector<Modulator::ModuleRequest> DummyModulator::ModuleRequestsFromModuleRecord(
+Vector<ModuleRequest> DummyModulator::ModuleRequestsFromModuleRecord(
     v8::Local<v8::Module>) {
   NOTREACHED();
   return Vector<ModuleRequest>();
 }
 
-ScriptValue DummyModulator::ExecuteModule(ModuleScript*, CaptureEvalErrorFlag) {
-  NOTREACHED();
-  return ScriptValue();
-}
-
 ModuleScriptFetcher* DummyModulator::CreateModuleScriptFetcher(
     ModuleScriptCustomFetchType,
-    util::PassKey<ModuleScriptLoader> pass_key) {
+    base::PassKey<ModuleScriptLoader> pass_key) {
   NOTREACHED();
   return nullptr;
 }
+
+void DummyModulator::ProduceCacheModuleTreeTopLevel(ModuleScript*) {}
 
 }  // namespace blink

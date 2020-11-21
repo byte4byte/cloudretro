@@ -41,11 +41,11 @@ class SearchBox extends cr.EventTarget {
 
     /**
      * Ripple effect of search button.
-     * @private {!FilesToggleRipple}
+     * @private {!FilesToggleRippleElement}
      * @const
      */
     this.searchButtonToggleRipple_ =
-        /** @type {!FilesToggleRipple} */ (
+        /** @type {!FilesToggleRippleElement} */ (
             queryRequiredElement('files-toggle-ripple', this.searchButton));
 
     /**
@@ -108,7 +108,7 @@ class SearchBox extends cr.EventTarget {
     element.parentNode.appendChild(this.autocompleteList);
   }
 
-  /** @private {boolean} */
+  /** @return {boolean} */
   get collapsed() {
     return this.searchWrapper.hasAttribute('collapsed');
   }

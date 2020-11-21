@@ -6,10 +6,11 @@
 
 #import <CoreText/CoreText.h>
 
+#include "base/check_op.h"
 #include "base/command_line.h"
 #include "base/ios/ios_util.h"
-#include "base/logging.h"
 #include "base/mac/foundation_util.h"
+#include "base/notreached.h"
 
 #include "base/strings/sys_string_conversions.h"
 #include "components/grit/components_scaled_resources.h"
@@ -18,7 +19,6 @@
 #include "ios/chrome/browser/autocomplete/autocomplete_scheme_classifier_impl.h"
 #include "ios/chrome/browser/system_flags.h"
 #import "ios/chrome/browser/ui/omnibox/omnibox_util.h"
-#import "ios/chrome/browser/ui/toolbar/public/features.h"
 #import "ios/chrome/browser/ui/toolbar/public/toolbar_constants.h"
 #include "ios/chrome/browser/ui/ui_feature_flags.h"
 #import "ios/chrome/browser/ui/util/animation_util.h"
@@ -229,20 +229,20 @@ NSString* const kOmniboxFadeAnimationKey = @"OmniboxFadeAnimation";
 
   [self setTextAlignment:NSTextAlignmentNatural];
 
-  UITextWritingDirection textDirection =
+  NSWritingDirection textDirection =
       [self baseWritingDirectionForPosition:[self beginningOfDocument]
                                 inDirection:UITextStorageDirectionForward];
   NSLocaleLanguageDirection currentLocaleDirection = [NSLocale
       characterDirectionForLanguage:NSLocale.currentLocale.languageCode];
 
-  if ((textDirection == UITextWritingDirectionLeftToRight &&
+  if ((textDirection == NSWritingDirectionLeftToRight &&
        currentLocaleDirection == NSLocaleLanguageDirectionLeftToRight) ||
-      (textDirection == UITextWritingDirectionRightToLeft &&
+      (textDirection == NSWritingDirectionRightToLeft &&
        currentLocaleDirection == NSLocaleLanguageDirectionRightToLeft)) {
     return UISemanticContentAttributeUnspecified;
   }
 
-  return textDirection == UITextWritingDirectionRightToLeft
+  return textDirection == NSWritingDirectionRightToLeft
              ? UISemanticContentAttributeForceRightToLeft
              : UISemanticContentAttributeForceLeftToRight;
 }
@@ -409,7 +409,7 @@ NSString* const kOmniboxFadeAnimationKey = @"OmniboxFadeAnimation";
 }
 
 - (UIFont*)currentFont {
-  return IsCompactWidth() ? self.normalFont : self.largerFont;
+  return IsCompactWidth(self) ? self.normalFont : self.largerFont;
 }
 
 #pragma mark - Private methods
@@ -613,8 +613,8 @@ NSString* const kOmniboxFadeAnimationKey = @"OmniboxFadeAnimation";
   }
 
   // If there is pasteboard content, show paste.
-  if (UIPasteboard.generalPasteboard.string.length > 0 && action == @selector
-                                                              (paste:)) {
+  if (UIPasteboard.generalPasteboard.hasStrings && action == @selector
+                                                       (paste:)) {
     return YES;
   }
 

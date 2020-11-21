@@ -51,6 +51,8 @@ class WebrtcConnectionToClient : public ConnectionToClient,
   void set_host_stub(HostStub* host_stub) override;
   void set_input_stub(InputStub* input_stub) override;
   void ApplySessionOptions(const SessionOptions& options) override;
+  PeerConnectionControls* peer_connection_controls() override;
+  WebrtcEventLogData* rtc_event_log() override;
 
   // Session::EventHandler interface.
   void OnSessionStateChange(Session::State state) override;
@@ -59,6 +61,7 @@ class WebrtcConnectionToClient : public ConnectionToClient,
   void OnWebrtcTransportConnecting() override;
   void OnWebrtcTransportConnected() override;
   void OnWebrtcTransportError(ErrorCode error) override;
+  void OnWebrtcTransportProtocolChanged() override;
   void OnWebrtcTransportIncomingDataChannel(
       const std::string& name,
       std::unique_ptr<MessagePipe> pipe) override;
@@ -66,12 +69,15 @@ class WebrtcConnectionToClient : public ConnectionToClient,
       scoped_refptr<webrtc::MediaStreamInterface> stream) override;
   void OnWebrtcTransportMediaStreamRemoved(
       scoped_refptr<webrtc::MediaStreamInterface> stream) override;
+  void OnWebrtcTransportRouteChanged(const TransportRoute& route) override;
 
   // ChannelDispatcherBase::EventHandler interface.
   void OnChannelInitialized(ChannelDispatcherBase* channel_dispatcher) override;
   void OnChannelClosed(ChannelDispatcherBase* channel_dispatcher) override;
 
  private:
+  bool allChannelsConnected();
+
   base::ThreadChecker thread_checker_;
 
   // Event handler for handling events sent from this object.

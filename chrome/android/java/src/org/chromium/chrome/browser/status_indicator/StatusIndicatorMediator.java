@@ -5,7 +5,6 @@
 package org.chromium.chrome.browser.status_indicator;
 
 import android.animation.Animator;
-import android.animation.AnimatorListenerAdapter;
 import android.animation.AnimatorSet;
 import android.animation.ArgbEvaluator;
 import android.animation.ValueAnimator;
@@ -17,27 +16,37 @@ import androidx.annotation.ColorInt;
 import androidx.annotation.NonNull;
 import androidx.annotation.VisibleForTesting;
 
+import org.chromium.base.Callback;
 import org.chromium.base.supplier.Supplier;
-import org.chromium.chrome.browser.fullscreen.ChromeFullscreenManager;
+import org.chromium.chrome.browser.browser_controls.BrowserControlsStateProvider;
+import org.chromium.components.browser_ui.widget.animation.CancelAwareAnimatorListener;
 import org.chromium.components.browser_ui.widget.animation.Interpolators;
 import org.chromium.ui.modelutil.PropertyModel;
 
 import java.util.HashSet;
 
 class StatusIndicatorMediator
-        implements ChromeFullscreenManager.FullscreenListener, View.OnLayoutChangeListener {
+        implements BrowserControlsStateProvider.Observer, View.OnLayoutChangeListener {
     private static final int STATUS_BAR_COLOR_TRANSITION_DURATION_MS = 200;
     private static final int FADE_TEXT_DURATION_MS = 150;
     private static final int UPDATE_COLOR_TRANSITION_DURATION_MS = 400;
 
     private PropertyModel mModel;
-    private ChromeFullscreenManager mFullscreenManager;
+    private BrowserControlsStateProvider mBrowserControlsStateProvider;
     private HashSet<StatusIndicatorCoordinator.StatusIndicatorObserver> mObservers =
             new HashSet<>();
     private Supplier<Integer> mStatusBarWithoutIndicatorColorSupplier;
-    private Runnable mOnCompositorShowAnimationEnd;
+    private Runnable mOnShowAnimationEnd;
+    private Runnable mRegisterResource;
+    private Runnable mUnregisterResource;
     private Supplier<Boolean> mCanAnimateNativeBrowserControls;
-    private Runnable mInvalidateCompositorView;
+    private Callback<Runnable> mInvalidateCompositorView;
+    private Runnable mRequestLayout;
+
+    private ValueAnimator mStatusBarAnimation;
+    private ValueAnimator mTextFadeInAnimation;
+    private AnimatorSet mUpdateAnimatorSet;
+    private AnimatorSet mHideAnimatorSet;
 
     private int mIndicatorHeight;
     private int mJavaLayoutHeight;
@@ -45,9 +54,8 @@ class StatusIndicatorMediator
 
     /**
      * Constructs the status indicator mediator.
-     * @param model The {@link PropertyModel} for the status indicator.
-     * @param fullscreenManager The {@link ChromeFullscreenManager} to listen to for the changes in
-     *                          controls offsets.
+     * @param browserControlsStateProvider The {@link BrowserControlsStateProvider} to listen to
+     *                                     for the changes in controls offsets.
      * @param statusBarWithoutIndicatorColorSupplier A supplier that will get the status bar color
      *                                               without taking the status indicator into
      *                                               account.
@@ -55,25 +63,37 @@ class StatusIndicatorMediator
      *                                        browser controls can be animated. This will be false
      *                                        where we can't have a reliable cc::BCOM instance, e.g.
      *                                        tab switcher.
-     * @param invalidateCompositorView Runnable to invalidate the compositor texture.
      */
-    StatusIndicatorMediator(PropertyModel model, ChromeFullscreenManager fullscreenManager,
+    StatusIndicatorMediator(BrowserControlsStateProvider browserControlsStateProvider,
             Supplier<Integer> statusBarWithoutIndicatorColorSupplier,
-            Supplier<Boolean> canAnimateNativeBrowserControls, Runnable invalidateCompositorView) {
-        mModel = model;
-        mFullscreenManager = fullscreenManager;
+            Supplier<Boolean> canAnimateNativeBrowserControls) {
+        mBrowserControlsStateProvider = browserControlsStateProvider;
         mStatusBarWithoutIndicatorColorSupplier = statusBarWithoutIndicatorColorSupplier;
         mCanAnimateNativeBrowserControls = canAnimateNativeBrowserControls;
+    }
+
+    /**
+     * Initialize the mediator before first #animateShow().
+     * @param model The {@link PropertyModel} for the status indicator.
+     * @param registerResource A {@link Runnable} to register the view resource for the compositor
+     *                         view.
+     * @param unregisterResource A {@link Runnable} to unregister the view resource for the
+     *                           compositor view.
+     * @param invalidateCompositorView Callback to invalidate the compositor texture.
+     * @param requestLayout Runnable to request layout for the view.
+     */
+    void initialize(PropertyModel model, Runnable registerResource, Runnable unregisterResource,
+            Callback<Runnable> invalidateCompositorView, Runnable requestLayout) {
+        mModel = model;
+        mRegisterResource = registerResource;
+        mUnregisterResource = unregisterResource;
         mInvalidateCompositorView = invalidateCompositorView;
+        mRequestLayout = requestLayout;
     }
 
     @Override
     public void onControlsOffsetChanged(int topOffset, int topControlsMinHeightOffset,
             int bottomOffset, int bottomControlsMinHeightOffset, boolean needsAnimate) {
-        // If we aren't animating the browser controls in cc, we shouldn't care about the offsets
-        // we get.
-        if (!mCanAnimateNativeBrowserControls.get()) return;
-
         onOffsetChanged(topControlsMinHeightOffset);
     }
 
@@ -83,8 +103,17 @@ class StatusIndicatorMediator
         // Wait for first valid height while showing indicator.
         if (mIsHiding || mJavaLayoutHeight != 0 || v.getHeight() <= 0) return;
 
+        mInvalidateCompositorView.onResult(null);
         mJavaLayoutHeight = v.getHeight();
         updateVisibility(false);
+    }
+
+    void destroy() {
+        if (mStatusBarAnimation != null) mStatusBarAnimation.cancel();
+        if (mTextFadeInAnimation != null) mTextFadeInAnimation.cancel();
+        if (mUpdateAnimatorSet != null)  mUpdateAnimatorSet.cancel();
+        if (mHideAnimatorSet != null) mHideAnimatorSet.cancel();
+        mBrowserControlsStateProvider.removeObserver(this);
     }
 
     void addObserver(StatusIndicatorCoordinator.StatusIndicatorObserver observer) {
@@ -122,6 +151,15 @@ class StatusIndicatorMediator
      */
     void animateShow(@NonNull String statusText, Drawable statusIcon, @ColorInt int backgroundColor,
             @ColorInt int textColor, @ColorInt int iconTint) {
+        mRegisterResource.run();
+
+        // TODO(sinansahin): Look into returning back to the right state earlier, ideally in
+        // #onOffsetChanged after the view is hidden. It's currently challenging if the status
+        // indicator is shown while a tab modal dialog is showing because the compositor
+        // animation is blocked, and we don't get any signal to know if the indicator is hidden.
+        mIsHiding = false;
+        mJavaLayoutHeight = 0;
+
         Runnable initializeProperties = () -> {
             mModel.set(StatusIndicatorProperties.STATUS_TEXT, statusText);
             mModel.set(StatusIndicatorProperties.STATUS_ICON, statusIcon);
@@ -130,8 +168,7 @@ class StatusIndicatorMediator
             mModel.set(StatusIndicatorProperties.TEXT_COLOR, textColor);
             mModel.set(StatusIndicatorProperties.ICON_TINT, iconTint);
             mModel.set(StatusIndicatorProperties.ANDROID_VIEW_VISIBILITY, View.INVISIBLE);
-            mOnCompositorShowAnimationEnd = () -> animateTextFadeIn();
-            mInvalidateCompositorView.run();
+            mOnShowAnimationEnd = () -> animateTextFadeIn();
         };
 
         final int statusBarColor = mStatusBarWithoutIndicatorColorSupplier.get();
@@ -142,33 +179,46 @@ class StatusIndicatorMediator
             return;
         }
 
-        ValueAnimator animation = ValueAnimator.ofInt(statusBarColor, backgroundColor);
-        animation.setEvaluator(new ArgbEvaluator());
-        animation.setInterpolator(Interpolators.FAST_OUT_SLOW_IN_INTERPOLATOR);
-        animation.setDuration(STATUS_BAR_COLOR_TRANSITION_DURATION_MS);
-        animation.addUpdateListener(anim -> {
+        mStatusBarAnimation = ValueAnimator.ofInt(statusBarColor, backgroundColor);
+        mStatusBarAnimation.setEvaluator(new ArgbEvaluator());
+        mStatusBarAnimation.setInterpolator(Interpolators.FAST_OUT_SLOW_IN_INTERPOLATOR);
+        mStatusBarAnimation.setDuration(STATUS_BAR_COLOR_TRANSITION_DURATION_MS);
+        mStatusBarAnimation.addUpdateListener(anim -> {
             for (StatusIndicatorCoordinator.StatusIndicatorObserver observer : mObservers) {
                 observer.onStatusIndicatorColorChanged((int) anim.getAnimatedValue());
             }
         });
-        animation.addListener(new AnimatorListenerAdapter() {
+        mStatusBarAnimation.addListener(new CancelAwareAnimatorListener() {
             @Override
-            public void onAnimationEnd(Animator animation) {
+            public void onEnd(Animator animation) {
                 initializeProperties.run();
+                mStatusBarAnimation = null;
             }
         });
-        animation.start();
+        mStatusBarAnimation.start();
     }
 
     private void animateTextFadeIn() {
-        ValueAnimator animation = ValueAnimator.ofFloat(0.f, 1.f);
-        animation.setInterpolator(Interpolators.FAST_OUT_SLOW_IN_INTERPOLATOR);
-        animation.setDuration(FADE_TEXT_DURATION_MS);
-        animation.addUpdateListener((anim -> {
+        mTextFadeInAnimation = ValueAnimator.ofFloat(0.f, 1.f);
+        mTextFadeInAnimation.setInterpolator(Interpolators.FAST_OUT_SLOW_IN_INTERPOLATOR);
+        mTextFadeInAnimation.setDuration(FADE_TEXT_DURATION_MS);
+        mTextFadeInAnimation.addUpdateListener((anim -> {
             final float currentAlpha = (float) anim.getAnimatedValue();
             mModel.set(StatusIndicatorProperties.TEXT_ALPHA, currentAlpha);
         }));
-        animation.start();
+        mTextFadeInAnimation.addListener(new CancelAwareAnimatorListener() {
+            @Override
+            public void onStart(Animator animation) {
+                mRequestLayout.run();
+            }
+
+            @Override
+            public void onEnd(Animator animator) {
+                mTextFadeInAnimation = null;
+                notifyShowAnimationEnd();
+            }
+        });
+        mTextFadeInAnimation.start();
     }
 
     // TODO(sinansahin): See if/how we can skip some of the animations if the properties didn't
@@ -214,9 +264,9 @@ class StatusIndicatorMediator
             final float currentAlpha = (float) anim.getAnimatedValue();
             mModel.set(StatusIndicatorProperties.TEXT_ALPHA, currentAlpha);
         });
-        fadeOldOut.addListener(new AnimatorListenerAdapter() {
+        fadeOldOut.addListener(new CancelAwareAnimatorListener() {
             @Override
-            public void onAnimationEnd(Animator animation) {
+            public void onEnd(Animator animation) {
                 mModel.set(StatusIndicatorProperties.STATUS_TEXT, statusText);
                 mModel.set(StatusIndicatorProperties.STATUS_ICON, statusIcon);
                 mModel.set(StatusIndicatorProperties.TEXT_COLOR, textColor);
@@ -245,16 +295,17 @@ class StatusIndicatorMediator
             mModel.set(StatusIndicatorProperties.TEXT_ALPHA, currentAlpha);
         });
 
-        AnimatorSet animatorSet = new AnimatorSet();
-        animatorSet.play(fadeOldOut).with(colorAnimation);
-        animatorSet.play(fadeNewIn).after(colorAnimation);
-        animatorSet.addListener(new AnimatorListenerAdapter() {
+        mUpdateAnimatorSet = new AnimatorSet();
+        mUpdateAnimatorSet.play(fadeOldOut).with(colorAnimation);
+        mUpdateAnimatorSet.play(fadeNewIn).after(colorAnimation);
+        mUpdateAnimatorSet.addListener(new CancelAwareAnimatorListener() {
             @Override
-            public void onAnimationEnd(Animator animation) {
+            public void onEnd(Animator animation) {
                 animationCompleteCallback.run();
+                mUpdateAnimatorSet = null;
             }
         });
-        animatorSet.start();
+        mUpdateAnimatorSet.start();
     }
 
     /**
@@ -282,9 +333,9 @@ class StatusIndicatorMediator
             mModel.set(StatusIndicatorProperties.BACKGROUND_COLOR, currentColor);
             notifyColorChange(currentColor);
         });
-        colorAnimation.addListener(new AnimatorListenerAdapter() {
+        colorAnimation.addListener(new CancelAwareAnimatorListener() {
             @Override
-            public void onAnimationEnd(Animator animation) {
+            public void onEnd(Animator animation) {
                 notifyColorChange(Color.TRANSPARENT);
             }
         });
@@ -296,16 +347,20 @@ class StatusIndicatorMediator
         fadeOut.addUpdateListener(anim -> mModel.set(
                 StatusIndicatorProperties.TEXT_ALPHA, (float) anim.getAnimatedValue()));
 
-        AnimatorSet animatorSet = new AnimatorSet();
-        animatorSet.play(colorAnimation).with(fadeOut);
-        animatorSet.addListener(new AnimatorListenerAdapter() {
+        mHideAnimatorSet = new AnimatorSet();
+        mHideAnimatorSet.play(colorAnimation).with(fadeOut);
+        mHideAnimatorSet.addListener(new CancelAwareAnimatorListener() {
             @Override
-            public void onAnimationEnd(Animator animation) {
-                mInvalidateCompositorView.run();
-                updateVisibility(true);
+            public void onEnd(Animator animation) {
+                if (mCanAnimateNativeBrowserControls.get()) {
+                    mInvalidateCompositorView.onResult(() -> updateVisibility(true));
+                } else {
+                    updateVisibility(true);
+                }
+                mHideAnimatorSet = null;
             }
         });
-        animatorSet.start();
+        mHideAnimatorSet.start();
     }
 
     // Observer notifiers
@@ -322,6 +377,12 @@ class StatusIndicatorMediator
         }
     }
 
+    private void notifyShowAnimationEnd() {
+        for (StatusIndicatorCoordinator.StatusIndicatorObserver observer : mObservers) {
+            observer.onStatusIndicatorShowAnimationEnd();
+        }
+    }
+
     // Other internal methods
 
     /**
@@ -333,38 +394,47 @@ class StatusIndicatorMediator
         mIndicatorHeight = hiding ? 0 : mJavaLayoutHeight;
 
         if (!mIsHiding) {
-            mFullscreenManager.addListener(this);
-        }
-
-        // If the browser controls won't be animating, we can pretend that the animation ended.
-        if (!mCanAnimateNativeBrowserControls.get()) {
-            onOffsetChanged(mIndicatorHeight);
+            mBrowserControlsStateProvider.addObserver(this);
         }
 
         notifyHeightChange(mIndicatorHeight);
     }
 
     private void onOffsetChanged(int topControlsMinHeightOffset) {
-        final boolean compositedVisible = topControlsMinHeightOffset > 0;
-        // Composited view should be visible if we have a positive top min-height offset, or current
-        // min-height.
-        mModel.set(StatusIndicatorProperties.COMPOSITED_VIEW_VISIBLE, compositedVisible);
+        final boolean indicatorVisible = topControlsMinHeightOffset > 0;
+        // Composited view should be visible if we have a positive top min-height offset (or current
+        // min-height) and we're running the animations in native.
+        mModel.set(StatusIndicatorProperties.COMPOSITED_VIEW_VISIBLE,
+                indicatorVisible && mCanAnimateNativeBrowserControls.get());
 
-        final boolean isCompletelyShown = topControlsMinHeightOffset == mIndicatorHeight;
-        // Android view should only be visible when the indicator is fully shown.
+        mModel.set(StatusIndicatorProperties.CURRENT_VISIBLE_HEIGHT, topControlsMinHeightOffset);
+
+        final boolean isCompletelyShown =
+                indicatorVisible && topControlsMinHeightOffset == mIndicatorHeight;
+        // If we're running the animations in native, the Android view should only be visible when
+        // the indicator is fully shown. Otherwise, the Android view will be visible if it's within
+        // screen boundaries.
         mModel.set(StatusIndicatorProperties.ANDROID_VIEW_VISIBILITY,
-                mIsHiding ? View.GONE : (isCompletelyShown ? View.VISIBLE : View.INVISIBLE));
+                mIsHiding && (mCanAnimateNativeBrowserControls.get() || !indicatorVisible)
+                        ? View.GONE
+                        : (isCompletelyShown || !mCanAnimateNativeBrowserControls.get()
+                                        ? View.VISIBLE
+                                        : View.INVISIBLE));
 
-        if (mOnCompositorShowAnimationEnd != null && isCompletelyShown) {
-            mOnCompositorShowAnimationEnd.run();
-            mOnCompositorShowAnimationEnd = null;
+        if (mOnShowAnimationEnd != null && isCompletelyShown) {
+            mOnShowAnimationEnd.run();
+            mOnShowAnimationEnd = null;
         }
 
-        final boolean doneHiding = !compositedVisible && mIsHiding;
+        final boolean doneHiding = !indicatorVisible && mIsHiding;
         if (doneHiding) {
-            mFullscreenManager.removeListener(this);
+            // This block is currently never executed if the status indicator is shown and hidden
+            // while a modal dialog is visible. |mIsHiding| and |mJavaLayoutHeight| are also reset
+            // in #animateShow as a precaution in case this happens.
+            mBrowserControlsStateProvider.removeObserver(this);
             mIsHiding = false;
             mJavaLayoutHeight = 0;
+            mUnregisterResource.run();
         }
     }
 

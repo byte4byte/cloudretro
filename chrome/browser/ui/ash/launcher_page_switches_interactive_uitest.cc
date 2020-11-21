@@ -14,6 +14,7 @@
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/test/base/perf/drag_event_generator.h"
 #include "chrome/test/base/perf/performance_test.h"
+#include "content/public/test/browser_test.h"
 #include "ui/base/test/ui_controls.h"
 #include "ui/display/display.h"
 #include "ui/display/screen.h"
@@ -32,7 +33,11 @@ class PageSwitchWaiter : public ash::PaginationModelObserver {
 
  private:
   // ash::PaginationModelObserver:
-  void TransitionEnded() override { run_loop_.Quit(); }
+  void TransitionEnded() override {
+    // Needs one frame presented after transition animation ends to get
+    // the metrics recorded.
+    ash::ShellTestApi().WaitForNextFrame(run_loop_.QuitClosure());
+  }
 
   ash::PaginationModel* model_;
   base::RunLoop run_loop_;

@@ -206,11 +206,18 @@ class ExtensionTabUtil {
   // Returns true if navigating to |url| would kill a page or the browser
   // itself, whether by simulating a crash, browser quit, thread hang, or
   // equivalent. Extensions should be prevented from navigating to such URLs.
+  //
+  // The caller should ensure that |url| has already been "fixed up" by calling
+  // url_formatter::FixupURL.
   static bool IsKillURL(const GURL& url);
 
-  // Logs if the URL of a tab that an extension is creating or navitaging to has
-  // the devtools scheme.
-  static void LogPossibleDevtoolsSchemeNavigation(const GURL& url);
+  // Resolves the URL and ensures the extension is allowed to navigate to it.
+  // Returns true and sets |url| if successful. Returns false and sets |error|
+  // if an error occurs.
+  static bool PrepareURLForNavigation(const std::string& url_string,
+                                      const Extension* extension,
+                                      GURL* url,
+                                      std::string* error);
 
   // Opens a tab for the specified |web_contents|.
   static void CreateTab(std::unique_ptr<content::WebContents> web_contents,

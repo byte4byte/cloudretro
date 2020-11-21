@@ -36,15 +36,14 @@ using base::UserMetricsAction;
 CriticalNotificationBubbleView::CriticalNotificationBubbleView(
     views::View* anchor_view)
     : BubbleDialogDelegateView(anchor_view, views::BubbleBorder::TOP_RIGHT) {
-  DialogDelegate::SetButtonLabel(
-      ui::DIALOG_BUTTON_OK,
-      l10n_util::GetStringUTF16(IDS_CRITICAL_NOTIFICATION_RESTART));
-  DialogDelegate::SetButtonLabel(ui::DIALOG_BUTTON_CANCEL,
-                                   l10n_util::GetStringUTF16(IDS_CANCEL));
-  DialogDelegate::SetAcceptCallback(
+  SetButtonLabel(ui::DIALOG_BUTTON_OK,
+                 l10n_util::GetStringUTF16(IDS_CRITICAL_NOTIFICATION_RESTART));
+  SetButtonLabel(ui::DIALOG_BUTTON_CANCEL,
+                 l10n_util::GetStringUTF16(IDS_CANCEL));
+  SetAcceptCallback(
       base::BindOnce(&CriticalNotificationBubbleView::OnDialogAccepted,
                      base::Unretained(this)));
-  DialogDelegate::SetCancelCallback(
+  SetCancelCallback(
       base::BindOnce(&CriticalNotificationBubbleView::OnDialogCancelled,
                      base::Unretained(this)));
   set_close_on_deactivate(false);
@@ -122,14 +121,12 @@ void CriticalNotificationBubbleView::Init() {
 
   auto message = std::make_unique<views::Label>(
       l10n_util::GetStringUTF16(IDS_CRITICAL_NOTIFICATION_TEXT),
-      views::style::CONTEXT_MESSAGE_BOX_BODY_TEXT,
-      views::style::STYLE_SECONDARY);
+      views::style::CONTEXT_DIALOG_BODY_TEXT, views::style::STYLE_SECONDARY);
   message->SetMultiLine(true);
   message->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-  message->SizeToFit(
-      ChromeLayoutProvider::Get()->GetDistanceMetric(
-          ChromeDistanceMetric::DISTANCE_BUBBLE_PREFERRED_WIDTH) -
-      margins().width());
+  message->SizeToFit(ChromeLayoutProvider::Get()->GetDistanceMetric(
+                         views::DISTANCE_BUBBLE_PREFERRED_WIDTH) -
+                     margins().width());
   AddChildView(std::move(message));
 
   refresh_timer_.Start(FROM_HERE, base::TimeDelta::FromSeconds(1), this,

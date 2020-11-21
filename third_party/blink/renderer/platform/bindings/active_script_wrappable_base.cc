@@ -4,19 +4,16 @@
 
 #include "third_party/blink/renderer/platform/bindings/active_script_wrappable_base.h"
 
-#include "third_party/blink/renderer/platform/bindings/dom_data_store.h"
-#include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
-#include "third_party/blink/renderer/platform/bindings/v8_binding.h"
+#include "third_party/blink/renderer/platform/bindings/active_script_wrappable_manager.h"
 #include "third_party/blink/renderer/platform/bindings/v8_per_isolate_data.h"
-#include "third_party/blink/renderer/platform/heap/visitor.h"
 
 namespace blink {
 
-ActiveScriptWrappableBase::ActiveScriptWrappableBase() {
+void ActiveScriptWrappableBase::ActiveScriptWrappableBaseConstructed() {
   DCHECK(ThreadState::Current());
-  v8::Isolate* isolate = ThreadState::Current()->GetIsolate();
-  V8PerIsolateData* isolate_data = V8PerIsolateData::From(isolate);
-  isolate_data->GetActiveScriptWrappableManager()->Add(this);
+  V8PerIsolateData::From(ThreadState::Current()->GetIsolate())
+      ->GetActiveScriptWrappableManager()
+      ->Add(this);
 }
 
 }  // namespace blink

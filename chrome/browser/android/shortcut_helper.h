@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_ANDROID_SHORTCUT_HELPER_H_
 
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -65,16 +66,6 @@ class ShortcutHelper {
   // Returns the ideal size for a shortcut icon of a WebAPK.
   static int GetIdealShortcutIconSizeInPx();
 
-  // Fetches the splash screen image and stores it inside the WebappDataStorage
-  // of the webapp. The WebappDataStorage object *must* have been previously
-  // created by AddToLauncherWithSkBitmap(); this method should be passed as a
-  // closure to that method.
-  static void FetchSplashScreenImage(content::WebContents* web_contents,
-                                     const GURL& image_url,
-                                     const int ideal_splash_image_size_in_px,
-                                     const int minimum_splash_image_size_in_px,
-                                     const std::string& webapp_id);
-
   // Stores the webapp splash screen in the WebappDataStorage associated with
   // |webapp_id|.
   static void StoreWebappSplashImage(const std::string& webapp_id,
@@ -93,11 +84,21 @@ class ShortcutHelper {
   // Returns an empty string if there are no matches.
   static std::string QueryFirstWebApkPackage(const GURL& url);
 
-  // Returns true if WebAPKs are enabled and there is an installed WebAPK which
-  // can handle |start_url|, or there is one is being installed.
+  // Returns true if there is an installed WebAPK which can handle |url|.
   static bool IsWebApkInstalled(content::BrowserContext* browser_context,
-                                const GURL& start_url,
-                                const GURL& manifest_url);
+                                const GURL& url);
+
+  // Returns true if there is a WebAPK installed under |origin|, and false
+  // otherwise.
+  static bool DoesOriginContainAnyInstalledWebApk(const GURL& origin);
+
+  // Returns true if there is a TWA installed under |origin|, and false
+  // otherwise.
+  static bool DoesOriginContainAnyInstalledTrustedWebActivity(
+      const GURL& origin);
+
+  // Returns a set of origins that have an installed WebAPK or TWA.
+  static std::set<GURL> GetOriginsWithInstalledWebApksOrTwas();
 
   // Sets a flag to force an update for the WebAPK corresponding to |id| on next
   // launch.

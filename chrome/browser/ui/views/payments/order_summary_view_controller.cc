@@ -63,10 +63,11 @@ std::unique_ptr<views::View> CreateLineItemView(const base::string16& label,
   // across the row up to the amount label. This way the first label elides as
   // required.
   columns->AddColumn(views::GridLayout::LEADING, views::GridLayout::CENTER, 1.0,
-                     views::GridLayout::USE_PREF, 0, 0);
+                     views::GridLayout::ColumnSize::kUsePreferred, 0, 0);
   columns->AddColumn(views::GridLayout::FILL, views::GridLayout::CENTER,
-                     views::GridLayout::kFixedSize, views::GridLayout::FIXED,
-                     kAmountSectionWidth, kAmountSectionWidth);
+                     views::GridLayout::kFixedSize,
+                     views::GridLayout::ColumnSize::kFixed, kAmountSectionWidth,
+                     kAmountSectionWidth);
 
   layout->StartRow(views::GridLayout::kFixedSize, 0);
   std::unique_ptr<views::Label> label_text;
@@ -98,10 +99,11 @@ std::unique_ptr<views::View> CreateLineItemView(const base::string16& label,
   views::ColumnSet* wrapper_columns = wrapper_layout->AddColumnSet(0);
   wrapper_columns->AddColumn(
       views::GridLayout::LEADING, views::GridLayout::CENTER,
-      views::GridLayout::kFixedSize, views::GridLayout::USE_PREF, 0, 0);
-  wrapper_columns->AddColumn(views::GridLayout::TRAILING,
-                             views::GridLayout::CENTER, 1.0,
-                             views::GridLayout::USE_PREF, 0, 0);
+      views::GridLayout::kFixedSize,
+      views::GridLayout::ColumnSize::kUsePreferred, 0, 0);
+  wrapper_columns->AddColumn(
+      views::GridLayout::TRAILING, views::GridLayout::CENTER, 1.0,
+      views::GridLayout::ColumnSize::kUsePreferred, 0, 0);
 
   wrapper_layout->StartRow(views::GridLayout::kFixedSize, 0);
   currency_text->SetID(static_cast<int>(currency_label_id));
@@ -117,16 +119,20 @@ std::unique_ptr<views::View> CreateLineItemView(const base::string16& label,
 }  // namespace
 
 OrderSummaryViewController::OrderSummaryViewController(
-    PaymentRequestSpec* spec,
-    PaymentRequestState* state,
-    PaymentRequestDialogView* dialog)
-    : PaymentRequestSheetController(spec, state, dialog), pay_button_(nullptr) {
+    base::WeakPtr<PaymentRequestSpec> spec,
+    base::WeakPtr<PaymentRequestState> state,
+    base::WeakPtr<PaymentRequestDialogView> dialog)
+    : PaymentRequestSheetController(spec, state, dialog) {
+  DCHECK(spec);
+  DCHECK(state);
   spec->AddObserver(this);
   state->AddObserver(this);
 }
 
 OrderSummaryViewController::~OrderSummaryViewController() {
-  spec()->RemoveObserver(this);
+  if (spec())
+    spec()->RemoveObserver(this);
+
   state()->RemoveObserver(this);
 }
 
@@ -135,22 +141,7 @@ void OrderSummaryViewController::OnSpecUpdated() {
 }
 
 void OrderSummaryViewController::OnSelectedInformationChanged() {
-  UpdatePayButtonState(state()->is_ready_to_pay());
-}
-
-std::unique_ptr<views::Button>
-OrderSummaryViewController::CreatePrimaryButton() {
-  std::unique_ptr<views::Button> button(
-      views::MdTextButton::CreateSecondaryUiBlueButton(
-          this, state()->selected_app() && state()->selected_app()->type() !=
-                                               PaymentApp::Type::AUTOFILL
-                    ? l10n_util::GetStringUTF16(IDS_PAYMENTS_CONTINUE_BUTTON)
-                    : l10n_util::GetStringUTF16(IDS_PAYMENTS_PAY_BUTTON)));
-  button->set_tag(static_cast<int>(PaymentRequestCommonTags::PAY_BUTTON_TAG));
-  button->SetID(static_cast<int>(DialogViewID::PAY_BUTTON));
-  pay_button_ = button.get();
-  UpdatePayButtonState(state()->is_ready_to_pay());
-  return button;
+  primary_button()->SetEnabled(GetPrimaryButtonEnabled());
 }
 
 bool OrderSummaryViewController::ShouldShowSecondaryButton() {
@@ -162,6 +153,9 @@ base::string16 OrderSummaryViewController::GetSheetTitle() {
 }
 
 void OrderSummaryViewController::FillContentView(views::View* content_view) {
+  if (!spec())
+    return;
+
   auto layout = std::make_unique<views::BoxLayout>(
       views::BoxLayout::Orientation::kVertical);
   layout->set_main_axis_alignment(views::BoxLayout::MainAxisAlignment::kStart);
@@ -209,10 +203,6 @@ void OrderSummaryViewController::FillContentView(views::View* content_view) {
           true, DialogViewID::ORDER_SUMMARY_TOTAL_CURRENCY_LABEL,
           DialogViewID::ORDER_SUMMARY_TOTAL_AMOUNT_LABEL)
           .release());
-}
-
-void OrderSummaryViewController::UpdatePayButtonState(bool enabled) {
-  pay_button_->SetEnabled(enabled);
 }
 
 }  // namespace payments

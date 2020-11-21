@@ -4,6 +4,7 @@
 
 #include "ui/events/blink/web_input_event.h"
 
+#include "ui/base/ui_base_features.h"
 #include "ui/events/base_event_utils.h"
 #include "ui/events/blink/blink_event_util.h"
 #include "ui/events/blink/blink_features.h"
@@ -17,34 +18,19 @@
 #endif
 
 #if defined(USE_X11)
-#include "ui/gfx/x/x11.h"
 #endif
 
 namespace ui {
 
 namespace {
 
+// The scroll percentage per mousewheel tick. Used to determine scroll delta
+// if percent based scrolling is enabled.
+const float kScrollPercentPerLineOrChar = 0.05;
+
 gfx::PointF GetScreenLocationFromEvent(const LocatedEvent& event) {
   return event.target() ? event.target()->GetScreenLocationF(event)
                         : event.root_location_f();
-}
-
-blink::WebPointerProperties::PointerType EventPointerTypeToWebPointerType(
-    EventPointerType pointer_type) {
-  switch (pointer_type) {
-    case EventPointerType::POINTER_TYPE_UNKNOWN:
-      return blink::WebPointerProperties::PointerType::kUnknown;
-    case EventPointerType::POINTER_TYPE_MOUSE:
-      return blink::WebPointerProperties::PointerType::kMouse;
-    case EventPointerType::POINTER_TYPE_PEN:
-      return blink::WebPointerProperties::PointerType::kPen;
-    case EventPointerType::POINTER_TYPE_ERASER:
-      return blink::WebPointerProperties::PointerType::kEraser;
-    case EventPointerType::POINTER_TYPE_TOUCH:
-      return blink::WebPointerProperties::PointerType::kTouch;
-  }
-  NOTREACHED() << "Unexpected EventPointerType";
-  return blink::WebPointerProperties::PointerType::kUnknown;
 }
 
 // Creates a WebGestureEvent from a GestureEvent. Note that it does not
@@ -138,8 +124,7 @@ blink::WebMouseWheelEvent MakeWebMouseWheelEventFromUiEvent(
   if (offset_ordinal_y != 0.f && webkit_event.delta_y != 0.f)
     webkit_event.acceleration_ratio_y = offset_ordinal_y / webkit_event.delta_y;
 
-  webkit_event.pointer_type =
-      EventPointerTypeToWebPointerType(event.pointer_details().pointer_type);
+  webkit_event.pointer_type = event.pointer_details().pointer_type;
 
   switch (event.scroll_event_phase()) {
     case ui::ScrollEventPhase::kNone:
@@ -248,8 +233,7 @@ blink::WebMouseEvent MakeWebMouseEvent(const MouseEvent& event) {
       event.native_event().message && (event.type() != ET_MOUSE_EXITED)
           ? MakeUntranslatedWebMouseEventFromNativeEvent(
                 event.native_event(), event.time_stamp(),
-                EventPointerTypeToWebPointerType(
-                    event.pointer_details().pointer_type))
+                event.pointer_details().pointer_type)
           : MakeWebMouseEventFromUiEvent(event);
 #else
       MakeWebMouseEventFromUiEvent(event);
@@ -281,8 +265,7 @@ blink::WebMouseWheelEvent MakeWebMouseWheelEvent(const MouseWheelEvent& event) {
       event.native_event().message
           ? MakeUntranslatedWebMouseWheelEventFromNativeEvent(
                 event.native_event(), event.time_stamp(),
-                EventPointerTypeToWebPointerType(
-                    event.pointer_details().pointer_type))
+                event.pointer_details().pointer_type)
           : MakeWebMouseWheelEventFromUiEvent(event);
 #else
   blink::WebMouseWheelEvent webkit_event =
@@ -306,8 +289,7 @@ blink::WebMouseWheelEvent MakeWebMouseWheelEvent(const ScrollEvent& event) {
       event.native_event().message
           ? MakeUntranslatedWebMouseWheelEventFromNativeEvent(
                 event.native_event(), event.time_stamp(),
-                EventPointerTypeToWebPointerType(
-                    event.pointer_details().pointer_type))
+                event.pointer_details().pointer_type)
           : MakeWebMouseWheelEventFromUiEvent(event);
 #else
   blink::WebMouseWheelEvent webkit_event =
@@ -456,8 +438,7 @@ blink::WebMouseEvent MakeWebMouseEventFromUiEvent(const MouseEvent& event) {
       event.pointer_details().tangential_pressure;
   webkit_event.twist = event.pointer_details().twist;
   webkit_event.id = event.pointer_details().id;
-  webkit_event.pointer_type =
-      EventPointerTypeToWebPointerType(event.pointer_details().pointer_type);
+  webkit_event.pointer_type = event.pointer_details().pointer_type;
 
   return webkit_event;
 }
@@ -487,11 +468,23 @@ blink::WebMouseWheelEvent MakeWebMouseWheelEventFromUiEvent(
   webkit_event.wheel_ticks_y =
       webkit_event.delta_y / MouseWheelEvent::kWheelDelta;
 
+  // Set deltas to be percent based if percent based scrolling is enabled.
+  // If percent based scrolling is enabled on Windows, percent based
+  // mousewheel events are built in the Windows web input event builder.
+  // Percent based scrolling is not supported on Mac because the current
+  // roadmap for scroll personality work is reserved for Windows and Linux.
+  if (base::FeatureList::IsEnabled(features::kPercentBasedScrolling)) {
+    webkit_event.delta_units = ui::ScrollGranularity::kScrollByPercentage;
+    webkit_event.delta_y *=
+        (kScrollPercentPerLineOrChar / MouseWheelEvent::kWheelDelta);
+    webkit_event.delta_x *=
+        (kScrollPercentPerLineOrChar / MouseWheelEvent::kWheelDelta);
+  }
+
   webkit_event.tilt_x = roundf(event.pointer_details().tilt_x);
   webkit_event.tilt_y = roundf(event.pointer_details().tilt_y);
   webkit_event.force = event.pointer_details().force;
-  webkit_event.pointer_type =
-      EventPointerTypeToWebPointerType(event.pointer_details().pointer_type);
+  webkit_event.pointer_type = event.pointer_details().pointer_type;
 
   return webkit_event;
 }

@@ -11,7 +11,6 @@
 #include "ash/login/ui/login_user_menu_view.h"
 #include "ash/public/cpp/login_types.h"
 #include "base/macros.h"
-#include "ui/views/controls/button/button.h"
 #include "ui/views/view.h"
 
 namespace ash {
@@ -21,8 +20,7 @@ class LoginButton;
 
 // Display the user's profile icon, name, and a menu icon in various layout
 // styles.
-class ASH_EXPORT LoginUserView : public views::View,
-                                 public views::ButtonListener {
+class ASH_EXPORT LoginUserView : public views::View {
  public:
   // TestApi is used for tests to get internal implementation details.
   class ASH_EXPORT TestApi {
@@ -37,8 +35,8 @@ class ASH_EXPORT LoginUserView : public views::View,
     views::View* user_label() const;
     views::View* tap_button() const;
     views::View* dropdown() const;
-    LoginBaseBubbleView* menu() const;
-    views::View* user_domain() const;
+    LoginUserMenuView* menu() const;
+    views::View* enterprise_icon() const;
 
     void OnTap() const;
 
@@ -59,7 +57,6 @@ class ASH_EXPORT LoginUserView : public views::View,
   // |show_dropdown| arg is false.
   LoginUserView(LoginDisplayStyle style,
                 bool show_dropdown,
-                bool show_domain,
                 const OnTap& on_tap,
                 const OnRemoveWarningShown& on_remove_warning_shown,
                 const OnRemove& on_remove);
@@ -82,9 +79,6 @@ class ASH_EXPORT LoginUserView : public views::View,
   void Layout() override;
   void RequestFocus() override;
 
-  // views::ButtonListener:
-  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
-
  private:
   class UserImage;
   class UserLabel;
@@ -92,6 +86,8 @@ class ASH_EXPORT LoginUserView : public views::View,
 
   // Called when hover state changes.
   void OnHover(bool has_hover);
+
+  void DropdownButtonPressed();
 
   // Updates UI element values so they reflect the data in |current_user_|.
   void UpdateCurrentUserState();

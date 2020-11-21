@@ -12,6 +12,8 @@ GEN_INCLUDE([
   'os_settings_accessibility_test.js',
 ]);
 
+GEN('#include "content/public/test/browser_test.h"');
+
 // eslint-disable-next-line no-var
 var MultideviceFeaturesA11yTest = class extends OSSettingsAccessibilityTest {};
 
@@ -35,7 +37,7 @@ AccessibilityTest.define('MultideviceFeaturesA11yTest', {
         // TODO(https://crbug.com/894602): Remove this exception when settled
         // with UX.
         'link-in-text-block': function(nodeResult) {
-          return nodeResult.element.parentElement.id == 'multideviceSubLabel';
+          return nodeResult.element.parentElement.id === 'multideviceSubLabel';
         },
       }),
 });

@@ -23,6 +23,9 @@
 #include "third_party/blink/renderer/core/style/computed_style.h"
 #include "third_party/blink/renderer/core/style/svg_computed_style.h"
 #include "third_party/blink/renderer/core/svg/graphics/filters/svg_filter_builder.h"
+#include "third_party/blink/renderer/core/svg/svg_animated_number.h"
+#include "third_party/blink/renderer/core/svg/svg_animated_number_optional_number.h"
+#include "third_party/blink/renderer/core/svg/svg_animated_string.h"
 #include "third_party/blink/renderer/core/svg_names.h"
 #include "third_party/blink/renderer/platform/graphics/filters/fe_drop_shadow.h"
 #include "third_party/blink/renderer/platform/heap/heap.h"
@@ -45,7 +48,15 @@ SVGFEDropShadowElement::SVGFEDropShadowElement(Document& document)
   AddToPropertyMap(in1_);
 }
 
-void SVGFEDropShadowElement::Trace(Visitor* visitor) {
+SVGAnimatedNumber* SVGFEDropShadowElement::stdDeviationX() {
+  return std_deviation_->FirstNumber();
+}
+
+SVGAnimatedNumber* SVGFEDropShadowElement::stdDeviationY() {
+  return std_deviation_->SecondNumber();
+}
+
+void SVGFEDropShadowElement::Trace(Visitor* visitor) const {
   visitor->Trace(dx_);
   visitor->Trace(dy_);
   visitor->Trace(std_deviation_);
@@ -79,7 +90,8 @@ bool SVGFEDropShadowElement::SetFilterEffectAttribute(
 }
 
 void SVGFEDropShadowElement::SvgAttributeChanged(
-    const QualifiedName& attr_name) {
+    const SvgAttributeChangedParams& params) {
+  const QualifiedName& attr_name = params.name;
   if (attr_name == svg_names::kInAttr ||
       attr_name == svg_names::kStdDeviationAttr ||
       attr_name == svg_names::kDxAttr || attr_name == svg_names::kDyAttr) {
@@ -88,7 +100,7 @@ void SVGFEDropShadowElement::SvgAttributeChanged(
     return;
   }
 
-  SVGFilterPrimitiveStandardAttributes::SvgAttributeChanged(attr_name);
+  SVGFilterPrimitiveStandardAttributes::SvgAttributeChanged(params);
 }
 
 FilterEffect* SVGFEDropShadowElement::Build(SVGFilterBuilder* filter_builder,

@@ -25,6 +25,7 @@
 #include "chromeos/dbus/session_manager/session_manager_client.h"
 #include "chromeos/settings/cros_settings_names.h"
 #include "components/policy/proto/chrome_device_policy.pb.h"
+#include "content/public/test/browser_test.h"
 #include "extensions/browser/api/system_display/display_info_provider.h"
 #include "extensions/common/api/system_display.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -109,7 +110,7 @@ void SetPolicyValue(em::ChromeDeviceSettingsProto* proto,
                     PolicyValue policy,
                     bool recommended) {
   std::vector<std::string> json_entries;
-  std::string json = "";
+  std::string json;
   if (policy.external_width) {
     json_entries.push_back("\"external_width\": " +
                            std::to_string(*policy.external_width));
@@ -200,8 +201,7 @@ class DeviceDisplayResolutionTest : public DeviceDisplayResolutionTestBase {
   DISALLOW_COPY_AND_ASSIGN(DeviceDisplayResolutionTest);
 };
 
-// crbug.com/1000694.
-IN_PROC_BROWSER_TEST_P(DeviceDisplayResolutionTest, DISABLED_Internal) {
+IN_PROC_BROWSER_TEST_P(DeviceDisplayResolutionTest, Internal) {
   const PolicyValue policy_value = GetParam();
 
   EXPECT_EQ(kDefaultDisplayScale, display_helper()->GetScaleOfFirstDisplay())
@@ -219,9 +219,7 @@ IN_PROC_BROWSER_TEST_P(DeviceDisplayResolutionTest, DISABLED_Internal) {
       << "Scale of primary display after policy";
 }
 
-// crbug.com/1000694.
-IN_PROC_BROWSER_TEST_P(DeviceDisplayResolutionTest,
-                       DISABLED_ResizeSecondDisplay) {
+IN_PROC_BROWSER_TEST_P(DeviceDisplayResolutionTest, ResizeSecondDisplay) {
   const PolicyValue policy_value = GetParam();
 
   AddExternalDisplay(display_helper()->GetDisplayManager());
@@ -251,9 +249,7 @@ IN_PROC_BROWSER_TEST_P(DeviceDisplayResolutionTest,
       << "Primary display scale after resizing external";
 }
 
-// crbug.com/1000694.
-IN_PROC_BROWSER_TEST_P(DeviceDisplayResolutionTest,
-                       DISABLED_ConnectSecondDisplay) {
+IN_PROC_BROWSER_TEST_P(DeviceDisplayResolutionTest, ConnectSecondDisplay) {
   const PolicyValue policy_value = GetParam();
 
   SetPolicy(policy_value);
@@ -274,8 +270,7 @@ IN_PROC_BROWSER_TEST_P(DeviceDisplayResolutionTest,
 }
 
 // crbug.com/1000694.
-IN_PROC_BROWSER_TEST_P(DeviceDisplayResolutionTest,
-                       DISABLED_SetAndUnsetPolicy) {
+IN_PROC_BROWSER_TEST_P(DeviceDisplayResolutionTest, SetAndUnsetPolicy) {
   const PolicyValue policy_value = GetParam();
   AddExternalDisplay(display_helper()->GetDisplayManager());
   SetPolicy(policy_value);
@@ -371,8 +366,7 @@ IN_PROC_BROWSER_TEST_P(DisplayResolutionBootTest, PRE_Reboot) {
       << "Initial primary display scale after policy set";
 }
 
-// crbug.com/1000694.
-IN_PROC_BROWSER_TEST_P(DisplayResolutionBootTest, DISABLED_Reboot) {
+IN_PROC_BROWSER_TEST_P(DisplayResolutionBootTest, Reboot) {
   const PolicyValue policy_value = GetParam();
 
   AddExternalDisplay(display_helper()->GetDisplayManager());
@@ -428,9 +422,7 @@ class DeviceDisplayResolutionRecommendedTest
   DISALLOW_COPY_AND_ASSIGN(DeviceDisplayResolutionRecommendedTest);
 };
 
-// crbug.com/1000694.
-IN_PROC_BROWSER_TEST_P(DeviceDisplayResolutionRecommendedTest,
-                       DISABLED_Internal) {
+IN_PROC_BROWSER_TEST_P(DeviceDisplayResolutionRecommendedTest, Internal) {
   const PolicyValue policy_value = GetParam();
   EXPECT_EQ(kDefaultDisplayResolution,
             display_helper()->GetResolutionOfFirstDisplay())
@@ -455,9 +447,8 @@ IN_PROC_BROWSER_TEST_P(DeviceDisplayResolutionRecommendedTest,
       << "Scale of internal display after user operation";
 }
 
-// crbug.com/1000694.
 IN_PROC_BROWSER_TEST_P(DeviceDisplayResolutionRecommendedTest,
-                       DISABLED_ResizeSecondDisplay) {
+                       ResizeSecondDisplay) {
   const PolicyValue policy_value = GetParam();
   AddExternalDisplay(display_helper()->GetDisplayManager());
 

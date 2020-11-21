@@ -22,6 +22,7 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/ui/settings_window_manager_chromeos.h"
+#include "chrome/browser/ui/webui/settings/chromeos/constants/routes.mojom.h"
 #include "chrome/common/webui_url_constants.h"
 #endif  // defined(OS_CHROMEOS)
 
@@ -103,14 +104,15 @@ void BluetoothChooserController::RefreshOptions() {
   if (event_handler_.is_null())
     return;
   ClearAllDevices();
-  event_handler_.Run(content::BluetoothChooser::Event::RESCAN, std::string());
+  event_handler_.Run(content::BluetoothChooserEvent::RESCAN, std::string());
 }
 
 void BluetoothChooserController::OpenAdapterOffHelpUrl() const {
 #if defined(OS_CHROMEOS)
   // Chrome OS can directly link to the OS setting to turn on the adapter.
   chrome::SettingsWindowManager::GetInstance()->ShowOSSettings(
-      GetBrowser()->profile(), chrome::kBluetoothSubPage);
+      GetBrowser()->profile(),
+      chromeos::settings::mojom::kBluetoothDevicesSubpagePath);
 #else
   // For other operating systems, show a help center page in a tab.
   GetBrowser()->OpenURL(content::OpenURLParams(
@@ -132,7 +134,7 @@ void BluetoothChooserController::Select(const std::vector<size_t>& indices) {
     return;
   }
   DCHECK_LT(index, devices_.size());
-  event_handler_.Run(content::BluetoothChooser::Event::SELECTED,
+  event_handler_.Run(content::BluetoothChooserEvent::SELECTED,
                      devices_[index].id);
 }
 
@@ -140,16 +142,14 @@ void BluetoothChooserController::Cancel() {
   RecordInteractionWithChooser(event_handler_.is_null());
   if (event_handler_.is_null())
     return;
-  event_handler_.Run(content::BluetoothChooser::Event::CANCELLED,
-                     std::string());
+  event_handler_.Run(content::BluetoothChooserEvent::CANCELLED, std::string());
 }
 
 void BluetoothChooserController::Close() {
   RecordInteractionWithChooser(event_handler_.is_null());
   if (event_handler_.is_null())
     return;
-  event_handler_.Run(content::BluetoothChooser::Event::CANCELLED,
-                     std::string());
+  event_handler_.Run(content::BluetoothChooserEvent::CANCELLED, std::string());
 }
 
 void BluetoothChooserController::OpenHelpCenterUrl() const {
@@ -288,6 +288,11 @@ void BluetoothChooserController::RemoveDevice(const std::string& device_id) {
 
 void BluetoothChooserController::ResetEventHandler() {
   event_handler_.Reset();
+}
+
+base::WeakPtr<BluetoothChooserController>
+BluetoothChooserController::GetWeakPtr() {
+  return weak_factory_.GetWeakPtr();
 }
 
 void BluetoothChooserController::ClearAllDevices() {

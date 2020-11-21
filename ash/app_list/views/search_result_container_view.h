@@ -38,10 +38,6 @@ class APP_LIST_EXPORT SearchResultContainerView : public views::View,
 
     // Called whenever results in the container change, i.e. during |Update()|.
     virtual void OnSearchResultContainerResultsChanged() = 0;
-
-    // Called whenever a result within the container gains focus.
-    virtual void OnSearchResultContainerResultFocused(
-        SearchResultBaseView* focused_result_view) = 0;
   };
   explicit SearchResultContainerView(AppListViewDelegate* view_delegate);
   ~SearchResultContainerView() override;
@@ -66,15 +62,6 @@ class APP_LIST_EXPORT SearchResultContainerView : public views::View,
   void set_container_score(double score) { container_score_ = score; }
   double container_score() const { return container_score_; }
 
-  // Updates the distance_from_origin() properties of the results in this
-  // container. |y_index| is the absolute y-index of the first result of this
-  // container (counting from the top of the app list).
-  virtual void NotifyFirstResultYIndex(int y_index);
-
-  // Gets the number of down keystrokes from the beginning to the end of this
-  // container.
-  virtual int GetYSize();
-
   // Batching method that actually performs the update and updates layout.
   void Update();
 
@@ -83,9 +70,6 @@ class APP_LIST_EXPORT SearchResultContainerView : public views::View,
 
   // Overridden from views::View:
   const char* GetClassName() const override;
-
-  // Overridden from views::ViewObserver:
-  void OnViewFocused(View* observed_view) override;
 
   // Functions to allow derivative classes to add/remove observed result views.
   void AddObservedResultView(SearchResultBaseView* result_view);
@@ -99,7 +83,7 @@ class APP_LIST_EXPORT SearchResultContainerView : public views::View,
 
   // Returns the first result in the container view. Returns nullptr if it does
   // not exist.
-  virtual SearchResultBaseView* GetFirstResultView();
+  SearchResultBaseView* GetFirstResultView();
 
   // Called from SearchResultPageView OnShown/OnHidden
   void SetShown(bool shown);

@@ -37,7 +37,7 @@ bool JavaScriptTabModalDialogViewViews::ShouldShowCloseButton() const {
 }
 
 views::View* JavaScriptTabModalDialogViewViews::GetInitiallyFocusedView() {
-  auto* text_box = message_box_view_->text_box();
+  auto* text_box = message_box_view_->GetVisiblePromptField();
   return text_box ? text_box : views::DialogDelegate::GetInitiallyFocusedView();
 }
 
@@ -65,43 +65,38 @@ JavaScriptTabModalDialogViewViews::JavaScriptTabModalDialogViewViews(
       default_prompt_text_(default_prompt_text),
       dialog_callback_(std::move(dialog_callback)),
       dialog_force_closed_callback_(std::move(dialog_force_closed_callback)) {
-  DialogDelegate::SetDefaultButton(ui::DIALOG_BUTTON_OK);
+  SetDefaultButton(ui::DIALOG_BUTTON_OK);
   const bool is_alert = dialog_type == content::JAVASCRIPT_DIALOG_TYPE_ALERT;
-  DialogDelegate::SetButtons(
+  SetButtons(
       // Alerts only have an OK button, no Cancel, because there is no choice
       // being made.
       is_alert ? ui::DIALOG_BUTTON_OK
                : (ui::DIALOG_BUTTON_OK | ui::DIALOG_BUTTON_CANCEL));
 
-  DialogDelegate::SetAcceptCallback(base::BindOnce(
+  SetAcceptCallback(base::BindOnce(
       [](JavaScriptTabModalDialogViewViews* dialog) {
         if (dialog->dialog_callback_)
           std::move(dialog->dialog_callback_)
               .Run(true, dialog->message_box_view_->GetInputText());
       },
       base::Unretained(this)));
-  DialogDelegate::SetCancelCallback(base::BindOnce(
+  SetCancelCallback(base::BindOnce(
       [](JavaScriptTabModalDialogViewViews* dialog) {
         if (dialog->dialog_callback_)
           std::move(dialog->dialog_callback_).Run(false, base::string16());
       },
       base::Unretained(this)));
-  DialogDelegate::SetCloseCallback(base::BindOnce(
+  SetCloseCallback(base::BindOnce(
       [](JavaScriptTabModalDialogViewViews* dialog) {
         if (dialog->dialog_force_closed_callback_)
           std::move(dialog->dialog_force_closed_callback_).Run();
       },
       base::Unretained(this)));
 
-  int options = views::MessageBoxView::DETECT_DIRECTIONALITY;
+  message_box_view_ = new views::MessageBoxView(
+      message_text, /* detect_directionality = */ true);
   if (dialog_type == content::JAVASCRIPT_DIALOG_TYPE_PROMPT)
-    options |= views::MessageBoxView::HAS_PROMPT_FIELD;
-
-  views::MessageBoxView::InitParams params(message_text);
-  params.options = options;
-  params.default_prompt = default_prompt_text;
-  message_box_view_ = new views::MessageBoxView(params);
-  DCHECK(message_box_view_);
+    message_box_view_->SetPromptField(default_prompt_text);
 
   SetLayoutManager(std::make_unique<views::FillLayout>());
   AddChildView(message_box_view_);

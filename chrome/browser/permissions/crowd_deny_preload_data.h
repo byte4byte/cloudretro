@@ -11,15 +11,17 @@
 #include "base/containers/flat_map.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "base/version.h"
 #include "chrome/browser/permissions/crowd_deny.pb.h"
 #include "url/origin.h"
 
 namespace base {
 class SequencedTaskRunner;
+class FilePath;
 }
 
-namespace base {
-class FilePath;
+namespace testing {
+class ScopedCrowdDenyPreloadDataOverride;
 }
 
 // Stores information relevant for making permission decision on popular sites.
@@ -49,27 +51,56 @@ class CrowdDenyPreloadData {
 
   // Parses a single instance of chrome_browser_crowd_deny::PreloadData message
   // in binary wire format from the file at |preload_data_path|.
-  void LoadFromDisk(const base::FilePath& preload_data_path);
+  void LoadFromDisk(const base::FilePath& preload_data_path,
+                    const base::Version& version);
 
-  // Sets the notification UX for a particular origin. Only used for testing.
-  void set_origin_notification_user_experience_for_testing(
-      const url::Origin& origin,
-      chrome_browser_crowd_deny::
-          SiteReputation_NotificationUserExperienceQuality quality) {
-    domain_to_reputation_map_[origin.host()] = SiteReputation();
-    domain_to_reputation_map_[origin.host()].set_notification_ux_quality(
-        quality);
+  inline bool is_loaded_from_disk() { return is_loaded_from_disk_; }
+  inline const base::Optional<base::Version>& version_on_disk() {
+    return version_on_disk_;
   }
 
  private:
+  friend class testing::ScopedCrowdDenyPreloadDataOverride;
+
   void set_site_reputations(DomainToReputationMap map) {
     domain_to_reputation_map_ = std::move(map);
+    is_loaded_from_disk_ = true;
   }
 
+  DomainToReputationMap TakeSiteReputations();
+  bool is_loaded_from_disk_ = false;
   DomainToReputationMap domain_to_reputation_map_;
   scoped_refptr<base::SequencedTaskRunner> loading_task_runner_;
+  base::Optional<base::Version> version_on_disk_;
 
   DISALLOW_COPY_AND_ASSIGN(CrowdDenyPreloadData);
 };
+
+namespace testing {
+
+// Overrides the production preload list, while the instance is in scope, with
+// a testing list that is initially empty.
+class ScopedCrowdDenyPreloadDataOverride {
+ public:
+  using SiteReputation = CrowdDenyPreloadData::SiteReputation;
+  using DomainToReputationMap = CrowdDenyPreloadData::DomainToReputationMap;
+
+  ScopedCrowdDenyPreloadDataOverride();
+  ~ScopedCrowdDenyPreloadDataOverride();
+
+  ScopedCrowdDenyPreloadDataOverride(
+      const ScopedCrowdDenyPreloadDataOverride&) = delete;
+  ScopedCrowdDenyPreloadDataOverride& operator=(
+      const ScopedCrowdDenyPreloadDataOverride&) = delete;
+
+  void SetOriginReputation(const url::Origin& origin,
+                           SiteReputation site_reputation);
+  void ClearAllReputations();
+
+ private:
+  DomainToReputationMap old_map_;
+};
+
+}  // namespace testing
 
 #endif  // CHROME_BROWSER_PERMISSIONS_CROWD_DENY_PRELOAD_DATA_H_

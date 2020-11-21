@@ -23,6 +23,7 @@
 #include "media/mojo/mojom/media_service.mojom.h"
 #include "media/mojo/mojom/renderer.mojom.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "services/metrics/public/cpp/ukm_source_id.h"
 #include "services/service_manager/public/cpp/binder_registry.h"
 #include "services/service_manager/public/mojom/interface_provider.mojom-forward.h"
 #include "services/service_manager/public/mojom/service.mojom-forward.h"
@@ -138,7 +139,7 @@ class CastContentBrowserClient
   // TODO(slan): This further couples the browser to the Cast service. Remove
   // this once the dedicated Bluetooth service has been implemented.
   // (b/76155468)
-  virtual base::WeakPtr<device::BluetoothAdapterCast> CreateBluetoothAdapter();
+  virtual scoped_refptr<device::BluetoothAdapterCast> CreateBluetoothAdapter();
 #endif  // !defined(OS_ANDROID) && !defined(OS_FUCHSIA)
 
   // chromecast::metrics::CastMetricsServiceDelegate implementation:
@@ -162,7 +163,7 @@ class CastContentBrowserClient
   std::string GetAcceptLangs(content::BrowserContext* context) override;
   network::mojom::NetworkContext* GetSystemNetworkContext() override;
   void OverrideWebkitPrefs(content::RenderViewHost* render_view_host,
-                           content::WebPreferences* prefs) override;
+                           blink::web_pref::WebPreferences* prefs) override;
   std::string GetApplicationLocale() override;
   scoped_refptr<content::QuotaPermissionContext> CreateQuotaPermissionContext()
       override;
@@ -204,8 +205,7 @@ class CastContentBrowserClient
                                 mojo::GenericPendingReceiver receiver) override;
   void RegisterBrowserInterfaceBindersForFrame(
       content::RenderFrameHost* render_frame_host,
-      service_manager::BinderMapWithContext<content::RenderFrameHost*>* map)
-      override;
+      mojo::BinderMapWithContext<content::RenderFrameHost*>* map) override;
   mojo::Remote<::media::mojom::MediaService> RunSecondaryMediaService()
       override;
   void RunServiceInstance(
@@ -229,6 +229,7 @@ class CastContentBrowserClient
   CreateThrottlesForNavigation(content::NavigationHandle* handle) override;
   void RegisterNonNetworkNavigationURLLoaderFactories(
       int frame_tree_node_id,
+      ukm::SourceIdObj ukm_source_id,
       NonNetworkURLLoaderFactoryMap* factories) override;
   void RegisterNonNetworkSubresourceURLLoaderFactories(
       int render_process_id,
@@ -236,10 +237,13 @@ class CastContentBrowserClient
       NonNetworkURLLoaderFactoryMap* factories) override;
   void OnNetworkServiceCreated(
       network::mojom::NetworkService* network_service) override;
-  mojo::Remote<network::mojom::NetworkContext> CreateNetworkContext(
+  void ConfigureNetworkContextParams(
       content::BrowserContext* context,
       bool in_memory,
-      const base::FilePath& relative_partition_path) override;
+      const base::FilePath& relative_partition_path,
+      network::mojom::NetworkContextParams* network_context_params,
+      network::mojom::CertVerifierCreationParams* cert_verifier_creation_params)
+      override;
   std::string GetUserAgent() override;
   bool DoesSiteRequireDedicatedProcess(content::BrowserContext* browser_context,
                                        const GURL& effective_site_url) override;

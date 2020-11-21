@@ -4,10 +4,10 @@
 
 package org.chromium.chrome.browser.tasks;
 
-import static android.support.test.espresso.Espresso.onView;
-import static android.support.test.espresso.action.ViewActions.click;
-import static android.support.test.espresso.action.ViewActions.replaceText;
-import static android.support.test.espresso.matcher.ViewMatchers.withId;
+import static androidx.test.espresso.Espresso.onView;
+import static androidx.test.espresso.action.ViewActions.click;
+import static androidx.test.espresso.action.ViewActions.replaceText;
+import static androidx.test.espresso.matcher.ViewMatchers.withId;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -24,22 +24,39 @@ import static org.chromium.chrome.browser.tasks.TasksSurfaceProperties.IS_INCOGN
 import static org.chromium.chrome.browser.tasks.TasksSurfaceProperties.IS_TAB_CAROUSEL_VISIBLE;
 import static org.chromium.chrome.browser.tasks.TasksSurfaceProperties.IS_VOICE_RECOGNITION_BUTTON_VISIBLE;
 import static org.chromium.chrome.browser.tasks.TasksSurfaceProperties.MORE_TABS_CLICK_LISTENER;
+import static org.chromium.chrome.browser.tasks.TasksSurfaceProperties.MV_TILES_CONTAINER_TOP_MARGIN;
 import static org.chromium.chrome.browser.tasks.TasksSurfaceProperties.MV_TILES_VISIBLE;
+import static org.chromium.chrome.browser.tasks.TasksSurfaceProperties.TAB_SWITCHER_TITLE_TOP_MARGIN;
+import static org.chromium.chrome.browser.tasks.TasksSurfaceProperties.TASKS_SURFACE_BODY_TOP_MARGIN;
 import static org.chromium.chrome.browser.tasks.TasksSurfaceProperties.VOICE_SEARCH_BUTTON_CLICK_LISTENER;
 
 import android.content.res.Resources;
 import android.graphics.drawable.ColorDrawable;
-import android.support.test.annotation.UiThreadTest;
-import android.support.test.filters.SmallTest;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.view.View;
+import android.view.ViewGroup;
+import android.widget.HorizontalScrollView;
+import android.widget.ListView;
+import android.widget.ScrollView;
 
+import androidx.core.widget.NestedScrollView;
+import androidx.test.espresso.UiController;
+import androidx.test.espresso.ViewAction;
+import androidx.test.espresso.action.ScrollToAction;
+import androidx.test.espresso.matcher.ViewMatchers;
+import androidx.test.filters.SmallTest;
+
+import org.hamcrest.Matcher;
+import org.hamcrest.Matchers;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
+import org.chromium.base.test.UiThreadTest;
+import org.chromium.base.test.util.DisabledTest;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.ntp.IncognitoCookieControlsManager;
 import org.chromium.chrome.tab_ui.R;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
@@ -49,6 +66,8 @@ import org.chromium.ui.modelutil.PropertyModel;
 import org.chromium.ui.modelutil.PropertyModelChangeProcessor;
 import org.chromium.ui.test.util.DummyUiActivityTestCase;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /** Tests for {@link TasksViewBinder}. */
@@ -65,6 +84,12 @@ public class TasksViewBinderTest extends DummyUiActivityTestCase {
     public void setUpTest() throws Exception {
         super.setUpTest();
         MockitoAnnotations.initMocks(this);
+
+        Map<String, Boolean> testFeatures = new HashMap<>();
+        testFeatures.put(ChromeFeatureList.INTEREST_FEED_V2, false);
+        testFeatures.put(ChromeFeatureList.INTEREST_FEED_CONTENT_SUGGESTIONS, true);
+        testFeatures.put(ChromeFeatureList.REPORT_FEED_USER_ACTIONS, false);
+        ChromeFeatureList.setTestFeatures(testFeatures);
 
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             mTasksView = (TasksView) getActivity().getLayoutInflater().inflate(
@@ -141,6 +166,7 @@ public class TasksViewBinderTest extends DummyUiActivityTestCase {
 
     @Test
     @SmallTest
+    @DisabledTest
     public void testSetVoiceSearchButtonVisibilityAndClickListener() {
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             mTasksViewPropertyModel.set(IS_FAKE_SEARCH_BOX_VISIBLE, true);
@@ -209,13 +235,14 @@ public class TasksViewBinderTest extends DummyUiActivityTestCase {
 
     @Test
     @SmallTest
-    public void testSetIncognitoDescriptionVisibilityAndClickListener() {
-        assertFalse(isViewVisible(R.id.incognito_description_layout_stub));
+    public void
+    testSetIncognitoDescriptionVisibilityAndClickListener() {
+        assertFalse(isViewVisible(R.id.incognito_description_container_layout_stub));
 
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             mTasksViewPropertyModel.set(INCOGNITO_LEARN_MORE_CLICK_LISTENER, mViewOnClickListener);
         });
-        assertFalse(isViewVisible(R.id.incognito_description_layout_stub));
+        assertFalse(isViewVisible(R.id.incognito_description_container_layout_stub));
 
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             mTasksViewPropertyModel.set(INCOGNITO_COOKIE_CONTROLS_MANAGER, mCookieControlsManager);
@@ -225,7 +252,72 @@ public class TasksViewBinderTest extends DummyUiActivityTestCase {
         assertTrue(isViewVisible(R.id.new_tab_incognito_container));
 
         mViewClicked.set(false);
-        onView(withId(R.id.learn_more)).perform(click());
+        // Default scrollTo() cannot be used for NestedScrollView. Add a customized scrollTo for
+        // scrolling to learn_more button.
+        ViewAction customizedScrollTo = new ViewAction() {
+            @Override
+            public Matcher<View> getConstraints() {
+                return Matchers.allOf(
+                        ViewMatchers.withEffectiveVisibility(ViewMatchers.Visibility.VISIBLE),
+                        ViewMatchers.isDescendantOfA(
+                                Matchers.anyOf(ViewMatchers.isAssignableFrom(ScrollView.class),
+                                        ViewMatchers.isAssignableFrom(HorizontalScrollView.class),
+                                        ViewMatchers.isAssignableFrom(ListView.class),
+                                        ViewMatchers.isAssignableFrom(NestedScrollView.class))));
+            }
+
+            @Override
+            public String getDescription() {
+                return "scroll to";
+            }
+
+            @Override
+            public void perform(UiController uiController, View view) {
+                new ScrollToAction().perform(uiController, view);
+            }
+        };
+        onView(withId(R.id.learn_more)).perform(customizedScrollTo, click());
         assertTrue(mViewClicked.get());
+    }
+
+    @Test
+    @UiThreadTest
+    @SmallTest
+    public void testSetTasksSurfaceBodyTopMargin() {
+        ViewGroup.MarginLayoutParams params =
+                (ViewGroup.MarginLayoutParams) mTasksView.getBodyViewContainer().getLayoutParams();
+        assertEquals(0, params.topMargin);
+
+        mTasksViewPropertyModel.set(TASKS_SURFACE_BODY_TOP_MARGIN, 16);
+
+        assertEquals(16, params.topMargin);
+    }
+
+    @Test
+    @UiThreadTest
+    @SmallTest
+    public void testSetMVTilesContainerTopMargin() {
+        ViewGroup.MarginLayoutParams params =
+                (ViewGroup.MarginLayoutParams) mTasksView.findViewById(R.id.mv_tiles_container)
+                        .getLayoutParams();
+        assertEquals(0, params.topMargin);
+
+        mTasksViewPropertyModel.set(MV_TILES_CONTAINER_TOP_MARGIN, 16);
+
+        assertEquals(16, params.topMargin);
+    }
+
+    @Test
+    @UiThreadTest
+    @SmallTest
+    public void testSetTabSwitcherTitleTopMargin() {
+        ViewGroup.MarginLayoutParams params =
+                (ViewGroup.MarginLayoutParams) mTasksView.findViewById(R.id.tab_switcher_title)
+                        .getLayoutParams();
+        assertEquals(0, params.topMargin);
+
+        mTasksViewPropertyModel.set(TAB_SWITCHER_TITLE_TOP_MARGIN, 16);
+
+        assertEquals(16, params.topMargin);
     }
 }

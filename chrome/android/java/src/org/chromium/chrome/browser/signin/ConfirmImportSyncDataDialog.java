@@ -16,6 +16,7 @@ import androidx.fragment.app.DialogFragment;
 
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.components.browser_ui.settings.ManagedPreferencesUtils;
 import org.chromium.components.browser_ui.widget.RadioButtonWithDescription;
 
@@ -53,7 +54,6 @@ public class ConfirmImportSyncDataDialog extends DialogFragment
     private RadioButtonWithDescription mKeepSeparateOption;
 
     private Listener mListener;
-    private boolean mListenerCalled;
 
     /**
      * Creates a new instance of ConfirmImportSyncDataDialog, a dialog that gives the
@@ -76,15 +76,13 @@ public class ConfirmImportSyncDataDialog extends DialogFragment
     }
 
     private void setListener(Listener listener) {
-        assert mListener == null;
+        assert listener != null;
         mListener = listener;
     }
 
     @Override
     public Dialog onCreateDialog(Bundle savedInstanceState) {
-        // If the dialog is being recreated it won't have the listener set and so won't be
-        // functional. Therefore we dismiss, and the user will need to open the dialog again.
-        if (savedInstanceState != null) {
+        if (mListener == null) {
             dismiss();
         }
         String oldAccountName = getArguments().getString(KEY_OLD_ACCOUNT_NAME);
@@ -109,26 +107,40 @@ public class ConfirmImportSyncDataDialog extends DialogFragment
         mConfirmImportOption.setRadioButtonGroup(radioGroup);
         mKeepSeparateOption.setRadioButtonGroup(radioGroup);
 
+        boolean isManagedAccount = IdentityServicesProvider.get()
+                                           .getSigninManager(Profile.getLastUsedRegularProfile())
+                                           .getManagementDomain()
+                != null;
+        final AlertDialog alertDialog =
+                new AlertDialog.Builder(getActivity(), R.style.Theme_Chromium_AlertDialog)
+                        .setPositiveButton(R.string.continue_button, this)
+                        .setNegativeButton(R.string.cancel, this)
+                        .setView(v)
+                        .create();
+        // For non-managed accounts, the confirmation button starts out disabled, since none of the
+        // options are chosen by default.
+        alertDialog.setOnShowListener(dialog
+                -> alertDialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(isManagedAccount));
+
         // If the account is managed, disallow merging information.
-        if (IdentityServicesProvider.get().getSigninManager().getManagementDomain() != null) {
+        if (isManagedAccount) {
             mKeepSeparateOption.setChecked(true);
             mConfirmImportOption.setOnClickListener(
                     view -> ManagedPreferencesUtils.showManagedByAdministratorToast(getActivity()));
         } else {
-            mConfirmImportOption.setChecked(true);
+            // The confirmation button gets enabled as soon as either of the radio button options
+            // was selected.
+            mConfirmImportOption.setOnCheckedChangeListener(radioButton
+                    -> alertDialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(true));
+            mKeepSeparateOption.setOnCheckedChangeListener(radioButton
+                    -> alertDialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(true));
         }
 
-        return new AlertDialog.Builder(getActivity(), R.style.Theme_Chromium_AlertDialog)
-                .setPositiveButton(R.string.continue_button, this)
-                .setNegativeButton(R.string.cancel, this)
-                .setView(v)
-                .create();
+        return alertDialog;
     }
 
     @Override
     public void onClick(DialogInterface dialog, int which) {
-        if (mListener == null) return;
-
         if (which == AlertDialog.BUTTON_POSITIVE) {
             assert mConfirmImportOption.isChecked() ^ mKeepSeparateOption.isChecked();
 
@@ -142,15 +154,12 @@ public class ConfirmImportSyncDataDialog extends DialogFragment
             RecordUserAction.record("Signin_ImportDataPrompt_Cancel");
             mListener.onCancel();
         }
-        mListenerCalled = true;
     }
 
     @Override
-    public void onDismiss(DialogInterface dialog) {
-        super.onDismiss(dialog);
-        if (mListener != null && !mListenerCalled) {
-            mListener.onCancel();
-        }
+    public void onCancel(DialogInterface dialog) {
+        super.onCancel(dialog);
+        mListener.onCancel();
     }
 }
 

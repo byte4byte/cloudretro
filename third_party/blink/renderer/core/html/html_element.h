@@ -100,16 +100,18 @@ class CORE_EXPORT HTMLElement : public Element {
 
   bool ShouldSerializeEndTag() const;
 
-  virtual HTMLFormElement* formOwner() const { return nullptr; }
+  virtual HTMLFormElement* formOwner() const;
 
   HTMLFormElement* FindFormAncestor() const;
 
   bool HasDirectionAuto() const;
   TextDirection DirectionalityIfhasDirAutoAttribute(bool& is_auto) const;
 
+  virtual bool IsHTMLBodyElement() const { return false; }
+  virtual bool IsHTMLFrameSetElement() const { return false; }
+  virtual bool IsHTMLPortalElement() const { return false; }
   virtual bool IsHTMLUnknownElement() const { return false; }
   virtual bool IsPluginElement() const { return false; }
-  virtual bool IsHTMLPortalElement() const { return false; }
 
   // https://html.spec.whatwg.org/C/#category-label
   virtual bool IsLabelable() const;
@@ -153,14 +155,19 @@ class CORE_EXPORT HTMLElement : public Element {
 
  protected:
   enum AllowPercentage { kDontAllowPercentageValues, kAllowPercentageValues };
+  enum AllowZero { kDontAllowZeroValues, kAllowZeroValues };
   void AddHTMLLengthToStyle(MutableCSSPropertyValueSet*,
                             CSSPropertyID,
                             const String& value,
-                            AllowPercentage = kAllowPercentageValues);
+                            AllowPercentage = kAllowPercentageValues,
+                            AllowZero = kAllowZeroValues);
   void AddHTMLColorToStyle(MutableCSSPropertyValueSet*,
                            CSSPropertyID,
                            const String& color);
 
+  void ApplyAspectRatioToStyle(const AtomicString& width,
+                               const AtomicString& height,
+                               MutableCSSPropertyValueSet*);
   void ApplyAlignmentAttributeToStyle(const AtomicString&,
                                       MutableCSSPropertyValueSet*);
   void ApplyBorderAttributeToStyle(const AtomicString&,

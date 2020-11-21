@@ -118,8 +118,10 @@ void FrameConsole::ReportResourceResponseReceived(
 void FrameConsole::DidFailLoading(DocumentLoader* loader,
                                   uint64_t request_identifier,
                                   const ResourceError& error) {
-  if (error.IsCancellation())  // Report failures only.
+  // Report failures only.
+  if (error.IsCancellation() || error.IsUnactionableTrustTokensStatus())
     return;
+
   StringBuilder message;
   message.Append("Failed to load resource");
   if (!error.LocalizedDescription().IsEmpty()) {
@@ -131,7 +133,7 @@ void FrameConsole::DidFailLoading(DocumentLoader* loader,
       message.ToString(), error.FailingURL(), loader, request_identifier));
 }
 
-void FrameConsole::Trace(Visitor* visitor) {
+void FrameConsole::Trace(Visitor* visitor) const {
   visitor->Trace(frame_);
 }
 

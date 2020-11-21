@@ -10,6 +10,7 @@
 
 #include "base/callback_forward.h"
 #include "base/macros.h"
+#include "base/memory/weak_ptr.h"
 #include "chrome/browser/ui/views/payments/view_stack.h"
 #include "components/payments/content/initialization_task.h"
 #include "components/payments/content/payment_request_dialog.h"
@@ -84,14 +85,16 @@ class PaymentRequestDialogView : public views::DialogDelegateView,
     virtual void OnProcessingSpinnerShown() = 0;
 
     virtual void OnProcessingSpinnerHidden() = 0;
+
+    virtual void OnPaymentHandlerWindowOpened() = 0;
   };
 
   // Build a Dialog around the PaymentRequest object. |observer| is used to
   // be notified of dialog events as they happen (but may be NULL) and should
   // outlive this object.
-  PaymentRequestDialogView(PaymentRequest* request,
-                           PaymentRequestDialogView::ObserverForTest* observer);
-  ~PaymentRequestDialogView() override;
+  static base::WeakPtr<PaymentRequestDialogView> Create(
+      base::WeakPtr<PaymentRequest> request,
+      PaymentRequestDialogView::ObserverForTest* observer);
 
   // views::View
   void RequestFocus() override;
@@ -113,6 +116,7 @@ class PaymentRequestDialogView : public views::DialogDelegateView,
       const GURL& url,
       PaymentHandlerOpenWindowCallback callback) override;
   void RetryDialog() override;
+  void ConfirmPaymentForTesting() override;
 
   // PaymentRequestSpec::Observer:
   void OnStartUpdating(PaymentRequestSpec::UpdateReason reason) override;
@@ -134,11 +138,9 @@ class PaymentRequestDialogView : public views::DialogDelegateView,
   // |on_added| is called when a new credit card was added (the reference is
   // short-lived; callee should make a copy of the CreditCard object).
   // |back_navigation_type| identifies the type of navigation to execute once
-  // the editor has completed successfully. |next_ui_tag| is the lowest value
-  // that the credit card editor can use to assign to custom controls.
+  // the editor has completed successfully.
   void ShowCreditCardEditor(
       BackNavigationType back_navigation_type,
-      int next_ui_tag,
       base::OnceClosure on_edited,
       base::OnceCallback<void(const autofill::CreditCard&)> on_added,
       autofill::CreditCard* credit_card = nullptr);
@@ -177,27 +179,40 @@ class PaymentRequestDialogView : public views::DialogDelegateView,
 
   Profile* GetProfile();
 
-  ViewStack* view_stack_for_testing() { return view_stack_.get(); }
+  // Calculates the actual payment handler dialog height based on the preferred
+  // height and current browser window size.
+  int GetActualPaymentHandlerDialogHeight() const;
+
+  // Calculates the dialog width depending on whether or not the large payment
+  // handler window is currently showing.
+  int GetActualDialogWidth() const;
+
+  ViewStack* view_stack_for_testing() { return view_stack_; }
   views::View* throbber_overlay_for_testing() { return throbber_overlay_; }
 
  private:
+  // The browsertest validates the calculated dialog size.
+  friend class PaymentHandlerWindowSizeTest;
+
+  PaymentRequestDialogView(base::WeakPtr<PaymentRequest> request,
+                           PaymentRequestDialogView::ObserverForTest* observer);
+  ~PaymentRequestDialogView() override;
+
   void OnDialogOpened();
   void ShowInitialPaymentSheet();
   void SetupSpinnerOverlay();
   void OnDialogClosed();
+  void ResizeDialogWindow();
 
   // views::View
   gfx::Size CalculatePreferredSize() const override;
   void ViewHierarchyChanged(
       const views::ViewHierarchyChangedDetails& details) override;
 
-  // Non-owned reference to the PaymentRequest that initiated this dialog. Since
-  // the PaymentRequest object always outlives this one, the pointer should
-  // always be valid even though there is no direct ownership relationship
-  // between the two.
-  PaymentRequest* request_;
+  // The PaymentRequest object that initiated this dialog.
+  base::WeakPtr<PaymentRequest> request_;
   ControllerMap controller_map_;
-  std::unique_ptr<ViewStack> view_stack_;
+  ViewStack* view_stack_;
 
   // A full dialog overlay that shows a spinner and the "processing" label. It's
   // hidden until ShowProcessingSpinner is called.
@@ -207,12 +222,22 @@ class PaymentRequestDialogView : public views::DialogDelegateView,
   // May be null.
   ObserverForTest* observer_for_testing_;
 
-  // Used when the dialog is being closed to avoid re-entrancy into the
-  // controller_map_.
+  // Used when the dialog is being closed to avoid re-entrance into the
+  // controller_map_ or view_stack_.
   bool being_closed_ = false;
 
   // The number of initialization tasks that are not yet initialized.
   size_t number_of_initialization_tasks_ = 0;
+
+  // True when payment handler screen is shown and the
+  // kPaymentHandlerPopUpSizeWindow runtime flag is set.
+  bool is_showing_large_payment_handler_window_ = false;
+
+  // Calculated based on the browser content size at the time of opening payment
+  // handler window.
+  int payment_handler_window_height_ = 0;
+
+  base::WeakPtrFactory<PaymentRequestDialogView> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(PaymentRequestDialogView);
 };

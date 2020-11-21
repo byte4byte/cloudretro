@@ -17,7 +17,6 @@ import androidx.core.app.NotificationManagerCompat;
 
 import org.chromium.base.ContextUtils;
 import org.chromium.base.MathUtils;
-import org.chromium.base.library_loader.LibraryLoader;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.chrome.browser.notifications.channels.ChromeChannelDefinitions;
 import org.chromium.chrome.browser.preferences.ChromePreferenceKeys;
@@ -53,7 +52,11 @@ public class NotificationUmaTracker {
             SystemNotificationType.CLICK_TO_CALL, SystemNotificationType.SHARED_CLIPBOARD,
             SystemNotificationType.PERMISSION_REQUESTS,
             SystemNotificationType.PERMISSION_REQUESTS_HIGH, SystemNotificationType.ANNOUNCEMENT,
-            SystemNotificationType.SHARE_SAVE_IMAGE})
+            SystemNotificationType.SHARE_SAVE_IMAGE, SystemNotificationType.TWA_DISCLOSURE_INITIAL,
+            SystemNotificationType.TWA_DISCLOSURE_SUBSEQUENT,
+            SystemNotificationType.CHROME_REENGAGEMENT_1,
+            SystemNotificationType.CHROME_REENGAGEMENT_2,
+            SystemNotificationType.CHROME_REENGAGEMENT_3})
     @Retention(RetentionPolicy.SOURCE)
     public @interface SystemNotificationType {
         int UNKNOWN = -1;
@@ -80,8 +83,13 @@ public class NotificationUmaTracker {
         int PERMISSION_REQUESTS_HIGH = 20;
         int ANNOUNCEMENT = 21;
         int SHARE_SAVE_IMAGE = 22;
+        int TWA_DISCLOSURE_INITIAL = 23;
+        int TWA_DISCLOSURE_SUBSEQUENT = 24;
+        int CHROME_REENGAGEMENT_1 = 25;
+        int CHROME_REENGAGEMENT_2 = 26;
+        int CHROME_REENGAGEMENT_3 = 27;
 
-        int NUM_ENTRIES = 23;
+        int NUM_ENTRIES = 28;
     }
 
     /*
@@ -130,8 +138,10 @@ public class NotificationUmaTracker {
         int ANNOUNCEMENT_ACK = 13;
         // Open button on announcement notification.
         int ANNOUNCEMENT_OPEN = 14;
+        // "Got it" button on the TWA "Running in Chrome" notification.
+        int TWA_NOTIFICATION_ACCEPTANCE = 15;
 
-        int NUM_ENTRIES = 15;
+        int NUM_ENTRIES = 16;
     }
 
     private static class LazyHolder {
@@ -261,12 +271,10 @@ public class NotificationUmaTracker {
     }
 
     /**
-     * Logs when failed to create notification with Android API.
-     * @param type Type of the notification.
+     * Tracks UMA when failed to notify {@link NotificationManager}.
      */
-    public static void onNotificationFailedToCreate(@SystemNotificationType int type) {
-        if (type == SystemNotificationType.UNKNOWN) return;
-        recordHistogram("Mobile.SystemNotification.CreationFailure", type);
+    public void onFailedToNotify(@SystemNotificationType int type) {
+        recordHistogram("Mobile.SystemNotification.NotifyFailure", type);
     }
 
     private void logNotificationShown(@SystemNotificationType int type,
@@ -313,7 +321,6 @@ public class NotificationUmaTracker {
     private static void recordHistogram(String name, @SystemNotificationType int type) {
         if (type == SystemNotificationType.UNKNOWN) return;
 
-        if (!LibraryLoader.getInstance().isInitialized()) return;
         RecordHistogram.recordEnumeratedHistogram(name, type, SystemNotificationType.NUM_ENTRIES);
     }
 

@@ -26,8 +26,10 @@ network::mojom::CSPSourceListPtr BuildCSPSourceList(
     sources.push_back(BuildCSPSource(source));
 
   return network::mojom::CSPSourceList::New(
-      std::move(sources), source_list.allow_self, source_list.allow_star,
-      source_list.allow_redirects);
+      std::move(sources), std::vector<std::string>(),
+      std::vector<network::mojom::CSPHashSourcePtr>(), source_list.allow_self,
+      source_list.allow_star, source_list.allow_redirects, false, false, false,
+      false, false, false);
 }
 
 network::mojom::ContentSecurityPolicyPtr BuildContentSecurityPolicy(
@@ -42,9 +44,23 @@ network::mojom::ContentSecurityPolicyPtr BuildContentSecurityPolicy(
     auto name = network::ToCSPDirectiveName(directive.name.Utf8());
     policy->directives[name] = BuildCSPSourceList(directive.source_list);
   }
+  policy->upgrade_insecure_requests = policy_in.upgrade_insecure_requests;
+  policy->block_all_mixed_content = policy_in.block_all_mixed_content;
 
   for (const blink::WebString& endpoint : policy_in.report_endpoints)
     policy->report_endpoints.push_back(endpoint.Utf8());
+
+  policy->require_trusted_types_for = policy_in.require_trusted_types_for;
+
+  if (policy_in.trusted_types) {
+    std::vector<std::string> list;
+    for (const auto& type : policy_in.trusted_types->list) {
+      list.emplace_back(type.Utf8());
+    }
+    policy->trusted_types = network::mojom::CSPTrustedTypes::New(
+        std::move(list), policy_in.trusted_types->allow_any,
+        policy_in.trusted_types->allow_duplicates);
+  }
 
   return policy;
 }

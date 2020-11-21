@@ -115,7 +115,7 @@
   // clean up.
   [[UpgradeCenter sharedInstance]
       registerClient:self.mediator
-      withDispatcher:static_cast<id<ApplicationCommands>>(
+         withHandler:static_cast<id<ApplicationCommands>>(
                          self.browser->GetCommandDispatcher())];
 }
 
@@ -236,13 +236,16 @@
   infobarCoordinator.bannerViewController.infobarBannerContainer = self;
   // TODO(crbug.com/1045047): Use HandlerForProtocol after commands protocol
   // clean up.
-  infobarCoordinator.dispatcher = static_cast<id<ApplicationCommands>>(
+  infobarCoordinator.handler = static_cast<id<ApplicationCommands>>(
       self.browser->GetCommandDispatcher());
   infobarCoordinator.infobarContainer = self;
   [self presentBannerForInfobarCoordinator:infobarCoordinator];
 }
 
 - (void)infobarManagerWillChange {
+  if (IsInfobarUIRebootEnabled()) {
+    [self dismissInfobarBannerAnimated:NO completion:nil];
+  }
   self.infobarCoordinators = [NSMutableArray array];
   self.infobarCoordinatorsToPresent = [NSMutableArray array];
 }

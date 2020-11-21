@@ -25,6 +25,7 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/page_type.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
@@ -86,7 +87,8 @@ IN_PROC_BROWSER_TEST_F(ZoomControllerBrowserTest,
     host->Shutdown(0);
     crash_observer.Wait();
   }
-  EXPECT_FALSE(web_contents->GetRenderViewHost()->IsRenderViewLive());
+  EXPECT_FALSE(
+      web_contents->GetMainFrame()->GetRenderViewHost()->IsRenderViewLive());
 
   // The following attempt to change the zoom level for a crashed tab should
   // fail.

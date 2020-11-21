@@ -24,6 +24,7 @@
 #include "ui/gfx/geometry/point_conversions.h"
 #include "ui/wm/core/coordinate_conversion.h"
 #include "ui/wm/core/cursor_manager.h"
+#include "ui/wm/core/shadow_controller.h"
 #include "ui/wm/core/window_util.h"
 
 namespace ash {
@@ -40,16 +41,18 @@ void RecursiveSchedulePainter(ui::Layer* layer) {
 }  // namespace
 
 // static
-DragWindowResizer* DragWindowResizer::instance_ = NULL;
+DragWindowResizer* DragWindowResizer::instance_ = nullptr;
 
 DragWindowResizer::~DragWindowResizer() {
-  if (window_state_)
-    window_state_->DeleteDragDetails();
   Shell* shell = Shell::Get();
+  if (window_state_) {
+    window_state_->DeleteDragDetails();
+    shell->shadow_controller()->UpdateShadowForWindow(window_state_->window());
+  }
   shell->mouse_cursor_filter()->set_mouse_warp_enabled(true);
   shell->mouse_cursor_filter()->HideSharedEdgeIndicator();
   if (instance_ == this)
-    instance_ = NULL;
+    instance_ = nullptr;
 }
 
 void DragWindowResizer::Drag(const gfx::PointF& location, int event_flags) {
@@ -89,14 +92,14 @@ DragWindowResizer::DragWindowResizer(
       next_window_resizer_(std::move(next_window_resizer)) {
   // The pointer should be confined in one display during resizing a window
   // because the window cannot span two displays at the same time anyway. The
-  // exception is window/tab dragging operation. During that operation,
-  // |mouse_warp_mode_| should be set to WARP_DRAG so that the user could move a
-  // window/tab to another display.
+  // exception is window/tab dragging operation. During that operation, mouse
+  // warp is set so that the user can move a window/tab to another display.
   MouseCursorEventFilter* mouse_cursor_filter =
       Shell::Get()->mouse_cursor_filter();
   mouse_cursor_filter->set_mouse_warp_enabled(ShouldAllowMouseWarp());
   if (ShouldAllowMouseWarp())
     mouse_cursor_filter->ShowSharedEdgeIndicator(GetTarget()->GetRootWindow());
+  Shell::Get()->shadow_controller()->UpdateShadowForWindow(GetTarget());
   instance_ = this;
 }
 
@@ -140,7 +143,13 @@ void DragWindowResizer::EndDragImpl() {
   // Adjust the size and position so that it doesn't exceed the size of work
   // area.
   display::Display dst_display;
-  screen->GetDisplayWithDisplayId(dst_display_id, &dst_display);
+  // TODO(crbug.com/1131071): It's possible that |dst_display_id| returned from
+  // CursorManager::GetDisplay().id() is an invalid display id thus
+  // |dst_display| may be invalid as well. This may cause crash later. To avoid
+  // crash, we early return here. However, |dst_display_id| should never be
+  // invalid.
+  if (!screen->GetDisplayWithDisplayId(dst_display_id, &dst_display))
+    return;
   const gfx::Size& size = dst_display.work_area().size();
   gfx::Rect bounds = GetTarget()->bounds();
   if (bounds.width() > size.width()) {

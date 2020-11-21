@@ -4,7 +4,7 @@
 
 #include "extensions/browser/extension_web_contents_observer.h"
 
-#include "base/logging.h"
+#include "base/check.h"
 #include "content/public/browser/child_process_security_policy.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_frame_host.h"
@@ -292,12 +292,14 @@ const Extension* ExtensionWebContentsObserver::GetExtensionFromFrame(
 
   if (verify_url) {
     const url::Origin& origin(render_frame_host->GetLastCommittedOrigin());
-    // Without site isolation, this check is needed to eliminate non-extension
-    // schemes. With site isolation, this is still needed to exclude sandboxed
-    // extension frames with an opaque origin.
-    const GURL site_url(render_frame_host->GetSiteInstance()->GetSiteURL());
-    if (origin.opaque() || site_url != content::SiteInstance::GetSiteForURL(
-                                           browser_context, origin.GetURL()))
+    // This check is needed to eliminate origins that are not within a
+    // hosted-app's web extent, and sandboxed extension frames with an opaque
+    // origin.
+    // TODO(1139108) See if extension check is still needed after bug is fixed.
+    auto* extension_for_origin = ExtensionRegistry::Get(browser_context)
+                                     ->enabled_extensions()
+                                     .GetExtensionOrAppByURL(origin.GetURL());
+    if (origin.opaque() || extension_for_origin != extension)
       return nullptr;
   }
 

@@ -20,42 +20,23 @@ namespace features {
 COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC)
 extern const base::Feature kAssistantAudioEraser;
 
-// Enable Assistant Feedback UI.
-COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC)
-extern const base::Feature kAssistantFeedbackUi;
-
-// Enables Assistant warmer welcome.
-COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC)
-extern const base::Feature kAssistantWarmerWelcomeFeature;
-
 // Enables Assistant app support.
 COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC)
 extern const base::Feature kAssistantAppSupport;
+
+// Enables better onboarding for Assistant.
+COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC)
+extern const base::Feature kAssistantBetterOnboarding;
 
 // Enables Assistant launcher chip integration.
 COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC)
 extern const base::Feature kAssistantLauncherChipIntegration;
 
-// Enables Assistant proactive suggestions.
+// When enabled, Assistant will use response processing V2. This is a set of
+// synced client and server changes which will turn on default parallel client
+// op processing and eager (streaming) UI element rendering.
 COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC)
-extern const base::Feature kAssistantProactiveSuggestions;
-
-// A comma-delimited list of experiment IDs to trigger on the proactive
-// suggestions server.
-COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC)
-extern const base::FeatureParam<std::string>
-    kAssistantProactiveSuggestionsServerExperimentIds;
-
-// Enables suppression of Assistant proactive suggestions that have already been
-// shown to the user.
-COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC)
-extern const base::FeatureParam<bool>
-    kAssistantProactiveSuggestionsSuppressDuplicates;
-
-// The timeout threshold (in milliseconds) for the proactive suggestions chip.
-COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC)
-extern const base::FeatureParam<int>
-    kAssistantProactiveSuggestionsTimeoutThresholdMillis;
+extern const base::Feature kAssistantResponseProcessingV2;
 
 // Enables Assistant routines.
 COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC)
@@ -66,9 +47,24 @@ extern const base::Feature kAssistantRoutines;
 COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC)
 extern const base::Feature kAssistantTimersV2;
 
-// Enables clear cut logging.
+// Enables server-driven wait scheduling. This allows the server to inject
+// pauses into the interaction response to give the user time to digest one leg
+// of a routine before proceeding to the next, for example, or to provide
+// comedic timing for jokes.
 COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC)
-extern const base::Feature kEnableClearCutLog;
+extern const base::Feature kAssistantWaitScheduling;
+
+// Enables Assistant in Ambient Mode.
+COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC)
+extern const base::Feature kEnableAmbientAssistant;
+
+// Enables Better Assistant.
+COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC)
+extern const base::Feature kEnableBetterAssistant;
+
+// Enables Bloom integration.
+COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC)
+extern const base::Feature kEnableBloom;
 
 // Enables DSP for hotword detection.
 COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC)
@@ -86,33 +82,34 @@ extern const base::Feature kEnableStereoAudioInput;
 COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC)
 extern const base::Feature kEnablePowerManager;
 
+// Enables on-device-assistant to handle the most common queries on device.
+// See go/marble
 COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC)
-int GetProactiveSuggestionsMaxWidth();
+extern const base::Feature kEnableOnDeviceAssistant;
 
+// Uses the LibAssistant beta backend instead of the release channel.
 COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC)
-int GetProactiveSuggestionsRichEntryPointBackgroundBlurRadius();
+extern const base::Feature kEnableLibAssistantBetaBackend;
 
-COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC)
-int GetProactiveSuggestionsRichEntryPointCornerRadius();
-
-COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC)
-std::string GetProactiveSuggestionsServerExperimentIds();
-
-COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC)
-base::TimeDelta GetProactiveSuggestionsTimeoutThreshold();
+COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC) bool IsAmbientAssistantEnabled();
 
 COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC) bool IsAppSupportEnabled();
 
 COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC) bool IsAudioEraserEnabled();
 
-COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC) bool IsClearCutLogEnabled();
+COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC) bool IsBetterAssistantEnabled();
+
+COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC) bool IsBetterOnboardingEnabled();
+
+COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC) bool IsBloomEnabled();
 
 COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC)
 bool IsConversationStartersV2Enabled();
 
-COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC) bool IsDspHotwordEnabled();
+COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC)
+bool IsAssistantDebuggingEnabled();
 
-COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC) bool IsFeedbackUiEnabled();
+COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC) bool IsDspHotwordEnabled();
 
 COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC)
 bool IsLauncherChipIntegrationEnabled();
@@ -122,16 +119,10 @@ bool IsMediaSessionIntegrationEnabled();
 
 COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC) bool IsPowerManagerEnabled();
 
-COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC) bool IsProactiveSuggestionsEnabled();
+COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC) bool IsOnDeviceAssistantEnabled();
 
 COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC)
-bool IsProactiveSuggestionsShowOnScrollEnabled();
-
-COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC)
-bool IsProactiveSuggestionsShowRichEntryPointEnabled();
-
-COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC)
-bool IsProactiveSuggestionsSuppressDuplicatesEnabled();
+bool IsLibAssistantBetaBackendEnabled();
 
 COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC)
 bool IsResponseProcessingV2Enabled();
@@ -142,9 +133,9 @@ COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC) bool IsStereoAudioInputEnabled();
 
 COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC) bool IsTimersV2Enabled();
 
-COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC) bool IsWarmerWelcomeEnabled();
-
 COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC) bool IsVoiceMatchDisabled();
+
+COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC) bool IsWaitSchedulingEnabled();
 
 }  // namespace features
 }  // namespace assistant

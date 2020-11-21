@@ -14,9 +14,11 @@
 namespace {
 
 size_t GetFaviconCacheSize() {
-  // Set cache size to twice the number of maximum results to avoid favicon
-  // refetches as the user types. Favicon fetches are uncached and can hit disk.
-  return 2 * AutocompleteResult::GetMaxMatches();
+  // Set cache size to twice the number of maximum results in either the
+  // on-focus or prefix-suggest mode to avoid favicon refetches as the user
+  // types. Favicon fetches are uncached and can hit disk.
+  return 2 * std::max(AutocompleteResult::GetMaxMatches(),
+                      AutocompleteResult::GetMaxMatches(true));
 }
 
 }  // namespace
@@ -29,11 +31,10 @@ bool FaviconCache::Request::operator<(const Request& rhs) const {
 FaviconCache::FaviconCache(favicon::FaviconService* favicon_service,
                            history::HistoryService* history_service)
     : favicon_service_(favicon_service),
-      history_observer_(this),
       mru_cache_(GetFaviconCacheSize()),
       responses_without_favicons_(GetFaviconCacheSize()) {
   if (history_service) {
-    history_observer_.Add(history_service);
+    history_observation_.Observe(history_service);
 
     favicons_changed_subscription_ =
         history_service->AddFaviconsChangedCallback(base::BindRepeating(

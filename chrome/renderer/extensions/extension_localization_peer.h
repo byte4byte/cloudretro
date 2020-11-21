@@ -56,14 +56,14 @@ class ExtensionLocalizationPeer : public content::RequestPeer {
   // content::RequestPeer methods.
   void OnUploadProgress(uint64_t position, uint64_t size) override;
   bool OnReceivedRedirect(const net::RedirectInfo& redirect_info,
-                          network::mojom::URLResponseHeadPtr head) override;
+                          network::mojom::URLResponseHeadPtr head,
+                          std::vector<std::string>*) override;
   void OnReceivedResponse(network::mojom::URLResponseHeadPtr head) override;
   void OnStartLoadingResponseBody(
       mojo::ScopedDataPipeConsumerHandle body) override;
   void OnTransferSizeUpdated(int transfer_size_diff) override;
   void OnCompletedRequest(
       const network::URLLoaderCompletionStatus& status) override;
-  scoped_refptr<base::TaskRunner> GetTaskRunner() override;
 
  private:
   friend class ExtensionLocalizationPeerTest;

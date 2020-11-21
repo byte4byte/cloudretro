@@ -20,14 +20,9 @@ namespace ash {
 class AccessibilityFeatureDisableDialog : public views::DialogDelegateView {
  public:
   AccessibilityFeatureDisableDialog(int window_title_text_id,
-                                    int dialog_text_id,
                                     base::OnceClosure on_accept_callback,
                                     base::OnceClosure on_cancel_callback);
   ~AccessibilityFeatureDisableDialog() override;
-
-  // views::DialogDelegateView:
-  ui::ModalType GetModalType() const override;
-  base::string16 GetWindowTitle() const override;
 
   base::WeakPtr<AccessibilityFeatureDisableDialog> GetWeakPtr();
 
@@ -35,8 +30,6 @@ class AccessibilityFeatureDisableDialog : public views::DialogDelegateView {
   const char* GetClassName() const override;
 
  private:
-  const base::string16 window_title_;
-
   base::OnceClosure on_cancel_callback_;
 
   base::WeakPtrFactory<AccessibilityFeatureDisableDialog> weak_ptr_factory_{

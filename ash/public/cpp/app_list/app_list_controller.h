@@ -18,6 +18,7 @@
 namespace ash {
 
 class AppListClient;
+class AppListControllerObserver;
 
 // An interface implemented in Ash to handle calls from Chrome.
 // These include:
@@ -37,6 +38,9 @@ class ASH_PUBLIC_EXPORT AppListController {
 
   // Gets the client that handles calls from Ash.
   virtual AppListClient* GetClient() = 0;
+
+  virtual void AddObserver(AppListControllerObserver* observer) = 0;
+  virtual void RemoveObserver(AppListControllerObserver* obsever) = 0;
 
   // Adds an item to AppListModel.
   virtual void AddItem(std::unique_ptr<AppListItemMetadata> app_item) = 0;
@@ -60,25 +64,8 @@ class ASH_PUBLIC_EXPORT AppListController {
   // e.g. the model is under synchronization or in normal status.
   virtual void SetStatus(AppListModelStatus status) = 0;
 
-  // Tells Ash what the current state of the app list should be,
-  // e.g. the user is searching for something, or showing apps, etc.
-  virtual void SetState(AppListState state) = 0;
-
-  // Highlights the given item in the app list. If not present and it is later
-  // added, the item will be highlighted after being added.
-  virtual void HighlightItemInstalledFromUI(const std::string& id) = 0;
-
   // Sets whether the search engine is Google or not.
   virtual void SetSearchEngineIsGoogle(bool is_google) = 0;
-
-  // Sets the text for screen readers on the search box, and updates the
-  // accessible names.
-  virtual void SetSearchTabletAndClamshellAccessibleName(
-      const base::string16& tablet_accessible_name,
-      const base::string16& clamshell_accessible_name) = 0;
-
-  // Sets the hint text to display when there is in input.
-  virtual void SetSearchHintText(const base::string16& hint_text) = 0;
 
   // Sets the text for the search box's Textfield and the voice search flag.
   virtual void UpdateSearchBox(const base::string16& text,
@@ -96,14 +83,6 @@ class ASH_PUBLIC_EXPORT AppListController {
   virtual void SetItemIcon(const std::string& id,
                            const gfx::ImageSkia& icon) = 0;
 
-  // Updates whether an item is installing.
-  virtual void SetItemIsInstalling(const std::string& id,
-                                   bool is_installing) = 0;
-
-  // Updates the downloaded percentage of an item.
-  virtual void SetItemPercentDownloaded(const std::string& id,
-                                        int32_t percent_downloaded) = 0;
-
   // Update the whole model, usually when profile changes happen in Chrome.
   virtual void SetModelData(
       int profile_id,
@@ -113,17 +92,6 @@ class ASH_PUBLIC_EXPORT AppListController {
   // Updates a search rresult's metadata.
   virtual void SetSearchResultMetadata(
       std::unique_ptr<SearchResultMetadata> metadata) = 0;
-
-  // Updates whether a search result is being installed.
-  virtual void SetSearchResultIsInstalling(const std::string& id,
-                                           bool is_installing) = 0;
-
-  // Updates the download progress of a search result.
-  virtual void SetSearchResultPercentDownloaded(const std::string& id,
-                                                int32_t percent_downloaded) = 0;
-
-  // Called when the app represented by a search result is installed.
-  virtual void NotifySearchResultItemInstalled(const std::string& id) = 0;
 
   // Returns a map from each item's id to its shown index in the app list.
   using GetIdToAppListIndexMapCallback =
@@ -153,6 +121,9 @@ class ASH_PUBLIC_EXPORT AppListController {
   virtual void ResolveOemFolderPosition(
       const syncer::StringOrdinal& preferred_oem_position,
       ResolveOemFolderPositionCallback callback) = 0;
+
+  // Notifies sync service has finished processing sync changes.
+  virtual void NotifyProcessSyncChangesFinished() = 0;
 
   // Dismisses the app list.
   virtual void DismissAppList() = 0;

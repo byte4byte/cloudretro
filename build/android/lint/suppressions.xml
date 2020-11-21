@@ -132,20 +132,14 @@ Still reading?
   <issue id="IconDipSize">
     <!-- These only need to be 1px for all densities. See: crbug.com/804449 -->
     <ignore regexp="chrome/android/java/res/.*tab_strip_fade"/>
-<<<<<<< HEAD
     <ignore regexp="content/.*/app_icon.png"/>
-=======
     <ignore regexp="chromecast/internal"/>
->>>>>>> 53836640273c3d45b05ad74bdff7323ef0ffc610
   </issue>
   <issue id="IconDuplicates" severity="Error">
     <!-- mipmap version is used for app launcher only. drawables used for notifications -->
     <ignore regexp="chromecast/browser/android/apk/res/mipmap-.*/app_icon.png"/>
-<<<<<<< HEAD
     <ignore regexp="content/.*/app_icon.png"/>
-=======
     <ignore regexp="chromecast/internal"/>
->>>>>>> 53836640273c3d45b05ad74bdff7323ef0ffc610
   </issue>
   <issue id="IconDuplicatesConfig" severity="Error">
 	  <ignore regexp="chromecast/internal"/>

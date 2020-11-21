@@ -62,7 +62,7 @@ AudioContext* AudioContext::Create(Document& document,
     return nullptr;
   }
 
-  document.CountUseOnlyInCrossOriginIframe(
+  document.domWindow()->CountUseOnlyInCrossOriginIframe(
       WebFeature::kAudioContextCrossOriginIframe);
 
   WebAudioLatencyHint latency_hint(WebAudioLatencyHint::kCategoryInteractive);
@@ -131,7 +131,7 @@ AudioContext::AudioContext(Document& document,
                            base::Optional<float> sample_rate)
     : BaseAudioContext(&document, kRealtimeContext),
       context_id_(g_context_id++),
-      audio_context_manager_(document.ToExecutionContext()),
+      audio_context_manager_(document.GetExecutionContext()),
       keep_alive_(PERSISTENT_FROM_HERE, this) {
   destination_node_ =
       RealtimeAudioDestinationNode::Create(this, latency_hint, sample_rate);
@@ -194,7 +194,7 @@ AudioContext::~AudioContext() {
 #endif
 }
 
-void AudioContext::Trace(Visitor* visitor) {
+void AudioContext::Trace(Visitor* visitor) const {
   visitor->Trace(close_resolver_);
   visitor->Trace(audio_context_manager_);
   BaseAudioContext::Trace(visitor);

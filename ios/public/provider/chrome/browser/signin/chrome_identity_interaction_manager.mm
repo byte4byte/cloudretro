@@ -4,7 +4,9 @@
 
 #import "ios/public/provider/chrome/browser/signin/chrome_identity_interaction_manager.h"
 
-#include "base/logging.h"
+#include <ostream>
+
+#include "base/notreached.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -13,23 +15,21 @@
 @implementation ChromeIdentityInteractionManager
 @synthesize delegate = _delegate;
 
-- (BOOL)isCanceling {
-  return NO;
-}
-
-- (void)addAccountWithCompletion:(SigninCompletionCallback)completion {
+- (void)addAccountWithPresentingViewController:(UIViewController*)viewController
+                                    completion:
+                                        (SigninCompletionCallback)completion {
   NOTREACHED() << "Subclasses must override this";
-  completion(nil, nil);
 }
 
-- (void)reauthenticateUserWithID:(NSString*)userID
-                           email:(NSString*)userEmail
-                      completion:(SigninCompletionCallback)completion {
+- (void)addAccountWithPresentingViewController:(UIViewController*)viewController
+                                     userEmail:(NSString*)userEmail
+                                    completion:
+                                        (SigninCompletionCallback)completion {
   NOTREACHED() << "Subclasses must override this";
-  completion(nil, nil);
 }
 
-- (void)cancelAndDismissAnimated:(BOOL)animated {
+- (void)cancelAddAccountWithAnimation:(BOOL)animated
+                           completion:(void (^)(void))completion {
   NOTREACHED() << "Subclasses must override this";
 }
 

@@ -9,7 +9,6 @@
 #include "build/build_config.h"
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
 #include "base/callback_helpers.h"
 #include "base/guid.h"
 #include "base/json/json_reader.h"
@@ -21,6 +20,7 @@
 #include "components/policy/core/common/cloud/device_management_service.h"
 #include "components/policy/core/common/cloud/dm_auth.h"
 #include "components/policy/core/common/cloud/dmserver_job_configurations.h"
+#include "components/policy/core/common/cloud/encrypted_reporting_job_configuration.h"
 #include "components/policy/core/common/cloud/realtime_reporting_job_configuration.h"
 #include "components/policy/core/common/cloud/signing_service.h"
 #include "google_apis/gaia/gaia_constants.h"
@@ -62,7 +62,7 @@ DeviceMode TranslateProtobufDeviceMode(
 bool IsChromePolicy(const std::string& type) {
   return type == dm_protocol::kChromeDevicePolicyType ||
          type == dm_protocol::kChromeUserPolicyType ||
-         type == dm_protocol::kChromeMachineLevelUserCloudPolicyType;
+         IsMachineLevelUserCloudPolicyType(type);
 }
 
 em::PolicyValidationReportRequest::ValidationResultType
@@ -135,31 +135,43 @@ CloudPolicyClient::CloudPolicyClient(
     const std::string& machine_id,
     const std::string& machine_model,
     const std::string& brand_code,
+    const std::string& attested_device_id,
     const std::string& ethernet_mac_address,
     const std::string& dock_mac_address,
     const std::string& manufacture_date,
+    SigningService* signing_service,
     DeviceManagementService* service,
     scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
-    SigningService* signing_service,
     DeviceDMTokenCallback device_dm_token_callback)
     : machine_id_(machine_id),
       machine_model_(machine_model),
       brand_code_(brand_code),
+      attested_device_id_(attested_device_id),
       ethernet_mac_address_(ethernet_mac_address),
       dock_mac_address_(dock_mac_address),
       manufacture_date_(manufacture_date),
-      service_(service),  // Can be null for unit tests.
       signing_service_(signing_service),
+      service_(service),  // Can be null for unit tests.
+      device_dm_token_callback_(device_dm_token_callback),
+      url_loader_factory_(url_loader_factory) {}
+
+CloudPolicyClient::CloudPolicyClient(
+    DeviceManagementService* service,
+    scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
+    DeviceDMTokenCallback device_dm_token_callback)
+    : service_(service),  // Can be null for unit tests.
       device_dm_token_callback_(device_dm_token_callback),
       url_loader_factory_(url_loader_factory) {}
 
 CloudPolicyClient::~CloudPolicyClient() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 }
 
 void CloudPolicyClient::SetupRegistration(
     const std::string& dm_token,
     const std::string& client_id,
     const std::vector<std::string>& user_affiliation_ids) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(!dm_token.empty());
   DCHECK(!client_id.empty());
   DCHECK(!is_registered());
@@ -168,6 +180,7 @@ void CloudPolicyClient::SetupRegistration(
   client_id_ = client_id;
   request_jobs_.clear();
   app_install_report_request_job_ = nullptr;
+  extension_install_report_request_job_ = nullptr;
   policy_fetch_request_job_.reset();
   responses_.clear();
   if (device_dm_token_callback_) {
@@ -182,12 +195,13 @@ void CloudPolicyClient::SetupRegistration(
 // Reusing IDs would mean the server could track clients by their registration
 // attempts.
 void CloudPolicyClient::SetClientId(const std::string& client_id) {
-  client_id_ = client_id.empty() ?  base::GenerateGUID() : client_id;
+  client_id_ = client_id.empty() ? base::GenerateGUID() : client_id;
 }
 
 void CloudPolicyClient::Register(const RegistrationParameters& parameters,
                                  const std::string& client_id,
                                  const std::string& oauth_token) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(service_);
   DCHECK(!oauth_token.empty());
   DCHECK(!is_registered());
@@ -217,6 +231,7 @@ void CloudPolicyClient::RegisterWithCertificate(
     std::unique_ptr<DMAuth> auth,
     const std::string& pem_certificate_chain,
     const std::string& sub_organization) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(signing_service_);
   DCHECK(service_);
   DCHECK(!is_registered());
@@ -225,7 +240,7 @@ void CloudPolicyClient::RegisterWithCertificate(
 
   em::CertificateBasedDeviceRegistrationData data;
   data.set_certificate_type(em::CertificateBasedDeviceRegistrationData::
-      ENTERPRISE_ENROLLMENT_CERTIFICATE);
+                                ENTERPRISE_ENROLLMENT_CERTIFICATE);
   data.set_device_certificate(pem_certificate_chain);
 
   em::DeviceRegisterRequest* request = data.mutable_device_register_request();
@@ -244,6 +259,7 @@ void CloudPolicyClient::RegisterWithCertificate(
 
 void CloudPolicyClient::RegisterWithToken(const std::string& token,
                                           const std::string& client_id) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(service_);
   DCHECK(!token.empty());
   DCHECK(!client_id.empty());
@@ -299,16 +315,22 @@ void CloudPolicyClient::OnRegisterWithCertificateRequestSigned(
 
 void CloudPolicyClient::SetInvalidationInfo(int64_t version,
                                             const std::string& payload) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
   invalidation_version_ = version;
   invalidation_payload_ = payload;
 }
 
 void CloudPolicyClient::SetOAuthTokenAsAdditionalAuth(
     const std::string& oauth_token) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
   oauth_token_ = oauth_token;
 }
 
 void CloudPolicyClient::FetchPolicy() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
   CHECK(is_registered());
   CHECK(!types_to_fetch_.empty());
 
@@ -356,8 +378,7 @@ void CloudPolicyClient::FetchPolicy() {
         request->mutable_device_state_key_update_request();
     for (std::vector<std::string>::const_iterator key(
              state_keys_to_upload_.begin());
-         key != state_keys_to_upload_.end();
-         ++key) {
+         key != state_keys_to_upload_.end(); ++key) {
       key_update_request->add_server_backed_state_keys(*key);
     }
   }
@@ -374,6 +395,7 @@ void CloudPolicyClient::UploadPolicyValidationReport(
     const std::vector<ValueValidationIssue>& value_validation_issues,
     const std::string& policy_type,
     const std::string& policy_token) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   CHECK(is_registered());
 
   StatusCallback callback = base::DoNothing();
@@ -408,8 +430,13 @@ void CloudPolicyClient::UploadPolicyValidationReport(
   request_jobs_.push_back(service_->CreateJob(std::move(config)));
 }
 
-void CloudPolicyClient::FetchRobotAuthCodes(std::unique_ptr<DMAuth> auth,
-                                            RobotAuthCodeCallback callback) {
+void CloudPolicyClient::FetchRobotAuthCodes(
+    std::unique_ptr<DMAuth> auth,
+    enterprise_management::DeviceServiceApiAccessRequest::DeviceType
+        device_type,
+    const std::set<std::string>& oauth_scopes,
+    RobotAuthCodeCallback callback) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   CHECK(is_registered());
   DCHECK(auth->has_dm_token());
 
@@ -427,14 +454,19 @@ void CloudPolicyClient::FetchRobotAuthCodes(std::unique_ptr<DMAuth> auth,
       config->request()->mutable_service_api_access_request();
   request->set_oauth2_client_id(
       GaiaUrls::GetInstance()->oauth2_chrome_client_id());
-  request->add_auth_scopes(GaiaConstants::kAnyApiOAuth2Scope);
-  request->set_device_type(em::DeviceServiceApiAccessRequest::CHROME_OS);
 
-  policy_fetch_request_job_ = service_->CreateJob(std::move(config));
+  for (const auto& scope : oauth_scopes)
+    request->add_auth_scopes(scope);
+
+  request->set_device_type(device_type);
+
+  request_jobs_.push_back(service_->CreateJob(std::move(config)));
 }
 
 void CloudPolicyClient::Unregister() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(service_);
+
   std::unique_ptr<DMServerJobConfiguration> config =
       std::make_unique<DMServerJobConfiguration>(
           DeviceManagementService::JobConfiguration::TYPE_UNREGISTRATION, this,
@@ -451,6 +483,8 @@ void CloudPolicyClient::Unregister() {
 void CloudPolicyClient::UploadEnterpriseMachineCertificate(
     const std::string& certificate_data,
     CloudPolicyClient::StatusCallback callback) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
   UploadCertificate(certificate_data,
                     em::DeviceCertUploadRequest::ENTERPRISE_MACHINE_CERTIFICATE,
                     std::move(callback));
@@ -459,6 +493,8 @@ void CloudPolicyClient::UploadEnterpriseMachineCertificate(
 void CloudPolicyClient::UploadEnterpriseEnrollmentCertificate(
     const std::string& certificate_data,
     CloudPolicyClient::StatusCallback callback) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
   UploadCertificate(
       certificate_data,
       em::DeviceCertUploadRequest::ENTERPRISE_ENROLLMENT_CERTIFICATE,
@@ -468,6 +504,8 @@ void CloudPolicyClient::UploadEnterpriseEnrollmentCertificate(
 void CloudPolicyClient::UploadEnterpriseEnrollmentId(
     const std::string& enrollment_id,
     CloudPolicyClient::StatusCallback callback) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
   std::unique_ptr<DMServerJobConfiguration> config =
       CreateCertUploadJobConfiguration(std::move(callback));
   em::DeviceManagementRequest* request = config->request();
@@ -482,6 +520,7 @@ void CloudPolicyClient::UploadDeviceStatus(
     const em::SessionStatusReportRequest* session_status,
     const em::ChildStatusReportRequest* child_status,
     CloudPolicyClient::StatusCallback callback) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   CHECK(is_registered());
   // Should pass in at least one type of status.
   DCHECK(device_status || session_status || child_status);
@@ -508,8 +547,10 @@ void CloudPolicyClient::UploadDeviceStatus(
 void CloudPolicyClient::UploadChromeDesktopReport(
     std::unique_ptr<em::ChromeDesktopReportRequest> chrome_desktop_report,
     CloudPolicyClient::StatusCallback callback) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   CHECK(is_registered());
   DCHECK(chrome_desktop_report);
+
   std::unique_ptr<DMServerJobConfiguration> config =
       std::make_unique<DMServerJobConfiguration>(
           DeviceManagementService::JobConfiguration::TYPE_CHROME_DESKTOP_REPORT,
@@ -530,8 +571,10 @@ void CloudPolicyClient::UploadChromeOsUserReport(
     std::unique_ptr<enterprise_management::ChromeOsUserReportRequest>
         chrome_os_user_report,
     CloudPolicyClient::StatusCallback callback) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   CHECK(is_registered());
   DCHECK(chrome_os_user_report);
+
   std::unique_ptr<DMServerJobConfiguration> config =
       std::make_unique<DMServerJobConfiguration>(
           DeviceManagementService::JobConfiguration::TYPE_CHROME_OS_USER_REPORT,
@@ -548,23 +591,78 @@ void CloudPolicyClient::UploadChromeOsUserReport(
   request_jobs_.push_back(service_->CreateJob(std::move(config)));
 }
 
-void CloudPolicyClient::UploadRealtimeReport(base::Value report,
-                                             StatusCallback callback) {
+void CloudPolicyClient::UploadSecurityEventReport(base::Value report,
+                                                  StatusCallback callback) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   CHECK(is_registered());
-  std::unique_ptr<RealtimeReportingJobConfiguration> config =
-      std::make_unique<RealtimeReportingJobConfiguration>(
-          this, DMAuth::FromDMToken(dm_token_),
-          base::BindOnce(&CloudPolicyClient::OnRealtimeReportUploadCompleted,
+  CreateNewRealtimeReportingJob(
+      std::move(report),
+      service()->configuration()->GetReportingConnectorServerUrl(),
+      add_connector_url_params_, std::move(callback));
+}
+
+void CloudPolicyClient::UploadEncryptedReport(
+    const ::reporting::EncryptedRecord& record,
+    base::Optional<base::Value> context,
+    StatusCallback callback) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  if (!is_registered()) {
+    std::move(callback).Run(false);
+    return;
+  }
+
+  std::unique_ptr<EncryptedReportingJobConfiguration> config =
+      std::make_unique<EncryptedReportingJobConfiguration>(
+          this, service()->configuration()->GetEncryptedReportingServerUrl(),
+          base::BindOnce(&CloudPolicyClient::OnEncryptedReportUploadCompleted,
                          weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
-
-  config->AddReport(std::move(report));
-
+  if (!config->AddEncryptedRecord(record)) {
+    return;
+  }
+  if (context.has_value()) {
+    config->UpdateContext(context.value());
+  }
   request_jobs_.push_back(service_->CreateJob(std::move(config)));
 }
 
+void CloudPolicyClient::UploadAppInstallReport(base::Value report,
+                                               StatusCallback callback) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  CHECK(is_registered());
+  CancelAppInstallReportUpload();
+  app_install_report_request_job_ = CreateNewRealtimeReportingJob(
+      std::move(report),
+      service()->configuration()->GetRealtimeReportingServerUrl(),
+      /* add_connector_url_params=*/false, std::move(callback));
+  DCHECK(app_install_report_request_job_);
+}
+
 void CloudPolicyClient::CancelAppInstallReportUpload() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
   if (app_install_report_request_job_) {
     RemoveJob(app_install_report_request_job_);
+    DCHECK_EQ(app_install_report_request_job_, nullptr);
+  }
+}
+
+void CloudPolicyClient::UploadExtensionInstallReport(base::Value report,
+                                                     StatusCallback callback) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  CHECK(is_registered());
+  CancelExtensionInstallReportUpload();
+  extension_install_report_request_job_ = CreateNewRealtimeReportingJob(
+      std::move(report),
+      service()->configuration()->GetRealtimeReportingServerUrl(),
+      /* add_connector_url_params=*/false, std::move(callback));
+  DCHECK(extension_install_report_request_job_);
+}
+
+void CloudPolicyClient::CancelExtensionInstallReportUpload() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  if (extension_install_report_request_job_) {
+    RemoveJob(extension_install_report_request_job_);
+    DCHECK_EQ(extension_install_report_request_job_, nullptr);
   }
 }
 
@@ -572,7 +670,9 @@ void CloudPolicyClient::FetchRemoteCommands(
     std::unique_ptr<RemoteCommandJob::UniqueIDType> last_command_id,
     const std::vector<em::RemoteCommandResult>& command_results,
     RemoteCommandCallback callback) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   CHECK(is_registered());
+
   std::unique_ptr<DMServerJobConfiguration> config =
       std::make_unique<DMServerJobConfiguration>(
           DeviceManagementService::JobConfiguration::TYPE_REMOTE_COMMANDS, this,
@@ -596,23 +696,41 @@ void CloudPolicyClient::FetchRemoteCommands(
   request_jobs_.push_back(service_->CreateJob(std::move(config)));
 }
 
+DeviceManagementService::Job* CloudPolicyClient::CreateNewRealtimeReportingJob(
+    base::Value report,
+    const std::string& server_url,
+    bool add_connector_url_params,
+    StatusCallback callback) {
+  std::unique_ptr<RealtimeReportingJobConfiguration> config =
+      std::make_unique<RealtimeReportingJobConfiguration>(
+          this, server_url, add_connector_url_params,
+          base::BindOnce(&CloudPolicyClient::OnRealtimeReportUploadCompleted,
+                         weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
+
+  config->AddReport(std::move(report));
+  request_jobs_.push_back(service_->CreateJob(std::move(config)));
+  return request_jobs_.back().get();
+}
+
 void CloudPolicyClient::GetDeviceAttributeUpdatePermission(
     std::unique_ptr<DMAuth> auth,
     CloudPolicyClient::StatusCallback callback) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   CHECK(is_registered());
   // This condition is wrong in case of Attestation enrollment
   // (https://crbug.com/942013).
   // DCHECK(auth->has_oauth_token() || auth->has_enrollment_token());
 
-  bool has_oauth_token = auth->has_oauth_token();
+  const bool has_oauth_token = auth->has_oauth_token();
+  const std::string oauth_token =
+      has_oauth_token ? auth->oauth_token() : std::string();
   std::unique_ptr<DMServerJobConfiguration> config =
       std::make_unique<DMServerJobConfiguration>(
           DeviceManagementService::JobConfiguration::
               TYPE_ATTRIBUTE_UPDATE_PERMISSION,
           this,
           /*critical=*/false,
-          !has_oauth_token ? std::move(auth) : DMAuth::NoAuth(),
-          has_oauth_token ? auth->oauth_token() : std::string(),
+          !has_oauth_token ? std::move(auth) : DMAuth::NoAuth(), oauth_token,
           base::BindOnce(
               &CloudPolicyClient::OnDeviceAttributeUpdatePermissionCompleted,
               weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
@@ -627,17 +745,19 @@ void CloudPolicyClient::UpdateDeviceAttributes(
     const std::string& asset_id,
     const std::string& location,
     CloudPolicyClient::StatusCallback callback) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   CHECK(is_registered());
   DCHECK(auth->has_oauth_token() || auth->has_enrollment_token());
 
-  bool has_oauth_token = auth->has_oauth_token();
+  const bool has_oauth_token = auth->has_oauth_token();
+  const std::string oauth_token =
+      has_oauth_token ? auth->oauth_token() : std::string();
   std::unique_ptr<DMServerJobConfiguration> config =
       std::make_unique<DMServerJobConfiguration>(
           DeviceManagementService::JobConfiguration::TYPE_ATTRIBUTE_UPDATE,
           this,
           /*critical=*/false,
-          !has_oauth_token ? std::move(auth) : DMAuth::NoAuth(),
-          has_oauth_token ? auth->oauth_token() : std::string(),
+          !has_oauth_token ? std::move(auth) : DMAuth::NoAuth(), oauth_token,
           base::BindOnce(&CloudPolicyClient::OnDeviceAttributeUpdated,
                          weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
 
@@ -653,6 +773,7 @@ void CloudPolicyClient::UpdateDeviceAttributes(
 void CloudPolicyClient::UpdateGcmId(
     const std::string& gcm_id,
     CloudPolicyClient::StatusCallback callback) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   CHECK(is_registered());
 
   std::unique_ptr<DMServerJobConfiguration> config =
@@ -674,8 +795,10 @@ void CloudPolicyClient::UpdateGcmId(
 void CloudPolicyClient::ClientCertProvisioningStartCsr(
     const std::string& cert_scope,
     const std::string& cert_profile_id,
+    const std::string& cert_profile_version,
     const std::string& public_key,
     ClientCertProvisioningStartCsrCallback callback) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   CHECK(is_registered());
 
   std::unique_ptr<DMServerJobConfiguration> config = std::make_unique<
@@ -693,6 +816,7 @@ void CloudPolicyClient::ClientCertProvisioningStartCsr(
 
   request->set_certificate_scope(cert_scope);
   request->set_cert_profile_id(cert_profile_id);
+  request->set_policy_version(cert_profile_version);
   request->set_public_key(public_key);
   // Sets the request type, no actual data is required.
   request->mutable_start_csr_request();
@@ -703,10 +827,12 @@ void CloudPolicyClient::ClientCertProvisioningStartCsr(
 void CloudPolicyClient::ClientCertProvisioningFinishCsr(
     const std::string& cert_scope,
     const std::string& cert_profile_id,
+    const std::string& cert_profile_version,
     const std::string& public_key,
     const std::string& va_challenge_response,
     const std::string& signature,
     ClientCertProvisioningFinishCsrCallback callback) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   CHECK(is_registered());
 
   std::unique_ptr<DMServerJobConfiguration> config = std::make_unique<
@@ -724,6 +850,7 @@ void CloudPolicyClient::ClientCertProvisioningFinishCsr(
 
   request->set_certificate_scope(cert_scope);
   request->set_cert_profile_id(cert_profile_id);
+  request->set_policy_version(cert_profile_version);
   request->set_public_key(public_key);
 
   em::FinishCsrRequest* finish_csr_request =
@@ -739,8 +866,10 @@ void CloudPolicyClient::ClientCertProvisioningFinishCsr(
 void CloudPolicyClient::ClientCertProvisioningDownloadCert(
     const std::string& cert_scope,
     const std::string& cert_profile_id,
+    const std::string& cert_profile_version,
     const std::string& public_key,
     ClientCertProvisioningDownloadCertCallback callback) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   CHECK(is_registered());
 
   std::unique_ptr<DMServerJobConfiguration> config = std::make_unique<
@@ -758,6 +887,7 @@ void CloudPolicyClient::ClientCertProvisioningDownloadCert(
 
   request->set_certificate_scope(cert_scope);
   request->set_cert_profile_id(cert_profile_id);
+  request->set_policy_version(cert_profile_version);
   request->set_public_key(public_key);
   // Sets the request type, no actual data is required.
   request->mutable_download_cert_request();
@@ -766,58 +896,72 @@ void CloudPolicyClient::ClientCertProvisioningDownloadCert(
 }
 
 void CloudPolicyClient::UpdateServiceAccount(const std::string& account_email) {
-  // The service account identity is always set on policy data, so don't notify
-  // the observers if it's the same as it was during the previous fetch.
-  if (service_account_email_ == account_email)
-    return;
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
-  service_account_email_ = account_email;
-  NotifyServiceAccountChanged();
+  NotifyServiceAccountSet(account_email);
 }
 
 void CloudPolicyClient::AddObserver(Observer* observer) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
   observers_.AddObserver(observer);
 }
 
 void CloudPolicyClient::RemoveObserver(Observer* observer) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
   observers_.RemoveObserver(observer);
 }
 
 void CloudPolicyClient::AddPolicyTypeToFetch(
     const std::string& policy_type,
     const std::string& settings_entity_id) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
   types_to_fetch_.insert(std::make_pair(policy_type, settings_entity_id));
 }
 
 void CloudPolicyClient::RemovePolicyTypeToFetch(
     const std::string& policy_type,
     const std::string& settings_entity_id) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
   types_to_fetch_.erase(std::make_pair(policy_type, settings_entity_id));
 }
 
 void CloudPolicyClient::SetStateKeysToUpload(
     const std::vector<std::string>& keys) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
   state_keys_to_upload_ = keys;
 }
 
 const em::PolicyFetchResponse* CloudPolicyClient::GetPolicyFor(
     const std::string& policy_type,
     const std::string& settings_entity_id) const {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
   auto it = responses_.find(std::make_pair(policy_type, settings_entity_id));
   return it == responses_.end() ? nullptr : it->second.get();
 }
 
 scoped_refptr<network::SharedURLLoaderFactory>
 CloudPolicyClient::GetURLLoaderFactory() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
   return url_loader_factory_;
 }
 
 int CloudPolicyClient::GetActiveRequestCountForTest() const {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
   return request_jobs_.size();
 }
 
 void CloudPolicyClient::SetURLLoaderFactoryForTesting(
     scoped_refptr<network::SharedURLLoaderFactory> factory) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
   url_loader_factory_ = factory;
 }
 
@@ -920,6 +1064,10 @@ void CloudPolicyClient::OnFetchRobotAuthCodesCompleted(
     DeviceManagementStatus status,
     int net_error,
     const em::DeviceManagementResponse& response) {
+  // Remove the job before executing the callback because |this| might be
+  // deleted during the callback.
+  RemoveJob(job);
+
   if (status == DM_STATUS_SUCCESS &&
       (!response.has_service_api_access_response())) {
     LOG(WARNING) << "Invalid service api access response.";
@@ -934,6 +1082,7 @@ void CloudPolicyClient::OnFetchRobotAuthCodesCompleted(
   } else {
     std::move(callback).Run(status, std::string());
   }
+  // |this| might be deleted at this point.
 }
 
 void CloudPolicyClient::OnPolicyFetchCompleted(
@@ -958,8 +1107,7 @@ void CloudPolicyClient::OnPolicyFetchCompleted(
       const em::PolicyFetchResponse& response = policy_response.responses(i);
       em::PolicyData policy_data;
       if (!policy_data.ParseFromString(response.policy_data()) ||
-          !policy_data.IsInitialized() ||
-          !policy_data.has_policy_type()) {
+          !policy_data.IsInitialized() || !policy_data.has_policy_type()) {
         LOG(WARNING) << "Invalid PolicyData received, ignoring";
         continue;
       }
@@ -969,8 +1117,8 @@ void CloudPolicyClient::OnPolicyFetchCompleted(
         entity_id = policy_data.settings_entity_id();
       std::pair<std::string, std::string> key(type, entity_id);
       if (base::Contains(responses_, key)) {
-        LOG(WARNING) << "Duplicate PolicyFetchResponse for type: "
-            << type << ", entity: " << entity_id << ", ignoring";
+        LOG(WARNING) << "Duplicate PolicyFetchResponse for type: " << type
+                     << ", entity: " << entity_id << ", ignoring";
         continue;
       }
       responses_[key] = std::make_unique<em::PolicyFetchResponse>(response);
@@ -1005,6 +1153,7 @@ void CloudPolicyClient::OnUnregisterCompleted(
     // Cancel all outstanding jobs.
     request_jobs_.clear();
     app_install_report_request_job_ = nullptr;
+    extension_install_report_request_job_ = nullptr;
     device_dm_token_.clear();
     NotifyRegistrationStateChanged();
   } else {
@@ -1049,7 +1198,8 @@ void CloudPolicyClient::OnDeviceAttributeUpdatePermissionCompleted(
   if (status == DM_STATUS_SUCCESS &&
       response.device_attribute_update_permission_response().has_result() &&
       response.device_attribute_update_permission_response().result() ==
-      em::DeviceAttributeUpdatePermissionResponse::ATTRIBUTE_UPDATE_ALLOWED) {
+          em::DeviceAttributeUpdatePermissionResponse::
+              ATTRIBUTE_UPDATE_ALLOWED) {
     success = true;
   }
 
@@ -1075,7 +1225,7 @@ void CloudPolicyClient::OnDeviceAttributeUpdated(
   if (status == DM_STATUS_SUCCESS &&
       response.device_attribute_update_response().has_result() &&
       response.device_attribute_update_response().result() ==
-      em::DeviceAttributeUpdateResponse::ATTRIBUTE_UPDATE_SUCCESS) {
+          em::DeviceAttributeUpdateResponse::ATTRIBUTE_UPDATE_SUCCESS) {
     success = true;
   }
 
@@ -1086,6 +1236,8 @@ void CloudPolicyClient::OnDeviceAttributeUpdated(
 void CloudPolicyClient::RemoveJob(DeviceManagementService::Job* job) {
   if (app_install_report_request_job_ == job) {
     app_install_report_request_job_ = nullptr;
+  } else if (extension_install_report_request_job_ == job) {
+    extension_install_report_request_job_ = nullptr;
   }
   for (auto it = request_jobs_.begin(); it != request_jobs_.end(); ++it) {
     if (it->get() == job) {
@@ -1124,6 +1276,24 @@ void CloudPolicyClient::OnRealtimeReportUploadCompleted(
 
   std::move(callback).Run(status == DM_STATUS_SUCCESS);
   RemoveJob(job);
+}
+
+// |job| can be null if the owning EncryptedReportingJobConfiguration is
+// destroyed prior to calling OnUploadComplete. In that case, callback will be
+// called with false value.
+void CloudPolicyClient::OnEncryptedReportUploadCompleted(
+    StatusCallback callback,
+    DeviceManagementService::Job* job,
+    DeviceManagementStatus status,
+    int net_error,
+    const base::Value& response) {
+  if (job == nullptr) {
+    std::move(callback).Run(false);
+    return;
+  }
+
+  OnRealtimeReportUploadCompleted(std::move(callback), job, status, net_error,
+                                  response);
 }
 
 void CloudPolicyClient::OnRemoteCommandsFetched(
@@ -1371,9 +1541,10 @@ void CloudPolicyClient::NotifyClientError() {
     observer.OnClientError(this);
 }
 
-void CloudPolicyClient::NotifyServiceAccountChanged() {
+void CloudPolicyClient::NotifyServiceAccountSet(
+    const std::string& account_email) {
   for (auto& observer : observers_)
-    observer.OnServiceAccountChanged(this);
+    observer.OnServiceAccountSet(this, account_email);
 }
 
 void CloudPolicyClient::CreateDeviceRegisterRequest(
@@ -1391,6 +1562,9 @@ void CloudPolicyClient::CreateDeviceRegisterRequest(
     request->set_machine_model(machine_model_);
   if (!brand_code_.empty())
     request->set_brand_code(brand_code_);
+  if (!attested_device_id_.empty())
+    request->mutable_device_register_identification()->set_attested_device_id(
+        attested_device_id_);
   if (!ethernet_mac_address_.empty())
     request->set_ethernet_mac_address(ethernet_mac_address_);
   if (!dock_mac_address_.empty())

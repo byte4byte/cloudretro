@@ -13,8 +13,11 @@
 #include "base/containers/flat_map.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "base/optional.h"
 #include "components/component_updater/configurator_impl.h"
 #include "components/update_client/configurator.h"
+
+class GURL;
 
 namespace content {
 class BrowserContext;
@@ -22,6 +25,7 @@ class BrowserContext;
 
 namespace update_client {
 class ActivityDataService;
+class CrxDownloaderFactory;
 class NetworkFetcherFactory;
 class ProtocolHandlerFactory;
 }
@@ -37,7 +41,11 @@ class ChromeUpdateClientConfig : public update_client::Configurator {
           content::BrowserContext* context)>;
 
   static scoped_refptr<ChromeUpdateClientConfig> Create(
-      content::BrowserContext* context);
+      content::BrowserContext* context,
+      base::Optional<GURL> url_override);
+
+  ChromeUpdateClientConfig(content::BrowserContext* context,
+                           base::Optional<GURL> url_override);
 
   int InitialDelay() const override;
   int NextCheckDelay() const override;
@@ -55,6 +63,8 @@ class ChromeUpdateClientConfig : public update_client::Configurator {
   std::string GetDownloadPreference() const override;
   scoped_refptr<update_client::NetworkFetcherFactory> GetNetworkFetcherFactory()
       override;
+  scoped_refptr<update_client::CrxDownloaderFactory> GetCrxDownloaderFactory()
+      override;
   scoped_refptr<update_client::UnzipperFactory> GetUnzipperFactory() override;
   scoped_refptr<update_client::PatcherFactory> GetPatcherFactory() override;
   bool EnabledDeltas() const override;
@@ -71,7 +81,6 @@ class ChromeUpdateClientConfig : public update_client::Configurator {
   friend class base::RefCountedThreadSafe<ChromeUpdateClientConfig>;
   friend class ExtensionUpdateClientBaseTest;
 
-  explicit ChromeUpdateClientConfig(content::BrowserContext* context);
   ~ChromeUpdateClientConfig() override;
 
   // Injects a new client config by changing the creation factory.
@@ -85,8 +94,10 @@ class ChromeUpdateClientConfig : public update_client::Configurator {
   PrefService* pref_service_;
   std::unique_ptr<update_client::ActivityDataService> activity_data_service_;
   scoped_refptr<update_client::NetworkFetcherFactory> network_fetcher_factory_;
+  scoped_refptr<update_client::CrxDownloaderFactory> crx_downloader_factory_;
   scoped_refptr<update_client::UnzipperFactory> unzip_factory_;
   scoped_refptr<update_client::PatcherFactory> patch_factory_;
+  base::Optional<GURL> url_override_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeUpdateClientConfig);
 };

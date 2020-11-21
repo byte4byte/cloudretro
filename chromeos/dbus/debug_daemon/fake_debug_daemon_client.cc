@@ -118,11 +118,20 @@ void FakeDebugDaemonClient::GetPerfOutput(
 void FakeDebugDaemonClient::StopPerf(uint64_t session_id,
                                      VoidDBusMethodCallback callback) {}
 
-void FakeDebugDaemonClient::GetScrubbedBigLogs(GetLogsCallback callback) {
+void FakeDebugDaemonClient::GetScrubbedBigLogs(
+    const cryptohome::AccountIdentifier& id,
+    GetLogsCallback callback) {
   std::map<std::string, std::string> sample;
   sample["Sample Scrubbed Big Log"] = "Your email address is xxxxxxxx";
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE, base::BindOnce(std::move(callback), false, sample));
+}
+
+void FakeDebugDaemonClient::BackupArcBugReport(
+    const cryptohome::AccountIdentifier& id,
+    VoidDBusMethodCallback callback) {
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::BindOnce(std::move(callback), true));
 }
 
 void FakeDebugDaemonClient::GetAllLogs(GetLogsCallback callback) {
@@ -153,7 +162,10 @@ void FakeDebugDaemonClient::TestICMPWithOptions(
       FROM_HERE, base::BindOnce(std::move(callback), base::nullopt));
 }
 
-void FakeDebugDaemonClient::UploadCrashes() {}
+void FakeDebugDaemonClient::UploadCrashes(UploadCrashesCallback callback) {
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::BindOnce(std::move(callback), true));
+}
 
 void FakeDebugDaemonClient::EnableDebuggingFeatures(
     const std::string& password,
@@ -243,16 +255,6 @@ void FakeDebugDaemonClient::CupsRemovePrinter(
 
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE, base::BindOnce(std::move(callback), has_printer));
-}
-
-void FakeDebugDaemonClient::StartConcierge(ConciergeCallback callback) {
-  base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::BindOnce(std::move(callback), true));
-}
-
-void FakeDebugDaemonClient::StopConcierge(ConciergeCallback callback) {
-  base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::BindOnce(std::move(callback), true));
 }
 
 void FakeDebugDaemonClient::StartPluginVmDispatcher(

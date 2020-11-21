@@ -7,22 +7,23 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
 #include "base/callback.h"
-#include "base/logging.h"
+#include "base/callback_helpers.h"
+#include "base/check_op.h"
+#include "base/notreached.h"
 #include "base/run_loop.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/mock_callback.h"
 #include "base/test/task_environment.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "components/sync/driver/configure_context.h"
-#include "components/sync/driver/sync_merge_result.h"
 #include "components/sync/engine/commit_queue.h"
 #include "components/sync/engine/data_type_activation_response.h"
 #include "components/sync/engine/fake_model_type_processor.h"
 #include "components/sync/engine/model_type_configurer.h"
 #include "components/sync/engine/model_type_processor_proxy.h"
 #include "components/sync/model/data_type_activation_request.h"
+#include "components/sync/model/type_entities_count.h"
 #include "components/sync/model_impl/forwarding_model_type_controller_delegate.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -47,14 +48,24 @@ MATCHER(ErrorIsSet, "") {
 
 class MockDelegate : public ModelTypeControllerDelegate {
  public:
-  MOCK_METHOD2(OnSyncStarting,
-               void(const DataTypeActivationRequest& request,
-                    StartCallback callback));
-  MOCK_METHOD1(OnSyncStopping, void(SyncStopMetadataFate metadata_fate));
-  MOCK_METHOD1(GetAllNodesForDebugging, void(AllNodesCallback callback));
-  MOCK_METHOD1(GetStatusCountersForDebugging,
-               void(StatusCountersCallback callback));
-  MOCK_METHOD0(RecordMemoryUsageAndCountsHistograms, void());
+  MOCK_METHOD(void,
+              OnSyncStarting,
+              (const DataTypeActivationRequest& request,
+               StartCallback callback),
+              (override));
+  MOCK_METHOD(void,
+              OnSyncStopping,
+              (SyncStopMetadataFate metadata_fate),
+              (override));
+  MOCK_METHOD(void,
+              GetAllNodesForDebugging,
+              (AllNodesCallback callback),
+              (override));
+  MOCK_METHOD(void,
+              GetTypeEntitiesCountForDebugging,
+              (base::OnceCallback<void(const TypeEntitiesCount&)> callback),
+              (const override));
+  MOCK_METHOD(void, RecordMemoryUsageAndCountsHistograms, (), (override));
 };
 
 // A simple processor that trackes connected state.
@@ -89,40 +100,25 @@ class TestModelTypeConfigurer : public ModelTypeConfigurer {
     NOTREACHED() << "Not implemented.";
   }
 
-  void RegisterDirectoryDataType(ModelType type,
-                                 ModelSafeGroup group) override {
-    NOTREACHED() << "Not implemented.";
-  }
-
-  void UnregisterDirectoryDataType(ModelType type) override {
-    NOTREACHED() << "Not implemented.";
-  }
-
-  void ActivateDirectoryDataType(ModelType type,
-                                 ModelSafeGroup group,
-                                 ChangeProcessor* change_processor) override {
-    NOTREACHED() << "Not implemented.";
-  }
-
-  void DeactivateDirectoryDataType(ModelType type) override {
-    NOTREACHED() << "Not implemented.";
-  }
-
-  void ActivateNonBlockingDataType(ModelType type,
-                                   std::unique_ptr<DataTypeActivationResponse>
-                                       activation_response) override {
+  void ActivateDataType(ModelType type,
+                        std::unique_ptr<DataTypeActivationResponse>
+                            activation_response) override {
     DCHECK_EQ(kTestModelType, type);
     DCHECK(!processor_);
     processor_ = std::move(activation_response->type_processor);
     processor_->ConnectSync(nullptr);
   }
 
-  void DeactivateNonBlockingDataType(ModelType type) override {
+  void DeactivateDataType(ModelType type) override {
     DCHECK_EQ(kTestModelType, type);
     DCHECK(processor_);
     processor_->DisconnectSync();
     processor_.reset();
   }
+
+  void ActivateProxyDataType(ModelType type) override { NOTREACHED(); }
+
+  void DeactivateProxyDataType(ModelType type) override { NOTREACHED(); }
 
  private:
   std::unique_ptr<ModelTypeProcessor> processor_;
@@ -192,19 +188,13 @@ class ModelTypeControllerTest : public testing::Test {
     return true;
   }
 
-  void RegisterWithBackend(bool expect_downloaded) {
+  void ActivateDataType(bool expect_downloaded) {
     auto result = expect_downloaded
                       ? DataTypeController::TYPE_ALREADY_DOWNLOADED
                       : DataTypeController::TYPE_NOT_YET_DOWNLOADED;
-    EXPECT_EQ(result, controller_.RegisterWithBackend(&configurer_));
+    EXPECT_EQ(result, controller_.ActivateDataType(&configurer_));
     // ModelTypeProcessorProxy does posting of tasks.
     base::RunLoop().RunUntilIdle();
-  }
-
-  void StartAssociating() {
-    base::MockCallback<DataTypeController::StartCallback> callback;
-    EXPECT_CALL(callback, Run(DataTypeController::OK, _, _));
-    controller_.StartAssociating(callback.Get());
   }
 
   void StopAndWait(ShutdownReason shutdown_reason) {
@@ -261,10 +251,8 @@ TEST_F(ModelTypeControllerTest, Activate) {
   base::HistogramTester histogram_tester;
   ASSERT_TRUE(LoadModels());
   EXPECT_EQ(DataTypeController::MODEL_LOADED, controller()->state());
-  RegisterWithBackend(/*expect_downloaded=*/false);
+  ActivateDataType(/*expect_downloaded=*/false);
   EXPECT_TRUE(processor()->is_connected());
-
-  StartAssociating();
   EXPECT_EQ(DataTypeController::RUNNING, controller()->state());
   histogram_tester.ExpectTotalCount(kStartFailuresHistogram, 0);
 }
@@ -273,7 +261,7 @@ TEST_F(ModelTypeControllerTest, ActivateWithInitialSyncDone) {
   base::HistogramTester histogram_tester;
   ASSERT_TRUE(LoadModels(/*initial_sync_done=*/true));
   EXPECT_EQ(DataTypeController::MODEL_LOADED, controller()->state());
-  RegisterWithBackend(/*expect_downloaded=*/true);
+  ActivateDataType(/*expect_downloaded=*/true);
   EXPECT_TRUE(processor()->is_connected());
   histogram_tester.ExpectTotalCount(kStartFailuresHistogram, 0);
 }
@@ -307,11 +295,8 @@ TEST_F(ModelTypeControllerTest, ActivateWithError) {
 
 TEST_F(ModelTypeControllerTest, Stop) {
   ASSERT_TRUE(LoadModels());
-  RegisterWithBackend(/*expect_downloaded=*/false);
+  ActivateDataType(/*expect_downloaded=*/false);
   EXPECT_TRUE(processor()->is_connected());
-
-  StartAssociating();
-
   DeactivateDataTypeAndStop(STOP_SYNC);
   EXPECT_EQ(DataTypeController::NOT_RUNNING, controller()->state());
 }
@@ -319,7 +304,6 @@ TEST_F(ModelTypeControllerTest, Stop) {
 // Test emulates normal browser shutdown. Ensures that metadata was not cleared.
 TEST_F(ModelTypeControllerTest, StopWhenDatatypeEnabled) {
   ASSERT_TRUE(LoadModels());
-  StartAssociating();
 
   // Ensures that metadata was not cleared.
   EXPECT_CALL(*delegate(), OnSyncStopping(KEEP_METADATA));
@@ -332,7 +316,6 @@ TEST_F(ModelTypeControllerTest, StopWhenDatatypeEnabled) {
 // cleared.
 TEST_F(ModelTypeControllerTest, StopWhenDatatypeDisabled) {
   ASSERT_TRUE(LoadModels());
-  StartAssociating();
 
   EXPECT_CALL(*delegate(), OnSyncStopping(CLEAR_METADATA));
   DeactivateDataTypeAndStop(DISABLE_SYNC);
@@ -643,7 +626,45 @@ TEST_F(ModelTypeControllerTest, ReportErrorAfterLoaded) {
   std::move(start_callback).Run(std::make_unique<DataTypeActivationResponse>());
   ASSERT_EQ(DataTypeController::MODEL_LOADED, controller()->state());
 
-  StartAssociating();
+  // Now trigger the run-time error.
+  error_handler.Run(ModelError(FROM_HERE, "Test error"));
+  // TODO(mastiz): We shouldn't need RunUntilIdle() here, but
+  // ModelTypeController currently uses task-posting for errors.
+  base::RunLoop().RunUntilIdle();
+  EXPECT_EQ(DataTypeController::FAILED, controller()->state());
+  histogram_tester.ExpectTotalCount(kRunFailuresHistogram, 0);
+  histogram_tester.ExpectBucketCount(kStartFailuresHistogram,
+                                     ModelTypeHistogramValue(kTestModelType),
+                                     /*count=*/1);
+}
+
+TEST_F(ModelTypeControllerTest, ReportErrorAfterRegisteredWithBackend) {
+  base::HistogramTester histogram_tester;
+  // Capture the callbacks.
+  ModelErrorHandler error_handler;
+  ModelTypeControllerDelegate::StartCallback start_callback;
+  EXPECT_CALL(*delegate(), OnSyncStarting(_, _))
+      .WillOnce([&](const DataTypeActivationRequest& request,
+                    ModelTypeControllerDelegate::StartCallback callback) {
+        error_handler = request.error_handler;
+        start_callback = std::move(callback);
+      });
+  controller()->LoadModels(MakeConfigureContext(), base::DoNothing());
+  ASSERT_EQ(DataTypeController::MODEL_STARTING, controller()->state());
+  ASSERT_TRUE(error_handler);
+  ASSERT_TRUE(start_callback);
+
+  // An activation response with a non-null processor is required for
+  // registering with the backend.
+  auto activation_response = std::make_unique<DataTypeActivationResponse>();
+  activation_response->type_processor =
+      std::make_unique<TestModelTypeProcessor>();
+
+  // Mimic completion for OnSyncStarting().
+  std::move(start_callback).Run(std::move(activation_response));
+  ASSERT_EQ(DataTypeController::MODEL_LOADED, controller()->state());
+
+  ActivateDataType(/*expect_downloaded=*/false);
   ASSERT_EQ(DataTypeController::RUNNING, controller()->state());
 
   // Now trigger the run-time error.

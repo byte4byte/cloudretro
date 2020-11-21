@@ -18,6 +18,7 @@
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "net/dns/mock_host_resolver.h"
@@ -50,8 +51,7 @@ IN_PROC_BROWSER_TEST_F(ThirdPartyNTPUiTest, Reloads) {
       https_test_server().GetURL("ntp.com", "/instant_extended.html");
   GURL ntp_url =
       https_test_server().GetURL("ntp.com", "/instant_extended_ntp.html");
-  InstantTestBase::Init(base_url, ntp_url, false);
-  SetupInstant(browser());
+  SetupInstant(browser()->profile(), base_url, ntp_url);
 
   // Verify that at the start of the test the tab contents has focus.
   browser()->tab_strip_model()->GetActiveWebContents()->Focus();

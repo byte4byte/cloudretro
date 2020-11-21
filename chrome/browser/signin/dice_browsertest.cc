@@ -10,18 +10,20 @@
 #include "base/auto_reset.h"
 #include "base/base_switches.h"
 #include "base/bind.h"
-#include "base/bind_helpers.h"
 #include "base/callback.h"
+#include "base/callback_helpers.h"
 #include "base/check.h"
 #include "base/command_line.h"
 #include "base/location.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
-#include "base/task/post_task.h"
+#include "base/test/scoped_feature_list.h"
+#include "base/test/test_mock_time_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
+#include "chrome/browser/apps/platform_apps/shortcut_manager.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/api/identity/web_auth_flow.h"
 #include "chrome/browser/policy/cloud/user_policy_signin_service.h"
@@ -34,6 +36,7 @@
 #include "chrome/browser/signin/chrome_signin_client.h"
 #include "chrome/browser/signin/chrome_signin_client_factory.h"
 #include "chrome/browser/signin/chrome_signin_helper.h"
+#include "chrome/browser/signin/dice_response_handler.h"
 #include "chrome/browser/signin/identity_manager_factory.h"
 #include "chrome/browser/signin/signin_util.h"
 #include "chrome/browser/sync/user_event_service_factory.h"
@@ -48,7 +51,10 @@
 #include "chrome/common/webui_url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/policy/core/common/management/management_service.h"
+#include "components/policy/core/common/management/scoped_management_service_override_for_testing.h"
 #include "components/prefs/pref_service.h"
+#include "components/search/ntp_features.h"
 #include "components/signin/core/browser/account_reconcilor.h"
 #include "components/signin/core/browser/dice_header_helper.h"
 #include "components/signin/core/browser/signin_header_helper.h"
@@ -64,7 +70,9 @@
 #include "components/variations/variations_switches.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/load_notification_details.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/notification_types.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test.h"
 #include "google_apis/gaia/gaia_switches.h"
@@ -107,6 +115,7 @@ const char kOAuth2TokenExchangeURL[] = "/oauth2/v4/token";
 const char kOAuth2TokenRevokeURL[] = "/o/oauth2/revoke";
 const char kSecondaryEmail[] = "secondary_email@example.com";
 const char kSigninURL[] = "/signin";
+const char kSigninWithOutageInDiceURL[] = "/signin/outage";
 const char kSignoutURL[] = "/signout";
 
 // Test response that does not complete synchronously. It must be unblocked by
@@ -128,8 +137,8 @@ class BlockedHttpResponse : public net::test_server::BasicHttpResponse {
                        base::ThreadTaskRunnerHandle::Get(), FROM_HERE,
                        std::move(unblock_io_thread));
     // Pass |unblock_any_thread| to the caller on the UI thread.
-    base::PostTask(
-        FROM_HERE, {content::BrowserThread::UI},
+    content::GetUIThreadTaskRunner({})->PostTask(
+        FROM_HERE,
         base::BindOnce(std::move(callback_), std::move(unblock_any_thread)));
   }
 
@@ -150,7 +159,8 @@ std::unique_ptr<HttpResponse> HandleSigninURL(
     const base::RepeatingCallback<void(const std::string&)>& callback,
     const HttpRequest& request) {
   if (!net::test_server::ShouldHandle(request, kSigninURL) &&
-      !net::test_server::ShouldHandle(request, kChromeSyncEndpointURL))
+      !net::test_server::ShouldHandle(request, kChromeSyncEndpointURL) &&
+      !net::test_server::ShouldHandle(request, kSigninWithOutageInDiceURL))
     return nullptr;
 
   // Extract Dice request header.
@@ -159,18 +169,27 @@ std::unique_ptr<HttpResponse> HandleSigninURL(
   if (it != request.headers.end())
     header_value = it->second;
 
-  base::PostTask(FROM_HERE, {content::BrowserThread::UI},
-                 base::BindOnce(callback, header_value));
+  content::GetUIThreadTaskRunner({})->PostTask(
+      FROM_HERE, base::BindOnce(callback, header_value));
 
   // Add the SIGNIN dice header.
   std::unique_ptr<BasicHttpResponse> http_response(new BasicHttpResponse);
   if (header_value != kNoDiceRequestHeader) {
-    http_response->AddCustomHeader(
-        kDiceResponseHeader,
-        base::StringPrintf(
-            "action=SIGNIN,authuser=1,id=%s,email=%s,authorization_code=%s",
-            signin::GetTestGaiaIdForEmail(main_email).c_str(),
-            main_email.c_str(), kAuthorizationCode));
+    if (net::test_server::ShouldHandle(request, kSigninWithOutageInDiceURL)) {
+      http_response->AddCustomHeader(
+          kDiceResponseHeader,
+          base::StringPrintf("action=SIGNIN,authuser=1,id=%s,email=%s,"
+                             "no_authorization_code=true",
+                             signin::GetTestGaiaIdForEmail(main_email).c_str(),
+                             main_email.c_str()));
+    } else {
+      http_response->AddCustomHeader(
+          kDiceResponseHeader,
+          base::StringPrintf(
+              "action=SIGNIN,authuser=1,id=%s,email=%s,authorization_code=%s",
+              signin::GetTestGaiaIdForEmail(main_email).c_str(),
+              main_email.c_str(), kAuthorizationCode));
+    }
   }
 
   // When hitting the Chrome Sync endpoint, redirect to kEnableSyncURL, which
@@ -280,7 +299,7 @@ std::unique_ptr<HttpResponse> HandleOAuth2TokenRevokeURL(
   if (!net::test_server::ShouldHandle(request, kOAuth2TokenRevokeURL))
     return nullptr;
 
-  base::PostTask(FROM_HERE, {content::BrowserThread::UI}, callback);
+  content::GetUIThreadTaskRunner({})->PostTask(FROM_HERE, callback);
 
   std::unique_ptr<BasicHttpResponse> http_response(new BasicHttpResponse);
   http_response->AddCustomHeader("Cache-Control", "no-store");
@@ -301,8 +320,8 @@ std::unique_ptr<HttpResponse> HandleChromeSigninEmbeddedURL(
   auto it = request.headers.find(signin::kDiceRequestHeader);
   if (it != request.headers.end())
     dice_request_header = it->second;
-  base::PostTask(FROM_HERE, {content::BrowserThread::UI},
-                 base::BindOnce(callback, dice_request_header));
+  content::GetUIThreadTaskRunner({})->PostTask(
+      FROM_HERE, base::BindOnce(callback, dice_request_header));
 
   std::unique_ptr<BasicHttpResponse> http_response(new BasicHttpResponse);
   http_response->AddCustomHeader("Cache-Control", "no-store");
@@ -328,6 +347,7 @@ class DiceBrowserTest : public InProcessBrowserTest,
         reconcilor_blocked_count_(0),
         reconcilor_unblocked_count_(0),
         reconcilor_started_count_(0) {
+    feature_list_.InitAndEnableFeature(kSupportOAuthOutageInDice);
     https_server_.RegisterDefaultHandler(base::BindRepeating(
         &FakeGaia::HandleSigninURL, main_email_,
         base::BindRepeating(&DiceBrowserTest::OnSigninRequest,
@@ -473,6 +493,7 @@ class DiceBrowserTest : public InProcessBrowserTest,
     EXPECT_EQ(dice_request_header != kNoDiceRequestHeader,
               IsReconcilorBlocked());
     dice_request_header_ = dice_request_header;
+    RunClosureIfValid(std::move(signin_requested_quit_closure_));
   }
 
   void OnChromeSigninEmbeddedRequest(const std::string& dice_request_header) {
@@ -597,6 +618,10 @@ class DiceBrowserTest : public InProcessBrowserTest,
     EXPECT_EQ(count, token_revoked_count_);
   }
 
+  DiceResponseHandler* GetDiceResponseHandler() {
+    return DiceResponseHandler::GetForProfile(browser()->profile());
+  }
+
   const std::string main_email_;
   net::EmbeddedTestServer https_server_;
   bool enable_sync_requested_;
@@ -608,6 +633,7 @@ class DiceBrowserTest : public InProcessBrowserTest,
   int reconcilor_unblocked_count_;
   int reconcilor_started_count_;
   std::string dice_request_header_;
+  base::test::ScopedFeatureList feature_list_;
 
   // Unblocks the server responses.
   base::OnceClosure unblock_token_exchange_response_closure_;
@@ -622,6 +648,23 @@ class DiceBrowserTest : public InProcessBrowserTest,
   base::OnceClosure unblock_count_quit_closure_;
   base::OnceClosure tokens_loaded_quit_closure_;
   base::OnceClosure on_primary_account_set_quit_closure_;
+  base::OnceClosure signin_requested_quit_closure_;
+
+  // The sync service and waits for policies to load before starting for
+  // enterprise users, managed devices and browsers. This means that services
+  // depending on it might have to wait too. By setting the management
+  // authorities to none by default, we assume that the default test is on an
+  // unmanaged device and browser thus we avoid unnecessarily waiting for
+  // policies to load. Tests expecting either an enterprise user, a managed
+  // device or browser should add the appropriate management authorities.
+  policy::ScopedManagementServiceOverrideForTesting browser_management_ =
+      policy::ScopedManagementServiceOverrideForTesting(
+          policy::ManagementTarget::BROWSER,
+          base::flat_set<policy::EnterpriseManagementAuthority>());
+  policy::ScopedManagementServiceOverrideForTesting platform_management_ =
+      policy::ScopedManagementServiceOverrideForTesting(
+          policy::ManagementTarget::PLATFORM,
+          base::flat_set<policy::EnterpriseManagementAuthority>());
 
   DISALLOW_COPY_AND_ASSIGN(DiceBrowserTest);
 };
@@ -652,6 +695,34 @@ IN_PROC_BROWSER_TEST_F(DiceBrowserTest, Signin) {
   EXPECT_EQ(1, reconcilor_blocked_count_);
   WaitForReconcilorUnblockedCount(1);
   EXPECT_EQ(1, reconcilor_started_count_);
+}
+
+// Checks that the account reconcilor is blocked when where was OAuth
+// outage in Dice, and unblocked after the timeout.
+IN_PROC_BROWSER_TEST_F(DiceBrowserTest, SupportOAuthOutageInDice) {
+  DiceResponseHandler* dice_response_handler = GetDiceResponseHandler();
+  scoped_refptr<base::TestMockTimeTaskRunner> task_runner =
+      new base::TestMockTimeTaskRunner();
+  dice_response_handler->SetTaskRunner(task_runner);
+  NavigateToURL(kSigninWithOutageInDiceURL);
+  // Check that the Dice request header was sent.
+  std::string client_id = GaiaUrls::GetInstance()->oauth2_chrome_client_id();
+  EXPECT_EQ(base::StringPrintf("version=%s,client_id=%s,device_id=%s,"
+                               "signin_mode=all_accounts,"
+                               "signout_mode=show_confirmation",
+                               signin::kDiceProtocolVersion, client_id.c_str(),
+                               GetDeviceId().c_str()),
+            dice_request_header_);
+  // Check that the reconcilor was blocked and not unblocked before timeout.
+  EXPECT_EQ(1, reconcilor_blocked_count_);
+  EXPECT_EQ(0, reconcilor_unblocked_count_);
+  task_runner->FastForwardBy(
+      base::TimeDelta::FromHours(kLockAccountReconcilorTimeoutHours / 2));
+  EXPECT_EQ(0, reconcilor_unblocked_count_);
+  task_runner->FastForwardBy(
+      base::TimeDelta::FromHours((kLockAccountReconcilorTimeoutHours + 1) / 2));
+  // Wait until reconcilor is unblocked.
+  WaitForReconcilorUnblockedCount(1);
 }
 
 // Checks that re-auth on Gaia triggers the fetch for a refresh token.
@@ -780,7 +851,27 @@ IN_PROC_BROWSER_TEST_F(DiceBrowserTest, MAYBE_NoDiceFromWebUI) {
   WaitForReconcilorUnblockedCount(0);
 }
 
-IN_PROC_BROWSER_TEST_F(DiceBrowserTest, DiceExtensionConsent) {
+IN_PROC_BROWSER_TEST_F(DiceBrowserTest,
+                       NoDiceExtensionConsent_LaunchWebAuthFlow) {
+  auto web_auth_flow = std::make_unique<extensions::WebAuthFlow>(
+      nullptr, browser()->profile(), https_server_.GetURL(kSigninURL),
+      extensions::WebAuthFlow::INTERACTIVE,
+      extensions::WebAuthFlow::LAUNCH_WEB_AUTH_FLOW);
+  web_auth_flow->Start();
+
+  if (dice_request_header_.empty())
+    WaitForClosure(&signin_requested_quit_closure_);
+
+  EXPECT_EQ(kNoDiceRequestHeader, dice_request_header_);
+  EXPECT_EQ(0, reconcilor_blocked_count_);
+  WaitForReconcilorUnblockedCount(0);
+
+  // Delete the web auth flow (uses DeleteSoon).
+  web_auth_flow.release()->DetachDelegateAndDelete();
+  base::RunLoop().RunUntilIdle();
+}
+
+IN_PROC_BROWSER_TEST_F(DiceBrowserTest, DiceExtensionConsent_GetAuthToken) {
   // Signin from extension consent flow.
   class DummyDelegate : public extensions::WebAuthFlow::Delegate {
    public:
@@ -791,7 +882,8 @@ IN_PROC_BROWSER_TEST_F(DiceBrowserTest, DiceExtensionConsent) {
   DummyDelegate delegate;
   auto web_auth_flow = std::make_unique<extensions::WebAuthFlow>(
       &delegate, browser()->profile(), https_server_.GetURL(kSigninURL),
-      extensions::WebAuthFlow::INTERACTIVE);
+      extensions::WebAuthFlow::INTERACTIVE,
+      extensions::WebAuthFlow::GET_AUTH_TOKEN);
   web_auth_flow->Start();
 
   // Check that the token was requested and added to the token service.
@@ -849,9 +941,24 @@ IN_PROC_BROWSER_TEST_F(DiceBrowserTest, EnableSyncAfterToken) {
                                GetDeviceId().c_str()),
             dice_request_header_);
 
-  ui_test_utils::UrlLoadObserver ntp_url_observer(
-      GURL(chrome::kChromeSearchLocalNtpUrl),
-      content::NotificationService::AllSources());
+  content::WindowedNotificationObserver ntp_url_observer(
+      content::NOTIFICATION_LOAD_STOP,
+      base::BindRepeating([](const content::NotificationSource&,
+                             const content::NotificationDetails& details) {
+        auto url =
+            content::Details<content::LoadNotificationDetails>(details)->url;
+        // Some test flags (e.g. ForceWebRequestProxyForTest) can change whether
+        // the reported NTP URL is the virtual chrome://newtab or one of the
+        // concrete chrome://new-tab-page or
+        // chrome-search://local-ntp/local-ntp.html. As far as this test is
+        // concerned either URL is fine.
+        auto concrete_ntp_url =
+            base::FeatureList::IsEnabled(ntp_features::kWebUI)
+                ? GURL(chrome::kChromeUINewTabPageURL)
+                : GURL(chrome::kChromeSearchLocalNtpUrl);
+        return url == concrete_ntp_url ||
+               url == GURL(chrome::kChromeUINewTabURL);
+      }));
 
   WaitForSigninSucceeded();
   EXPECT_EQ(GetMainAccountID(), GetIdentityManager()->GetPrimaryAccountId());
@@ -870,7 +977,14 @@ IN_PROC_BROWSER_TEST_F(DiceBrowserTest, EnableSyncAfterToken) {
 
 // Tests that Sync is enabled if the ENABLE_SYNC response is received before the
 // refresh token.
-IN_PROC_BROWSER_TEST_F(DiceBrowserTest, EnableSyncBeforeToken) {
+
+// https://crbug.com/1082858
+#if (defined(OS_LINUX) || defined(OS_CHROMEOS)) && !defined(NDEBUG)
+#define MAYBE_EnableSyncBeforeToken DISABLED_EnableSyncBeforeToken
+#else
+#define MAYBE_EnableSyncBeforeToken EnableSyncBeforeToken
+#endif
+IN_PROC_BROWSER_TEST_F(DiceBrowserTest, MAYBE_EnableSyncBeforeToken) {
   EXPECT_EQ(0, reconcilor_started_count_);
 
   ui_test_utils::UrlLoadObserver enable_sync_url_observer(
@@ -904,7 +1018,7 @@ IN_PROC_BROWSER_TEST_F(DiceBrowserTest, EnableSyncBeforeToken) {
             dice_request_header_);
 
   ui_test_utils::UrlLoadObserver ntp_url_observer(
-      GURL(chrome::kChromeSearchLocalNtpUrl),
+      GURL(chrome::kChromeUINewTabURL),
       content::NotificationService::AllSources());
 
   WaitForSigninSucceeded();
@@ -965,8 +1079,8 @@ IN_PROC_BROWSER_TEST_F(DiceBrowserTest, TurnOffDice) {
 
 // Checks that Dice is disabled in incognito mode.
 IN_PROC_BROWSER_TEST_F(DiceBrowserTest, Incognito) {
-  Browser* incognito_browser = new Browser(Browser::CreateParams(
-      browser()->profile()->GetOffTheRecordProfile(), true));
+  Browser* incognito_browser = Browser::Create(Browser::CreateParams(
+      browser()->profile()->GetPrimaryOTRProfile(), true));
 
   // Check that Dice is disabled.
   EXPECT_FALSE(AccountConsistencyModeManager::IsDiceEnabledForProfile(
@@ -988,6 +1102,15 @@ class DiceManageAccountBrowserTest : public DiceBrowserTest {
         prohibit_sigout_auto_reset_(
             &policy::internal::g_force_prohibit_signout_for_tests,
             true) {}
+
+  void SetUp() override {
+#if defined(OS_WIN)
+    // Shortcut deletion delays tests shutdown on Win-7 and results in time out.
+    // See crbug.com/1073451.
+    AppShortcutManager::SuppressShortcutsForTesting();
+#endif
+    DiceBrowserTest::SetUp();
+  }
 
  protected:
   base::AutoReset<bool> skip_message_box_auto_reset_;

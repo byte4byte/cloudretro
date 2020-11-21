@@ -5,7 +5,7 @@
 #include "chrome/browser/web_applications/components/web_app_file_handler_registration.h"
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
@@ -14,7 +14,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/shell_integration_linux.h"
 #include "chrome/browser/web_applications/components/app_registrar.h"
-#include "chrome/browser/web_applications/components/app_shortcut_manager.h"
+#include "chrome/browser/web_applications/components/os_integration_manager.h"
 #include "chrome/browser/web_applications/components/web_app_provider_base.h"
 #include "chrome/browser/web_applications/components/web_app_shortcut.h"
 
@@ -56,6 +56,12 @@ void RecordRegistration(RegistrationResult result) {
 }
 
 void OnShortcutInfoReceived(std::unique_ptr<ShortcutInfo> info) {
+  if (!info) {
+    UMA_HISTOGRAM_ENUMERATION(kRecreateShortcutResultMetric,
+                              RecreateShortcutResult::kFailToCreateShortcut);
+    return;
+  }
+
   base::FilePath shortcut_data_dir = internals::GetShortcutDataDir(*info);
 
   ShortcutLocations locations;
@@ -77,10 +83,9 @@ void UpdateFileHandlerRegistrationInOs(const AppId& app_id, Profile* profile) {
   // On Linux, file associations are managed through shortcuts in the app menu,
   // so after enabling or disabling file handling for an app its shortcuts
   // need to be recreated.
-  AppShortcutManager& shortcut_manager =
-      WebAppProviderBase::GetProviderBase(profile)->shortcut_manager();
-  shortcut_manager.GetShortcutInfoForApp(
-      app_id, base::BindOnce(&OnShortcutInfoReceived));
+  WebAppProviderBase::GetProviderBase(profile)
+      ->os_integration_manager()
+      .GetShortcutInfoForApp(app_id, base::BindOnce(&OnShortcutInfoReceived));
 }
 
 void OnRegisterMimeTypes(bool registration_succeeded) {
@@ -98,10 +103,7 @@ bool DoRegisterMimeTypes(base::FilePath filename, std::string file_contents) {
   }
 
   base::FilePath temp_file_path(temp_dir.GetPath().Append(filename));
-
-  int bytes_written = base::WriteFile(temp_file_path, file_contents.data(),
-                                      file_contents.length());
-  if (bytes_written != static_cast<int>(file_contents.length())) {
+  if (!base::WriteFile(temp_file_path, file_contents)) {
     RecordRegistration(RegistrationResult::kFailToWriteMimetypeFile);
     return false;
   }
@@ -154,6 +156,8 @@ void UnregisterFileHandlersWithOs(const AppId& app_id, Profile* profile) {
   if (!provider->registrar().IsInstalled(app_id))
     return;
 
+  // TODO(crbug.com/1076688): Fix file handlers unregistration. We can't update
+  // registration here asynchronously because app_id is being uninstalled.
   UpdateFileHandlerRegistrationInOs(app_id, profile);
 }
 

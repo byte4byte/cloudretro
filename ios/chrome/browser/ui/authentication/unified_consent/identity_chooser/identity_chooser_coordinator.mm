@@ -4,12 +4,17 @@
 
 #import "ios/chrome/browser/ui/authentication/unified_consent/identity_chooser/identity_chooser_coordinator.h"
 
-#include "base/logging.h"
+#include <ostream>
+
+#include "base/check_op.h"
+#include "base/notreached.h"
 #import "ios/chrome/browser/ui/authentication/unified_consent/identity_chooser/identity_chooser_coordinator_delegate.h"
 #import "ios/chrome/browser/ui/authentication/unified_consent/identity_chooser/identity_chooser_mediator.h"
 #import "ios/chrome/browser/ui/authentication/unified_consent/identity_chooser/identity_chooser_transition_delegate.h"
 #import "ios/chrome/browser/ui/authentication/unified_consent/identity_chooser/identity_chooser_view_controller.h"
 #import "ios/chrome/browser/ui/authentication/unified_consent/identity_chooser/identity_chooser_view_controller_presentation_delegate.h"
+#import "ios/public/provider/chrome/browser/chrome_browser_provider.h"
+#import "ios/public/provider/chrome/browser/signin/chrome_identity_service.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -60,6 +65,9 @@ typedef NS_ENUM(NSInteger, IdentityChooserCoordinatorState) {
 
 - (void)start {
   [super start];
+  ios::ChromeIdentityService* chromeIdentityService =
+      ios::GetChromeBrowserProvider()->GetChromeIdentityService();
+  chromeIdentityService->WaitUntilCacheIsPopulated();
   DCHECK_EQ(IdentityChooserCoordinatorStateNotStarted, self.state);
   self.state = IdentityChooserCoordinatorStateStarted;
   // Creates the controller.

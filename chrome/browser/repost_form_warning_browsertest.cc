@@ -14,6 +14,7 @@
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 
@@ -111,7 +112,7 @@ IN_PROC_BROWSER_TEST_F(RepostFormWarningTest, TestLoginAfterRepost) {
 
 // Disable on Mac OS until dialogs are using toolkit-views for MacViews project.
 // https://crbug.com/683356
-#if !defined(OS_MACOSX)
+#if !defined(OS_MAC)
 IN_PROC_BROWSER_TEST_F(RepostFormWarningTest, InvokeUi_TestRepostWarning) {
   ShowAndVerifyUi();
 }

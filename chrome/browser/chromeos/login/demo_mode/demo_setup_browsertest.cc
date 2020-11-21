@@ -6,6 +6,7 @@
 
 #include <string>
 
+#include "ash/public/cpp/login_accelerators.h"
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/containers/flat_map.h"
@@ -35,6 +36,7 @@
 #include "chrome/browser/component_updater/cros_component_installer_chromeos.h"
 #include "chrome/browser/ui/webui/chromeos/login/demo_preferences_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/demo_setup_screen_handler.h"
+#include "chrome/browser/ui/webui/chromeos/login/error_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/eula_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/gaia_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/network_screen_handler.h"
@@ -52,6 +54,7 @@
 #include "chromeos/system/statistics_provider.h"
 #include "components/arc/arc_util.h"
 #include "components/policy/core/common/cloud/mock_cloud_policy_store.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
@@ -82,7 +85,7 @@ enum class OobeButton { kBack, kNext, kText };
 // Dialogs that are a part of Demo Mode setup screens.
 enum class DemoSetupDialog { kNetwork, kEula, kArcTos, kProgress, kError };
 
-// Returns the tag of the given |button| type.
+// Returns the tag of the given `button` type.
 std::string ButtonToTag(OobeButton button) {
   switch (button) {
     case OobeButton::kBack:
@@ -96,7 +99,7 @@ std::string ButtonToTag(OobeButton button) {
   }
 }
 
-// Returns js id of the given |dialog|.
+// Returns js id of the given `dialog`.
 std::string DialogToStringId(DemoSetupDialog dialog) {
   switch (dialog) {
     case DemoSetupDialog::kNetwork:
@@ -114,19 +117,19 @@ std::string DialogToStringId(DemoSetupDialog dialog) {
   }
 }
 
-// Returns query to access the content of the given OOBE |screen| or empty
-// string if the |screen| is not a part of Demo Mode setup flow.
+// Returns query to access the content of the given OOBE `screen` or empty
+// string if the `screen` is not a part of Demo Mode setup flow.
 std::string ScreenToContentQuery(OobeScreenId screen) {
   if (screen == DemoPreferencesScreenView::kScreenId)
-    return "$('demo-preferences-content')";
+    return "$('demo-preferences')";
   if (screen == NetworkScreenView::kScreenId)
-    return "$('oobe-network-md')";
+    return "$('network-selection')";
   if (screen == EulaView::kScreenId)
     return "$('oobe-eula-md')";
   if (screen == ArcTermsOfServiceScreenView::kScreenId)
     return "$('arc-tos-root')";
   if (screen == DemoSetupScreenView::kScreenId)
-    return "$('demo-setup-content')";
+    return "$('demo-setup')";
   NOTREACHED() << "This OOBE screen is not a part of Demo Mode setup flow";
   return std::string();
 }
@@ -201,7 +204,7 @@ class DemoSetupTestBase : public OobeBaseTest {
     return test::OobeJS().GetBool(query);
   }
 
-  // Returns whether a custom item with |custom_item_name| is shown as a first
+  // Returns whether a custom item with `custom_item_name` is shown as a first
   // element on the network list.
   bool IsCustomNetworkListElementShown(const std::string& custom_item_name) {
     const std::string element_selector = base::StrCat(
@@ -215,8 +218,8 @@ class DemoSetupTestBase : public OobeBaseTest {
   }
 
   // Returns whether error message is shown on demo setup error screen and
-  // contains text consisting of strings identified by |error_message_id| and
-  // |recovery_message_id|.
+  // contains text consisting of strings identified by `error_message_id` and
+  // `recovery_message_id`.
   bool IsErrorMessageShown(int error_message_id, int recovery_message_id) {
     const std::string element_selector =
         base::StrCat({ScreenToContentQuery(DemoSetupScreenView::kScreenId),
@@ -237,14 +240,15 @@ class DemoSetupTestBase : public OobeBaseTest {
   }
 
   void InvokeDemoModeWithAccelerator() {
-    test::ExecuteOobeJS("cr.ui.Oobe.handleAccelerator('demo_mode');");
+    WizardController::default_controller()->HandleAccelerator(
+        ash::LoginAcceleratorAction::kStartDemoMode);
   }
 
   void InvokeDemoModeWithTaps() {
     MultiTapOobeContainer(kInvokeDemoModeGestureTapsCount);
   }
 
-  // Simulates multi-tap gesture that consists of |tapCount| clicks on the OOBE
+  // Simulates multi-tap gesture that consists of `tapCount` clicks on the OOBE
   // outer-container.
   void MultiTapOobeContainer(int tapsCount) {
     const std::string query = base::StrCat(
@@ -261,7 +265,7 @@ class DemoSetupTestBase : public OobeBaseTest {
     test::ExecuteOobeJS("document.querySelector('.cr-dialog-cancel').click();");
   }
 
-  // Simulates |button| click on a specified OOBE |screen|. Can be used for
+  // Simulates `button` click on a specified OOBE `screen`. Can be used for
   // screens that consists of one oobe-dialog element.
   void ClickOobeButton(OobeScreenId screen,
                        OobeButton button,
@@ -269,8 +273,8 @@ class DemoSetupTestBase : public OobeBaseTest {
     ClickOobeButtonWithSelector(screen, ButtonToTag(button), execution);
   }
 
-  // Simulates click on a button with |button_selector| on specified OOBE
-  // |screen|. Can be used for screens that consists of one oobe-dialog element.
+  // Simulates click on a button with `button_selector` on specified OOBE
+  // `screen`. Can be used for screens that consists of one oobe-dialog element.
   void ClickOobeButtonWithSelector(OobeScreenId screen,
                                    const std::string& button_selector,
                                    JSExecution execution) {
@@ -289,7 +293,7 @@ class DemoSetupTestBase : public OobeBaseTest {
     }
   }
 
-  // Simulates |button| click on a |dialog| of the specified OOBE |screen|.
+  // Simulates `button` click on a `dialog` of the specified OOBE `screen`.
   // Can be used for screens that consists of multiple oobe-dialog elements.
   void ClickScreenDialogButton(OobeScreenId screen,
                                DemoSetupDialog dialog,
@@ -299,8 +303,8 @@ class DemoSetupTestBase : public OobeBaseTest {
                                         execution);
   }
 
-  // Simulates click on a button with |button_selector| on a |dialog| of the
-  // specified OOBE |screen|. Can be used for screens that consist of multiple
+  // Simulates click on a button with `button_selector` on a `dialog` of the
+  // specified OOBE `screen`. Can be used for screens that consist of multiple
   // oobe-dialog elements.
   void ClickScreenDialogButtonWithSelector(OobeScreenId screen,
                                            DemoSetupDialog dialog,
@@ -321,7 +325,7 @@ class DemoSetupTestBase : public OobeBaseTest {
     }
   }
 
-  // Simulates click on the network list item. |element| should specify
+  // Simulates click on the network list item. `element` should specify
   // the aria-label of the desired network-list-item.
   void ClickNetworkListElement(const std::string& name) {
     const std::string element =
@@ -489,8 +493,15 @@ IN_PROC_BROWSER_TEST_F(DemoSetupArcSupportedTest,
   EXPECT_TRUE(IsScreenShown(DemoPreferencesScreenView::kScreenId));
 }
 
+// TODO(crbug.com/1150349): Flaky on ChromeOS ASAN.
+#if defined(ADDRESS_SANITIZER)
+#define MAYBE_ShowConfirmationDialogAndCancel \
+  DISABLED_ShowConfirmationDialogAndCancel
+#else
+#define MAYBE_ShowConfirmationDialogAndCancel ShowConfirmationDialogAndCancel
+#endif
 IN_PROC_BROWSER_TEST_F(DemoSetupArcSupportedTest,
-                       ShowConfirmationDialogAndCancel) {
+                       MAYBE_ShowConfirmationDialogAndCancel) {
   EXPECT_FALSE(IsConfirmationDialogShown());
 
   InvokeDemoModeWithAccelerator();
@@ -502,7 +513,13 @@ IN_PROC_BROWSER_TEST_F(DemoSetupArcSupportedTest,
   EXPECT_FALSE(IsScreenShown(DemoPreferencesScreenView::kScreenId));
 }
 
-IN_PROC_BROWSER_TEST_F(DemoSetupArcSupportedTest, InvokeWithTaps) {
+// TODO(crbug.com/1150349): Flaky on ChromeOS ASAN.
+#if defined(ADDRESS_SANITIZER)
+#define MAYBE_InvokeWithTaps DISABLED_InvokeWithTaps
+#else
+#define MAYBE_InvokeWithTaps InvokeWithTaps
+#endif
+IN_PROC_BROWSER_TEST_F(DemoSetupArcSupportedTest, MAYBE_InvokeWithTaps) {
   // Use fake time to avoid flakiness.
   SetFakeTimeForMultiTapDetector(base::Time::UnixEpoch());
   EXPECT_FALSE(IsConfirmationDialogShown());
@@ -511,8 +528,16 @@ IN_PROC_BROWSER_TEST_F(DemoSetupArcSupportedTest, InvokeWithTaps) {
   EXPECT_TRUE(IsConfirmationDialogShown());
 }
 
+// TODO(crbug.com/1150349): Flaky on ChromeOS ASAN.
+#if defined(ADDRESS_SANITIZER)
+#define MAYBE_DoNotInvokeWithNonConsecutiveTaps \
+  DISABLED_DoNotInvokeWithNonConsecutiveTaps
+#else
+#define MAYBE_DoNotInvokeWithNonConsecutiveTaps \
+  DoNotInvokeWithNonConsecutiveTaps
+#endif
 IN_PROC_BROWSER_TEST_F(DemoSetupArcSupportedTest,
-                       DoNotInvokeWithNonConsecutiveTaps) {
+                       MAYBE_DoNotInvokeWithNonConsecutiveTaps) {
   // Use fake time to avoid flakiness.
   const base::Time kFakeTime = base::Time::UnixEpoch();
   SetFakeTimeForMultiTapDetector(kFakeTime);
@@ -530,7 +555,14 @@ IN_PROC_BROWSER_TEST_F(DemoSetupArcSupportedTest,
   EXPECT_FALSE(IsConfirmationDialogShown());
 }
 
-IN_PROC_BROWSER_TEST_F(DemoSetupArcSupportedTest, OnlineSetupFlowSuccess) {
+// TODO(crbug.com/1150349): Flaky on ChromeOS ASAN.
+#if defined(ADDRESS_SANITIZER)
+#define MAYBE_OnlineSetupFlowSuccess DISABLED_OnlineSetupFlowSuccess
+#else
+#define MAYBE_OnlineSetupFlowSuccess OnlineSetupFlowSuccess
+#endif
+IN_PROC_BROWSER_TEST_F(DemoSetupArcSupportedTest,
+                       MAYBE_OnlineSetupFlowSuccess) {
   // Simulate successful online setup.
   enrollment_helper_.ExpectEnrollmentMode(
       policy::EnrollmentConfig::MODE_ATTESTATION);
@@ -580,7 +612,7 @@ IN_PROC_BROWSER_TEST_F(DemoSetupArcSupportedTest, OnlineSetupFlowSuccess) {
   // TODO(agawronska): Progress dialog transition is async - extra work is
   // needed to be able to check it reliably.
 
-  OobeScreenWaiter(GaiaView::kScreenId).Wait();
+  OobeScreenWaiter(GetFirstSigninScreen()).Wait();
   EXPECT_TRUE(StartupUtils::IsOobeCompleted());
   EXPECT_TRUE(StartupUtils::IsDeviceRegistered());
 }
@@ -668,7 +700,7 @@ IN_PROC_BROWSER_TEST_F(DemoSetupArcSupportedTest,
   EXPECT_EQ("admin-fr@cros-demo-mode.com",
             DemoSetupController::GetSubOrganizationEmail());
 
-  OobeScreenWaiter(GaiaView::kScreenId).Wait();
+  OobeScreenWaiter(GetFirstSigninScreen()).Wait();
   EXPECT_TRUE(StartupUtils::IsOobeCompleted());
   EXPECT_TRUE(StartupUtils::IsDeviceRegistered());
 }
@@ -735,8 +767,16 @@ IN_PROC_BROWSER_TEST_F(DemoSetupArcSupportedTest, OnlineSetupFlowErrorDefault) {
   EXPECT_FALSE(StartupUtils::IsDeviceRegistered());
 }
 
+// TODO(crbug.com/1150349): Flaky on ChromeOS ASAN.
+#if defined(ADDRESS_SANITIZER)
+#define MAYBE_OnlineSetupFlowErrorPowerwashRequired \
+  DISABLED_OnlineSetupFlowErrorPowerwashRequired
+#else
+#define MAYBE_OnlineSetupFlowErrorPowerwashRequired \
+  OnlineSetupFlowErrorPowerwashRequired
+#endif
 IN_PROC_BROWSER_TEST_F(DemoSetupArcSupportedTest,
-                       OnlineSetupFlowErrorPowerwashRequired) {
+                       MAYBE_OnlineSetupFlowErrorPowerwashRequired) {
   // Simulate online setup failure that requires powerwash.
   enrollment_helper_.ExpectEnrollmentMode(
       policy::EnrollmentConfig::MODE_ATTESTATION);
@@ -928,13 +968,19 @@ IN_PROC_BROWSER_TEST_F(DemoSetupArcSupportedTest, OfflineSetupFlowSuccess) {
   // TODO(agawronska): Progress dialog transition is async - extra work is
   // needed to be able to check it reliably.
 
-  OobeScreenWaiter(GaiaView::kScreenId).Wait();
+  OobeScreenWaiter(ErrorScreenView::kScreenId).Wait();
   EXPECT_TRUE(StartupUtils::IsOobeCompleted());
   EXPECT_TRUE(StartupUtils::IsDeviceRegistered());
 }
 
+// TODO(crbug.com/1150349): Flaky on ChromeOS ASAN.
+#if defined(ADDRESS_SANITIZER)
+#define MAYBE_OfflineSetupFlowErrorDefault DISABLED_OfflineSetupFlowErrorDefault
+#else
+#define MAYBE_OfflineSetupFlowErrorDefault OfflineSetupFlowErrorDefault
+#endif
 IN_PROC_BROWSER_TEST_F(DemoSetupArcSupportedTest,
-                       OfflineSetupFlowErrorDefault) {
+                       MAYBE_OfflineSetupFlowErrorDefault) {
   // Simulate offline setup failure.
   enrollment_helper_.ExpectOfflineEnrollmentError(
       policy::EnrollmentStatus::ForStatus(
@@ -1064,7 +1110,14 @@ IN_PROC_BROWSER_TEST_F(DemoSetupArcSupportedTest,
   EXPECT_FALSE(StartupUtils::IsDeviceRegistered());
 }
 
-IN_PROC_BROWSER_TEST_F(DemoSetupArcSupportedTest, NextDisabledOnNetworkScreen) {
+// TODO(crbug.com/1150349): Flaky on ChromeOS ASAN.
+#if defined(ADDRESS_SANITIZER)
+#define MAYBE_NextDisabledOnNetworkScreen DISABLED_NextDisabledOnNetworkScreen
+#else
+#define MAYBE_NextDisabledOnNetworkScreen NextDisabledOnNetworkScreen
+#endif
+IN_PROC_BROWSER_TEST_F(DemoSetupArcSupportedTest,
+                       MAYBE_NextDisabledOnNetworkScreen) {
   SimulateNetworkDisconnected();
   SkipToScreen(NetworkScreenView::kScreenId);
   EXPECT_FALSE(IsScreenDialogElementEnabled(NetworkScreenView::kScreenId,
@@ -1116,7 +1169,13 @@ IN_PROC_BROWSER_TEST_F(DemoSetupArcSupportedTest, BackOnNetworkScreen) {
   EXPECT_TRUE(IsScreenShown(DemoPreferencesScreenView::kScreenId));
 }
 
-IN_PROC_BROWSER_TEST_F(DemoSetupArcSupportedTest, BackOnArcTermsScreen) {
+// TODO(crbug.com/1150349): Flaky on ChromeOS ASAN.
+#if defined(ADDRESS_SANITIZER)
+#define MAYBE_BackOnArcTermsScreen DISABLED_BackOnArcTermsScreen
+#else
+#define MAYBE_BackOnArcTermsScreen BackOnArcTermsScreen
+#endif
+IN_PROC_BROWSER_TEST_F(DemoSetupArcSupportedTest, MAYBE_BackOnArcTermsScreen) {
   // User cannot go to ARC ToS screen without accepting eula - simulate that.
   StartupUtils::MarkEulaAccepted();
 
@@ -1128,7 +1187,13 @@ IN_PROC_BROWSER_TEST_F(DemoSetupArcSupportedTest, BackOnArcTermsScreen) {
   OobeScreenWaiter(NetworkScreenView::kScreenId).Wait();
 }
 
-IN_PROC_BROWSER_TEST_F(DemoSetupArcSupportedTest, BackOnErrorScreen) {
+// TODO(crbug.com/1150349): Flaky on ChromeOS ASAN.
+#if defined(ADDRESS_SANITIZER)
+#define MAYBE_BackOnErrorScreen DISABLED_BackOnErrorScreen
+#else
+#define MAYBE_BackOnErrorScreen BackOnErrorScreen
+#endif
+IN_PROC_BROWSER_TEST_F(DemoSetupArcSupportedTest, MAYBE_BackOnErrorScreen) {
   SkipToErrorDialog();
 
   ClickScreenDialogButton(DemoSetupScreenView::kScreenId,
@@ -1138,7 +1203,13 @@ IN_PROC_BROWSER_TEST_F(DemoSetupArcSupportedTest, BackOnErrorScreen) {
   OobeScreenWaiter(WelcomeView::kScreenId).Wait();
 }
 
-IN_PROC_BROWSER_TEST_F(DemoSetupArcSupportedTest, RetryOnErrorScreen) {
+// TODO(crbug.com/1150349): Flaky on ChromeOS ASAN.
+#if defined(ADDRESS_SANITIZER)
+#define MAYBE_RetryOnErrorScreen DISABLED_RetryOnErrorScreen
+#else
+#define MAYBE_RetryOnErrorScreen RetryOnErrorScreen
+#endif
+IN_PROC_BROWSER_TEST_F(DemoSetupArcSupportedTest, MAYBE_RetryOnErrorScreen) {
   SkipToErrorDialog();
 
   // We need to create another mock after showing error dialog.
@@ -1152,11 +1223,12 @@ IN_PROC_BROWSER_TEST_F(DemoSetupArcSupportedTest, RetryOnErrorScreen) {
                                       JSExecution::kAsync);
   // TODO(agawronska): Progress dialog transition is async - extra work is
   // needed to be able to check it reliably.
-  OobeScreenWaiter(GaiaView::kScreenId).Wait();
+  OobeScreenWaiter(ErrorScreenView::kScreenId).Wait();
 }
 
+// Test is flaky: crbug.com/1099402
 IN_PROC_BROWSER_TEST_F(DemoSetupArcSupportedTest,
-                       ShowOfflineSetupOptionOnNetworkList) {
+                       DISABLED_ShowOfflineSetupOptionOnNetworkList) {
   auto* const wizard_controller = WizardController::default_controller();
   wizard_controller->SimulateDemoModeSetupForTesting();
   SimulateOfflineEnvironment();
@@ -1182,7 +1254,7 @@ class DemoSetupProgressStepsTest : public DemoSetupTestBase {
   // Checks how many steps have been rendered in the demo setup screen.
   int CountNumberOfStepsInUi() {
     const std::string query =
-        "$('demo-setup-content').$$('oobe-dialog').querySelectorAll('progress-"
+        "$('demo-setup').$$('oobe-dialog').querySelectorAll('progress-"
         "list-item').length";
 
     return test::OobeJS().GetInt(query);
@@ -1191,7 +1263,7 @@ class DemoSetupProgressStepsTest : public DemoSetupTestBase {
   // Checks how many steps are marked as pending in the demo setup screen.
   int CountPendingStepsInUi() {
     const std::string query =
-        "Object.values($('demo-setup-content').$$('oobe-dialog')."
+        "Object.values($('demo-setup').$$('oobe-dialog')."
         "querySelectorAll('progress-list-item')).filter(node => "
         "node.shadowRoot.querySelector('#icon-pending:not([hidden])')).length";
 
@@ -1201,7 +1273,7 @@ class DemoSetupProgressStepsTest : public DemoSetupTestBase {
   // Checks how many steps are marked as active in the demo setup screen.
   int CountActiveStepsInUi() {
     const std::string query =
-        "Object.values($('demo-setup-content').$$('oobe-dialog')."
+        "Object.values($('demo-setup').$$('oobe-dialog')."
         "querySelectorAll('progress-list-item')).filter(node => "
         "node.shadowRoot.querySelector('#icon-active:not([hidden])')).length";
 
@@ -1211,7 +1283,7 @@ class DemoSetupProgressStepsTest : public DemoSetupTestBase {
   // Checks how many steps are marked as complete in the demo setup screen.
   int CountCompletedStepsInUi() {
     const std::string query =
-        "Object.values($('demo-setup-content').$$('oobe-dialog')."
+        "Object.values($('demo-setup').$$('oobe-dialog')."
         "querySelectorAll('progress-list-item')).filter(node => "
         "node.shadowRoot.querySelector('#icon-completed:not([hidden])'))."
         "length";
@@ -1333,7 +1405,7 @@ IN_PROC_BROWSER_TEST_F(DemoSetupFRETest, DeviceFromFactory) {
   // TODO(agawronska): Progress dialog transition is async - extra work is
   // needed to be able to check it reliably.
 
-  OobeScreenWaiter(GaiaView::kScreenId).Wait();
+  OobeScreenWaiter(ErrorScreenView::kScreenId).Wait();
   EXPECT_TRUE(StartupUtils::IsOobeCompleted());
   EXPECT_TRUE(StartupUtils::IsDeviceRegistered());
 }
@@ -1368,7 +1440,7 @@ IN_PROC_BROWSER_TEST_F(DemoSetupFRETest, NonEnterpriseDevice) {
   // TODO(agawronska): Progress dialog transition is async - extra work is
   // needed to be able to check it reliably.
 
-  OobeScreenWaiter(GaiaView::kScreenId).Wait();
+  OobeScreenWaiter(ErrorScreenView::kScreenId).Wait();
   EXPECT_TRUE(StartupUtils::IsOobeCompleted());
   EXPECT_TRUE(StartupUtils::IsDeviceRegistered());
 }
@@ -1404,7 +1476,7 @@ IN_PROC_BROWSER_TEST_F(DemoSetupFRETest, LegacyDemoModeDevice) {
   // TODO(agawronska): Progress dialog transition is async - extra work is
   // needed to be able to check it reliably.
 
-  OobeScreenWaiter(GaiaView::kScreenId).Wait();
+  OobeScreenWaiter(ErrorScreenView::kScreenId).Wait();
   EXPECT_TRUE(StartupUtils::IsOobeCompleted());
   EXPECT_TRUE(StartupUtils::IsDeviceRegistered());
 }

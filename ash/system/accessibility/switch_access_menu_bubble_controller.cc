@@ -11,6 +11,8 @@
 #include "ash/system/tray/tray_background_view.h"
 #include "ash/system/tray/tray_constants.h"
 #include "ash/system/unified/unified_system_tray_view.h"
+#include "ash/wm/collision_detection/collision_detection_utils.h"
+#include "ui/accessibility/ax_enums.mojom.h"
 
 namespace ash {
 
@@ -24,67 +26,101 @@ SwitchAccessMenuBubbleController::~SwitchAccessMenuBubbleController() {
 }
 
 void SwitchAccessMenuBubbleController::ShowBackButton(const gfx::Rect& anchor) {
-  back_button_controller_->ShowBackButton(anchor);
+  back_button_controller_->ShowBackButton(anchor, /*show_focus_ring=*/true,
+                                          menu_open_);
 }
 
 void SwitchAccessMenuBubbleController::ShowMenu(
     const gfx::Rect& anchor,
     const std::vector<std::string>& actions_to_show) {
-  if (widget_) {
-    DCHECK(bubble_view_);
-    menu_view_->SetActions(actions_to_show);
-    bubble_view_->SetPreferredWidth(menu_view_->GetBubbleWidthDip());
-    bubble_view_->ChangeAnchorRect(anchor);
-    ShowBackButtonForMenu();
-    return;
+  menu_open_ = true;
+  if (!widget_) {
+    TrayBubbleView::InitParams init_params;
+    init_params.delegate = this;
+    // Anchor within the overlay container.
+    init_params.parent_window =
+        Shell::GetContainer(Shell::GetPrimaryRootWindow(),
+                            kShellWindowId_AccessibilityBubbleContainer);
+    init_params.anchor_mode = TrayBubbleView::AnchorMode::kRect;
+    init_params.is_anchored_to_status_area = false;
+    init_params.insets = gfx::Insets(kUnifiedMenuPadding, kUnifiedMenuPadding);
+    init_params.corner_radius = kUnifiedTrayCornerRadius;
+    init_params.has_shadow = false;
+    init_params.translucent = true;
+    bubble_view_ = new TrayBubbleView(init_params);
+    bubble_view_->SetArrow(views::BubbleBorder::Arrow::TOP_LEFT);
+
+    menu_view_ = new SwitchAccessMenuView();
+    menu_view_->SetBorder(
+        views::CreateEmptyBorder(gfx::Insets(kUnifiedMenuPadding)));
+    bubble_view_->AddChildView(menu_view_);
+
+    menu_view_->SetPaintToLayer();
+    menu_view_->layer()->SetFillsBoundsOpaquely(false);
+
+    widget_ = views::BubbleDialogDelegateView::CreateBubble(bubble_view_);
+    TrayBackgroundView::InitializeBubbleAnimations(widget_);
+    bubble_view_->InitializeAndShowBubble();
+
+    CollisionDetectionUtils::MarkWindowPriorityForCollisionDetection(
+        widget_->GetNativeWindow(),
+        CollisionDetectionUtils::RelativePriority::kSwitchAccessMenu);
   }
 
-  TrayBubbleView::InitParams init_params;
-  init_params.delegate = this;
-  // Anchor within the overlay container.
-  init_params.parent_window =
-      Shell::GetContainer(Shell::GetPrimaryRootWindow(),
-                          kShellWindowId_AccessibilityPanelContainer);
-  init_params.anchor_mode = TrayBubbleView::AnchorMode::kRect;
-  init_params.anchor_rect = anchor;
-  init_params.is_anchored_to_status_area = false;
-  init_params.insets = gfx::Insets(kUnifiedMenuPadding, kUnifiedMenuPadding);
-  init_params.corner_radius = kUnifiedTrayCornerRadius;
-  init_params.has_shadow = false;
-  init_params.translucent = true;
-  bubble_view_ = new TrayBubbleView(init_params);
+  DCHECK(bubble_view_);
 
-  menu_view_ = new SwitchAccessMenuView();
   menu_view_->SetActions(actions_to_show);
-  menu_view_->SetBorder(
-      views::CreateEmptyBorder(kUnifiedTopShortcutSpacing, 0, 0, 0));
   bubble_view_->SetPreferredWidth(menu_view_->GetBubbleWidthDip());
-  bubble_view_->AddChildView(menu_view_);
+  bubble_view_->ChangeAnchorRect(anchor);
 
-  menu_view_->SetPaintToLayer();
-  menu_view_->layer()->SetFillsBoundsOpaquely(false);
+  gfx::Rect new_bounds = widget_->GetWindowBoundsInScreen();
 
-  widget_ = views::BubbleDialogDelegateView::CreateBubble(bubble_view_);
-  TrayBackgroundView::InitializeBubbleAnimations(widget_);
-  bubble_view_->InitializeAndShowBubble();
-  ShowBackButtonForMenu();
+  // Adjust the bounds to fit entirely within the screen.
+  gfx::Rect display_bounds =
+      display::Screen::GetScreen()->GetDisplayMatching(new_bounds).bounds();
+  new_bounds.AdjustToFit(display_bounds);
+
+  // Update the preferred bounds based on other system windows.
+  gfx::Rect resting_bounds = CollisionDetectionUtils::AvoidObstacles(
+      display::Screen::GetScreen()->GetDisplayNearestWindow(
+          widget_->GetNativeWindow()),
+      new_bounds, CollisionDetectionUtils::RelativePriority::kSwitchAccessMenu);
+
+  widget_->SetBounds(resting_bounds);
+  widget_->Show();
+  bubble_view_->NotifyAccessibilityEvent(ax::mojom::Event::kChildrenChanged,
+                                         true);
+
+  // The resting bounds includes padding on each side of the menu.
+  // Remove that before passing to the back button controller so the back button
+  // appears in the correct position.
+  resting_bounds.Inset(kUnifiedMenuPadding, kUnifiedMenuPadding);
+  back_button_controller_->ShowBackButton(resting_bounds,
+                                          /*show_focus_ring=*/false,
+                                          /*for_menu=*/true);
 }
 
-void SwitchAccessMenuBubbleController::CloseAll() {
-  back_button_controller_->CloseBubble();
-  if (widget_ && !widget_->IsClosed())
-    widget_->CloseWithReason(views::Widget::ClosedReason::kUnspecified);
+void SwitchAccessMenuBubbleController::HideBackButton() {
+  if (widget_ && widget_->IsVisible())
+    back_button_controller_->HideFocusRing();
+  else
+    back_button_controller_->Hide();
+}
+
+void SwitchAccessMenuBubbleController::HideMenuBubble() {
+  menu_open_ = false;
+  back_button_controller_->Hide();
+  if (widget_)
+    widget_->Hide();
+  if (bubble_view_)
+    bubble_view_->NotifyAccessibilityEvent(ax::mojom::Event::kChildrenChanged,
+                                           true);
 }
 
 void SwitchAccessMenuBubbleController::BubbleViewDestroyed() {
   bubble_view_ = nullptr;
   menu_view_ = nullptr;
   widget_ = nullptr;
-}
-
-void SwitchAccessMenuBubbleController::ShowBackButtonForMenu() {
-  gfx::Rect widget_bounds = widget_->GetWindowBoundsInScreen();
-  ShowBackButton(widget_bounds);
 }
 
 }  // namespace ash

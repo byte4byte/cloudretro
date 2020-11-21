@@ -6,11 +6,10 @@
 
 #include <algorithm>
 #include <array>
-#include <map>
 #include <set>
 
+#include "base/check_op.h"
 #include "base/i18n/streaming_utf8_validator.h"
-#include "base/logging.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversion_utils.h"
 #include "chromeos/printing/uri.h"
@@ -73,26 +72,6 @@ bool ParseCharacter(const Iter& end, Iter* current, char* out) {
   return true;
 }
 
-// Tries to parse the input string |begin|-|end| as a Port number.
-// For a number from range [0,65535] it returns this number.
-// For an empty string it returns -1 (not specified).
-// For all other inputs it returns -2 (invalid Port number).
-// The input requirement: |begin| <= |end|.
-int ParsePort(const Iter& begin, const Iter& end) {
-  if (begin == end)
-    return kPortUnspecified;
-  int number = 0;
-  for (Iter it = begin; it < end; ++it) {
-    if (!base::IsAsciiDigit(*it))
-      return kPortInvalid;
-    number *= 10;
-    number += *it - '0';
-    if (number > kPortMaxNumber)
-      return kPortInvalid;
-  }
-  return number;
-}
-
 // Helper struct for the function below.
 class Comparator {
  public:
@@ -112,11 +91,8 @@ class Comparator {
 Iter FindFirstOf(Iter begin, Iter end, const std::string& chars) {
   return std::find_if(begin, end, Comparator(chars));
 }
-}  // namespace
 
-const std::map<std::string, int> Uri::Pim::kDefaultPorts = {
-    {"ipp", 631},   {"ipps", 443}, {"http", 80},
-    {"https", 443}, {"lpd", 515},  {"socket", 9100}};
+}  // namespace
 
 template <bool encoded, bool case_insensitive>
 bool Uri::Pim::ParseString(const Iter& begin,
@@ -171,11 +147,14 @@ bool Uri::Pim::ParseString(const Iter& begin,
       out->append(std::move(utf8_character));
     }
   }
+  ++(parser_error_.parsed_strings);
   return true;
 }
 
 template <bool encoded>
 bool Uri::Pim::SaveUserinfo(const std::string& val) {
+  parser_error_.status = ParserStatus::kNoErrors;
+  parser_error_.parsed_strings = 0;
   std::string out;
   if (!ParseString<encoded>(val.begin(), val.end(), &out))
     return false;
@@ -185,6 +164,8 @@ bool Uri::Pim::SaveUserinfo(const std::string& val) {
 
 template <bool encoded>
 bool Uri::Pim::SaveHost(const std::string& val) {
+  parser_error_.status = ParserStatus::kNoErrors;
+  parser_error_.parsed_strings = 0;
   std::string out;
   if (!ParseString<encoded, true>(val.begin(), val.end(), &out))
     return false;
@@ -193,20 +174,24 @@ bool Uri::Pim::SaveHost(const std::string& val) {
 }
 
 bool Uri::Pim::SavePort(int value) {
-  if (value == kPortInvalid) {
-    parser_error_.parsed_chars = 0;
+  parser_error_.status = ParserStatus::kNoErrors;
+  parser_error_.parsed_strings = 0;
+  parser_error_.parsed_chars = 0;
+  if (value < -1 || value > 65535) {
     parser_error_.status = ParserStatus::kInvalidPortNumber;
     return false;
   }
-  if (value == kPortUnspecified && kDefaultPorts.count(scheme_)) {
-    value = kDefaultPorts.at(scheme_);
-  }
+  if (value == kPortUnspecified)
+    value = Uri::GetDefaultPort(scheme_);
   port_ = value;
   return true;
 }
 
 template <bool encoded>
 bool Uri::Pim::SavePath(const std::vector<std::string>& val) {
+  parser_error_.status = ParserStatus::kNoErrors;
+  parser_error_.parsed_strings = 0;
+  parser_error_.parsed_chars = 0;
   std::vector<std::string> out;
   out.reserve(val.size());
   for (size_t i = 0; i < val.size(); ++i) {
@@ -220,12 +205,13 @@ bool Uri::Pim::SavePath(const std::vector<std::string>& val) {
     } else if (segment == ".." && !out.empty() && out.back() != "..") {
       out.pop_back();
     } else if (segment.empty()) {
+      --parser_error_.parsed_strings;  // it was already counted
+      parser_error_.parsed_chars = 0;
       parser_error_.status = ParserStatus::kEmptySegmentInPath;
       return false;
     } else {
       out.push_back(std::move(segment));
     }
-    ++parser_error_.parsed_strings;
   }
   path_ = std::move(out);
   return true;
@@ -234,6 +220,9 @@ bool Uri::Pim::SavePath(const std::vector<std::string>& val) {
 template <bool encoded>
 bool Uri::Pim::SaveQuery(
     const std::vector<std::pair<std::string, std::string>>& val) {
+  parser_error_.status = ParserStatus::kNoErrors;
+  parser_error_.parsed_strings = 0;
+  parser_error_.parsed_chars = 0;
   std::vector<std::pair<std::string, std::string>> out(val.size());
   for (size_t i = 0; i < out.size(); ++i) {
     // Process parameter name.
@@ -242,16 +231,16 @@ bool Uri::Pim::SaveQuery(
     if (!ParseString<encoded>(it1, it2, &out[i].first, true))
       return false;
     if (out[i].first.empty()) {
+      --parser_error_.parsed_strings;  // it was already counted
+      parser_error_.parsed_chars = 0;
       parser_error_.status = ParserStatus::kEmptyParameterNameInQuery;
       return false;
     }
-    ++parser_error_.parsed_strings;
     // Process parameter value.
     it1 = val[i].second.begin();
     it2 = val[i].second.end();
     if (!ParseString<encoded>(it1, it2, &out[i].second, true))
       return false;
-    ++parser_error_.parsed_strings;
   }
   query_ = std::move(out);
   return true;
@@ -259,6 +248,8 @@ bool Uri::Pim::SaveQuery(
 
 template <bool encoded>
 bool Uri::Pim::SaveFragment(const std::string& val) {
+  parser_error_.status = ParserStatus::kNoErrors;
+  parser_error_.parsed_strings = 0;
   std::string out;
   if (!ParseString<encoded>(val.begin(), val.end(), &out))
     return false;
@@ -267,6 +258,9 @@ bool Uri::Pim::SaveFragment(const std::string& val) {
 }
 
 bool Uri::Pim::ParseScheme(const Iter& begin, const Iter& end) {
+  parser_error_.status = ParserStatus::kNoErrors;
+  parser_error_.parsed_strings = 0;
+  parser_error_.parsed_chars = 0;
   // Special case for an empty string on the input.
   if (begin == end) {
     scheme_.clear();
@@ -298,8 +292,8 @@ bool Uri::Pim::ParseScheme(const Iter& begin, const Iter& end) {
   scheme_ = std::move(out);
   // If the current Port is unspecified and the new Scheme has default port
   // number, set the default port number.
-  if (port_ == kPortUnspecified && kDefaultPorts.count(scheme_))
-    port_ = kDefaultPorts.at(scheme_);
+  if (port_ == kPortUnspecified)
+    port_ = Uri::GetDefaultPort(scheme_);
   return true;
 }
 
@@ -324,7 +318,7 @@ bool Uri::Pim::ParseAuthority(const Iter& begin, const Iter& end) {
   // Parse and save Port.
   if (it2 != end) {
     ++it2;  // omit the ':' character
-    if (it2 < end && !SavePort(ParsePort(it2, end))) {
+    if (!ParsePort(it2, end)) {
       parser_error_.parsed_chars += it2 - begin;
       return false;
     }
@@ -332,14 +326,35 @@ bool Uri::Pim::ParseAuthority(const Iter& begin, const Iter& end) {
   return true;
 }
 
+bool Uri::Pim::ParsePort(const Iter& begin, const Iter& end) {
+  if (begin == end)
+    return SavePort(kPortUnspecified);
+  int number = 0;
+  for (Iter it = begin; it < end; ++it) {
+    if (!base::IsAsciiDigit(*it))
+      return SavePort(kPortInvalid);
+    number *= 10;
+    number += *it - '0';
+    if (number > kPortMaxNumber)
+      return SavePort(kPortInvalid);
+  }
+  return SavePort(number);
+}
+
 bool Uri::Pim::ParsePath(const Iter& begin, const Iter& end) {
+  // Path must be empty or start with '/'.
+  if (begin < end && *begin != '/') {
+    parser_error_.status = ParserStatus::kRelativePathsNotAllowed;
+    parser_error_.parsed_chars = 0;
+    parser_error_.parsed_strings = 0;
+    return false;
+  }
   // This holds Path's segments.
   std::vector<std::string> path;
   // This stores offset from begin of every segment.
   std::vector<size_t> strings_positions;
   // Parsing...
   for (Iter it1 = begin; it1 < end;) {
-    DCHECK_EQ(*it1, '/');
     if (++it1 == end)  // omit '/' character
       break;
     Iter it2 = std::find(it1, end, '/');
@@ -392,6 +407,7 @@ bool Uri::Pim::ParseQuery(const Iter& begin, const Iter& end) {
 }
 
 bool Uri::Pim::ParseFragment(const Iter& begin, const Iter& end) {
+  parser_error_.parsed_strings = 0;
   std::string out;
   if (!ParseString<true>(begin, end, &out))
     return false;
@@ -400,6 +416,9 @@ bool Uri::Pim::ParseFragment(const Iter& begin, const Iter& end) {
 }
 
 bool Uri::Pim::ParseUri(const Iter& begin, const Iter end) {
+  parser_error_.status = ParserStatus::kNoErrors;
+  parser_error_.parsed_strings = 0;
+  parser_error_.parsed_chars = 0;
   Iter it1 = begin;
   // The Scheme component ends at the first colon (":").
   {
@@ -431,7 +450,7 @@ bool Uri::Pim::ParseUri(const Iter& begin, const Iter end) {
   }
   // The Path is terminated by the first question mark ("?") or number
   // sign ("#") character, or by the end of the URI.
-  if (it1 < end && *it1 == '/') {
+  if (it1 < end) {
     auto it2 = FindFirstOf(it1, end, "?#");
     if (!ParsePath(it1, it2)) {
       parser_error_.parsed_chars += it1 - begin;

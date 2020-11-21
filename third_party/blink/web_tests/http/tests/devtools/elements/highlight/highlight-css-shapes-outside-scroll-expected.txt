@@ -180,6 +180,8 @@ circle{
   ],
   "showRulers": true,
   "showExtensionLines": true,
+  "showAccessibilityInfo": true,
+  "colorFormat": "hex",
   "elementInfo": {
     "tagName": "div",
     "idValue": "circle",
@@ -188,7 +190,9 @@ circle{
     "nodeHeight": "128",
     "isKeyboardFocusable": false,
     "accessibleName": "",
-    "accessibleRole": "generic"
+    "accessibleRole": "generic",
+    "layoutObjectName": "LayoutNGBlockFlow",
+    "showAccessibilityInfo": true
   }
 }
 circle{
@@ -371,6 +375,8 @@ circle{
   ],
   "showRulers": true,
   "showExtensionLines": true,
+  "showAccessibilityInfo": true,
+  "colorFormat": "hex",
   "elementInfo": {
     "tagName": "div",
     "idValue": "circle",
@@ -379,7 +385,9 @@ circle{
     "nodeHeight": "128",
     "isKeyboardFocusable": false,
     "accessibleName": "",
-    "accessibleRole": "generic"
+    "accessibleRole": "generic",
+    "layoutObjectName": "LayoutNGBlockFlow",
+    "showAccessibilityInfo": true
   }
 }
 

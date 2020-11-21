@@ -17,6 +17,7 @@
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/debug/leak_annotations.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/no_destructor.h"
 #include "base/numerics/ranges.h"
 #include "base/optional.h"
@@ -72,6 +73,29 @@
 namespace ui {
 
 namespace {
+
+// IMPORTANT!
+// These values are written to logs.  Do not renumber or delete
+// existing items; add new entries to the end of the list.
+enum class UmaAtkApi {
+  kGetName = 0,
+  kGetDescription = 1,
+  kGetNChildren = 2,
+  kRefChild = 3,
+  kGetIndexInParent = 4,
+  kGetParent = 5,
+  kRefRelationSet = 6,
+  kGetAttributes = 7,
+  kGetRole = 8,
+  kRefStateSet = 9,
+  // This must always be the last enum. It's okay for its value to
+  // increase, but none of the other enum values may change.
+  kMaxValue = kRefStateSet,
+};
+
+void RecordAccessibilityAtkApi(UmaAtkApi enum_value) {
+  UMA_HISTOGRAM_ENUMERATION("Accessibility.ATK-APIs", enum_value);
+}
 
 // When accepting input from clients calling the API, an ATK character offset
 // of -1 can often represent the length of the string.
@@ -186,13 +210,17 @@ void SetIntPointerValueIfNotNull(int* pointer, int value) {
     *pointer = value;
 }
 
+#if defined(ATK_230)
 bool SupportsAtkComponentScrollingInterface() {
   return dlsym(RTLD_DEFAULT, "atk_component_scroll_to_point");
 }
+#endif
 
+#if defined(ATK_232)
 bool SupportsAtkTextScrollingInterface() {
   return dlsym(RTLD_DEFAULT, "atk_text_scroll_substring_to_point");
 }
+#endif
 
 AtkObject* FindAtkObjectParentFrame(AtkObject* atk_object) {
   AXPlatformNodeAuraLinux* node =
@@ -996,6 +1024,18 @@ gunichar GetCharacterAtOffset(AtkText* atk_text, int offset) {
   return code_point;
 }
 
+gint GetOffsetAtPoint(AtkText* text, gint x, gint y, AtkCoordType coords) {
+  g_return_val_if_fail(ATK_IS_TEXT(text), -1);
+
+  AtkObject* atk_object = ATK_OBJECT(text);
+  AXPlatformNodeAuraLinux* obj =
+      AXPlatformNodeAuraLinux::FromAtkObject(atk_object);
+  if (!obj)
+    return -1;
+
+  return obj->GetTextOffsetAtPoint(x, y, coords);
+}
+
 // This function returns a single character as a UTF-8 encoded C string because
 // the character may be encoded into more than one byte.
 char* GetCharacter(AtkText* atk_text,
@@ -1246,6 +1286,7 @@ char* GetStringAtOffset(AtkText* atk_text,
 }
 #endif
 
+#if defined(ATK_230)
 gfx::Rect GetUnclippedParentHypertextRangeBoundsRect(
     AXPlatformNodeDelegate* ax_platform_node_delegate,
     const int start_offset,
@@ -1269,6 +1310,7 @@ gfx::Rect GetUnclippedParentHypertextRangeBoundsRect(
                              AXClippingBehavior::kClipped)
              .OffsetFromOrigin();
 }
+#endif
 
 void GetCharacterExtents(AtkText* atk_text,
                          int offset,
@@ -1417,6 +1459,7 @@ void Init(AtkTextIface* iface) {
   iface->get_text = GetText;
   iface->get_character_count = GetCharacterCount;
   iface->get_character_at_offset = GetCharacterAtOffset;
+  iface->get_offset_at_point = GetOffsetAtPoint;
   iface->get_text_after_offset = GetTextAfterOffset;
   iface->get_text_before_offset = GetTextBeforeOffset;
   iface->get_text_at_offset = GetTextAtOffset;
@@ -2028,7 +2071,7 @@ const gchar* GetName(AtkObject* atk_object) {
 }
 
 const gchar* AtkGetName(AtkObject* atk_object) {
-  AXPlatformNode::NotifyAddAXModeFlags(kAXModeComplete);
+  RecordAccessibilityAtkApi(UmaAtkApi::kGetName);
   return GetName(atk_object);
 }
 
@@ -2045,7 +2088,7 @@ const gchar* GetDescription(AtkObject* atk_object) {
 }
 
 const gchar* AtkGetDescription(AtkObject* atk_object) {
-  AXPlatformNode::NotifyAddAXModeFlags(kAXModeComplete);
+  RecordAccessibilityAtkApi(UmaAtkApi::kGetDescription);
   return GetDescription(atk_object);
 }
 
@@ -2061,7 +2104,7 @@ gint GetNChildren(AtkObject* atk_object) {
 }
 
 gint AtkGetNChildren(AtkObject* atk_object) {
-  AXPlatformNode::NotifyAddAXModeFlags(kAXModeComplete);
+  RecordAccessibilityAtkApi(UmaAtkApi::kGetNChildren);
   return GetNChildren(atk_object);
 }
 
@@ -2083,7 +2126,7 @@ AtkObject* RefChild(AtkObject* atk_object, gint index) {
 }
 
 AtkObject* AtkRefChild(AtkObject* atk_object, gint index) {
-  AXPlatformNode::NotifyAddAXModeFlags(kAXModeComplete);
+  RecordAccessibilityAtkApi(UmaAtkApi::kRefChild);
   return RefChild(atk_object, index);
 }
 
@@ -2099,7 +2142,7 @@ gint GetIndexInParent(AtkObject* atk_object) {
 }
 
 gint AtkGetIndexInParent(AtkObject* atk_object) {
-  AXPlatformNode::NotifyAddAXModeFlags(kAXModeComplete);
+  RecordAccessibilityAtkApi(UmaAtkApi::kGetIndexInParent);
   return GetIndexInParent(atk_object);
 }
 
@@ -2115,7 +2158,7 @@ AtkObject* GetParent(AtkObject* atk_object) {
 }
 
 AtkObject* AtkGetParent(AtkObject* atk_object) {
-  AXPlatformNode::NotifyAddAXModeFlags(kAXModeComplete);
+  RecordAccessibilityAtkApi(UmaAtkApi::kGetParent);
   return GetParent(atk_object);
 }
 
@@ -2130,7 +2173,11 @@ AtkRelationSet* RefRelationSet(AtkObject* atk_object) {
 }
 
 AtkRelationSet* AtkRefRelationSet(AtkObject* atk_object) {
-  AXPlatformNode::NotifyAddAXModeFlags(kAXModeComplete);
+  RecordAccessibilityAtkApi(UmaAtkApi::kRefRelationSet);
+  // Enables AX mode. Most AT does not call AtkRefRelationSet, but Orca does,
+  // which is why it's a good signal to enable accessibility for Orca users
+  // without too many false positives.
+  AXPlatformNodeAuraLinux::EnableAXMode();
   return RefRelationSet(atk_object);
 }
 
@@ -2146,7 +2193,11 @@ AtkAttributeSet* GetAttributes(AtkObject* atk_object) {
 }
 
 AtkAttributeSet* AtkGetAttributes(AtkObject* atk_object) {
-  AXPlatformNode::NotifyAddAXModeFlags(kAXModeComplete);
+  RecordAccessibilityAtkApi(UmaAtkApi::kGetAttributes);
+  // Enables AX mode. Most AT does not call AtkGetAttributes, but Orca does,
+  // which is why it's a good signal to enable accessibility for Orca users
+  // without too many false positives.
+  AXPlatformNodeAuraLinux::EnableAXMode();
   return GetAttributes(atk_object);
 }
 
@@ -2161,7 +2212,7 @@ AtkRole GetRole(AtkObject* atk_object) {
 }
 
 AtkRole AtkGetRole(AtkObject* atk_object) {
-  AXPlatformNode::NotifyAddAXModeFlags(kAXModeComplete);
+  RecordAccessibilityAtkApi(UmaAtkApi::kGetRole);
   return GetRole(atk_object);
 }
 
@@ -2183,7 +2234,7 @@ AtkStateSet* RefStateSet(AtkObject* atk_object) {
 }
 
 AtkStateSet* AtkRefStateSet(AtkObject* atk_object) {
-  AXPlatformNode::NotifyAddAXModeFlags(kAXModeComplete);
+  RecordAccessibilityAtkApi(UmaAtkApi::kRefStateSet);
   return RefStateSet(atk_object);
 }
 
@@ -2446,7 +2497,10 @@ void AXPlatformNodeAuraLinux::SetDocumentParentOnFrameIfNecessary() {
   frame->SetDocumentParent(parent_atk_object);
 }
 
-AtkObject* AXPlatformNodeAuraLinux::FindFirstWebContentDocument() {
+AtkObject* AXPlatformNodeAuraLinux::FindPrimaryWebContentDocument() {
+  // It could get multiple web contents since additional web content is added,
+  // when the DevTools window is opened.
+  std::vector<AtkObject*> web_content_candidates;
   for (auto child_iterator_ptr = GetDelegate()->ChildrenBegin();
        *child_iterator_ptr != *GetDelegate()->ChildrenEnd();
        ++(*child_iterator_ptr)) {
@@ -2458,15 +2512,42 @@ AtkObject* AXPlatformNodeAuraLinux::FindFirstWebContentDocument() {
       continue;
     if (child_node->GetAtkRole() != ATK_ROLE_DOCUMENT_WEB)
       continue;
-    return child;
+    web_content_candidates.push_back(child);
   }
 
+  if (web_content_candidates.empty())
+    return nullptr;
+
+  // If it finds just one web content, return it.
+  if (web_content_candidates.size() == 1)
+    return web_content_candidates[0];
+
+  for (auto* object : web_content_candidates) {
+    auto* child_node = AXPlatformNodeAuraLinux::FromAtkObject(object);
+    // If it is a primary web contents, return it.
+    if (child_node->IsPrimaryWebContentsForWindow())
+      return object;
+  }
   return nullptr;
+}
+
+bool AXPlatformNodeAuraLinux::IsWebDocumentForRelations() {
+  AtkObject* atk_object = GetOrCreateAtkObject();
+  if (!atk_object)
+    return false;
+  AXPlatformNodeAuraLinux* parent = FromAtkObject(GetParent());
+  if (!parent || !GetDelegate()->IsWebContent() ||
+      GetAtkRole() != ATK_ROLE_DOCUMENT_WEB)
+    return false;
+  return parent->FindPrimaryWebContentDocument() == atk_object;
 }
 
 AtkObject* AXPlatformNodeAuraLinux::CreateAtkObject() {
   if (GetData().role != ax::mojom::Role::kApplication &&
+      !GetDelegate()->IsToplevelBrowserWindow() &&
       !GetAccessibilityMode().has_mode(AXMode::kNativeAPIs))
+    return nullptr;
+  if (GetDelegate()->IsChildOfLeaf())
     return nullptr;
   EnsureGTypeInit();
   interface_mask_ = GetGTypeInterfaceMask(GetData());
@@ -2547,6 +2628,11 @@ AXPlatformNode* AXPlatformNodeAuraLinux::application() {
 // static
 void AXPlatformNodeAuraLinux::StaticInitialize() {
   AtkUtilAuraLinux::GetInstance()->InitializeAsync();
+}
+
+// static
+void AXPlatformNodeAuraLinux::EnableAXMode() {
+  AXPlatformNode::NotifyAddAXModeFlags(kAXModeComplete);
 }
 
 AtkRole AXPlatformNodeAuraLinux::GetAtkRole() const {
@@ -2646,6 +2732,10 @@ AtkRole AXPlatformNodeAuraLinux::GetAtkRole() const {
       return kAtkFootnoteRole;
     case ax::mojom::Role::kDocPageBreak:
       return ATK_ROLE_SEPARATOR;
+    case ax::mojom::Role::kDocPageFooter:
+      return ATK_ROLE_FOOTER;
+    case ax::mojom::Role::kDocPageHeader:
+      return ATK_ROLE_HEADER;
     case ax::mojom::Role::kDocAcknowledgments:
     case ax::mojom::Role::kDocAfterword:
     case ax::mojom::Role::kDocAppendix:
@@ -2768,8 +2858,6 @@ AtkRole AXPlatformNodeAuraLinux::GetAtkRole() const {
       return ATK_ROLE_MARQUEE;
     case ax::mojom::Role::kMenu:
       return ATK_ROLE_MENU;
-    case ax::mojom::Role::kMenuButton:
-      return ATK_ROLE_MENU;
     case ax::mojom::Role::kMenuBar:
       return ATK_ROLE_MENU_BAR;
     case ax::mojom::Role::kMenuItem:
@@ -2844,7 +2932,6 @@ AtkRole AXPlatformNodeAuraLinux::GetAtkRole() const {
     case ax::mojom::Role::kSearch:
       return ATK_ROLE_LANDMARK;
     case ax::mojom::Role::kSlider:
-    case ax::mojom::Role::kSliderThumb:
       return ATK_ROLE_SLIDER;
     case ax::mojom::Role::kSpinButton:
       return ATK_ROLE_SPIN_BUTTON;
@@ -2974,7 +3061,7 @@ void AXPlatformNodeAuraLinux::GetAtkState(AtkStateSet* atk_state_set) {
     atk_state_set_add_state(atk_state_set, ATK_STATE_FOCUSABLE);
   if (data.HasState(ax::mojom::State::kHorizontal))
     atk_state_set_add_state(atk_state_set, ATK_STATE_HORIZONTAL);
-  if (!data.HasState(ax::mojom::State::kInvisible)) {
+  if (!IsInvisibleOrIgnored()) {
     atk_state_set_add_state(atk_state_set, ATK_STATE_VISIBLE);
     if (!delegate_->IsOffscreen() && !is_minimized)
       atk_state_set_add_state(atk_state_set, ATK_STATE_SHOWING);
@@ -2991,11 +3078,14 @@ void AXPlatformNodeAuraLinux::GetAtkState(AtkStateSet* atk_state_set) {
       data.GetIntAttribute(ax::mojom::IntAttribute::kInvalidState) !=
           static_cast<int32_t>(ax::mojom::InvalidState::kFalse))
     atk_state_set_add_state(atk_state_set, ATK_STATE_INVALID_ENTRY);
-#if defined(ATK_216)
-  if (data.HasIntAttribute(ax::mojom::IntAttribute::kCheckedState) &&
-      data.role != ax::mojom::Role::kToggleButton) {
-    atk_state_set_add_state(atk_state_set, ATK_STATE_CHECKABLE);
+  if (data.HasIntAttribute(ax::mojom::IntAttribute::kAriaCurrentState) &&
+      data.GetIntAttribute(ax::mojom::IntAttribute::kAriaCurrentState) !=
+          static_cast<int32_t>(ax::mojom::AriaCurrentState::kFalse)) {
+    atk_state_set_add_state(atk_state_set, ATK_STATE_ACTIVE);
   }
+#if defined(ATK_216)
+  if (IsPlatformCheckable())
+    atk_state_set_add_state(atk_state_set, ATK_STATE_CHECKABLE);
   if (data.HasIntAttribute(ax::mojom::IntAttribute::kHasPopup))
     atk_state_set_add_state(atk_state_set, ATK_STATE_HAS_POPUP);
 #endif
@@ -3003,7 +3093,7 @@ void AXPlatformNodeAuraLinux::GetAtkState(AtkStateSet* atk_state_set) {
     atk_state_set_add_state(atk_state_set, ATK_STATE_BUSY);
   if (data.GetBoolAttribute(ax::mojom::BoolAttribute::kModal))
     atk_state_set_add_state(atk_state_set, ATK_STATE_MODAL);
-  if (data.HasBoolAttribute(ax::mojom::BoolAttribute::kSelected))
+  if (data.IsSelectable())
     atk_state_set_add_state(atk_state_set, ATK_STATE_SELECTABLE);
   if (data.GetBoolAttribute(ax::mojom::BoolAttribute::kSelected))
     atk_state_set_add_state(atk_state_set, ATK_STATE_SELECTED);
@@ -3126,7 +3216,7 @@ AtkRelationSet* AXPlatformNodeAuraLinux::GetAtkRelations() {
 
   AtkRelationSet* relation_set = atk_relation_set_new();
 
-  if (GetDelegate()->IsWebContent() && GetAtkRole() == ATK_ROLE_DOCUMENT_WEB) {
+  if (IsWebDocumentForRelations()) {
     AtkObject* parent_frame = FindAtkObjectParentFrame(atk_object);
     if (parent_frame) {
       atk_relation_set_add_relation_by_type(
@@ -3135,7 +3225,7 @@ AtkRelationSet* AXPlatformNodeAuraLinux::GetAtkRelations() {
   }
 
   if (auto* document_parent = FromAtkObject(document_parent_)) {
-    AtkObject* document = document_parent->FindFirstWebContentDocument();
+    AtkObject* document = document_parent->FindPrimaryWebContentDocument();
     if (document) {
       atk_relation_set_add_relation_by_type(relation_set, ATK_RELATION_EMBEDS,
                                             document);
@@ -3192,6 +3282,9 @@ AXPlatformNodeAuraLinux::~AXPlatformNodeAuraLinux() {
 
   DestroyAtkObjects();
 
+  if (window_activate_event_postponed_)
+    AtkUtilAuraLinux::GetInstance()->CancelPostponedEventsFor(this);
+
   SetWeakGPtrToAtkObject(&document_parent_, nullptr);
 }
 
@@ -3207,6 +3300,28 @@ void AXPlatformNodeAuraLinux::Init(AXPlatformNodeDelegate* delegate) {
   // Only create the AtkObject if we know enough information.
   if (GetData().role != ax::mojom::Role::kUnknown)
     GetOrCreateAtkObject();
+}
+
+bool AXPlatformNodeAuraLinux::IsPlatformCheckable() const {
+  if (GetData().role == ax::mojom::Role::kToggleButton)
+    return false;
+
+  return AXPlatformNodeBase::IsPlatformCheckable();
+}
+
+base::Optional<int> AXPlatformNodeAuraLinux::GetIndexInParent() {
+  AXPlatformNode* parent =
+      AXPlatformNode::FromNativeViewAccessible(GetParent());
+  // Even though the node doesn't have its parent, GetParent() could return the
+  // application. Since the detached view has the kUnknown role and the
+  // restriction is kDisabled, it early returns before finding the index.
+  if (parent == AXPlatformNodeAuraLinux::application() &&
+      GetData().role == ax::mojom::Role::kUnknown &&
+      GetData().GetRestriction() == ax::mojom::Restriction::kDisabled) {
+    return base::nullopt;
+  }
+
+  return AXPlatformNodeBase::GetIndexInParent();
 }
 
 void AXPlatformNodeAuraLinux::EnsureAtkObjectIsValid() {
@@ -3242,8 +3357,12 @@ void AXPlatformNodeAuraLinux::OnActiveDescendantChanged() {
 
   // Active-descendant-changed notifications are typically only relevant when
   // the change is within the focused widget.
-  if (atk_object != g_current_focused)
+  if (!g_current_focused)
     return;
+  if (auto* focused_node = FromAtkObject(g_current_focused)) {
+    if (!focused_node->IsDescendantOf(this))
+      return;
+  }
 
   AtkObject* descendant = GetActiveDescendantOfCurrentFocused();
   if (descendant == g_current_active_descendant)
@@ -3284,6 +3403,16 @@ void AXPlatformNodeAuraLinux::OnCheckedStateChanged() {
   atk_object_notify_state_change(
       ATK_OBJECT(obj), GetAtkStateTypeForCheckableNode(),
       GetData().GetCheckedState() != ax::mojom::CheckedState::kFalse);
+}
+
+void AXPlatformNodeAuraLinux::OnEnabledChanged() {
+  AtkObject* obj = GetOrCreateAtkObject();
+  if (!obj)
+    return;
+
+  atk_object_notify_state_change(
+      obj, ATK_STATE_ENABLED,
+      GetData().GetRestriction() != ax::mojom::Restriction::kDisabled);
 }
 
 void AXPlatformNodeAuraLinux::OnExpandedStateChanged(bool is_expanded) {
@@ -3335,7 +3464,7 @@ void AXPlatformNodeAuraLinux::OnMenuPopupStart() {
   atk_object_notify_state_change(parent_frame, ATK_STATE_ACTIVE, TRUE);
 }
 
-void AXPlatformNodeAuraLinux::OnMenuPopupHide() {
+void AXPlatformNodeAuraLinux::OnMenuPopupEnd() {
   AtkObject* atk_object = GetOrCreateAtkObject();
   AtkObject* parent_frame = FindAtkObjectParentFrame(atk_object);
   if (!parent_frame)
@@ -3346,35 +3475,24 @@ void AXPlatformNodeAuraLinux::OnMenuPopupHide() {
   // kMenuPopupHide may be called multiple times for the same menu, so only
   // remove it if our parent frame matches the most recently opened menu.
   std::vector<AtkObject*>& active_menus = GetActiveMenus();
-  if (active_menus.empty())
-    return;
-
-  // When multiple levels of menu are closed at once, they may be hidden out
-  // of order. When this happens, we just remove the open menu from the stack.
-  if (active_menus.back() != atk_object) {
-    auto it = std::find(active_menus.rbegin(), active_menus.rend(), atk_object);
-    if (it != active_menus.rend()) {
-      // We used a reverse iterator, so we need to convert it into a normal
-      // iterator to use it for std::vector::erase(...).
-      auto to_remove = --(it.base());
-      active_menus.erase(to_remove);
-    }
-    return;
-  }
+  DCHECK(!active_menus.empty())
+      << "Asymmetrical menupopupend events -- too many";
 
   active_menus.pop_back();
-
-  // We exit early if the newly activated menu has the same AtkWindow as the
-  // previous one.
   AtkObject* new_active_item = ComputeActiveTopLevelFrame();
-  if (new_active_item == parent_frame)
-    return;
-  g_signal_emit_by_name(parent_frame, "deactivate");
-  atk_object_notify_state_change(parent_frame, ATK_STATE_ACTIVE, FALSE);
-  if (new_active_item) {
-    g_signal_emit_by_name(new_active_item, "activate");
-    atk_object_notify_state_change(new_active_item, ATK_STATE_ACTIVE, TRUE);
+  if (new_active_item != parent_frame) {
+    // Newly activated menu has the different AtkWindow as the previous one.
+    g_signal_emit_by_name(parent_frame, "deactivate");
+    atk_object_notify_state_change(parent_frame, ATK_STATE_ACTIVE, FALSE);
+    if (new_active_item) {
+      g_signal_emit_by_name(new_active_item, "activate");
+      atk_object_notify_state_change(new_active_item, ATK_STATE_ACTIVE, TRUE);
+    }
   }
+
+  // All menus are closed.
+  if (active_menus.empty())
+    OnAllMenusEnded();
 }
 
 void AXPlatformNodeAuraLinux::ResendFocusSignalsForCurrentlyFocusedNode() {
@@ -3390,7 +3508,8 @@ void AXPlatformNodeAuraLinux::ResendFocusSignalsForCurrentlyFocusedNode() {
   atk_object_notify_state_change(focused_node, ATK_STATE_FOCUSED, true);
 }
 
-void AXPlatformNodeAuraLinux::OnMenuPopupEnd() {
+// All menus have closed.
+void AXPlatformNodeAuraLinux::OnAllMenusEnded() {
   if (!GetActiveMenus().empty() && g_active_top_level_frame &&
       ComputeActiveTopLevelFrame() != g_active_top_level_frame) {
     g_signal_emit_by_name(g_active_top_level_frame, "activate");
@@ -3398,8 +3517,8 @@ void AXPlatformNodeAuraLinux::OnMenuPopupEnd() {
                                    TRUE);
   }
 
-  ResendFocusSignalsForCurrentlyFocusedNode();
   GetActiveMenus().clear();
+  ResendFocusSignalsForCurrentlyFocusedNode();
 }
 
 void AXPlatformNodeAuraLinux::OnWindowActivated() {
@@ -3504,16 +3623,25 @@ void AXPlatformNodeAuraLinux::OnFocused() {
 
   SetActiveViewsDialog();
 
-  if (g_current_focused) {
-    g_signal_emit_by_name(g_current_focused, "focus-event", false);
-    atk_object_notify_state_change(ATK_OBJECT(g_current_focused),
+  AtkObject* old_effective_focus = g_current_active_descendant
+                                       ? g_current_active_descendant
+                                       : g_current_focused;
+  if (old_effective_focus) {
+    g_signal_emit_by_name(old_effective_focus, "focus-event", false);
+    atk_object_notify_state_change(ATK_OBJECT(old_effective_focus),
                                    ATK_STATE_FOCUSED, false);
   }
 
   SetWeakGPtrToAtkObject(&g_current_focused, atk_object);
-  g_signal_emit_by_name(atk_object, "focus-event", true);
-  atk_object_notify_state_change(ATK_OBJECT(atk_object), ATK_STATE_FOCUSED,
-                                 true);
+  AtkObject* descendant = GetActiveDescendantOfCurrentFocused();
+  SetWeakGPtrToAtkObject(&g_current_active_descendant, descendant);
+
+  AtkObject* new_effective_focus = g_current_active_descendant
+                                       ? g_current_active_descendant
+                                       : g_current_focused;
+  g_signal_emit_by_name(new_effective_focus, "focus-event", true);
+  atk_object_notify_state_change(ATK_OBJECT(new_effective_focus),
+                                 ATK_STATE_FOCUSED, true);
 }
 
 void AXPlatformNodeAuraLinux::OnSelected() {
@@ -3569,13 +3697,22 @@ bool AXPlatformNodeAuraLinux::SelectionAndFocusAreTheSame() {
   // on the select element and not the newly-selected descendant.
   if (AXPlatformNodeBase* parent = FromAtkObject(GetParent())) {
     if (parent->GetData().role == ax::mojom::Role::kMenuListPopup)
-      return !parent->GetData().HasState(ax::mojom::State::kInvisible);
+      return !parent->IsInvisibleOrIgnored();
   }
 
   return false;
 }
 
 bool AXPlatformNodeAuraLinux::EmitsAtkTextEvents() const {
+  // Objects which do not implement AtkText cannot emit AtkText events.
+  if (!atk_object_ || !ATK_IS_TEXT(atk_object_))
+    return false;
+
+  // Objects which do implement AtkText, but are ignored or invisible should not
+  // emit AtkText events.
+  if (IsInvisibleOrIgnored())
+    return false;
+
   // If this node is not a static text node, it supports the full AtkText
   // interface.
   if (GetAtkRole() != kStaticRole)
@@ -3679,6 +3816,21 @@ void AXPlatformNodeAuraLinux::EmitCaretChangedSignal() {
                         UTF16ToUnicodeOffsetInText(selection.second));
 }
 
+void AXPlatformNodeAuraLinux::OnTextAttributesChanged() {
+  if (!EmitsAtkTextEvents()) {
+    if (auto* parent = FromAtkObject(GetParent()))
+      parent->OnTextAttributesChanged();
+    return;
+  }
+
+  AtkObject* atk_object = GetOrCreateAtkObject();
+  if (!atk_object)
+    return;
+
+  DCHECK(ATK_IS_TEXT(atk_object));
+  g_signal_emit_by_name(atk_object, "text-attributes-changed");
+}
+
 void AXPlatformNodeAuraLinux::OnTextSelectionChanged() {
   int32_t anchor_node_id, focus_node_id;
   int anchor_offset, focus_offset;
@@ -3734,6 +3886,20 @@ void AXPlatformNodeAuraLinux::OnDescriptionChanged() {
                         "property-change::accessible-description",
                         &property_values, nullptr);
   g_value_unset(&property_values.new_value);
+}
+
+void AXPlatformNodeAuraLinux::OnSortDirectionChanged() {
+  AXPlatformNodeBase* table = GetTable();
+  if (!table)
+    return;
+
+  AtkObject* atk_table = table->GetNativeViewAccessible();
+  DCHECK(ATK_IS_TABLE(atk_table));
+
+  if (GetData().role == ax::mojom::Role::kColumnHeader)
+    g_signal_emit_by_name(atk_table, "row-reordered");
+  else if (GetData().role == ax::mojom::Role::kRowHeader)
+    g_signal_emit_by_name(atk_table, "column-reordered");
 }
 
 void AXPlatformNodeAuraLinux::OnValueChanged() {
@@ -3844,9 +4010,31 @@ void AXPlatformNodeAuraLinux::OnInvalidStatusChanged() {
       GetData().GetInvalidState() != ax::mojom::InvalidState::kFalse);
 }
 
+void AXPlatformNodeAuraLinux::OnAriaCurrentChanged() {
+  AtkObject* atk_object = GetOrCreateAtkObject();
+  if (!atk_object)
+    return;
+
+  ax::mojom::AriaCurrentState aria_current =
+      static_cast<ax::mojom::AriaCurrentState>(GetData().GetIntAttribute(
+          ax::mojom::IntAttribute::kAriaCurrentState));
+  atk_object_notify_state_change(
+      ATK_OBJECT(atk_object), ATK_STATE_ACTIVE,
+      aria_current != ax::mojom::AriaCurrentState::kNone &&
+          aria_current != ax::mojom::AriaCurrentState::kFalse);
+}
+
 void AXPlatformNodeAuraLinux::OnAlertShown() {
+  DCHECK(ui::IsAlert(GetData().role));
   atk_object_notify_state_change(ATK_OBJECT(GetOrCreateAtkObject()),
                                  ATK_STATE_SHOWING, TRUE);
+}
+
+void AXPlatformNodeAuraLinux::RunPostponedEvents() {
+  if (window_activate_event_postponed_) {
+    OnWindowActivated();
+    window_activate_event_postponed_ = false;
+  }
 }
 
 void AXPlatformNodeAuraLinux::NotifyAccessibilityEvent(
@@ -3855,20 +4043,14 @@ void AXPlatformNodeAuraLinux::NotifyAccessibilityEvent(
     return;
   AXPlatformNodeBase::NotifyAccessibilityEvent(event_type);
   switch (event_type) {
-    // There are three types of messages that we receive for popup menus. Each
-    // time a popup menu is shown, we get a kMenuPopupStart message. This
-    // includes if the menu is hidden and then re-shown. When a menu is hidden
-    // we receive the kMenuPopupHide message. Finally, when the entire menu is
-    // closed we receive the kMenuPopupEnd message for the parent menu and all
-    // of the submenus that were opened when navigating through the menu.
-    case ax::mojom::Event::kMenuPopupEnd:
-      OnMenuPopupEnd();
-      break;
-    case ax::mojom::Event::kMenuPopupHide:
-      OnMenuPopupHide();
-      break;
+    // kMenuStart/kMenuEnd: the menu system has started / stopped.
+    // kMenuPopupStart/kMenuPopupEnd: an individual menu/submenu has
+    // opened/closed.
     case ax::mojom::Event::kMenuPopupStart:
       OnMenuPopupStart();
+      break;
+    case ax::mojom::Event::kMenuPopupEnd:
+      OnMenuPopupEnd();
       break;
     case ax::mojom::Event::kActiveDescendantChanged:
       OnActiveDescendantChanged();
@@ -3902,14 +4084,21 @@ void AXPlatformNodeAuraLinux::NotifyAccessibilityEvent(
     case ax::mojom::Event::kValueChanged:
       OnValueChanged();
       break;
-    case ax::mojom::Event::kInvalidStatusChanged:
-      OnInvalidStatusChanged();
-      break;
     case ax::mojom::Event::kWindowActivated:
-      OnWindowActivated();
+      if (AtkUtilAuraLinux::GetInstance()->IsAtSpiReady()) {
+        OnWindowActivated();
+      } else {
+        AtkUtilAuraLinux::GetInstance()->PostponeEventsFor(this);
+        window_activate_event_postponed_ = true;
+      }
       break;
     case ax::mojom::Event::kWindowDeactivated:
-      OnWindowDeactivated();
+      if (AtkUtilAuraLinux::GetInstance()->IsAtSpiReady()) {
+        OnWindowDeactivated();
+      } else {
+        AtkUtilAuraLinux::GetInstance()->CancelPostponedEventsFor(this);
+        window_activate_event_postponed_ = false;
+      }
       break;
     case ax::mojom::Event::kWindowVisibilityChanged:
       OnWindowVisibilityChanged();
@@ -4061,6 +4250,28 @@ size_t AXPlatformNodeAuraLinux::UnicodeToUTF16OffsetInText(int unicode_offset) {
   return utf16_offset;
 }
 
+int AXPlatformNodeAuraLinux::GetTextOffsetAtPoint(int x,
+                                                  int y,
+                                                  AtkCoordType atk_coord_type) {
+  if (!GetExtentsRelativeToAtkCoordinateType(atk_coord_type).Contains(x, y))
+    return -1;
+
+  AtkObject* atk_object = GetOrCreateAtkObject();
+  if (!atk_object)
+    return -1;
+
+  int count = atk_text::GetCharacterCount(ATK_TEXT(atk_object));
+  for (int i = 0; i < count; i++) {
+    int out_x, out_y, out_width, out_height;
+    atk_text::GetCharacterExtents(ATK_TEXT(atk_object), i, &out_x, &out_y,
+                                  &out_width, &out_height, atk_coord_type);
+    gfx::Rect rect(out_x, out_y, out_width, out_height);
+    if (rect.Contains(x, y))
+      return i;
+  }
+  return -1;
+}
+
 gfx::Vector2d AXPlatformNodeAuraLinux::GetParentOriginInScreenCoordinates()
     const {
   AtkObject* parent = GetParent();
@@ -4157,7 +4368,30 @@ gfx::NativeViewAccessible
 AXPlatformNodeAuraLinux::HitTestSync(gint x, gint y, AtkCoordType coord_type) {
   gfx::Point scroll_to(x, y);
   scroll_to = ConvertPointToScreenCoordinates(scroll_to, coord_type);
-  return delegate_->HitTestSync(scroll_to.x(), scroll_to.y());
+
+  AXPlatformNode* current_result = this;
+  while (true) {
+    gfx::NativeViewAccessible hit_child =
+        current_result->GetDelegate()->HitTestSync(scroll_to.x(),
+                                                   scroll_to.y());
+    if (!hit_child)
+      return nullptr;
+    AXPlatformNode* hit_child_node =
+        AXPlatformNode::FromNativeViewAccessible(hit_child);
+    if (!hit_child_node || !hit_child_node->IsDescendantOf(current_result))
+      break;
+
+    // If we get the same node, we're done.
+    if (hit_child_node == current_result)
+      break;
+
+    // Continue to check recursively. That's because HitTestSync may have
+    // returned the best result within a particular accessibility tree,
+    // but we might need to recurse further in a tree of a different type
+    // (for example, from Views to Web).
+    current_result = hit_child_node;
+  }
+  return current_result->GetNativeViewAccessible();
 }
 
 bool AXPlatformNodeAuraLinux::GrabFocus() {
@@ -4242,7 +4476,7 @@ bool AXPlatformNodeAuraLinux::
     if (!child)
       continue;
 
-    if (child->IsTextOnlyObject()) {
+    if (child->IsText()) {
       current_offset += child->GetName().size();
     } else {
       // Add an offset for the embedded character.
@@ -4284,9 +4518,9 @@ AtkAttributeSet* AXPlatformNodeAuraLinux::GetAtkAttributes() {
 AtkStateType AXPlatformNodeAuraLinux::GetAtkStateTypeForCheckableNode() {
   if (GetData().GetCheckedState() == ax::mojom::CheckedState::kMixed)
     return ATK_STATE_INDETERMINATE;
-  if (GetData().role == ax::mojom::Role::kToggleButton)
-    return ATK_STATE_PRESSED;
-  return ATK_STATE_CHECKED;
+  if (IsPlatformCheckable())
+    return ATK_STATE_CHECKED;
+  return ATK_STATE_PRESSED;
 }
 
 // AtkDocumentHelpers
@@ -4673,6 +4907,9 @@ int AXPlatformNodeAuraLinux::FindStartOfStyle(
   DCHECK(!offset_to_text_attributes_.empty());
 
   switch (direction) {
+    case ax::mojom::MoveDirection::kNone:
+      NOTREACHED();
+      return start_offset;
     case ax::mojom::MoveDirection::kBackward: {
       auto iterator = offset_to_text_attributes_.upper_bound(start_offset);
       --iterator;
@@ -4711,6 +4948,10 @@ const TextAttributeList& AXPlatformNodeAuraLinux::GetTextAttributes(
                               UTF16ToUnicodeOffsetInText(style_start));
   SetIntPointerValueIfNotNull(end_offset,
                               UTF16ToUnicodeOffsetInText(style_end));
+
+  if (iterator == offset_to_text_attributes_.end())
+    return default_text_attributes_;
+
   return iterator->second;
 }
 
@@ -4767,7 +5008,7 @@ AXPlatformNodeAuraLinux::GetHypertextExtentsOfChild(
     // If this object is a text only object, it is included directly into this
     // node's hypertext, otherwise it is represented as an embedded object
     // character.
-    int size = child->IsTextOnlyObject() ? child->GetName().size() : 1;
+    int size = child->IsText() ? child->GetName().size() : 1;
     if (child == child_to_find)
       return std::make_pair(current_offset, current_offset + size);
     current_offset += size;
@@ -4787,7 +5028,7 @@ void AXPlatformNodeAuraLinux::ActivateFindInPageInParent(int start_offset,
   if (!extents_in_parent.has_value())
     return;
 
-  DCHECK(IsTextOnlyObject());
+  DCHECK(IsText());
   parent->ActivateFindInPageResult(extents_in_parent->first + start_offset,
                                    extents_in_parent->first + end_offset);
 }

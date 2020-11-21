@@ -32,8 +32,10 @@ import unittest
 
 from blinkpy.common.host_mock import MockHost
 from blinkpy.common.system.output_capture import OutputCapture
-from blinkpy.web_tests.models.test_configuration import TestConfiguration, TestConfigurationConverter
-from blinkpy.web_tests.models.test_expectations import TestExpectations, SystemConfigurationRemover, ParseError
+from blinkpy.web_tests.models.test_configuration import (
+    TestConfiguration, TestConfigurationConverter)
+from blinkpy.web_tests.models.test_expectations import (
+    TestExpectations, SystemConfigurationRemover, ParseError)
 from blinkpy.web_tests.models.typ_types import ResultType, Expectation
 
 
@@ -46,16 +48,6 @@ class Base(unittest.TestCase):
         self._port = host.port_factory.get('test-win-win7', None)
         self._exp = None
         unittest.TestCase.__init__(self, testFunc)
-
-    def get_basic_tests(self):
-        return [
-            'failures/expected/text.html',
-            'failures/expected/image_checksum.html',
-            'failures/expected/crash.html', 'failures/expected/image.html',
-            'failures/expected/timeout.html',
-            'failures/unexpected/*/text.html', 'passes/text.html',
-            'reftests/failures/expected/has_unused_expectation.html'
-        ]
 
     def get_basic_expectations(self):
         return """
@@ -77,11 +69,16 @@ failures/expected/image.html [ Crash ]
             self._port, expectations_dict=expectations_to_lint)
 
     def assert_exp_list(self, test, results):
-        self.assertEqual(
-            self._exp.get_expectations(test).results, set(results))
+        exp = self._exp.get_expectations(test)
+        self.assertEqual(exp.test, test)
+        self.assertEqual(exp.results, set(results))
 
     def assert_exp(self, test, result):
         self.assert_exp_list(test, [result])
+
+    def assert_is_slow(self, test, is_slow):
+        self.assertEqual(
+            self._exp.get_expectations(test).is_slow_test, is_slow)
 
     def assert_bad_expectations(self, expectations, overrides=None):
         with self.assertRaises(ParseError):
@@ -92,10 +89,7 @@ failures/expected/image.html [ Crash ]
         self.assertEqual(
             self._exp.get_expectations(test).trailing_comments, comments)
 
-
-class BasicTests(Base):
-    def test_basic(self):
-        self.parse_exp(self.get_basic_expectations())
+    def assert_basic(self):
         self.assert_exp('failures/expected/text.html', ResultType.Failure)
         self.assert_exp_list('failures/expected/image_checksum.html',
                              [ResultType.Crash])
@@ -105,26 +99,71 @@ class BasicTests(Base):
                                       ' # foo and bar\n')
 
 
+class BasicTests(Base):
+    def test_basic(self):
+        self.parse_exp(self.get_basic_expectations())
+        self.assert_basic()
+
+
+class VirtualExpectationsTest(Base):
+    def test_virtual_expectations(self):
+        # See test.TestPort.virtual_test_suite() for the mapping of the virtual
+        # test suites to bases.
+        self.parse_exp(
+            '# results: [ Pass Slow Skip ]\n' + self.get_basic_expectations() +
+            'passes/text.html [ Slow ]\n'
+            'passes/image.html [ Skip ]\n'
+            'virtual/virtual_passes/passes/text.html [ Failure ]\n'
+            'virtual/virtual_failures/failure/expected/crash.html [ Pass ]')
+        self.assert_basic()
+        # Overrides.
+        self.assert_exp('virtual/virtual_passes/passes/text.html',
+                        ResultType.Failure)
+        self.assert_is_slow('virtual/virtual_passes/passes/text.html', True)
+        self.assert_exp('virtual/virtual_failures/failure/expected/text.html',
+                        ResultType.Pass)
+        self.assert_is_slow(
+            'virtual/virtual_failures/failure/expected/text.html', False)
+        # Fallbacks.
+        self.assert_exp(
+            'virtual/virtual_failures/failures/expected/crash.html',
+            ResultType.Crash)
+        self.assert_exp('virtual/virtual_passes/passes/image.html',
+                        ResultType.Skip)
+        # Non existence virtual suite doesn't fallback.
+        self.assert_exp('virtual/xyz/failures/expected/crash.html',
+                        ResultType.Pass)
+
+
 class FlagExpectationsTests(Base):
     def setup_using_raw_expectations(self,
                                      base_exps='',
                                      flag_exps='',
                                      flag_name=''):
         self._general_exp_filename = 'TestExpectations'
-        self._port.host.filesystem.write_text_file(self._general_exp_filename,
-                                                   base_exps)
         expectations_dict = {self._general_exp_filename: base_exps}
 
         # set up flag specific expectations
         if flag_name:
             self._flag_exp_filename = self._port.host.filesystem.join(
                 'FlagExpectations', flag_name)
-            self._port.host.filesystem.write_text_file(self._flag_exp_filename,
-                                                       flag_exps)
             expectations_dict[self._flag_exp_filename] = flag_exps
 
         self._test_expectations = TestExpectations(self._port,
                                                    expectations_dict)
+
+    def assert_base_and_flag_exp(self, test, base_exp, flag_exp):
+        self.assertEqual(
+            self._test_expectations.get_base_expectations(test).results,
+            set([base_exp]))
+        actual_flag_exp = self._test_expectations.get_flag_expectations(test)
+        if flag_exp is None:
+            self.assertIsNone(actual_flag_exp)
+        else:
+            self.assertEqual(actual_flag_exp.results, set([flag_exp]))
+
+    def assert_exp(self, test, result):
+        self.assert_exp_list(test, [result])
 
     def test_add_flag_test_expectations(self):
         raw_flag_exps = """
@@ -139,6 +178,153 @@ class FlagExpectationsTests(Base):
         self.assertEqual(flag_exp.results, set([ResultType.Failure]))
         self.assertEqual(self._test_expectations.flag_name,
                          '/composite-after-paint')
+
+    def test_override_and_fallback(self):
+        raw_base_exps = """
+        # tags: [ Win ]
+        # results: [ Skip Slow Failure Crash Pass ]
+        [ Win ] failures/expected/text.html [ Slow ]
+        failures/expected/image.html [ Skip ]
+        failures/expected/reftest.html [ Slow Failure ]
+        failures/expected/crash.html [ Crash ]
+        """
+        raw_flag_exps = """
+        # tags: [ Win ]
+        # results: [ Failure Pass Slow ]
+        [ Win ] failures/expected/text.html [ Failure ]
+        failures/expected/image.html [ Pass ]
+        failures/expected/reftest.html [ Pass ]
+        """
+        self.setup_using_raw_expectations(base_exps=raw_base_exps,
+                                          flag_exps=raw_flag_exps,
+                                          flag_name='composite-after-paint')
+        self.assertEqual(self._test_expectations.flag_name,
+                         '/composite-after-paint')
+
+        # Default pass without any explicit expectations.
+        exp = self._test_expectations.get_expectations('passes/text.html')
+        self.assertEqual(exp.results, set([ResultType.Pass]))
+        self.assertTrue(exp.is_default_pass)
+        self.assertFalse(exp.is_slow_test)
+        self.assert_base_and_flag_exp('passes/text.html', ResultType.Pass,
+                                      None)
+
+        # The test has a flag-specific expectation.
+        exp = self._test_expectations.get_expectations(
+            'failures/expected/text.html')
+        self.assertEqual(exp.results, set([ResultType.Failure]))
+        self.assertFalse(exp.is_default_pass)
+        self.assertTrue(exp.is_slow_test)
+        self.assert_base_and_flag_exp('failures/expected/text.html',
+                                      ResultType.Pass, ResultType.Failure)
+
+        # The flag-specific expectation overrides the base expectation.
+        exp = self._test_expectations.get_expectations(
+            'failures/expected/image.html')
+        self.assertEqual(exp.results, set([ResultType.Pass]))
+        self.assertFalse(exp.is_default_pass)
+        self.assertFalse(exp.is_slow_test)
+        self.assert_base_and_flag_exp('failures/expected/image.html',
+                                      ResultType.Skip, ResultType.Pass)
+
+        # The flag-specific expectation overrides the base expectation, but
+        # inherits [ Slow ] of the base expectation.
+        exp = self._test_expectations.get_expectations(
+            'failures/expected/reftest.html')
+        self.assertEqual(exp.results, set([ResultType.Pass]))
+        self.assertFalse(exp.is_default_pass)
+        self.assertTrue(exp.is_slow_test)
+        self.assert_base_and_flag_exp('failures/expected/reftest.html',
+                                      ResultType.Failure, ResultType.Pass)
+
+        # No flag-specific expectation. Fallback to the base expectation.
+        exp = self._test_expectations.get_expectations(
+            'failures/expected/crash.html')
+        self.assertEqual(exp.results, set([ResultType.Crash]))
+        self.assertFalse(exp.is_default_pass)
+        self.assertFalse(exp.is_slow_test)
+        self.assert_base_and_flag_exp('failures/expected/crash.html',
+                                      ResultType.Crash, None)
+
+    def test_override_and_fallback_virtual_test(self):
+        raw_base_exps = """
+        # tags: [ Win ]
+        # results: [ Skip Slow Failure Crash Pass ]
+        [ Win ] failures/expected/text.html [ Slow ]
+        failures/expected/image.html [ Skip ]
+        failures/expected/reftest.html [ Failure ]
+        failures/expected/crash.html [ Crash ]
+        virtual/virtual_failures/failures/expected/crash.html [ Pass ]
+        """
+        raw_flag_exps = """
+        # tags: [ Win ]
+        # results: [ Failure Pass Timeout Slow ]
+        [ Win ] failures/expected/text.html [ Failure ]
+        failures/expected/image.html [ Pass ]
+        failures/expected/reftest.html [ Slow ]
+        failures/expected/crash.html [ Timeout ]
+        virtual/virtual_failures/failures/expected/image.html [ Failure ]
+        """
+        self.setup_using_raw_expectations(base_exps=raw_base_exps,
+                                          flag_exps=raw_flag_exps,
+                                          flag_name='composite-after-paint')
+        self.assertEqual(self._test_expectations.flag_name,
+                         '/composite-after-paint')
+
+        # Default pass of virtual test without any explicit expectations for
+        # either the virtual test or the base test.
+        exp = self._test_expectations.get_expectations(
+            'virtual/virtual_passes/passes/image.html')
+        self.assertEqual(exp.results, set([ResultType.Pass]))
+        self.assertTrue(exp.is_default_pass)
+        self.assertFalse(exp.is_slow_test)
+        self.assert_base_and_flag_exp(
+            'virtual/virtual_passes/passes/image.html', ResultType.Pass, None)
+
+        # No virtual test expectation. The flag-specific expectation of the
+        # base test override the base expectation of the base test, but [ Slow ]
+        # is inherited.
+        exp = self._test_expectations.get_expectations(
+            'virtual/virtual_failures/failures/expected/text.html')
+        self.assertEqual(exp.results, set([ResultType.Failure]))
+        self.assertFalse(exp.is_default_pass)
+        self.assertTrue(exp.is_slow_test)
+        self.assert_base_and_flag_exp(
+            'virtual/virtual_failures/failures/expected/text.html',
+            ResultType.Pass, ResultType.Failure)
+
+        # The flag-specific virtual test expectation wins.
+        exp = self._test_expectations.get_expectations(
+            'virtual/virtual_failures/failures/expected/image.html')
+        self.assertEqual(exp.results, set([ResultType.Failure]))
+        self.assertFalse(exp.is_default_pass)
+        self.assertFalse(exp.is_slow_test)
+        self.assert_base_and_flag_exp(
+            'virtual/virtual_failures/failures/expected/image.html',
+            ResultType.Skip, ResultType.Failure)
+
+        # No virtual test expectations. [ Slow ] in the flag-specific
+        # expectation of the base test and [ Failure ] in the base expectation
+        # of the base test merged.
+        exp = self._test_expectations.get_expectations(
+            'virtual/virtual_failures/failures/expected/reftest.html')
+        self.assertEqual(exp.results, set([ResultType.Failure]))
+        self.assertFalse(exp.is_default_pass)
+        self.assertTrue(exp.is_slow_test)
+        self.assert_base_and_flag_exp(
+            'virtual/virtual_failures/failures/expected/reftest.html',
+            ResultType.Failure, None)
+
+        # No virtual test flag-specific expectation. The virtual test
+        # expectation in the base expectation file wins.
+        exp = self._test_expectations.get_expectations(
+            'virtual/virtual_failures/failures/expected/crash.html')
+        self.assertEqual(exp.results, set([ResultType.Pass]))
+        self.assertFalse(exp.is_default_pass)
+        self.assertFalse(exp.is_slow_test)
+        self.assert_base_and_flag_exp(
+            'virtual/virtual_failures/failures/expected/crash.html',
+            ResultType.Pass, ResultType.Timeout)
 
 
 class SystemConfigurationRemoverTests(Base):
@@ -454,13 +640,47 @@ class RemoveExpectationsTest(Base):
         expectations_dict['/tmp/TestExpectations'] = ''
         expectations_dict['/tmp/TestExpectations2'] = raw_expectations
         test_expectations = TestExpectations(port, expectations_dict)
-        test_to_exps = test_expectations.expectations[1].individual_exps
+        test_to_exps = test_expectations._expectations[1].individual_exps
         test_expectations.remove_expectations('/tmp/TestExpectations2',
                                               [test_to_exps['test1'][0]])
         test_expectations.commit_changes()
         content = port.host.filesystem.read_text_file('/tmp/TestExpectations2')
         self.assertEqual(content, ('# tags: [ Mac Win ]\n'
                                    '# results: [ Failure ]\n'))
+
+    def test_readd_removed_expectation_instance(self):
+        port = MockHost().port_factory.get('test-win-win7')
+        raw_expectations = ('# tags: [ Mac Win ]\n'
+                            '# results: [ Failure ]\n'
+                            '\n'
+                            '# This comment will not be deleted\n'
+                            '[ mac ] test1 [ Failure ]\n'
+                            '[ mac ] test2 [ Failure ]\n'
+                            '[ mac ] test3 [ Failure ]\n'
+                            '[ mac ] test4 [ Failure ]\n'
+                            '[ mac ] test5 [ Failure ]\n'
+                            '[ mac ] test6 [ Failure ]\n'
+                            '[ mac ] test7 [ Failure ]\n')
+        expectations_dict = OrderedDict()
+        expectations_dict['/tmp/TestExpectations'] = ''
+        expectations_dict['/tmp/TestExpectations2'] = raw_expectations
+        test_expectations = TestExpectations(port, expectations_dict)
+        test_to_exps = test_expectations._expectations[1].individual_exps
+        exp = test_expectations._expectations[1].individual_exps['test1'][0]
+        exps_to_remove = [test_to_exps[
+            'test%d' % case_no][0] for case_no in range(1, 8)]
+        test_expectations.remove_expectations(
+            '/tmp/TestExpectations2', exps_to_remove)
+        test_expectations.add_expectations(
+            '/tmp/TestExpectations2',[exp],
+            lineno=4)
+        test_expectations.commit_changes()
+        content = port.host.filesystem.read_text_file('/tmp/TestExpectations2')
+        self.assertEqual(content, ('# tags: [ Mac Win ]\n'
+                                   '# results: [ Failure ]\n'
+                                   '\n'
+                                   '# This comment will not be deleted\n'
+                                   '[ mac ] test1 [ Failure ]\n'))
 
     def test_remove_added_expectations(self):
         port = MockHost().port_factory.get('test-win-win7')
@@ -504,7 +724,7 @@ class RemoveExpectationsTest(Base):
         expectations_dict['/tmp/TestExpectations'] = ''
         expectations_dict['/tmp/TestExpectations2'] = raw_expectations
         test_expectations = TestExpectations(port, expectations_dict)
-        test_to_exps = test_expectations.expectations[1].individual_exps
+        test_to_exps = test_expectations._expectations[1].individual_exps
         test_expectations.add_expectations('/tmp/TestExpectations2', [
             Expectation(test='test2', results=set([ResultType.Failure])),
             Expectation(
@@ -520,27 +740,141 @@ class RemoveExpectationsTest(Base):
                                    '# results: [ Failure Crash ]\n'
                                    '\n'
                                    '# This comment will not be deleted\n'
-                                   '[ Mac ] test3 [ Crash ]\n'
-                                   'test2 [ Failure ]\n'))
+                                   'test2 [ Failure ]\n'
+                                   '[ Mac ] test3 [ Crash ]\n'))
 
 
 class AddExpectationsTest(Base):
-    def test_add_expectation(self):
+
+    def test_add_expectation_end_of_file_nonzero_lineno(self):
         port = MockHost().port_factory.get('test-win-win7')
-        raw_expectations = ('# tags: [ Mac Win ]\n' '# results: [ Failure ]\n')
+        raw_expectations = ('# tags: [ Mac Win ]\n'
+                            '# tags: [ release ]\n'
+                            '# results: [ Failure ]\n'
+                            '\n'
+                            '# this is a block of expectations\n'
+                            'test [ failure ]\n')
+        expectations_dict = OrderedDict()
+        expectations_dict['/tmp/TestExpectations'] = ''
+        expectations_dict['/tmp/TestExpectations2'] = raw_expectations
+        test_expectations = TestExpectations(port, expectations_dict)
+
+        with self.assertRaises(ValueError) as ctx:
+            test_expectations.add_expectations(
+                '/tmp/TestExpectations2',
+                [Expectation(test='test3',
+                             results=set([ResultType.Failure]))],
+                lineno=0)
+            test_expectations.commit_changes()
+        self.assertIn('append_to_end_of_file must be set to True',
+                      str(ctx.exception))
+
+    def test_add_expectation_with_negative_lineno(self):
+        port = MockHost().port_factory.get('test-win-win7')
+        raw_expectations = ('# tags: [ Mac Win ]\n'
+                            '# tags: [ release ]\n'
+                            '# results: [ Failure ]\n'
+                            '\n'
+                            '# this is a block of expectations\n'
+                            'test [ failure ]\n')
+        expectations_dict = OrderedDict()
+        expectations_dict['/tmp/TestExpectations'] = ''
+        expectations_dict['/tmp/TestExpectations2'] = raw_expectations
+        test_expectations = TestExpectations(port, expectations_dict)
+
+        with self.assertRaises(ValueError) as ctx:
+            test_expectations.add_expectations(
+                '/tmp/TestExpectations2',
+                [Expectation(test='test3',
+                             results=set([ResultType.Failure]))],
+                lineno=-1)
+            test_expectations.commit_changes()
+        self.assertIn('cannot be negative', str(ctx.exception))
+
+    def test_add_expectation_outside_file_size_range(self):
+        port = MockHost().port_factory.get('test-win-win7')
+        raw_expectations = ('# tags: [ Mac Win ]\n'
+                            '# tags: [ release ]\n'
+                            '# results: [ Failure ]\n'
+                            '\n'
+                            '# this is a block of expectations\n'
+                            'test [ failure ]\n')
+        expectations_dict = OrderedDict()
+        expectations_dict['/tmp/TestExpectations'] = ''
+        expectations_dict['/tmp/TestExpectations2'] = raw_expectations
+        test_expectations = TestExpectations(port, expectations_dict)
+
+        with self.assertRaises(ValueError) as ctx:
+            test_expectations.add_expectations(
+                '/tmp/TestExpectations2',
+                [Expectation(test='test3',
+                             results=set([ResultType.Failure]))],
+                lineno=100)
+            test_expectations.commit_changes()
+        self.assertIn('greater than the total line count', str(ctx.exception))
+
+    def test_use_append_to_end_flag_non_zero_lineno(self):
+        # Use append_to_end_of_file=True with lineno != 0
+        # An exception should be raised.
+        port = MockHost().port_factory.get('test-win-win7')
+        raw_expectations = ('# tags: [ Mac Win ]\n'
+                            '# tags: [ release ]\n'
+                            '# results: [ Failure ]\n'
+                            '\n'
+                            '# this is a block of expectations\n'
+                            'test [ failure ]\n')
+        expectations_dict = OrderedDict()
+        expectations_dict['/tmp/TestExpectations'] = ''
+        expectations_dict['/tmp/TestExpectations2'] = raw_expectations
+        test_expectations = TestExpectations(port, expectations_dict)
+
+        with self.assertRaises(ValueError) as ctx:
+            test_expectations.add_expectations(
+                '/tmp/TestExpectations2',
+                [Expectation(test='test3',
+                             results=set([ResultType.Failure]))],
+                lineno=100, append_to_end_of_file=True)
+            test_expectations.commit_changes()
+        self.assertIn('append_to_end_of_file is set then lineno must be 0',
+                      str(ctx.exception))
+
+    def test_add_expectations_to_end_of_file(self):
+        port = MockHost().port_factory.get('test-win-win7')
+        raw_expectations = ('# tags: [ Mac Win ]\n'
+                            '# tags: [ release ]\n'
+                            '# results: [ Failure ]\n'
+                            '\n'
+                            '# this is a block of expectations\n'
+                            'test [ failure ]\n')
         expectations_dict = OrderedDict()
         expectations_dict['/tmp/TestExpectations'] = ''
         expectations_dict['/tmp/TestExpectations2'] = raw_expectations
         test_expectations = TestExpectations(port, expectations_dict)
         test_expectations.add_expectations(
             '/tmp/TestExpectations2',
-            [Expectation(test='test1', results=set([ResultType.Failure]))])
+            [Expectation(test='test3', results=set([ResultType.Failure]))],
+            append_to_end_of_file=True)
+        test_expectations.add_expectations(
+            '/tmp/TestExpectations2',
+            [Expectation(test='test2', tags={'mac', 'release'},
+                         results={ResultType.Crash, ResultType.Failure})],
+            append_to_end_of_file=True)
+        test_expectations.add_expectations(
+            '/tmp/TestExpectations2',
+            [Expectation(test='test1', results=set([ResultType.Pass]))],
+            append_to_end_of_file=True)
         test_expectations.commit_changes()
         content = port.host.filesystem.read_text_file('/tmp/TestExpectations2')
         self.assertEqual(content, ('# tags: [ Mac Win ]\n'
+                                   '# tags: [ release ]\n'
                                    '# results: [ Failure ]\n'
                                    '\n'
-                                   'test1 [ Failure ]\n'))
+                                   '# this is a block of expectations\n'
+                                   'test [ failure ]\n'
+                                   '\n'
+                                   'test1 [ Pass ]\n'
+                                   '[ Release Mac ] test2 [ Failure Crash ]\n'
+                                   'test3 [ Failure ]\n'))
 
     def test_add_after_remove(self):
         port = MockHost().port_factory.get('test-win-win7')

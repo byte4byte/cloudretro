@@ -1,6 +1,9 @@
 This test (crudely) documents Blink's web-exposed CSS properties.  All changes to this list should go through Blink's feature review process: http://www.chromium.org/blink#new-features
 
 
+additiveSymbols
+advanceOverride
+advanceProportionalOverride
 alignContent
 alignItems
 alignSelf
@@ -14,8 +17,10 @@ animationFillMode
 animationIterationCount
 animationName
 animationPlayState
+animationTimeline
 animationTimingFunction
 appearance
+ascentOverride
 aspectRatio
 backdropFilter
 backfaceVisibility
@@ -123,18 +128,23 @@ columns
 contain
 containIntrinsicSize
 content
+contentVisibility
 counterIncrement
 counterReset
+counterSet
 cssFloat
 cssText
 cursor
 cx
 cy
 d
+descentOverride
 direction
 display
 dominantBaseline
 emptyCells
+end
+fallback
 fill
 fillOpacity
 fillRule
@@ -211,6 +221,7 @@ length
 letterSpacing
 lightingColor
 lineBreak
+lineGapOverride
 lineHeight
 lineHeightStep
 listStyle
@@ -233,10 +244,10 @@ markerEnd
 markerMid
 markerStart
 mask
-maskSourceType
 maskType
+mathDepth
+mathShift
 mathStyle
-mathSuperscriptShiftStyle
 maxBlockSize
 maxHeight
 maxInlineSize
@@ -248,6 +259,7 @@ minInlineSize
 minWidth
 minZoom
 mixBlendMode
+negative
 objectFit
 objectPosition
 offset
@@ -268,6 +280,7 @@ outlineWidth
 overflow
 overflowAnchor
 overflowBlock
+overflowClipMargin
 overflowInline
 overflowWrap
 overflowX
@@ -277,6 +290,7 @@ overscrollBehaviorBlock
 overscrollBehaviorInline
 overscrollBehaviorX
 overscrollBehaviorY
+pad
 padding
 paddingBlock
 paddingBlockEnd
@@ -292,6 +306,7 @@ page
 pageBreakAfter
 pageBreakBefore
 pageBreakInside
+pageOrientation
 paintOrder
 parentRule
 perspective
@@ -301,8 +316,10 @@ placeItems
 placeSelf
 pointerEvents
 position
+prefix
 quotes
 r
+range
 removeProperty
 resize
 right
@@ -338,14 +355,19 @@ scrollPaddingTop
 scrollSnapAlign
 scrollSnapStop
 scrollSnapType
+scrollbarGutter
+scrollbarWidth
 setProperty
 shapeImageThreshold
 shapeMargin
 shapeOutside
 shapeRendering
 size
+source
 speak
+speakAs
 src
+start
 stopColor
 stopOpacity
 stroke
@@ -356,8 +378,10 @@ strokeLinejoin
 strokeMiterlimit
 strokeOpacity
 strokeWidth
-subtreeVisibility
+suffix
+symbols
 syntax
+system
 tabSize
 tableLayout
 textAlign
@@ -369,6 +393,7 @@ textDecorationColor
 textDecorationLine
 textDecorationSkipInk
 textDecorationStyle
+textDecorationThickness
 textIndent
 textJustify
 textOrientation
@@ -377,7 +402,9 @@ textRendering
 textShadow
 textSizeAdjust
 textTransform
+textUnderlineOffset
 textUnderlinePosition
+timeRange
 top
 touchAction
 transform
@@ -471,7 +498,6 @@ webkitFlexGrow
 webkitFlexShrink
 webkitFlexWrap
 webkitFontFeatureSettings
-webkitFontSizeDelta
 webkitFontSmoothing
 webkitHighlight
 webkitHyphenateCharacter

@@ -12,20 +12,23 @@
 
 namespace base {
 template <typename T>
-struct DefaultSingletonTraits;
+class NoDestructor;
 
 class SequencedTaskRunner;
 }  // namespace base
 
 namespace ash {
 
-class AccelerometerFileReader;
+enum class State { INITIALIZING, SUCCESS, FAILED };
+
+enum class ECLidAngleDriverStatus { UNKNOWN, SUPPORTED, NOT_SUPPORTED };
+
+class AccelerometerProviderInterface;
 
 // Reads an accelerometer device and reports data back to an
 // AccelerometerDelegate.
 class ASH_EXPORT AccelerometerReader {
  public:
-
   // An interface to receive data from the AccelerometerReader.
   class Observer {
    public:
@@ -38,8 +41,7 @@ class ASH_EXPORT AccelerometerReader {
 
   static AccelerometerReader* GetInstance();
 
-  void Initialize(
-      scoped_refptr<base::SequencedTaskRunner> sequenced_task_runner);
+  void Initialize();
 
   // Add/Remove observers.
   void AddObserver(Observer* observer);
@@ -49,19 +51,68 @@ class ASH_EXPORT AccelerometerReader {
   void StartListenToTabletModeController();
   void StopListenToTabletModeController();
 
+  // Controls the availability of emitting acccelerometer reader events to
+  // its observers. This shouldn't be called normally, but Tast tests should
+  // be able to control the accelerometer feature.
+  void SetEnabled(bool enabled);
+
+  // Return the state of the driver being supported or not.
+  ECLidAngleDriverStatus GetECLidAngleDriverStatus() const;
+
+  void SetECLidAngleDriverStatusForTesting(
+      ECLidAngleDriverStatus ec_lid_angle_driver_status);
+
  protected:
   AccelerometerReader();
+  AccelerometerReader(const AccelerometerReader&) = delete;
+  AccelerometerReader& operator=(const AccelerometerReader&) = delete;
   virtual ~AccelerometerReader();
 
  private:
-  friend struct base::DefaultSingletonTraits<AccelerometerReader>;
+  friend class base::NoDestructor<AccelerometerReader>;
 
   // Worker that will run on the base::SequencedTaskRunner provided to
   // Initialize. It will determine accelerometer configuration, read the data,
   // and notify observers.
-  scoped_refptr<AccelerometerFileReader> accelerometer_file_reader_;
+  scoped_refptr<AccelerometerProviderInterface> accelerometer_provider_;
+};
 
-  DISALLOW_COPY_AND_ASSIGN(AccelerometerReader);
+class AccelerometerProviderInterface
+    : public base::RefCountedThreadSafe<AccelerometerProviderInterface> {
+ public:
+  // Prepare and start async initialization.
+  virtual void PrepareAndInitialize() = 0;
+
+  // Add/Remove observers.
+  virtual void AddObserver(AccelerometerReader::Observer* observer) = 0;
+  virtual void RemoveObserver(AccelerometerReader::Observer* observer) = 0;
+
+  // Start/Stop listening to tablet mode controller.
+  virtual void StartListenToTabletModeController() = 0;
+  virtual void StopListenToTabletModeController() = 0;
+
+  // Set emitting events (samples) to observers or not.
+  virtual void SetEmitEvents(bool emit_events) = 0;
+
+  // Return the state of the driver being supported or not.
+  ECLidAngleDriverStatus GetECLidAngleDriverStatus() const;
+
+  void SetECLidAngleDriverStatusForTesting(
+      ECLidAngleDriverStatus ec_lid_angle_driver_status);
+
+ protected:
+  virtual ~AccelerometerProviderInterface() = default;
+
+  // The current initialization state of reader.
+  State initialization_state_ = State::INITIALIZING;
+
+  // State of ChromeOS EC lid angle driver, if SUPPORTED, it means EC can handle
+  // lid angle calculation.
+  ECLidAngleDriverStatus ec_lid_angle_driver_status_ =
+      ECLidAngleDriverStatus::UNKNOWN;
+
+ private:
+  friend class base::RefCountedThreadSafe<AccelerometerProviderInterface>;
 };
 
 }  // namespace ash

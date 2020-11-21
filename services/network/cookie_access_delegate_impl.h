@@ -13,22 +13,29 @@
 
 namespace network {
 
+class PreloadedFirstPartySets;
+
 // This class acts as a delegate for the CookieStore to query the
 // CookieManager's CookieSettings for instructions on how to handle a given
-// cookie with respect to SameSite.
+// cookie with respect to SameSite, and to apply developer preferences on
+// trusted sites for purpose of secure cookies.
 class COMPONENT_EXPORT(NETWORK_SERVICE) CookieAccessDelegateImpl
     : public net::CookieAccessDelegate {
  public:
   // If |type| is USE_CONTENT_SETTINGS, a non-null |cookie_settings| is
   // expected. |cookie_settings| contains the set of content settings that
   // describes which cookies should be subject to legacy access rules.
-  // If non-null, |cookie_settings| is expected to outlive this class.
-  CookieAccessDelegateImpl(mojom::CookieAccessDelegateType type,
-                           const CookieSettings* cookie_settings = nullptr);
+  // If non-null, |cookie_settings| is expected to outlive this class. If
+  // non-null, `preloaded_first_party_sets` must outlive `this`.
+  CookieAccessDelegateImpl(
+      mojom::CookieAccessDelegateType type,
+      const PreloadedFirstPartySets* preloaded_first_party_sets,
+      const CookieSettings* cookie_settings = nullptr);
 
   ~CookieAccessDelegateImpl() override;
 
   // net::CookieAccessDelegate implementation:
+  bool ShouldTreatUrlAsTrustworthy(const GURL& url) const override;
   net::CookieAccessSemantics GetAccessSemantics(
       const net::CanonicalCookie& cookie) const override;
   bool ShouldIgnoreSameSiteRestrictions(

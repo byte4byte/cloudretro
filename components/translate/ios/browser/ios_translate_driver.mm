@@ -5,7 +5,7 @@
 #include "components/translate/ios/browser/ios_translate_driver.h"
 
 #include "base/bind.h"
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
@@ -68,15 +68,17 @@ IOSTranslateDriver::IOSTranslateDriver(
   JsLanguageDetectionManager* language_detection_manager =
       static_cast<JsLanguageDetectionManager*>(
           [receiver instanceOfClass:[JsLanguageDetectionManager class]]);
-  language_detection_controller_.reset(new LanguageDetectionController(
-      web_state, language_detection_manager,
-      translate_manager_->translate_client()->GetPrefs()));
+  language_detection_controller_ =
+      std::make_unique<LanguageDetectionController>(
+          web_state, language_detection_manager,
+          translate_manager_->translate_client()->GetPrefs());
 
   // Create the translate controller.
   JsTranslateManager* js_translate_manager = static_cast<JsTranslateManager*>(
       [receiver instanceOfClass:[JsTranslateManager class]]);
-  translate_controller_.reset(
-      new TranslateController(web_state, js_translate_manager));
+  translate_controller_ =
+      std::make_unique<TranslateController>(web_state, js_translate_manager);
+
   translate_controller_->set_observer(this);
 }
 
@@ -91,7 +93,7 @@ void IOSTranslateDriver::OnLanguageDetermined(
     const translate::LanguageDetectionDetails& details) {
   if (!translate_manager_)
     return;
-  translate_manager_->GetLanguageState().LanguageDetermined(
+  translate_manager_->GetLanguageState()->LanguageDetermined(
       details.adopted_language, true);
 
   if (web_state_)
@@ -122,7 +124,7 @@ void IOSTranslateDriver::DidFinishNavigation(
   // TODO(crbug.com/925320): support navigation types, like content/ does.
   const bool reload = ui::PageTransitionCoreTypeIs(
       navigation_context->GetPageTransition(), ui::PAGE_TRANSITION_RELOAD);
-  translate_manager_->GetLanguageState().DidNavigate(
+  translate_manager_->GetLanguageState()->DidNavigate(
       navigation_context->IsSameDocument(), true, reload, std::string(), false);
 }
 

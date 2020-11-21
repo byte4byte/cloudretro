@@ -4,7 +4,7 @@
 
 #import "ios/chrome/browser/ui/browser_container/browser_container_mediator.h"
 
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "base/scoped_observer.h"
 #import "ios/chrome/browser/overlays/public/overlay_presentation_context.h"
 #import "ios/chrome/browser/overlays/public/overlay_presenter.h"
@@ -110,7 +110,8 @@ bool IsActiveOverlayRequestForNonCommittedHttpAuthentication(
 #pragma mark - OverlayPresenterObserving
 
 - (void)overlayPresenter:(OverlayPresenter*)presenter
-    willShowOverlayForRequest:(OverlayRequest*)request {
+    willShowOverlayForRequest:(OverlayRequest*)request
+          initialPresentation:(BOOL)initialPresentation {
   self.showingAuthDialogForNonCommittedURL =
       IsActiveOverlayRequestForNonCommittedHttpAuthentication(
           self.webStateList);

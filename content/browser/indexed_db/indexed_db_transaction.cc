@@ -8,10 +8,11 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/check_op.h"
 #include "base/location.h"
-#include "base/logging.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/notreached.h"
 #include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/sequenced_task_runner_handle.h"
@@ -26,6 +27,26 @@
 namespace content {
 
 namespace {
+
+std::string WriteBlobToFileResultToString(
+    storage::mojom::WriteBlobToFileResult result) {
+  switch (result) {
+    case storage::mojom::WriteBlobToFileResult::kError:
+      return "Error";
+    case storage::mojom::WriteBlobToFileResult::kBadPath:
+      return "BadPath";
+    case storage::mojom::WriteBlobToFileResult::kInvalidBlob:
+      return "InvalidBlob";
+    case storage::mojom::WriteBlobToFileResult::kIOError:
+      return "IOError";
+    case storage::mojom::WriteBlobToFileResult::kTimestampError:
+      return "TimestampError";
+    case storage::mojom::WriteBlobToFileResult::kSuccess:
+      return "Success";
+  }
+  NOTREACHED();
+  return "";
+}
 
 const int64_t kInactivityTimeoutPeriodSeconds = 60;
 
@@ -265,7 +286,8 @@ void IndexedDBTransaction::EnsureBackingStoreTransactionBegun() {
 }
 
 leveldb::Status IndexedDBTransaction::BlobWriteComplete(
-    BlobWriteResult result) {
+    BlobWriteResult result,
+    storage::mojom::WriteBlobToFileResult error) {
   IDB_TRACE("IndexedDBTransaction::BlobWriteComplete");
   if (state_ == FINISHED)  // aborted
     return leveldb::Status::OK();
@@ -274,7 +296,10 @@ leveldb::Status IndexedDBTransaction::BlobWriteComplete(
   switch (result) {
     case BlobWriteResult::kFailure: {
       leveldb::Status status = Abort(IndexedDBDatabaseError(
-          blink::mojom::IDBException::kDataError, "Failed to write blobs."));
+          blink::mojom::IDBException::kDataError,
+          base::ASCIIToUTF16(base::StringPrintf(
+              "Failed to write blobs (%s)",
+              WriteBlobToFileResultToString(error).c_str()))));
       if (!status.ok())
         tear_down_callback_.Run(status);
       // The result is ignored.
@@ -337,10 +362,11 @@ leveldb::Status IndexedDBTransaction::Commit() {
     // to write.
     s = transaction_->CommitPhaseOne(base::BindOnce(
         [](base::WeakPtr<IndexedDBTransaction> transaction,
-           BlobWriteResult result) {
+           BlobWriteResult result,
+           storage::mojom::WriteBlobToFileResult error) {
           if (!transaction)
             return leveldb::Status::OK();
-          return transaction->BlobWriteComplete(result);
+          return transaction->BlobWriteComplete(result, error);
         },
         ptr_factory_.GetWeakPtr()));
   }

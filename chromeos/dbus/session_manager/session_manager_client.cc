@@ -12,12 +12,13 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
 #include "base/callback.h"
+#include "base/callback_helpers.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_file.h"
 #include "base/location.h"
+#include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/platform_shared_memory_region.h"
 #include "base/memory/read_only_shared_memory_region.h"
@@ -1060,7 +1061,8 @@ class SessionManagerClientImpl : public SessionManagerClient {
 
   dbus::ObjectProxy* session_manager_proxy_ = nullptr;
   std::unique_ptr<BlockingMethodCaller> blocking_method_caller_;
-  base::ObserverList<Observer>::Unchecked observers_;
+  base::ObserverList<Observer>::Unchecked observers_{
+      SessionManagerClient::kObserverListPolicy};
 
   // Most recent screen-lock state received from session_manager.
   bool screen_is_locked_ = false;

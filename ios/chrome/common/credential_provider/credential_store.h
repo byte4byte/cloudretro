@@ -34,7 +34,10 @@
 
 // Removes a credential from the memory storage. Use |-saveDataWithCompletion:|
 // to update the data on disk.
-- (void)removeCredential:(id<Credential>)credential;
+- (void)removeCredentialWithRecordIdentifier:(NSString*)recordIdentifier;
+
+// Returns the credential with matching |recordIdentifier| or nil if none.
+- (id<Credential>)credentialWithRecordIdentifier:(NSString*)recordIdentifier;
 
 @end
 

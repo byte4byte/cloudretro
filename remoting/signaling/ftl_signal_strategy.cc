@@ -17,32 +17,16 @@
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "remoting/base/logging.h"
 #include "remoting/base/oauth_token_getter.h"
+#include "remoting/base/protobuf_http_status.h"
 #include "remoting/signaling/ftl_device_id_provider.h"
 #include "remoting/signaling/ftl_messaging_client.h"
 #include "remoting/signaling/ftl_registration_manager.h"
 #include "remoting/signaling/signaling_address.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "third_party/libjingle_xmpp/xmllite/xmlelement.h"
 #include "third_party/libjingle_xmpp/xmpp/constants.h"
 
 namespace remoting {
-
-namespace {
-
-SignalStrategy::Error GrpcStatusToSignalingError(const grpc::Status& status) {
-  switch (status.error_code()) {
-    case grpc::StatusCode::OK:
-      return SignalStrategy::Error::OK;
-    case grpc::StatusCode::PERMISSION_DENIED:
-    case grpc::StatusCode::UNAUTHENTICATED:
-      return SignalStrategy::Error::AUTHENTICATION_FAILED;
-    default:
-      // There are so many errors that gRPC can report, so just generalize them
-      // as NETWORK_ERROR.
-      return SignalStrategy::Error::NETWORK_ERROR;
-  }
-}
-
-}  // namespace
 
 class FtlSignalStrategy::Core {
  public:
@@ -59,6 +43,8 @@ class FtlSignalStrategy::Core {
   void AddListener(Listener* listener);
   void RemoveListener(Listener* listener);
   bool SendStanza(std::unique_ptr<jingle_xmpp::XmlElement> stanza);
+  bool SendMessage(const SignalingAddress& destination_address,
+                   const ftl::ChromotingMessage& message);
   bool IsSignInError() const;
 
  private:
@@ -66,24 +52,24 @@ class FtlSignalStrategy::Core {
   void OnGetOAuthTokenResponse(OAuthTokenGetter::Status status,
                                const std::string& user_email,
                                const std::string& access_token);
-  void OnSignInGaiaResponse(const grpc::Status& status);
+  void OnSignInGaiaResponse(const ProtobufHttpStatus& status);
   void StartReceivingMessages();
   void OnReceiveMessagesStreamStarted();
-  void OnReceiveMessagesStreamClosed(const grpc::Status& status);
+  void OnReceiveMessagesStreamClosed(const ProtobufHttpStatus& status);
   void OnMessageReceived(const ftl::Id& sender_id,
                          const std::string& sender_registration_id,
                          const ftl::ChromotingMessage& message);
 
-  void SendMessage(const SignalingAddress& receiver,
-                   const std::string& stanza_id,
-                   const std::string& message);
+  void SendMessageImpl(const SignalingAddress& receiver,
+                       const ftl::ChromotingMessage& message,
+                       MessagingClient::DoneCallback callback);
   void OnSendMessageResponse(const SignalingAddress& receiver,
                              const std::string& stanza_id,
-                             const grpc::Status& status);
+                             const ProtobufHttpStatus& status);
 
   // Returns true if the status is handled.
-  void HandleGrpcStatusError(const base::Location& location,
-                             const grpc::Status& status);
+  void HandleProtobufHttpStatusError(const base::Location& location,
+                                     const ProtobufHttpStatus& status);
 
   void OnStanza(const SignalingAddress& sender_address,
                 std::unique_ptr<jingle_xmpp::XmlElement> stanza);
@@ -114,7 +100,6 @@ FtlSignalStrategy::Core::Core(
     std::unique_ptr<OAuthTokenGetter> oauth_token_getter,
     std::unique_ptr<RegistrationManager> registration_manager,
     std::unique_ptr<MessagingClient> messaging_client) {
-  DETACH_FROM_SEQUENCE(sequence_checker_);
   DCHECK(oauth_token_getter);
   DCHECK(registration_manager);
   DCHECK(messaging_client);
@@ -217,11 +202,34 @@ bool FtlSignalStrategy::Core::SendStanza(
   stanza->SetAttr(jingle_xmpp::QN_FROM, local_address_.id());
 
   std::string stanza_id = stanza->Attr(jingle_xmpp::QN_ID);
-  SendMessage(to, stanza_id, stanza->Str());
 
-  // Return false if the SendMessage() call above resulted in the SignalStrategy
-  // being disconnected.
+  ftl::ChromotingMessage crd_message;
+  crd_message.mutable_xmpp()->set_stanza(stanza->Str());
+  SendMessageImpl(to, crd_message,
+                  base::BindOnce(&Core::OnSendMessageResponse,
+                                 weak_factory_.GetWeakPtr(), to, stanza_id));
+
+  // Return false if the SendMessageImpl() call above resulted in the
+  // SignalStrategy being disconnected.
   return GetState() == CONNECTED;
+}
+
+bool FtlSignalStrategy::Core::SendMessage(
+    const SignalingAddress& destination_address,
+    const ftl::ChromotingMessage& message) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+  if (GetState() != CONNECTED) {
+    HOST_LOG << "Dropping message because FTL is not connected.";
+    return false;
+  }
+
+  SendMessageImpl(
+      destination_address, message,
+      base::BindOnce(&Core::OnSendMessageResponse, weak_factory_.GetWeakPtr(),
+                     destination_address, std::string()));
+
+  return true;
 }
 
 bool FtlSignalStrategy::Core::IsSignInError() const {
@@ -254,11 +262,12 @@ void FtlSignalStrategy::Core::OnGetOAuthTokenResponse(
   StartReceivingMessages();
 }
 
-void FtlSignalStrategy::Core::OnSignInGaiaResponse(const grpc::Status& status) {
+void FtlSignalStrategy::Core::OnSignInGaiaResponse(
+    const ProtobufHttpStatus& status) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   if (!status.ok()) {
     is_sign_in_error_ = true;
-    HandleGrpcStatusError(FROM_HERE, status);
+    HandleProtobufHttpStatusError(FROM_HERE, status);
     return;
   }
   StartReceivingMessages();
@@ -298,13 +307,13 @@ void FtlSignalStrategy::Core::OnReceiveMessagesStreamStarted() {
 }
 
 void FtlSignalStrategy::Core::OnReceiveMessagesStreamClosed(
-    const grpc::Status& status) {
+    const ProtobufHttpStatus& status) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  if (status.error_code() == grpc::StatusCode::CANCELLED) {
+  if (status.error_code() == ProtobufHttpStatus::Code::CANCELLED) {
     LOG(WARNING) << "ReceiveMessages stream closed with CANCELLED code.";
   }
   DCHECK(!status.ok());
-  HandleGrpcStatusError(FROM_HERE, status);
+  HandleProtobufHttpStatusError(FROM_HERE, status);
 }
 
 void FtlSignalStrategy::Core::OnMessageReceived(
@@ -335,9 +344,10 @@ void FtlSignalStrategy::Core::OnMessageReceived(
   OnStanza(sender_address, std::move(stanza));
 }
 
-void FtlSignalStrategy::Core::SendMessage(const SignalingAddress& receiver,
-                                          const std::string& stanza_id,
-                                          const std::string& message) {
+void FtlSignalStrategy::Core::SendMessageImpl(
+    const SignalingAddress& receiver,
+    const ftl::ChromotingMessage& message,
+    MessagingClient::DoneCallback callback) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   std::string receiver_username;
@@ -349,37 +359,49 @@ void FtlSignalStrategy::Core::SendMessage(const SignalingAddress& receiver,
     return;
   }
 
-  HOST_LOG << "Sending outgoing stanza:\n"
+  std::string message_payload;
+  if (message.has_xmpp()) {
+    message_payload = message.xmpp().stanza();
+  } else if (message.has_echo()) {
+    message_payload = message.echo().message();
+  } else {
+    message_payload = "Error displaying message due to unknown format.";
+  }
+
+  HOST_LOG << "Sending outgoing message:\n"
            << "Receiver: " << receiver_username << "\n"
            << "Receiver registration ID: " << receiver_registration_id << "\n"
-           << message
+           << message_payload
            << "\n=========================================================";
-  ftl::ChromotingMessage crd_message;
-  crd_message.mutable_xmpp()->set_stanza(message);
-  messaging_client_->SendMessage(
-      receiver_username, receiver_registration_id, crd_message,
-      base::BindOnce(&Core::OnSendMessageResponse, weak_factory_.GetWeakPtr(),
-                     receiver, stanza_id));
+
+  messaging_client_->SendMessage(receiver_username, receiver_registration_id,
+                                 message, std::move(callback));
 }
 
 void FtlSignalStrategy::Core::OnSendMessageResponse(
     const SignalingAddress& receiver,
     const std::string& stanza_id,
-    const grpc::Status& status) {
+    const ProtobufHttpStatus& status) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   if (status.ok()) {
     return;
   }
 
-  if (status.error_code() == grpc::StatusCode::UNAUTHENTICATED) {
-    HandleGrpcStatusError(FROM_HERE, status);
+  if (status.error_code() == ProtobufHttpStatus::Code::UNAUTHENTICATED) {
+    HandleProtobufHttpStatusError(FROM_HERE, status);
     return;
   }
 
-  // Fake an error message so that JingleSession will take it as
-  // PEER_IS_OFFLINE.
   LOG(ERROR) << "Failed to send message to peer. Error code: "
-             << status.error_code() << ", message: " << status.error_message();
+             << static_cast<int>(status.error_code())
+             << ", message: " << status.error_message();
+
+  if (stanza_id.empty()) {
+    // If the message sent was not related to signaling, then exit early.
+    return;
+  }
+
+  // Fake an error message so JingleSession will take it as PEER_IS_OFFLINE.
   auto error_iq = std::make_unique<jingle_xmpp::XmlElement>(jingle_xmpp::QN_IQ);
   error_iq->SetAttr(jingle_xmpp::QN_TYPE, jingle_xmpp::STR_ERROR);
   error_iq->SetAttr(jingle_xmpp::QN_ID, stanza_id);
@@ -388,16 +410,24 @@ void FtlSignalStrategy::Core::OnSendMessageResponse(
   OnStanza(receiver, std::move(error_iq));
 }
 
-void FtlSignalStrategy::Core::HandleGrpcStatusError(
+void FtlSignalStrategy::Core::HandleProtobufHttpStatusError(
     const base::Location& location,
-    const grpc::Status& status) {
+    const ProtobufHttpStatus& status) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(!status.ok());
-  error_ = GrpcStatusToSignalingError(status);
-  LOG(ERROR) << "Received gRPC error. Error code: " << status.error_code()
+  // We don't map HTTP_UNAUTHORIZED to AUTHENTICATION_FAILED here, as it will
+  // permanently terminate the host, which is not desirable since it might
+  // happen when the FTL registration becomes invalid while the robot account
+  // itself is still intact.
+  // AUTHENTICATION_FAILED is only reported if the OAuthTokenGetter fails to
+  // fetch the token.
+  error_ = Error::NETWORK_ERROR;
+  LOG(ERROR) << "Received server error. Error code: "
+             << static_cast<int>(status.error_code())
              << ", message: " << status.error_message()
              << ", location: " << location.ToString();
-  if (status.error_code() == grpc::StatusCode::UNAUTHENTICATED) {
+  if (status.error_code() == ProtobufHttpStatus::Code::UNAUTHENTICATED ||
+      status.error_code() == ProtobufHttpStatus::Code::PERMISSION_DENIED) {
     oauth_token_getter_->InvalidateCache();
   }
   Disconnect();
@@ -436,14 +466,17 @@ void FtlSignalStrategy::Core::OnStanza(
 
 FtlSignalStrategy::FtlSignalStrategy(
     std::unique_ptr<OAuthTokenGetter> oauth_token_getter,
-    std::unique_ptr<FtlDeviceIdProvider> device_id_provider) {
+    scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
+    std::unique_ptr<FtlDeviceIdProvider> device_id_provider,
+    SignalingTracker* signaling_tracker) {
   // TODO(yuweih): Just make FtlMessagingClient own FtlRegistrationManager and
   // call SignInGaia() transparently.
   auto registration_manager = std::make_unique<FtlRegistrationManager>(
-      oauth_token_getter.get(), std::move(device_id_provider));
+      oauth_token_getter.get(), url_loader_factory,
+      std::move(device_id_provider));
   auto messaging_client = std::make_unique<FtlMessagingClient>(
-      oauth_token_getter.get(), registration_manager.get(),
-      &signaling_tracker_);
+      oauth_token_getter.get(), url_loader_factory, registration_manager.get(),
+      signaling_tracker);
   CreateCore(std::move(oauth_token_getter), std::move(registration_manager),
              std::move(messaging_client));
 }
@@ -490,9 +523,15 @@ void FtlSignalStrategy::AddListener(Listener* listener) {
 void FtlSignalStrategy::RemoveListener(Listener* listener) {
   core_->RemoveListener(listener);
 }
+
 bool FtlSignalStrategy::SendStanza(
     std::unique_ptr<jingle_xmpp::XmlElement> stanza) {
   return core_->SendStanza(std::move(stanza));
+}
+
+bool FtlSignalStrategy::SendMessage(const SignalingAddress& destination_address,
+                                    const ftl::ChromotingMessage& message) {
+  return core_->SendMessage(destination_address, message);
 }
 
 std::string FtlSignalStrategy::GetNextId() {

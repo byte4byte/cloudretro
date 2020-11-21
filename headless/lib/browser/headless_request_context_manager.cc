@@ -8,9 +8,8 @@
 #include "base/task/post_task.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
-#include "components/os_crypt/key_storage_config_linux.h"
+#include "build/chromeos_buildflags.h"
 #include "content/public/browser/browser_task_traits.h"
-#include "content/public/browser/cors_exempt_headers.h"
 #include "content/public/browser/network_service_instance.h"
 #include "content/public/browser/resource_context.h"
 #include "headless/app/headless_shell_switches.h"
@@ -20,6 +19,7 @@
 #include "net/proxy_resolution/configured_proxy_resolution_service.h"
 #include "services/network/network_service.h"
 #include "services/network/public/cpp/features.h"
+#include "services/network/public/mojom/network_context.mojom.h"
 #include "services/network/public/mojom/network_service.mojom.h"
 #include "services/network/url_request_context_builder_mojo.h"
 
@@ -27,8 +27,10 @@ namespace headless {
 
 namespace {
 
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
-static char kProductName[] = "HeadlessChrome";
+// TODO(crbug.com/1052397): Revisit the macro expression once build flag switch
+// of lacros-chrome is complete.
+#if defined(OS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)
+constexpr char kProductName[] = "HeadlessChrome";
 #endif
 
 net::NetworkTrafficAnnotationTag GetProxyConfigTrafficAnnotationTag() {
@@ -57,7 +59,9 @@ net::NetworkTrafficAnnotationTag GetProxyConfigTrafficAnnotationTag() {
   return traffic_annotation;
 }
 
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
+// TODO(crbug.com/1052397): Revisit the macro expression once build flag switch
+// of lacros-chrome is complete.
+#if defined(OS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)
 ::network::mojom::CryptConfigPtr BuildCryptConfigOnce(
     const base::FilePath& user_data_path) {
   static bool done_once = false;
@@ -169,13 +173,22 @@ HeadlessRequestContextManager::CreateSystemContext(
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   auto auth_params = ::network::mojom::HttpAuthDynamicParams::New();
   auth_params->server_allowlist =
-      command_line->GetSwitchValueASCII(switches::kAuthServerWhitelist);
+      command_line->GetSwitchValueASCII(switches::kAuthServerAllowlist);
   auto* network_service = content::GetNetworkService();
   network_service->ConfigureHttpAuthPrefs(std::move(auth_params));
 
+  ::network::mojom::NetworkContextParamsPtr network_context_params =
+      ::network::mojom::NetworkContextParams::New();
+  ::network::mojom::CertVerifierCreationParamsPtr
+      cert_verifier_creation_params =
+          ::network::mojom::CertVerifierCreationParams::New();
+  manager->ConfigureNetworkContextParamsInternal(
+      network_context_params.get(), cert_verifier_creation_params.get());
+  network_context_params->cert_verifier_params =
+      content::GetCertVerifierParams(std::move(cert_verifier_creation_params));
   network_service->CreateNetworkContext(
       manager->system_context_.InitWithNewPipeAndPassReceiver(),
-      manager->CreateNetworkContextParams(/* is_system = */ true));
+      std::move(network_context_params));
 
   return manager;
 }
@@ -202,10 +215,17 @@ HeadlessRequestContextManager::HeadlessRequestContextManager(
               : nullptr),
       resource_context_(std::make_unique<content::ResourceContext>()) {
   if (!proxy_config_) {
-    proxy_config_monitor_ = std::make_unique<HeadlessProxyConfigMonitor>(
-        base::ThreadTaskRunnerHandle::Get());
+    base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+    if (command_line->HasSwitch(switches::kNoSystemProxyConfigService)) {
+      proxy_config_ = std::make_unique<net::ProxyConfig>();
+    } else {
+      proxy_config_monitor_ = std::make_unique<HeadlessProxyConfigMonitor>(
+          base::ThreadTaskRunnerHandle::Get());
+    }
   }
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
+// TODO(crbug.com/1052397): Revisit the macro expression once build flag switch
+// of lacros-chrome is complete.
+#if defined(OS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)
   auto crypt_config = BuildCryptConfigOnce(user_data_path_);
   if (crypt_config)
     content::GetNetworkService()->SetCryptConfig(std::move(crypt_config));
@@ -218,24 +238,22 @@ HeadlessRequestContextManager::~HeadlessRequestContextManager() {
     HeadlessProxyConfigMonitor::DeleteSoon(std::move(proxy_config_monitor_));
 }
 
-mojo::Remote<::network::mojom::NetworkContext>
-HeadlessRequestContextManager::CreateNetworkContext(
+void HeadlessRequestContextManager::ConfigureNetworkContextParams(
     bool in_memory,
-    const base::FilePath& relative_partition_path) {
-  mojo::Remote<::network::mojom::NetworkContext> network_context;
-  content::GetNetworkService()->CreateNetworkContext(
-      network_context.BindNewPipeAndPassReceiver(),
-      CreateNetworkContextParams(/* is_system = */ false));
-  return network_context;
+    const base::FilePath& relative_partition_path,
+    ::network::mojom::NetworkContextParams* network_context_params,
+    ::network::mojom::CertVerifierCreationParams*
+        cert_verifier_creation_params) {
+  ConfigureNetworkContextParamsInternal(network_context_params,
+                                        cert_verifier_creation_params);
 }
 
-::network::mojom::NetworkContextParamsPtr
-HeadlessRequestContextManager::CreateNetworkContextParams(bool is_system) {
-  auto context_params = ::network::mojom::NetworkContextParams::New();
-
+void HeadlessRequestContextManager::ConfigureNetworkContextParamsInternal(
+    ::network::mojom::NetworkContextParams* context_params,
+    ::network::mojom::CertVerifierCreationParams*
+        cert_verifier_creation_params) {
   context_params->user_agent = user_agent_;
   context_params->accept_language = accept_language_;
-  context_params->primary_network_context = is_system;
 
   // TODO(https://crbug.com/458508): Allow
   // context_params->http_auth_static_network_context_params->allow_default_credentials
@@ -260,10 +278,8 @@ HeadlessRequestContextManager::CreateNetworkContextParams(bool is_system) {
     context_params->initial_proxy_config = net::ProxyConfigWithAnnotation(
         *proxy_config_, GetProxyConfigTrafficAnnotationTag());
   } else {
-    proxy_config_monitor_->AddToNetworkContextParams(context_params.get());
+    proxy_config_monitor_->AddToNetworkContextParams(context_params);
   }
-  content::UpdateCorsExemptHeader(context_params.get());
-  return context_params;
 }
 
 }  // namespace headless

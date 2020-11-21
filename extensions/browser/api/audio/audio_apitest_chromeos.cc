@@ -15,6 +15,7 @@
 #include "chromeos/audio/cras_audio_handler.h"
 #include "chromeos/dbus/audio/fake_cras_audio_client.h"
 #include "extensions/common/features/feature_session_type.h"
+#include "extensions/common/mojom/feature_session_type.mojom.h"
 #include "extensions/common/switches.h"
 #include "extensions/shell/test/shell_apitest.h"
 #include "extensions/test/extension_test_message_listener.h"
@@ -49,6 +50,9 @@ struct AudioNodeInfo {
   const char* const name;
 };
 
+const uint32_t kInputMaxSupportedChannels = 1;
+const uint32_t kOutputMaxSupportedChannels = 2;
+
 const AudioNodeInfo kJabraSpeaker1 = {
     false, kJabraSpeaker1Id, kJabraSpeaker1StableDeviceId, "Jabra Speaker",
     "USB", "Jabra Speaker 1"};
@@ -74,12 +78,14 @@ const AudioNodeInfo kUSBCameraMic = {
     "Webcam Mic", "USB",        "Logitech Webcam"};
 
 AudioNode CreateAudioNode(const AudioNodeInfo& info, int version) {
-  return AudioNode(info.is_input, info.id, version == 2,
-                   // stable_device_id_v1:
-                   info.stable_id,
-                   // stable_device_id_v2:
-                   version == 2 ? info.stable_id ^ 0xFFFF : 0, info.device_name,
-                   info.type, info.name, false, 0);
+  return AudioNode(
+      info.is_input, info.id, version == 2,
+      // stable_device_id_v1:
+      info.stable_id,
+      // stable_device_id_v2:
+      version == 2 ? info.stable_id ^ 0xFFFF : 0, info.device_name, info.type,
+      info.name, false, 0,
+      info.is_input ? kInputMaxSupportedChannels : kOutputMaxSupportedChannels);
 }
 
 class AudioApiTest : public ShellApiTest {
@@ -89,7 +95,7 @@ class AudioApiTest : public ShellApiTest {
 
   void SetUp() override {
     session_feature_type_ = extensions::ScopedCurrentFeatureSessionType(
-        extensions::FeatureSessionType::KIOSK);
+        extensions::mojom::FeatureSessionType::kKiosk);
 
     ShellApiTest::SetUp();
   }
@@ -105,7 +111,7 @@ class AudioApiTest : public ShellApiTest {
   }
 
  protected:
-  std::unique_ptr<base::AutoReset<extensions::FeatureSessionType>>
+  std::unique_ptr<base::AutoReset<extensions::mojom::FeatureSessionType>>
       session_feature_type_;
 
  private:
@@ -275,7 +281,7 @@ class WhitelistedAudioApiTest : public AudioApiTest {
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
     command_line->AppendSwitchASCII(
-        extensions::switches::kWhitelistedExtensionID,
+        extensions::switches::kAllowlistedExtensionID,
         "jlgnoeceollaejlkenecblnjmdcfhfgc");
   }
 };

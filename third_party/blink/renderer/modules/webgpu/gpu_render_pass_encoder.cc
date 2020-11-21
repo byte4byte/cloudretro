@@ -10,6 +10,7 @@
 #include "third_party/blink/renderer/modules/webgpu/gpu_bind_group.h"
 #include "third_party/blink/renderer/modules/webgpu/gpu_buffer.h"
 #include "third_party/blink/renderer/modules/webgpu/gpu_device.h"
+#include "third_party/blink/renderer/modules/webgpu/gpu_query_set.h"
 #include "third_party/blink/renderer/modules/webgpu/gpu_render_bundle.h"
 #include "third_party/blink/renderer/modules/webgpu/gpu_render_pipeline.h"
 
@@ -58,8 +59,8 @@ void GPURenderPassEncoder::setBindGroup(
 }
 
 void GPURenderPassEncoder::pushDebugGroup(String groupLabel) {
-  GetProcs().renderPassEncoderPushDebugGroup(GetHandle(),
-                                             groupLabel.Utf8().data());
+  std::string label = groupLabel.Utf8();
+  GetProcs().renderPassEncoderPushDebugGroup(GetHandle(), label.c_str());
 }
 
 void GPURenderPassEncoder::popDebugGroup() {
@@ -67,8 +68,8 @@ void GPURenderPassEncoder::popDebugGroup() {
 }
 
 void GPURenderPassEncoder::insertDebugMarker(String markerLabel) {
-  GetProcs().renderPassEncoderInsertDebugMarker(GetHandle(),
-                                                markerLabel.Utf8().data());
+  std::string label = markerLabel.Utf8();
+  GetProcs().renderPassEncoderInsertDebugMarker(GetHandle(), label.c_str());
 }
 
 void GPURenderPassEncoder::setPipeline(GPURenderPipeline* pipeline) {
@@ -108,10 +109,12 @@ void GPURenderPassEncoder::setScissorRect(uint32_t x,
 }
 
 void GPURenderPassEncoder::setIndexBuffer(GPUBuffer* buffer,
+                                          const WTF::String& format,
                                           uint64_t offset,
                                           uint64_t size) {
-  GetProcs().renderPassEncoderSetIndexBuffer(GetHandle(), buffer->GetHandle(),
-                                             offset, size);
+  GetProcs().renderPassEncoderSetIndexBufferWithFormat(
+      GetHandle(), buffer->GetHandle(), AsDawnEnum<WGPUIndexFormat>(format),
+      offset, size);
 }
 
 void GPURenderPassEncoder::setVertexBuffer(uint32_t slot,
@@ -130,6 +133,14 @@ void GPURenderPassEncoder::draw(uint32_t vertexCount,
                                    firstVertex, firstInstance);
 }
 
+void GPURenderPassEncoder::draw(uint32_t vertexCount,
+                                uint32_t instanceCount,
+                                uint32_t firstVertex,
+                                uint32_t firstInstance,
+                                v8::FastApiCallbackOptions& options) {
+  draw(vertexCount, instanceCount, firstVertex, firstInstance);
+}
+
 void GPURenderPassEncoder::drawIndexed(uint32_t indexCount,
                                        uint32_t instanceCount,
                                        uint32_t firstIndex,
@@ -138,6 +149,15 @@ void GPURenderPassEncoder::drawIndexed(uint32_t indexCount,
   GetProcs().renderPassEncoderDrawIndexed(GetHandle(), indexCount,
                                           instanceCount, firstIndex, baseVertex,
                                           firstInstance);
+}
+
+void GPURenderPassEncoder::drawIndexed(uint32_t indexCount,
+                                       uint32_t instanceCount,
+                                       uint32_t firstIndex,
+                                       int32_t baseVertex,
+                                       uint32_t firstInstance,
+                                       v8::FastApiCallbackOptions& options) {
+  drawIndexed(indexCount, instanceCount, firstIndex, baseVertex, firstInstance);
 }
 
 void GPURenderPassEncoder::drawIndirect(GPUBuffer* indirectBuffer,
@@ -158,6 +178,12 @@ void GPURenderPassEncoder::executeBundles(
 
   GetProcs().renderPassEncoderExecuteBundles(GetHandle(), bundles.size(),
                                              dawn_bundles.get());
+}
+
+void GPURenderPassEncoder::writeTimestamp(GPUQuerySet* querySet,
+                                          uint32_t queryIndex) {
+  GetProcs().renderPassEncoderWriteTimestamp(GetHandle(), querySet->GetHandle(),
+                                             queryIndex);
 }
 
 void GPURenderPassEncoder::endPass() {

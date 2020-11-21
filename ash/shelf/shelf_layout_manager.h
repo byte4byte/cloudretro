@@ -10,12 +10,11 @@
 #include "ash/ash_export.h"
 #include "ash/home_screen/drag_window_from_shelf_controller.h"
 #include "ash/public/cpp/app_list/app_list_controller_observer.h"
+#include "ash/public/cpp/session/session_observer.h"
 #include "ash/public/cpp/shelf_config.h"
 #include "ash/public/cpp/shelf_types.h"
-#include "ash/public/cpp/tablet_mode_observer.h"
 #include "ash/public/cpp/wallpaper_controller.h"
 #include "ash/public/cpp/wallpaper_controller_observer.h"
-#include "ash/session/session_observer.h"
 #include "ash/shelf/shelf.h"
 #include "ash/shelf/shelf_metrics.h"
 #include "ash/shelf/shelf_widget.h"
@@ -61,6 +60,7 @@ class Shelf;
 class ShelfLayoutManagerObserver;
 class ShelfLayoutManagerTestBase;
 class ShelfWidget;
+class SwipeHomeToOverviewController;
 
 // ShelfLayoutManager is the layout manager responsible for the shelf and
 // status widgets. The shelf is given the total available width and told the
@@ -83,8 +83,7 @@ class ASH_EXPORT ShelfLayoutManager
       public LocaleChangeObserver,
       public DesksController::Observer,
       public message_center::MessageCenterObserver,
-      public ShelfConfig::Observer,
-      public TabletModeObserver {
+      public ShelfConfig::Observer {
  public:
   // Suspend work area updates within its scope. Note that relevant
   // ShelfLayoutManager must outlive this class.
@@ -150,8 +149,8 @@ class ASH_EXPORT ShelfLayoutManager
   void ProcessGestureEventOfInAppHotseat(ui::GestureEvent* event,
                                          aura::Window* target);
 
-  // Updates the auto-dim state.
-  void SetDimmed(bool dimmed);
+  // Updates the auto-dim state. Returns true if successful.
+  bool SetDimmed(bool dimmed);
 
   void AddObserver(ShelfLayoutManagerObserver* observer);
   void RemoveObserver(ShelfLayoutManagerObserver* observer);
@@ -272,10 +271,6 @@ class ASH_EXPORT ShelfLayoutManager
   // ShelfConfig::Observer:
   void OnShelfConfigUpdated() override;
 
-  // TabletModeObserver:
-  void OnTabletModeStarted() override;
-  void OnTabletModeEnded() override;
-
   float GetOpacity() const;
 
   bool updating_bounds() const { return phase_ == ShelfLayoutPhase::kMoving; }
@@ -286,6 +281,11 @@ class ASH_EXPORT ShelfLayoutManager
 
   DragWindowFromShelfController* window_drag_controller_for_testing() {
     return window_drag_controller_.get();
+  }
+
+  SwipeHomeToOverviewController*
+  swipe_home_to_overview_controller_for_testing() {
+    return swipe_home_to_overview_controller_.get();
   }
 
   HomeToOverviewNudgeController*
@@ -301,7 +301,7 @@ class ASH_EXPORT ShelfLayoutManager
   // Overview, Shelf, and any active gestures.
   // TODO(manucornet): Move this to the hotseat class.
   HotseatState CalculateHotseatState(ShelfVisibilityState visibility_state,
-                                     ShelfAutoHideState auto_hide_state);
+                                     ShelfAutoHideState auto_hide_state) const;
 
  private:
   class UpdateShelfObserver;
@@ -310,6 +310,7 @@ class ASH_EXPORT ShelfLayoutManager
   friend class ShelfLayoutManagerTestBase;
   friend class ShelfLayoutManagerWindowDraggingTest;
   friend class NotificationTrayTest;
+  friend class UnifiedSystemTrayTest;
   friend class Shelf;
 
   struct State {
@@ -464,6 +465,7 @@ class ASH_EXPORT ShelfLayoutManager
                   float scroll_y);
   void CompleteDrag(const ui::LocatedEvent& event_in_screen);
   void CompleteAppListDrag(const ui::LocatedEvent& event_in_screen);
+  void CompleteDragHomeToOverview(const ui::LocatedEvent& event_in_screen);
   void CancelDrag(base::Optional<ShelfWindowDragResult> window_drag_result);
   void CompleteDragWithChangedVisibility();
 
@@ -633,6 +635,11 @@ class ASH_EXPORT ShelfLayoutManager
   // The window drag controller that will be used when a window can be dragged
   // up from shelf to homescreen, overview or splitview.
   std::unique_ptr<DragWindowFromShelfController> window_drag_controller_;
+
+  // The gesture controller that switches from home screen to overview when it
+  // detects an upward swipe from the home launcher shelf area.
+  std::unique_ptr<SwipeHomeToOverviewController>
+      swipe_home_to_overview_controller_;
 
   std::unique_ptr<HomeToOverviewNudgeController>
       home_to_overview_nudge_controller_;

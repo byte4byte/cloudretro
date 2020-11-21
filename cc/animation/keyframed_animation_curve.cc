@@ -7,9 +7,10 @@
 #include <stddef.h>
 
 #include <algorithm>
+#include <memory>
+#include <utility>
 
 #include "base/memory/ptr_util.h"
-#include "cc/base/time_util.h"
 #include "ui/gfx/animation/tween.h"
 #include "ui/gfx/geometry/box_f.h"
 
@@ -34,6 +35,27 @@ void InsertKeyframe(std::unique_ptr<KeyframeType> keyframe,
   keyframes->push_back(std::move(keyframe));
 }
 
+struct TimeValues {
+  base::TimeDelta start_time;
+  base::TimeDelta duration;
+  double progress;
+};
+
+template <typename KeyframeType>
+TimeValues GetTimeValues(const KeyframeType& start_frame,
+                         const KeyframeType& end_frame,
+                         double scaled_duration,
+                         base::TimeDelta time) {
+  TimeValues values;
+  values.start_time = start_frame.Time() * scaled_duration;
+  values.duration = (end_frame.Time() * scaled_duration) - values.start_time;
+  const base::TimeDelta elapsed = time - values.start_time;
+  values.progress = (elapsed.is_inf() || values.duration.is_zero())
+                        ? 1.0
+                        : (elapsed / values.duration);
+  return values;
+}
+
 template <typename KeyframeType>
 base::TimeDelta TransformedAnimationTime(
     const std::vector<std::unique_ptr<KeyframeType>>& keyframes,
@@ -41,13 +63,10 @@ base::TimeDelta TransformedAnimationTime(
     double scaled_duration,
     base::TimeDelta time) {
   if (timing_function) {
-    base::TimeDelta start_time = keyframes.front()->Time() * scaled_duration;
-    base::TimeDelta duration =
-        (keyframes.back()->Time() - keyframes.front()->Time()) *
-        scaled_duration;
-    double progress = TimeUtil::Divide(time - start_time, duration);
-
-    time = (duration * timing_function->GetValue(progress)) + start_time;
+    const auto values = GetTimeValues(*keyframes.front(), *keyframes.back(),
+                                      scaled_duration, time);
+    time = (values.duration * timing_function->GetValue(values.progress)) +
+           values.start_time;
   }
 
   return time;
@@ -60,10 +79,9 @@ size_t GetActiveKeyframe(
     base::TimeDelta time) {
   DCHECK_GE(keyframes.size(), 2ul);
   size_t i = 0;
-  for (; i < keyframes.size() - 2; ++i) {  // Last keyframe is never active.
-    if (time < (keyframes[i + 1]->Time() * scaled_duration))
-      break;
-  }
+  while ((i < keyframes.size() - 2) &&  // Last keyframe is never active.
+         (time >= (keyframes[i + 1]->Time() * scaled_duration)))
+    ++i;
 
   return i;
 }
@@ -74,16 +92,12 @@ double TransformedKeyframeProgress(
     double scaled_duration,
     base::TimeDelta time,
     size_t i) {
-  base::TimeDelta time1 = keyframes[i]->Time() * scaled_duration;
-  base::TimeDelta time2 = keyframes[i + 1]->Time() * scaled_duration;
-
-  double progress = TimeUtil::Divide(time - time1, time2 - time1);
-
-  if (keyframes[i]->timing_function()) {
-    progress = keyframes[i]->timing_function()->GetValue(progress);
-  }
-
-  return progress;
+  const double progress =
+      GetTimeValues(*keyframes[i], *keyframes[i + 1], scaled_duration, time)
+          .progress;
+  return keyframes[i]->timing_function()
+             ? keyframes[i]->timing_function()->GetValue(progress)
+             : progress;
 }
 
 }  // namespace

@@ -7,6 +7,9 @@
 #include <cmath>
 
 #include "third_party/blink/renderer/core/geometry/dom_point_read_only.h"
+#include "third_party/blink/renderer/modules/webgl/webgl2_rendering_context.h"
+#include "third_party/blink/renderer/modules/webgl/webgl_rendering_context.h"
+#include "third_party/blink/renderer/modules/xr/xr_webgl_rendering_context.h"
 #include "third_party/blink/renderer/platform/transforms/transformation_matrix.h"
 
 namespace blink {
@@ -27,7 +30,7 @@ DOMFloat32Array* transformationMatrixToDOMFloat32Array(
 }
 
 TransformationMatrix DOMFloat32ArrayToTransformationMatrix(DOMFloat32Array* m) {
-  DCHECK_EQ(m->lengthAsSizeT(), 16u);
+  DCHECK_EQ(m->length(), 16u);
 
   auto* data = m->Data();
 
@@ -61,6 +64,21 @@ DOMPointReadOnly* makeNormalizedQuaternion(double x,
   }
   return DOMPointReadOnly::Create(x / length, y / length, z / length,
                                   w / length);
+}
+
+WebGLRenderingContextBase* webglRenderingContextBaseFromUnion(
+    const XRWebGLRenderingContext& context) {
+  if (context.IsWebGL2RenderingContext()) {
+    return context.GetAsWebGL2RenderingContext();
+  } else {
+    return context.GetAsWebGLRenderingContext();
+  }
+}
+
+base::Optional<device::Pose> CreatePose(
+    const blink::TransformationMatrix& matrix) {
+  return device::Pose::Create(
+      gfx::Transform(TransformationMatrix::ToSkMatrix44(matrix)));
 }
 
 }  // namespace blink

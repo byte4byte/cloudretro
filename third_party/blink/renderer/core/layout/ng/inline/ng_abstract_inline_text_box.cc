@@ -44,8 +44,7 @@ class NGAbstractInlineTextBoxCache final {
   scoped_refptr<AbstractInlineTextBox> GetOrCreateInternal(
       const Fragment& fragment) {
     const auto it = map_.find(&fragment);
-    LayoutText* const layout_text =
-        ToLayoutText(fragment.GetMutableLayoutObject());
+    auto* const layout_text = To<LayoutText>(fragment.GetMutableLayoutObject());
     if (it != map_.end()) {
       CHECK(layout_text->HasAbstractInlineTextBox());
       return it->value;
@@ -170,7 +169,7 @@ bool NGAbstractInlineTextBox::NeedsTrailingSpace() const {
     return false;
   NGInlineCursor line_box = cursor;
   line_box.MoveToContainingLine();
-  if (!line_box.HasSoftWrapToNextLine())
+  if (!line_box.Current().HasSoftWrapToNextLine())
     return false;
   const String text_content = GetTextContent();
   const unsigned end_offset = cursor.Current().TextEndOffset();
@@ -179,10 +178,9 @@ bool NGAbstractInlineTextBox::NeedsTrailingSpace() const {
   if (text_content[end_offset] != ' ')
     return false;
   const NGInlineBreakToken* break_token = line_box.Current().InlineBreakToken();
-  DCHECK(break_token);
   // TODO(yosin): We should support OOF fragments between |fragment_| and
   // break token.
-  if (break_token->TextOffset() != end_offset + 1)
+  if (break_token && break_token->TextOffset() != end_offset + 1)
     return false;
   // Check a character in text content after |fragment_| comes from same
   // layout text of |fragment_|.
@@ -231,7 +229,8 @@ unsigned NGAbstractInlineTextBox::Len() const {
   return cursor.Current().Text(cursor).length();
 }
 
-unsigned NGAbstractInlineTextBox::TextOffsetInContainer(unsigned offset) const {
+unsigned NGAbstractInlineTextBox::TextOffsetInFormattingContext(
+    unsigned offset) const {
   const NGInlineCursor& cursor = GetCursor();
   if (!cursor)
     return 0;

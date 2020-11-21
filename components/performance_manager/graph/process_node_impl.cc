@@ -6,15 +6,19 @@
 
 #include <utility>
 
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "components/performance_manager/graph/frame_node_impl.h"
 #include "components/performance_manager/graph/graph_impl.h"
 #include "components/performance_manager/graph/page_node_impl.h"
+#include "components/performance_manager/public/execution_context/execution_context_registry.h"
+#include "components/performance_manager/v8_memory/v8_context_tracker.h"
 
 namespace performance_manager {
 
-ProcessNodeImpl::ProcessNodeImpl(RenderProcessHostProxy render_process_proxy)
-    : render_process_host_proxy_(std::move(render_process_proxy)) {
+ProcessNodeImpl::ProcessNodeImpl(content::ProcessType process_type,
+                                 RenderProcessHostProxy render_process_proxy)
+    : process_type_(process_type),
+      render_process_host_proxy_(std::move(render_process_proxy)) {
   DETACH_FROM_SEQUENCE(sequence_checker_);
 }
 
@@ -34,15 +38,71 @@ void ProcessNodeImpl::Bind(
   receiver_.Bind(std::move(receiver));
 }
 
-void ProcessNodeImpl::SetExpectedTaskQueueingDuration(
-    base::TimeDelta duration) {
-  expected_task_queueing_duration_.SetAndNotify(this, duration);
-}
-
 void ProcessNodeImpl::SetMainThreadTaskLoadIsLow(
     bool main_thread_task_load_is_low) {
   main_thread_task_load_is_low_.SetAndMaybeNotify(this,
                                                   main_thread_task_load_is_low);
+}
+
+void ProcessNodeImpl::OnV8ContextCreated(
+    mojom::V8ContextDescriptionPtr description,
+    mojom::IframeAttributionDataPtr iframe_attribution_data) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  if (auto* tracker = v8_memory::V8ContextTracker::GetFromGraph(graph())) {
+    tracker->OnV8ContextCreated(PassKey(), this, *description,
+                                std::move(iframe_attribution_data));
+  }
+}
+
+void ProcessNodeImpl::OnV8ContextDetached(
+    const blink::V8ContextToken& v8_context_token) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  if (auto* tracker = v8_memory::V8ContextTracker::GetFromGraph(graph()))
+    tracker->OnV8ContextDetached(PassKey(), this, v8_context_token);
+}
+
+void ProcessNodeImpl::OnV8ContextDestroyed(
+    const blink::V8ContextToken& v8_context_token) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  if (auto* tracker = v8_memory::V8ContextTracker::GetFromGraph(graph()))
+    tracker->OnV8ContextDestroyed(PassKey(), this, v8_context_token);
+}
+
+void ProcessNodeImpl::OnRemoteIframeAttached(
+    const blink::LocalFrameToken& parent_frame_token,
+    const blink::RemoteFrameToken& remote_frame_token,
+    mojom::IframeAttributionDataPtr iframe_attribution_data) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  if (auto* tracker = v8_memory::V8ContextTracker::GetFromGraph(graph())) {
+    auto* ec_registry =
+        execution_context::ExecutionContextRegistry::GetFromGraph(graph());
+    DCHECK(ec_registry);
+    auto* parent_frame_node =
+        ec_registry->GetFrameNodeByFrameToken(parent_frame_token);
+    if (parent_frame_node) {
+      tracker->OnRemoteIframeAttached(
+          PassKey(), FrameNodeImpl::FromNode(parent_frame_node),
+          remote_frame_token, std::move(iframe_attribution_data));
+    }
+  }
+}
+
+void ProcessNodeImpl::OnRemoteIframeDetached(
+    const blink::LocalFrameToken& parent_frame_token,
+    const blink::RemoteFrameToken& remote_frame_token) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  if (auto* tracker = v8_memory::V8ContextTracker::GetFromGraph(graph())) {
+    auto* ec_registry =
+        execution_context::ExecutionContextRegistry::GetFromGraph(graph());
+    DCHECK(ec_registry);
+    auto* parent_frame_node =
+        ec_registry->GetFrameNodeByFrameToken(parent_frame_token);
+    if (parent_frame_node) {
+      tracker->OnRemoteIframeDetached(
+          PassKey(), FrameNodeImpl::FromNode(parent_frame_node),
+          remote_frame_token);
+    }
+  }
 }
 
 void ProcessNodeImpl::SetProcessExitStatus(int32_t exit_status) {
@@ -87,9 +147,10 @@ PageNodeImpl* ProcessNodeImpl::GetPageNodeIfExclusive() const {
   return page_node;
 }
 
-int ProcessNodeImpl::GetRenderProcessId() const {
+RenderProcessHostId ProcessNodeImpl::GetRenderProcessId() const {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  return render_process_host_proxy_.render_process_host_id();
+  return RenderProcessHostId(
+      render_process_host_proxy_.render_process_host_id());
 }
 
 void ProcessNodeImpl::AddFrame(FrameNodeImpl* frame_node) {
@@ -142,6 +203,11 @@ void ProcessNodeImpl::SetProcessImpl(base::Process process,
   process_.SetAndNotify(this, std::move(process));
 }
 
+content::ProcessType ProcessNodeImpl::GetProcessType() const {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  return process_type();
+}
+
 base::ProcessId ProcessNodeImpl::GetProcessId() const {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return process_id();
@@ -183,11 +249,6 @@ base::flat_set<const FrameNode*> ProcessNodeImpl::GetFrameNodes() const {
   return frames;
 }
 
-base::TimeDelta ProcessNodeImpl::GetExpectedTaskQueueingDuration() const {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  return expected_task_queueing_duration();
-}
-
 bool ProcessNodeImpl::GetMainThreadTaskLoadIsLow() const {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return main_thread_task_load_is_low();
@@ -201,6 +262,11 @@ uint64_t ProcessNodeImpl::GetPrivateFootprintKb() const {
 uint64_t ProcessNodeImpl::GetResidentSetKb() const {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return resident_set_kb();
+}
+
+RenderProcessHostId ProcessNodeImpl::GetRenderProcessHostId() const {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  return GetRenderProcessId();
 }
 
 const RenderProcessHostProxy& ProcessNodeImpl::GetRenderProcessHostProxy()

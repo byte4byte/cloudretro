@@ -32,6 +32,8 @@
 #import <AppKit/AppKit.h>
 #import <Foundation/Foundation.h>
 #import <math.h>
+
+#include "base/bit_cast.h"
 #include "base/mac/foundation_util.h"
 #include "base/mac/scoped_cftyperef.h"
 #include "base/mac/scoped_nsobject.h"
@@ -39,10 +41,6 @@
 #include "third_party/blink/renderer/platform/fonts/font_cache.h"
 #import "third_party/blink/renderer/platform/wtf/hash_set.h"
 #import "third_party/blink/renderer/platform/wtf/text/atomic_string_hash.h"
-
-@interface NSFont (YosemiteAdditions)
-+ (NSFont*)systemFontOfSize:(CGFloat)size weight:(CGFloat)weight;
-@end
 
 namespace {
 
@@ -59,16 +57,15 @@ static CGFloat toFontWeight(blink::FontSelectionValue font_weight) {
       0x3fe3d70a40000000,  // NSFontWeightBlack
   };
   if (font_weight <= 50 || font_weight >= 950)
-    return ns_font_weights[3];
+    return bit_cast<CGFloat>(ns_font_weights[3]);
 
   size_t select_weight = roundf(font_weight / 100) - 1;
   DCHECK_GE(select_weight, 0ul);
   DCHECK_LE(select_weight, base::size(ns_font_weights));
-  CGFloat* return_weight =
-      reinterpret_cast<CGFloat*>(&ns_font_weights[select_weight]);
-  return *return_weight;
+  return bit_cast<CGFloat>(ns_font_weights[select_weight]);
 }
-}
+
+}  // namespace
 
 namespace blink {
 
@@ -175,15 +172,9 @@ NSFont* MatchNSFontFamily(const AtomicString& desired_family_string,
 
   if (desired_family_string == font_family_names::kSystemUi) {
     NSFont* font = nil;
-// Normally we'd use an availability macro here, but
-// systemFontOfSize:weight: is available but not visible on macOS 10.10,
-// so it's been forward declared earlier in this file.
-// On OSX 10.10+, the default system font has more weights.
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wunguarded-availability"
-    font = [NSFont systemFontOfSize:size weight:toFontWeight(desired_weight)];
-#pragma clang diagnostic pop
-
+    if (@available(macOS 10.11, *)) {
+      font = [NSFont systemFontOfSize:size weight:toFontWeight(desired_weight)];
+    }
     if (desired_traits & IMPORTANT_FONT_TRAITS)
       font = [[NSFontManager sharedFontManager] convertFont:font
                                                 toHaveTrait:desired_traits];

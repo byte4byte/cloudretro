@@ -36,15 +36,16 @@ import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.base.test.util.JniMocker;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.profiles.Profile;
-import org.chromium.chrome.browser.site_settings.WebsitePreferenceBridge;
-import org.chromium.chrome.browser.site_settings.WebsitePreferenceBridgeJni;
 import org.chromium.chrome.test.util.browser.Features;
 import org.chromium.chrome.test.util.browser.LocationSettingsTestUtil;
 import org.chromium.components.browser_ui.site_settings.SiteSettingsFeatureList;
+import org.chromium.components.browser_ui.site_settings.WebsitePreferenceBridge;
+import org.chromium.components.browser_ui.site_settings.WebsitePreferenceBridgeJni;
 import org.chromium.components.content_settings.ContentSettingValues;
 import org.chromium.components.content_settings.ContentSettingsType;
 import org.chromium.components.embedder_support.browser_context.BrowserContextHandle;
 import org.chromium.components.page_info.PageInfoView;
+import org.chromium.components.page_info.PermissionParamsListBuilder;
 import org.chromium.components.page_info.SystemSettingsActivityRequiredListener;
 import org.chromium.ui.base.AndroidPermissionDelegate;
 import org.chromium.ui.base.PermissionCallback;
@@ -76,7 +77,7 @@ public class PermissionParamsListBuilderUnitTest {
     @Before
     public void setUp() {
         MockitoAnnotations.initMocks(this);
-        PermissionParamsListBuilder.setProfileForTesting(mProfileMock);
+        ChromePermissionParamsListBuilderDelegate.setProfileForTesting(mProfileMock);
         mocker.mock(WebsitePreferenceBridgeJni.TEST_HOOKS, mWebsitePreferenceBridgeMock);
         when(mWebsitePreferenceBridgeMock.isPermissionControlledByDSE(
                      any(BrowserContextHandle.class), anyInt(), anyString()))
@@ -84,9 +85,10 @@ public class PermissionParamsListBuilderUnitTest {
         FakePermissionDelegate.clearBlockedPermissions();
         AndroidPermissionDelegate permissionDelegate = new FakePermissionDelegate();
         mSettingsActivityRequiredListener = new FakeSystemSettingsActivityRequiredListener();
-        mPermissionParamsListBuilder = new PermissionParamsListBuilder(
-                RuntimeEnvironment.application, permissionDelegate, "https://example.com", true,
-                mSettingsActivityRequiredListener, result -> {});
+        mPermissionParamsListBuilder =
+                new PermissionParamsListBuilder(RuntimeEnvironment.application, permissionDelegate,
+                        "https://example.com", true, mSettingsActivityRequiredListener,
+                        result -> {}, new ChromePermissionParamsListBuilderDelegate());
     }
 
     @Test

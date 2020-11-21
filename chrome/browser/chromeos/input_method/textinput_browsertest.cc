@@ -13,6 +13,7 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -99,7 +100,7 @@ IN_PROC_BROWSER_TEST_F(TextInput_TextInputStateChangedTest,
 
   content::WebContents* tab =
       browser()->tab_strip_model()->GetActiveWebContents();
-  content::WaitForLoadStop(tab);
+  EXPECT_TRUE(content::WaitForLoadStop(tab));
 
   ASSERT_TRUE(helper.ClickElement("text_id", tab));
   helper.WaitForTextInputStateChanged(ui::TEXT_INPUT_TYPE_TEXT);

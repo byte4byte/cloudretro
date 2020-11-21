@@ -107,6 +107,7 @@ suite('OsSyncControlsTest', function() {
 
   teardown(function() {
     syncControls.remove();
+    settings.Router.getInstance().resetRouteForTesting();
   });
 
   test('ControlsHiddenUntilInitialUpdateSent', function() {
@@ -187,11 +188,18 @@ suite('OsSyncControlsTest', function() {
         syncControls.$.accountSubtitle.textContent.trim());
   });
 
+  // Regression test for https://crbug.com/1076239
+  test('Handles undefined syncStatus', function() {
+    syncControls.syncStatus = undefined;
+    setupWithFeatureEnabled();
+    assertEquals('', syncControls.$.accountTitle.textContent.trim());
+    assertEquals('', syncControls.$.accountSubtitle.textContent.trim());
+  });
+
   test('FeatureDisabled', function() {
     setupWithFeatureDisabled();
 
-    assertFalse(syncControls.$.turnOnSyncButton.hidden);
-    assertTrue(syncControls.$.turnOffSyncButton.hidden);
+    assertTrue(!!syncControls.$.syncOnOffButton);
 
     assertTrue(syncControls.$.syncEverythingCheckboxLabel.hasAttribute(
         'label-disabled'));
@@ -217,8 +225,7 @@ suite('OsSyncControlsTest', function() {
   test('FeatureEnabled', function() {
     setupWithFeatureEnabled();
 
-    assertTrue(syncControls.$.turnOnSyncButton.hidden);
-    assertFalse(syncControls.$.turnOffSyncButton.hidden);
+    assertTrue(!!syncControls.$.syncOnOffButton);
 
     assertFalse(syncControls.$.syncEverythingCheckboxLabel.hasAttribute(
         'label-disabled'));
@@ -243,14 +250,29 @@ suite('OsSyncControlsTest', function() {
 
   test('ClickingTurnOffDisablesFeature', async function() {
     setupWithFeatureEnabled();
-    syncControls.$.turnOffSyncButton.click();
+    syncControls.$.syncOnOffButton.click();
     const enabled = await browserProxy.whenCalled('setOsSyncFeatureEnabled');
     assertFalse(enabled);
   });
 
+  test('Deep link to sync on/off', async function() {
+    loadTimeData.overrideValues({isDeepLinkingEnabled: true});
+    setupWithFeatureEnabled();
+
+    const params = new URLSearchParams;
+    params.append('settingId', '302');
+    settings.Router.getInstance().navigateTo(settings.routes.OS_SYNC, params);
+
+    const deepLinkElement = syncControls.$.syncOnOffButton;
+    await test_util.waitAfterNextRender(deepLinkElement);
+    assertEquals(
+        deepLinkElement, getDeepActiveElement(),
+        'Sync on/off should be focused for settingId=302.');
+  });
+
   test('ClickingTurnOnEnablesFeature', async function() {
     setupWithFeatureDisabled();
-    syncControls.$.turnOnSyncButton.click();
+    syncControls.$.syncOnOffButton.click();
     enabled = await browserProxy.whenCalled('setOsSyncFeatureEnabled');
     assertTrue(enabled);
   });

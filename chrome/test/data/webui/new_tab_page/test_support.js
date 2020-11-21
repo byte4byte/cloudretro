@@ -59,7 +59,7 @@ export function createTestProxy() {
       testProxy.callbackRouter.$.bindNewPipeAndPassRemote();
   testProxy.handler =
       TestBrowserProxy.fromClass(newTabPage.mojom.PageHandlerRemote);
-  testProxy.setResultFor('createUntrustedIframeSrc', '');
+  testProxy.setResultFor('createIframeSrc', '');
   return testProxy;
 }
 
@@ -77,22 +77,24 @@ export function createTheme() {
     resultsDimSelected: {value: 0xff000008},
     resultsText: {value: 0xff000009},
     resultsTextSelected: {value: 0xff00000a},
-    resultsUrlSelected: {value: 0xff00000b},
-    text: {value: 0xff00000c},
+    resultsUrl: {value: 0xff00000b},
+    resultsUrlSelected: {value: 0xff00000c},
+    text: {value: 0xff00000d},
   };
   return {
-    type: newTabPage.mojom.ThemeType.DEFAULT,
-    info: {chromeThemeId: 0},
     backgroundColor: {value: 0xffff0000},
     shortcutBackgroundColor: {value: 0xff00ff00},
     shortcutTextColor: {value: 0xff0000ff},
+    isDefault: true,
     isDark: false,
     logoColor: null,
-    backgroundImageUrl: null,
+    backgroundImage: null,
     backgroundImageAttribution1: '',
     backgroundImageAttribution2: '',
     backgroundImageAttributionUrl: null,
     dailyRefreshCollectionId: '',
     searchBox: searchBox,
+    shortcutUseWhiteAddIcon: false,
+    shortcutUseTitlePill: false,
   };
 }

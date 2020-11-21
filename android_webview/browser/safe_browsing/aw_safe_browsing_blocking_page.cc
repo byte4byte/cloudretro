@@ -16,21 +16,21 @@
 #include "base/metrics/histogram_macros.h"
 #include "components/prefs/pref_service.h"
 #include "components/safe_browsing/content/browser/threat_details.h"
+#include "components/safe_browsing/core/common/safe_browsing_prefs.h"
 #include "components/safe_browsing/core/common/safebrowsing_constants.h"
 #include "components/safe_browsing/core/features.h"
 #include "components/safe_browsing/core/triggers/trigger_manager.h"
 #include "components/security_interstitials/content/security_interstitial_controller_client.h"
+#include "components/security_interstitials/content/settings_page_helper.h"
 #include "components/security_interstitials/content/unsafe_resource_util.h"
 #include "components/security_interstitials/core/base_safe_browsing_error_ui.h"
 #include "components/security_interstitials/core/safe_browsing_quiet_error_ui.h"
 #include "components/security_interstitials/core/unsafe_resource.h"
-#include "content/public/browser/interstitial_page.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
 #include "net/base/net_errors.h"
 
-using content::InterstitialPage;
 using content::WebContents;
 using security_interstitials::BaseSafeBrowsingErrorUI;
 using security_interstitials::SafeBrowsingQuietErrorUI;
@@ -87,39 +87,21 @@ AwSafeBrowsingBlockingPage::AwSafeBrowsingBlockingPage(
   }
 }
 
-// static
-void AwSafeBrowsingBlockingPage::ShowBlockingPage(
-    AwSafeBrowsingUIManager* ui_manager,
-    const UnsafeResource& unsafe_resource) {
-  DVLOG(1) << __func__ << " " << unsafe_resource.url.spec();
-  WebContents* web_contents = unsafe_resource.web_contents_getter.Run();
-
-  if (InterstitialPage::GetInterstitialPage(web_contents) &&
-      unsafe_resource.is_subresource) {
-    // This is an interstitial for a page's resource, let's queue it.
-    UnsafeResourceMap* unsafe_resource_map = GetUnsafeResourcesMap();
-    (*unsafe_resource_map)[web_contents].push_back(unsafe_resource);
-  } else {
-    // There is no interstitial currently showing, or we are about to display a
-    // new one for the main frame. If there is already an interstitial, showing
-    // the new one will automatically hide the old one.
-    AwSafeBrowsingBlockingPage* blocking_page = CreateBlockingPage(
-        ui_manager, unsafe_resource.web_contents_getter.Run(), GURL(),
-        unsafe_resource, nullptr);
-    blocking_page->Show();
-  }
-}
-
 AwSafeBrowsingBlockingPage* AwSafeBrowsingBlockingPage::CreateBlockingPage(
     AwSafeBrowsingUIManager* ui_manager,
     content::WebContents* web_contents,
     const GURL& main_frame_url,
     const UnsafeResource& unsafe_resource,
     std::unique_ptr<AwWebResourceRequest> resource_request) {
+  // Log the resource type that triggers the safe browsing blocking page.
+  UMA_HISTOGRAM_ENUMERATION("SafeBrowsing.BlockingPage.ResourceType",
+                            unsafe_resource.resource_type);
   const UnsafeResourceList unsafe_resources{unsafe_resource};
   AwBrowserContext* browser_context =
       AwBrowserContext::FromWebContents(web_contents);
   PrefService* pref_service = browser_context->GetPrefService();
+  // TODO(crbug.com/1134678): Set is_enhanced_protection_message_enabled once
+  // enhanced protection is supported on aw.
   BaseSafeBrowsingErrorUI::SBErrorDisplayOptions display_options =
       BaseSafeBrowsingErrorUI::SBErrorDisplayOptions(
           IsMainPageLoadBlocked(unsafe_resources),
@@ -129,8 +111,10 @@ AwSafeBrowsingBlockingPage* AwSafeBrowsingBlockingPage::CreateBlockingPage(
           safe_browsing::IsExtendedReportingPolicyManaged(*pref_service),
           safe_browsing::IsEnhancedProtectionEnabled(*pref_service),
           pref_service->GetBoolean(::prefs::kSafeBrowsingProceedAnywayDisabled),
-          false,                    // should_open_links_in_new_tab
-          false,                    // always_show_back_to_safety
+          false,  // should_open_links_in_new_tab
+          false,  // always_show_back_to_safety
+          false,  // is_enhanced_protection_message_enabled
+          safe_browsing::IsSafeBrowsingPolicyManaged(*pref_service),
           "cpn_safe_browsing_wv");  // help_center_article_link
 
   ErrorUiType errorType =
@@ -144,10 +128,12 @@ AwSafeBrowsingBlockingPage* AwSafeBrowsingBlockingPage::CreateBlockingPage(
   GURL url =
       (main_frame_url.is_empty() && entry) ? entry->GetURL() : main_frame_url;
 
+  // TODO(crbug.com/1134678): Set settings_page_helper once enhanced protection
+  // is supported on aw.
   return new AwSafeBrowsingBlockingPage(
       ui_manager, web_contents, url, unsafe_resources,
       CreateControllerClient(web_contents, unsafe_resources, ui_manager,
-                             pref_service),
+                             pref_service, /*settings_page_helper*/ nullptr),
       display_options, errorType, std::move(resource_request));
 }
 
@@ -178,9 +164,6 @@ void AwSafeBrowsingBlockingPage::FinishThreatDetails(
 
 void AwSafeBrowsingBlockingPage::OnInterstitialClosing() {
   if (resource_request_ && !proceeded()) {
-    // resource_request_ should only be set for committed interstitials.
-    DCHECK(
-        base::FeatureList::IsEnabled(safe_browsing::kCommittedSBInterstitials));
     AwContentsClientBridge* client =
         AwContentsClientBridge::FromWebContents(web_contents());
     // With committed interstitials, the navigation to the site is failed before
@@ -188,8 +171,8 @@ void AwSafeBrowsingBlockingPage::OnInterstitialClosing() {
     // time, and manually trigger them here.
     if (client) {
       client->OnReceivedError(*resource_request_,
-                              safe_browsing::GetNetErrorCodeForSafeBrowsing(),
-                              true, false);
+                              safe_browsing::kNetErrorCodeForSafeBrowsing, true,
+                              false);
     }
   }
   safe_browsing::BaseBlockingPage::OnInterstitialClosing();

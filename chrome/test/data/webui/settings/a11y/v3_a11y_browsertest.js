@@ -9,6 +9,7 @@ GEN_INCLUDE([
 
 GEN('#include "build/branding_buildflags.h"');
 GEN('#include "chrome/common/chrome_features.h"');
+GEN('#include "content/public/test/browser_test.h"');
 
 // TODO(crbug.com/1002627): This block prevents generation of a
 // link-in-text-block browser-test. This can be removed once the bug is
@@ -26,11 +27,11 @@ const violationFilterExcludeCustomInputAndTabindex =
       // Excuse custom input elements.
       'aria-valid-attr-value': function(nodeResult) {
         const describerId = nodeResult.element.getAttribute('aria-describedby');
-        return describerId === '' && nodeResult.element.tagName == 'INPUT';
+        return describerId === '' && nodeResult.element.tagName === 'INPUT';
       },
       'tabindex': function(nodeResult) {
         // TODO(crbug.com/808276): remove this exception when bug is fixed.
-        return nodeResult.element.getAttribute('tabindex') == '0';
+        return nodeResult.element.getAttribute('tabindex') === '0';
       },
     });
 
@@ -54,7 +55,7 @@ GEN('#endif  // !defined(OS_CHROMEOS)');
 // Disable since the EDIT_DICTIONARY route does not exist on Mac.
 // TODO(crbug.com/1012370) flaky on Linux b/c assertTrue(!!languagesPage);
 // TODO(crbug.com/1012370) flaky on Win the same way
-GEN('#if !defined(OS_MACOSX) && !defined(OS_LINUX) && !defined(OS_WIN)');
+GEN('#if !defined(OS_MAC) && !defined(OS_LINUX) && !defined(OS_CHROMEOS) && !defined(OS_WIN)');
 defineTest(
     'EditDictionary', 'edit_dictionary_a11y_v3_test.js',
     {filter: violationFilterExcludeCustomInputAndTabindex});
@@ -67,11 +68,6 @@ function defineTest(testName, module, config) {
     get browsePreload() {
       return `chrome://settings/test_loader.html?module=settings/a11y/${
           module}`;
-    }
-
-    /** @override */
-    get featureListInternal() {
-      return {disabled: ['features::kPrivacySettingsRedesign']};
     }
   };
 

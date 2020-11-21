@@ -39,6 +39,8 @@ class TestWebState : public WebState {
   bool IsWebUsageEnabled() const override;
   void SetWebUsageEnabled(bool enabled) override;
   UIView* GetView() override;
+  void DidCoverWebContent() override;
+  void DidRevealWebContent() override;
   void WasShown() override;
   void WasHidden() override;
   void SetKeepRenderProcessAlive(bool keep_alive) override;
@@ -86,17 +88,19 @@ class TestWebState : public WebState {
 
   void AddPolicyDecider(WebStatePolicyDecider* decider) override;
   void RemovePolicyDecider(WebStatePolicyDecider* decider) override;
-  void DidChangeVisibleSecurityState() override {}
+  void DidChangeVisibleSecurityState() override;
   bool HasOpener() const override;
   void SetHasOpener(bool has_opener) override;
   bool CanTakeSnapshot() const override;
   void TakeSnapshot(const gfx::RectF& rect, SnapshotCallback callback) override;
+  void CreateFullPagePdf(base::OnceCallback<void(NSData*)> callback) override;
 
   // Setters for test data.
   void SetBrowserState(BrowserState* browser_state);
   void SetJSInjectionReceiver(CRWJSInjectionReceiver* injection_receiver);
   void SetTitle(const base::string16& title);
   void SetContentIsHTML(bool content_is_html);
+  void SetContentsMimeType(const std::string& mime_type);
   void SetLoading(bool is_loading);
   void SetCurrentURL(const GURL& url);
   void SetVisibleURL(const GURL& url);
@@ -127,10 +131,12 @@ class TestWebState : public WebState {
       base::OnceCallback<void(WebStatePolicyDecider::PolicyDecision)> callback);
   base::string16 GetLastExecutedJavascript() const;
   NSData* GetLastLoadedData() const;
+  bool IsClosed() const;
 
   // Notifier for tests.
   void OnPageLoaded(PageLoadCompletionStatus load_completion_status);
   void OnNavigationStarted(NavigationContext* navigation_context);
+  void OnNavigationRedirected(NavigationContext* context);
   void OnNavigationFinished(NavigationContext* navigation_context);
   void OnRenderProcessGone();
   void OnBackForwardStateChanged();
@@ -148,6 +154,7 @@ class TestWebState : public WebState {
   bool is_evicted_;
   bool has_opener_;
   bool can_take_snapshot_;
+  bool is_closed_;
   GURL url_;
   base::string16 title_;
   base::string16 last_executed_javascript_;
@@ -159,7 +166,7 @@ class TestWebState : public WebState {
   UIView* view_;
   CRWWebViewProxyType web_view_proxy_;
   NSData* last_loaded_data_;
-  base::CallbackList<ScriptCommandCallbackSignature> callback_list_;
+  base::RepeatingCallbackList<ScriptCommandCallbackSignature> callback_list_;
 
   // A list of observers notified when page state changes. Weak references.
   base::ObserverList<WebStateObserver, true>::Unchecked observers_;

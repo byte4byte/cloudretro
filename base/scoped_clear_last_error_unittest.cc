@@ -10,6 +10,7 @@
 
 #if defined(OS_WIN)
 #include <windows.h>
+#include "base/logging.h"
 #endif  // defined(OS_WIN)
 
 namespace base {

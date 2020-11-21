@@ -80,7 +80,10 @@ void CloseCrostiniUpdateFilesystemView() {
 }  // namespace crostini
 
 void CrostiniUpdateFilesystemView::Show(Profile* profile) {
-  DCHECK(crostini::CrostiniFeatures::Get()->IsUIAllowed(profile));
+  if (!crostini::CrostiniFeatures::Get()->IsAllowedNow(profile)) {
+    return;
+  }
+
   if (!g_crostini_update_filesystem_view_dialog) {
     g_crostini_update_filesystem_view_dialog =
         new CrostiniUpdateFilesystemView();
@@ -88,21 +91,6 @@ void CrostiniUpdateFilesystemView::Show(Profile* profile) {
                        nullptr);
   }
   g_crostini_update_filesystem_view_dialog->GetWidget()->Show();
-}
-
-base::string16 CrostiniUpdateFilesystemView::GetWindowTitle() const {
-  return l10n_util::GetStringUTF16(IDS_CROSTINI_UPGRADING_LABEL);
-}
-
-bool CrostiniUpdateFilesystemView::ShouldShowCloseButton() const {
-  return false;
-}
-
-gfx::Size CrostiniUpdateFilesystemView::CalculatePreferredSize() const {
-  const int dialog_width = ChromeLayoutProvider::Get()->GetDistanceMetric(
-                               DISTANCE_STANDALONE_BUBBLE_PREFERRED_WIDTH) -
-                           margins().width();
-  return gfx::Size(dialog_width, GetHeightForWidth(dialog_width));
 }
 
 // static
@@ -114,7 +102,12 @@ CrostiniUpdateFilesystemView::GetActiveViewForTesting() {
 CrostiniUpdateFilesystemView::CrostiniUpdateFilesystemView() {
   constexpr int kDialogSpacingVertical = 32;
 
-  DialogDelegate::SetButtons(ui::DIALOG_BUTTON_OK);
+  SetShowCloseButton(false);
+  SetTitle(IDS_CROSTINI_UPGRADING_LABEL);
+  SetButtons(ui::DIALOG_BUTTON_OK);
+
+  set_fixed_width(ChromeLayoutProvider::Get()->GetDistanceMetric(
+      DISTANCE_STANDALONE_BUBBLE_PREFERRED_WIDTH));
 
   views::LayoutProvider* provider = views::LayoutProvider::Get();
   SetLayoutManager(std::make_unique<views::BoxLayout>(

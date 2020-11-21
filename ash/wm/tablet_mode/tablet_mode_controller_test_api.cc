@@ -25,7 +25,9 @@ bool IsTabletModeControllerInitialized() {
 }  // namespace
 
 TabletModeControllerTestApi::TabletModeControllerTestApi()
-    : tablet_mode_controller_(Shell::Get()->tablet_mode_controller()) {}
+    : tablet_mode_controller_(Shell::Get()->tablet_mode_controller()) {
+  tablet_mode_controller_->OnDeviceListsComplete();
+}
 
 TabletModeControllerTestApi::~TabletModeControllerTestApi() = default;
 
@@ -88,7 +90,7 @@ void TabletModeControllerTestApi::DetachAllTouchpads() {
 
 void TabletModeControllerTestApi::TriggerLidUpdate(const gfx::Vector3dF& lid) {
   scoped_refptr<AccelerometerUpdate> update(new AccelerometerUpdate());
-  update->Set(ACCELEROMETER_SOURCE_SCREEN, false, lid.x(), lid.y(), lid.z());
+  update->Set(ACCELEROMETER_SOURCE_SCREEN, lid.x(), lid.y(), lid.z());
   tablet_mode_controller_->OnAccelerometerUpdated(update);
 }
 
@@ -96,9 +98,9 @@ void TabletModeControllerTestApi::TriggerBaseAndLidUpdate(
     const gfx::Vector3dF& base,
     const gfx::Vector3dF& lid) {
   scoped_refptr<AccelerometerUpdate> update(new AccelerometerUpdate());
-  update->Set(ACCELEROMETER_SOURCE_ATTACHED_KEYBOARD, false,
-              base.x(), base.y(), base.z());
-  update->Set(ACCELEROMETER_SOURCE_SCREEN, false, lid.x(), lid.y(), lid.z());
+  update->Set(ACCELEROMETER_SOURCE_ATTACHED_KEYBOARD, base.x(), base.y(),
+              base.z());
+  update->Set(ACCELEROMETER_SOURCE_SCREEN, lid.x(), lid.y(), lid.z());
   tablet_mode_controller_->OnAccelerometerUpdated(update);
 }
 

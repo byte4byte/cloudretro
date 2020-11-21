@@ -11,10 +11,11 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/logging.h"
 #include "base/numerics/ranges.h"
 #include "chromecast/media/audio/audio_fader.h"
+#include "chromecast/media/audio/audio_log.h"
 #include "chromecast/media/cma/backend/mixer/audio_output_redirector_input.h"
 #include "chromecast/media/cma/backend/mixer/channel_layout.h"
 #include "chromecast/media/cma/backend/mixer/filter_group.h"
@@ -29,7 +30,7 @@ namespace media {
 namespace {
 
 const int64_t kMicrosecondsPerSecond = 1000 * 1000;
-const int kDefaultSlewTimeMs = 15;
+const int kDefaultSlewTimeMs = 50;
 const int kDefaultFillBufferFrames = 2048;
 
 int RoundUpMultiple(int value, int multiple) {
@@ -47,7 +48,7 @@ MixerInput::MixerInput(Source* source, FilterGroup* filter_group)
       primary_(source->primary()),
       device_id_(source->device_id()),
       content_type_(source->content_type()),
-      slew_volume_(kDefaultSlewTimeMs),
+      slew_volume_(kDefaultSlewTimeMs, true),
       volume_applied_(false),
       previous_ended_in_silence_(false),
       first_buffer_(true),
@@ -117,8 +118,9 @@ void MixerInput::SetFilterGroup(FilterGroup* filter_group) {
     if (filter_group->num_channels() == num_channels_) {
       channel_mixer_.reset();
     } else {
-      LOG(INFO) << "Remixing channels for " << source_ << " from "
-                << num_channels_ << " to " << filter_group->num_channels();
+      AUDIO_LOG(INFO) << "Remixing channels for " << source_ << " from "
+                      << num_channels_ << " to "
+                      << filter_group->num_channels();
       channel_mixer_ = std::make_unique<::media::ChannelMixer>(
           mixer::CreateAudioParametersForChannelMixer(channel_layout_,
                                                       num_channels_),
@@ -131,7 +133,8 @@ void MixerInput::SetFilterGroup(FilterGroup* filter_group) {
 
 void MixerInput::AddAudioOutputRedirector(
     AudioOutputRedirectorInput* redirector) {
-  LOG(INFO) << "Add redirector to " << device_id_ << "(" << source_ << ")";
+  AUDIO_LOG(INFO) << "Add redirector to " << device_id_ << "(" << source_
+                  << ")";
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(redirector);
   audio_output_redirectors_.insert(
@@ -146,7 +149,8 @@ void MixerInput::AddAudioOutputRedirector(
 
 void MixerInput::RemoveAudioOutputRedirector(
     AudioOutputRedirectorInput* redirector) {
-  LOG(INFO) << "Remove redirector from " << device_id_ << "(" << source_ << ")";
+  AUDIO_LOG(INFO) << "Remove redirector from " << device_id_ << "(" << source_
+                  << ")";
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(redirector);
   audio_output_redirectors_.erase(
@@ -217,12 +221,12 @@ int MixerInput::FillAudioData(int num_frames,
   // and then do channel selection. Currently if the input is mono we don't
   // bother doing channel selection since the result would be the same as
   // doing nothing anyway.
-  if (source_->playout_channel() != kChannelAll &&
-      source_->playout_channel() < num_channels_) {
+  int playout_channel = source_->playout_channel();
+  if (playout_channel != kChannelAll && playout_channel < num_channels_) {
     // Duplicate selected channel to all channels.
     for (int c = 0; c < num_channels_; ++c) {
       if (c != source_->playout_channel()) {
-        std::copy_n(fill_dest->channel(source_->playout_channel()), filled,
+        std::copy_n(fill_dest->channel(playout_channel), filled,
                     fill_dest->channel(c));
       }
     }
@@ -231,6 +235,10 @@ int MixerInput::FillAudioData(int num_frames,
   // Mix channels if necessary.
   if (channel_mixer_) {
     channel_mixer_->TransformPartial(fill_dest, filled, dest);
+  }
+
+  if (filled != num_frames) {
+    slew_volume_.Interrupted();
   }
 
   return filled;
@@ -249,7 +257,27 @@ int MixerInput::FillBuffer(int num_frames,
     // resampler_->BufferedFrames() gives incorrect values in the read callback,
     // so track the number of buffered frames ourselves.
     resampler_buffered_frames_ = resampler_->BufferedFrames();
+    filled_for_resampler_ = 0;
+    tried_to_fill_resampler_ = false;
     resampler_->Resample(num_frames, dest);
+    // If the source is not providing any audio anymore, we want to stop filling
+    // frames so we can reduce processing overhead. However, since the resampler
+    // fill size doesn't necessarily match the mixer's request size at all, we
+    // need to be careful. The resampler could have a lot of data buffered
+    // internally, so we only count cases where the resampler needed more data
+    // from the source but none was available. Then, to make sure all data is
+    // flushed out of the resampler, we require that to happen twice before we
+    // stop filling audio.
+    if (tried_to_fill_resampler_) {
+      if (filled_for_resampler_ == 0) {
+        resampled_silence_count_ = std::min(resampled_silence_count_ + 1, 2);
+      } else {
+        resampled_silence_count_ = 0;
+      }
+    }
+    if (resampled_silence_count_ > 1) {
+      return 0;
+    }
     return num_frames;
   } else {
     return source_->FillAudioPlaybackFrames(num_frames, rendering_delay, dest);
@@ -267,7 +295,9 @@ void MixerInput::ResamplerReadCallback(int frame_delay,
   delay.delay_microseconds += resampler_delay;
 
   const int needed_frames = output->frames();
+  tried_to_fill_resampler_ = true;
   int filled = source_->FillAudioPlaybackFrames(needed_frames, delay, output);
+  filled_for_resampler_ += filled;
   if (filled < needed_frames) {
     output->ZeroFramesPartial(filled, needed_frames - filled);
   }
@@ -297,9 +327,9 @@ void MixerInput::SetVolumeMultiplier(float multiplier) {
   float old_target_volume = TargetVolume();
   stream_volume_multiplier_ = std::max(0.0f, multiplier);
   float target_volume = TargetVolume();
-  LOG(INFO) << device_id_ << "(" << source_
-            << "): stream volume = " << stream_volume_multiplier_
-            << ", effective multiplier = " << target_volume;
+  AUDIO_LOG(INFO) << device_id_ << "(" << source_
+                  << "): stream volume = " << stream_volume_multiplier_
+                  << ", effective multiplier = " << target_volume;
   if (target_volume != old_target_volume) {
     slew_volume_.SetMaxSlewTimeMs(kDefaultSlewTimeMs);
     slew_volume_.SetVolume(target_volume);
@@ -313,9 +343,9 @@ void MixerInput::SetContentTypeVolume(float volume) {
   float old_target_volume = TargetVolume();
   type_volume_multiplier_ = volume;
   float target_volume = TargetVolume();
-  LOG(INFO) << device_id_ << "(" << source_
-            << "): type volume = " << type_volume_multiplier_
-            << ", effective multiplier = " << target_volume;
+  AUDIO_LOG(INFO) << device_id_ << "(" << source_
+                  << "): type volume = " << type_volume_multiplier_
+                  << ", effective multiplier = " << target_volume;
   if (target_volume != old_target_volume) {
     slew_volume_.SetMaxSlewTimeMs(kDefaultSlewTimeMs);
     slew_volume_.SetVolume(target_volume);
@@ -328,8 +358,8 @@ void MixerInput::SetVolumeLimits(float volume_min, float volume_max) {
   volume_min_ = volume_min;
   volume_max_ = volume_max;
   float target_volume = TargetVolume();
-  LOG(INFO) << device_id_ << "(" << source_ << "): set volume limits to ["
-            << volume_min_ << ", " << volume_max_ << "]";
+  AUDIO_LOG(INFO) << device_id_ << "(" << source_ << "): set volume limits to ["
+                  << volume_min_ << ", " << volume_max_ << "]";
   if (target_volume != old_target_volume) {
     slew_volume_.SetMaxSlewTimeMs(kDefaultSlewTimeMs);
     slew_volume_.SetVolume(target_volume);
@@ -341,13 +371,13 @@ void MixerInput::SetOutputLimit(float limit, int fade_ms) {
   float old_target_volume = TargetVolume();
   output_volume_limit_ = limit;
   float target_volume = TargetVolume();
-  LOG(INFO) << device_id_ << "(" << source_
-            << "): output limit = " << output_volume_limit_
-            << ", effective multiplier = " << target_volume;
+  AUDIO_LOG(INFO) << device_id_ << "(" << source_
+                  << "): output limit = " << output_volume_limit_
+                  << ", effective multiplier = " << target_volume;
   if (fade_ms < 0) {
     fade_ms = kDefaultSlewTimeMs;
   } else {
-    LOG(INFO) << "Fade over " << fade_ms << " ms";
+    AUDIO_LOG(INFO) << "Fade over " << fade_ms << " ms";
   }
   if (target_volume != old_target_volume) {
     slew_volume_.SetMaxSlewTimeMs(fade_ms);
@@ -362,9 +392,9 @@ void MixerInput::SetMuted(bool muted) {
   float old_target_volume = TargetVolume();
   mute_volume_multiplier_ = muted ? 0.0f : 1.0f;
   float target_volume = TargetVolume();
-  LOG(INFO) << device_id_ << "(" << source_
-            << "): mute volume = " << mute_volume_multiplier_
-            << ", effective multiplier = " << target_volume;
+  AUDIO_LOG(INFO) << device_id_ << "(" << source_
+                  << "): mute volume = " << mute_volume_multiplier_
+                  << ", effective multiplier = " << target_volume;
   if (target_volume != old_target_volume) {
     slew_volume_.SetMaxSlewTimeMs(kDefaultSlewTimeMs);
     slew_volume_.SetVolume(target_volume);

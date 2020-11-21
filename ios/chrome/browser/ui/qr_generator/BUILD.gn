@@ -13,6 +13,7 @@ source_set("ui") {
   deps = [
     "//base",
     "//ios/chrome/app/strings",
+    "//ios/chrome/browser/ui:feature_flags",
     "//ios/chrome/browser/ui/commands",
     "//ios/chrome/browser/ui/util",
     "//ios/chrome/common/ui/confirmation_alert",
@@ -34,11 +35,16 @@ source_set("qr_generator") {
   deps = [
     ":ui",
     "//base",
+    "//ios/chrome/app/strings",
     "//ios/chrome/browser/main:public",
+    "//ios/chrome/browser/ui/activity_services",
+    "//ios/chrome/browser/ui/activity_services/requirements",
     "//ios/chrome/browser/ui/commands",
     "//ios/chrome/browser/ui/coordinators:chrome_coordinators",
     "//ios/chrome/common/ui/confirmation_alert",
+    "//ios/chrome/common/ui/elements:popover_label_view_controller",
     "//net",
+    "//ui/base",
   ]
 }
 
@@ -57,6 +63,7 @@ source_set("unit_tests") {
     "//ios/chrome/browser/main:test_support",
     "//ios/chrome/browser/ui/commands",
     "//ios/chrome/common/ui/confirmation_alert",
+    "//ios/chrome/common/ui/elements:popover_label_view_controller",
     "//ios/chrome/test:test_support",
     "//ios/chrome/test/fakes",
     "//ios/web",

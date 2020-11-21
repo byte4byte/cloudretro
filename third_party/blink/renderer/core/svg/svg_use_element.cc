@@ -33,7 +33,9 @@
 #include "third_party/blink/renderer/core/dom/id_target_observer.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/dom/xml_document.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/layout/svg/layout_svg_transformable_container.h"
+#include "third_party/blink/renderer/core/svg/svg_animated_length.h"
 #include "third_party/blink/renderer/core/svg/svg_g_element.h"
 #include "third_party/blink/renderer/core/svg/svg_length_context.h"
 #include "third_party/blink/renderer/core/svg/svg_svg_element.h"
@@ -90,7 +92,7 @@ SVGUseElement::SVGUseElement(Document& document)
 
 SVGUseElement::~SVGUseElement() = default;
 
-void SVGUseElement::Trace(Visitor* visitor) {
+void SVGUseElement::Trace(Visitor* visitor) const {
   visitor->Trace(cache_entry_);
   visitor->Trace(x_);
   visitor->Trace(y_);
@@ -208,17 +210,16 @@ void SVGUseElement::UpdateTargetReference() {
     // context document for getting origin and ResourceFetcher to use the
     // main Document's origin, while using the element document for
     // CompleteURL() to use imported Documents' base URLs.
-    if (!GetDocument().ContextDocument()) {
-      cache_entry_ = nullptr;
-      return;
-    }
-    context_document = GetDocument().ContextDocument();
+    context_document =
+        To<LocalDOMWindow>(GetDocument().GetExecutionContext())->document();
   }
   cache_entry_ = SVGExternalDocumentCache::From(*context_document)
                      ->Get(this, element_url_, localName());
 }
 
-void SVGUseElement::SvgAttributeChanged(const QualifiedName& attr_name) {
+void SVGUseElement::SvgAttributeChanged(
+    const SvgAttributeChangedParams& params) {
+  const QualifiedName& attr_name = params.name;
   if (attr_name == svg_names::kXAttr || attr_name == svg_names::kYAttr ||
       attr_name == svg_names::kWidthAttr ||
       attr_name == svg_names::kHeightAttr) {
@@ -250,7 +251,7 @@ void SVGUseElement::SvgAttributeChanged(const QualifiedName& attr_name) {
     return;
   }
 
-  SVGGraphicsElement::SvgAttributeChanged(attr_name);
+  SVGGraphicsElement::SvgAttributeChanged(params);
 }
 
 static bool IsDisallowedElement(const Element& element) {
@@ -563,8 +564,8 @@ bool SVGUseElement::SelfHasRelativeLengths() const {
 
 FloatRect SVGUseElement::GetBBox() {
   DCHECK(GetLayoutObject());
-  LayoutSVGTransformableContainer& transformable_container =
-      ToLayoutSVGTransformableContainer(*GetLayoutObject());
+  auto& transformable_container =
+      To<LayoutSVGTransformableContainer>(*GetLayoutObject());
   // Don't apply the additional translation if the oBB is invalid.
   if (!transformable_container.IsObjectBoundingBoxValid())
     return FloatRect();

@@ -11,6 +11,7 @@
 #include <set>
 #include <vector>
 
+#include "base/optional.h"
 #include "base/strings/string16.h"
 #include "base/time/time.h"
 
@@ -28,7 +29,17 @@ namespace bookmark_utils_ios {
 typedef std::vector<const bookmarks::BookmarkNode*> NodeVector;
 typedef std::set<const bookmarks::BookmarkNode*> NodeSet;
 
+// Finds bookmark nodes from passed in |ids|. The optional is only set if all
+// the |ids| have been found.
+base::Optional<NodeSet> FindNodesByIds(bookmarks::BookmarkModel* model,
+                                       const std::set<int64_t>& ids);
+
 // Finds bookmark node passed in |id|, in the |model|.
+const bookmarks::BookmarkNode* FindNodeById(bookmarks::BookmarkModel* model,
+                                            int64_t id);
+
+// Finds bookmark node passed in |id|, in the |model|. Returns null if the
+// node is found but not a folder.
 const bookmarks::BookmarkNode* FindFolderById(bookmarks::BookmarkModel* model,
                                               int64_t id);
 
@@ -42,20 +53,30 @@ NSString* subtitleForBookmarkNode(const bookmarks::BookmarkNode* node);
 // Returns the current status bar height.
 CGFloat StatusBarHeight();
 
-// Returns whether the bookmark menu should be presented in a slide in panel.
-BOOL bookmarkMenuIsInSlideInPanel();
-
 #pragma mark - Updating Bookmarks
 
 // Creates the bookmark if |node| is NULL. Otherwise updates |node|.
 // |folder| is the intended parent of |node|.
 // Returns a snackbar with an undo action, returns nil if operation wasn't
 // successful or there's nothing to undo.
+// TODO(crbug.com/1099901): Refactor to include position and replace two
+// functions below.
 MDCSnackbarMessage* CreateOrUpdateBookmarkWithUndoToast(
     const bookmarks::BookmarkNode* node,
     NSString* title,
     const GURL& url,
     const bookmarks::BookmarkNode* folder,
+    bookmarks::BookmarkModel* bookmark_model,
+    ChromeBrowserState* browser_state);
+
+// Creates a new bookmark with |title|, |url|, at |position| under parent
+// |folder|. Returns a snackbar with an undo action. Returns nil if operation
+// failed or there's nothing to undo.
+MDCSnackbarMessage* CreateBookmarkAtPositionWithUndoToast(
+    NSString* title,
+    const GURL& url,
+    const bookmarks::BookmarkNode* folder,
+    int position,
     bookmarks::BookmarkModel* bookmark_model,
     ChromeBrowserState* browser_state);
 

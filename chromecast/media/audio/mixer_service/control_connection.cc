@@ -6,7 +6,6 @@
 
 #include <utility>
 
-#include "base/logging.h"
 #include "chromecast/media/audio/mixer_service/conversions.h"
 #include "chromecast/media/audio/mixer_service/mixer_service.pb.h"
 #include "net/socket/stream_socket.h"
@@ -69,6 +68,17 @@ void ControlConnection::SetVolumeLimit(AudioContentType type,
     limit->set_max_volume_multiplier(max_volume_multiplier);
     socket_->SendProto(message);
   }
+}
+
+void ControlConnection::ListPostprocessors(
+    ListPostprocessorsCallback callback) {
+  list_postprocessors_callbacks_.push_back(std::move(callback));
+  if (!socket_) {
+    return;
+  }
+  Generic proto;
+  proto.mutable_list_postprocessors();
+  socket_->SendProto(proto);
 }
 
 void ControlConnection::ConfigurePostprocessor(std::string postprocessor_name,
@@ -170,6 +180,12 @@ void ControlConnection::OnConnected(std::unique_ptr<MixerSocket> socket) {
     SendPostprocessorMessage(item.first, item.second);
   }
 
+  if (!list_postprocessors_callbacks_.empty()) {
+    Generic message;
+    message.mutable_list_postprocessors();
+    socket_->SendProto(message);
+  }
+
   if (connect_callback_) {
     connect_callback_.Run();
   }
@@ -185,6 +201,18 @@ bool ControlConnection::HandleMetadata(const Generic& message) {
     stream_count_callback_.Run(message.stream_count().primary(),
                                message.stream_count().sfx());
   }
+  if (message.has_postprocessor_list()) {
+    std::vector<std::string> post_processors;
+    for (const auto& post_processor :
+         message.postprocessor_list().postprocessors()) {
+      post_processors.push_back(post_processor);
+    }
+    while (!list_postprocessors_callbacks_.empty()) {
+      std::move(list_postprocessors_callbacks_.front()).Run(post_processors);
+      list_postprocessors_callbacks_.pop_front();
+    }
+  }
+
   return true;
 }
 

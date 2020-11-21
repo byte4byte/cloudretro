@@ -37,12 +37,18 @@ class StubLayerTreeViewDelegate : public LayerTreeViewDelegate {
   void WillCommitCompositorFrame() override {}
   void DidCommitCompositorFrame(base::TimeTicks commit_start_time) override {}
   void DidCompletePageScaleAnimation() override {}
+  void DidObserveFirstScrollDelay(
+      base::TimeDelta first_scroll_delay,
+      base::TimeTicks first_scroll_timestamp) override {}
   void RecordStartOfFrameMetrics() override {}
   void RecordEndOfFrameMetrics(
       base::TimeTicks frame_begin_time,
       cc::ActiveFrameSequenceTrackers trackers) override {}
   std::unique_ptr<cc::BeginMainFrameMetrics> GetBeginMainFrameMetrics()
       override {
+    return nullptr;
+  }
+  std::unique_ptr<cc::WebVitalMetrics> GetWebVitalMetrics() override {
     return nullptr;
   }
   void BeginUpdateLayers() override {}

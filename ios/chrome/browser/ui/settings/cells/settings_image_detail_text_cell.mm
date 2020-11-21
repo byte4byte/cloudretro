@@ -4,7 +4,7 @@
 
 #import "ios/chrome/browser/ui/settings/cells/settings_image_detail_text_cell.h"
 
-#include "base/logging.h"
+#include "base/check.h"
 #include "ios/chrome/browser/ui/table_view/cells/table_view_cells_constants.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
 #import "ios/chrome/common/ui/colors/UIColor+cr_semantic_colors.h"
@@ -61,7 +61,6 @@
   _detailTextLabel.font =
       [UIFont preferredFontForTextStyle:kTableViewSublabelFontStyle];
   _detailTextLabel.adjustsFontForContentSizeCategory = YES;
-  _detailTextLabel.textColor = UIColor.cr_secondaryLabelColor;
 }
 
 // Sets constraints on subviews.
@@ -110,6 +109,10 @@
         constraintGreaterThanOrEqualToAnchor:textStackView.bottomAnchor
                                     constant:
                                         kTableViewTwoLabelsCellVerticalSpacing],
+
+    // Leading constraint for |customSepartor|.
+    [self.customSeparator.leadingAnchor
+        constraintEqualToAnchor:self.textLabel.leadingAnchor],
   ]];
 }
 

@@ -14,13 +14,23 @@ import android.util.Property;
 import android.view.MotionEvent;
 import android.view.View;
 
+import androidx.annotation.NonNull;
+
+import org.chromium.base.supplier.ObservableSupplier;
+import org.chromium.base.supplier.OneshotSupplier;
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.WindowDelegate;
 import org.chromium.chrome.browser.download.DownloadUtils;
-import org.chromium.chrome.browser.ntp.NewTabPage;
+import org.chromium.chrome.browser.omnibox.status.StatusCoordinator;
+import org.chromium.chrome.browser.omnibox.suggestions.AutocompleteCoordinator;
+import org.chromium.chrome.browser.omnibox.voice.AssistantVoiceSearchService;
+import org.chromium.chrome.browser.omnibox.voice.VoiceRecognitionHandler;
+import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.toolbar.top.ToolbarTablet;
 import org.chromium.components.browser_ui.widget.animation.CancelAwareAnimatorListener;
 import org.chromium.ui.base.LocalizationUtils;
+import org.chromium.ui.base.WindowAndroid;
 import org.chromium.ui.interpolators.BakedBezierInterpolator;
 
 import java.util.ArrayList;
@@ -29,7 +39,7 @@ import java.util.List;
 /**
  * Location bar for tablet form factors.
  */
-public class LocationBarTablet extends LocationBarLayout {
+class LocationBarTablet extends LocationBarLayout {
     private static final long MAX_NTP_KEYBOARD_FOCUS_DURATION_MS = 200;
 
     private static final int ICON_FADE_ANIMATION_DURATION_MS = 150;
@@ -37,29 +47,29 @@ public class LocationBarTablet extends LocationBarLayout {
     private static final int WIDTH_CHANGE_ANIMATION_DURATION_MS = 225;
     private static final int WIDTH_CHANGE_ANIMATION_DELAY_MS = 75;
 
-    private final Property<LocationBarTablet, Float> mUrlFocusChangePercentProperty =
+    private final Property<LocationBarTablet, Float> mUrlFocusChangeFractionProperty =
             new Property<LocationBarTablet, Float>(Float.class, "") {
                 @Override
                 public Float get(LocationBarTablet object) {
-                    return object.mUrlFocusChangePercent;
+                    return object.mUrlFocusChangeFraction;
                 }
 
                 @Override
                 public void set(LocationBarTablet object, Float value) {
-                    setUrlFocusChangePercent(value);
+                    setUrlFocusChangeFraction(value);
                 }
             };
 
-    private final Property<LocationBarTablet, Float> mWidthChangePercentProperty =
+    private final Property<LocationBarTablet, Float> mWidthChangeFractionProperty =
             new Property<LocationBarTablet, Float>(Float.class, "") {
                 @Override
                 public Float get(LocationBarTablet object) {
-                    return object.mWidthChangePercent;
+                    return object.mWidthChangeFraction;
                 }
 
                 @Override
                 public void set(LocationBarTablet object, Float value) {
-                    setWidthChangeAnimationPercent(value);
+                    setWidthChangeAnimationFraction(value);
                 }
             };
 
@@ -78,7 +88,7 @@ public class LocationBarTablet extends LocationBarLayout {
     private final int mToolbarButtonsWidth;
     private final int mMicButtonWidth;
     private boolean mAnimatingWidthChange;
-    private float mWidthChangePercent;
+    private float mWidthChangeFraction;
     private float mLayoutLeft;
     private float mLayoutRight;
     private int mToolbarStartPaddingDifference;
@@ -104,8 +114,25 @@ public class LocationBarTablet extends LocationBarLayout {
         mSaveOfflineButton = findViewById(R.id.save_offline_button);
 
         mTargets = new View[] {mUrlBar, mDeleteButton};
-        mStatusViewCoordinator.setShowIconsWhenUrlFocused(true);
-        mStatusViewCoordinator.setStatusIconShown(true);
+    }
+
+    @Override
+    public void initialize(@NonNull AutocompleteCoordinator autocompleteCoordinator,
+            @NonNull UrlBarCoordinator urlCoordinator, @NonNull StatusCoordinator statusCoordinator,
+            @NonNull LocationBarDataProvider locationBarDataProvider,
+            @NonNull ObservableSupplier<Profile> profileSupplier,
+            @NonNull WindowDelegate windowDelegate, @NonNull WindowAndroid windowAndroid,
+            @NonNull OverrideUrlLoadingDelegate overrideUrlLoadingDelegate,
+            @NonNull VoiceRecognitionHandler voiceRecognitionHandler,
+            @NonNull OneshotSupplier<AssistantVoiceSearchService> assistantVoiceSearchSupplier) {
+        super.initialize(autocompleteCoordinator, urlCoordinator, statusCoordinator,
+                locationBarDataProvider, profileSupplier, windowDelegate, windowAndroid,
+                overrideUrlLoadingDelegate, voiceRecognitionHandler, assistantVoiceSearchSupplier);
+        mStatusCoordinator.setShowIconsWhenUrlFocused(true);
+        if (SearchEngineLogoUtils.shouldShowSearchEngineLogo(
+                    mLocationBarDataProvider.isIncognito())) {
+            mStatusCoordinator.setStatusIconShown(true);
+        }
     }
 
     @Override
@@ -141,11 +168,6 @@ public class LocationBarTablet extends LocationBarLayout {
         return selectedTarget.onTouchEvent(event);
     }
 
-    // Returns amount by which to adjust to move value inside the given range.
-    private static float distanceToRange(float min, float max, float value) {
-        return value < min ? (min - value) : value > max ? (max - value) : 0;
-    }
-
     @Override
     public void handleUrlFocusAnimation(final boolean hasFocus) {
         super.handleUrlFocusAnimation(hasFocus);
@@ -155,7 +177,7 @@ public class LocationBarTablet extends LocationBarLayout {
             mUrlFocusChangeAnimator = null;
         }
 
-        if (getToolbarDataProvider().getNewTabPageForCurrentTab() == null) {
+        if (mLocationBarDataProvider.getNewTabPageDelegate().isCurrentlyVisible()) {
             finishUrlFocusChange(hasFocus);
             return;
         }
@@ -165,7 +187,7 @@ public class LocationBarTablet extends LocationBarLayout {
         float screenSizeRatio = (rootViewBounds.height()
                 / (float) (Math.max(rootViewBounds.height(), rootViewBounds.width())));
         mUrlFocusChangeAnimator =
-                ObjectAnimator.ofFloat(this, mUrlFocusChangePercentProperty, hasFocus ? 1f : 0f);
+                ObjectAnimator.ofFloat(this, mUrlFocusChangeFractionProperty, hasFocus ? 1f : 0f);
         mUrlFocusChangeAnimator.setDuration(
                 (long) (MAX_NTP_KEYBOARD_FOCUS_DURATION_MS * screenSizeRatio));
         mUrlFocusChangeAnimator.addListener(new CancelAwareAnimatorListener() {
@@ -184,23 +206,15 @@ public class LocationBarTablet extends LocationBarLayout {
     }
 
     /**
-     * @param shouldShowButtons Whether buttons should be displayed in the URL bar when it's not
-     *                          focused.
+     * Updates progress of current the URL focus change animation.
+     *
+     * @param fraction 1.0 is 100% focused, 0 is completely unfocused.
      */
-    public void setShouldShowButtonsWhenUnfocused(boolean shouldShowButtons) {
-        mShouldShowButtonsWhenUnfocused = shouldShowButtons;
-        updateButtonVisibility();
-    }
-
-    /**
-     * Updates percentage of current the URL focus change animation.
-     * @param percent 1.0 is 100% focused, 0 is completely unfocused.
-     */
-    private void setUrlFocusChangePercent(float percent) {
-        mUrlFocusChangePercent = percent;
-
-        NewTabPage ntp = getToolbarDataProvider().getNewTabPageForCurrentTab();
-        if (ntp != null) ntp.setUrlFocusChangeAnimationPercent(percent);
+    @Override
+    public void setUrlFocusChangeFraction(float fraction) {
+        super.setUrlFocusChangeFraction(fraction);
+        mLocationBarDataProvider.getNewTabPageDelegate().setUrlFocusChangeAnimationPercent(
+                fraction);
     }
 
     @Override
@@ -224,15 +238,15 @@ public class LocationBarTablet extends LocationBarLayout {
     }
 
     @Override
-    public void onSuggestionsHidden() {
+    void onSuggestionsHidden() {
         super.onSuggestionsHidden();
-        mStatusViewCoordinator.setFirstSuggestionIsSearchType(false);
+        mStatusCoordinator.setFirstSuggestionIsSearchType(false);
     }
 
     @Override
-    public void onSuggestionsChanged(String autocompleteText) {
+    void onSuggestionsChanged(String autocompleteText) {
         super.onSuggestionsChanged(autocompleteText);
-        mStatusViewCoordinator.setFirstSuggestionIsSearchType(
+        mStatusCoordinator.setFirstSuggestionIsSearchType(
                 mAutocompleteCoordinator.getSuggestionCount() > 0
                 && mAutocompleteCoordinator.getSuggestionAt(0).isSearchSuggestion());
     }
@@ -256,8 +270,17 @@ public class LocationBarTablet extends LocationBarLayout {
         mLayoutRight = right;
 
         if (mAnimatingWidthChange) {
-            setWidthChangeAnimationPercent(mWidthChangePercent);
+            setWidthChangeAnimationFraction(mWidthChangeFraction);
         }
+    }
+
+    /**
+     * @param shouldShowButtons Whether buttons should be displayed in the URL bar when it's not
+     *                          focused.
+     */
+    public void setShouldShowButtonsWhenUnfocused(boolean shouldShowButtons) {
+        mShouldShowButtonsWhenUnfocused = shouldShowButtons;
+        updateButtonVisibility();
     }
 
     /**
@@ -303,7 +326,7 @@ public class LocationBarTablet extends LocationBarLayout {
         ArrayList<Animator> animators = new ArrayList<>();
 
         Animator widthChangeAnimator =
-                ObjectAnimator.ofFloat(this, mWidthChangePercentProperty, 0f);
+                ObjectAnimator.ofFloat(this, mWidthChangeFractionProperty, 0f);
         widthChangeAnimator.setDuration(WIDTH_CHANGE_ANIMATION_DURATION_MS);
         widthChangeAnimator.setInterpolator(BakedBezierInterpolator.TRANSFORM_CURVE);
         widthChangeAnimator.addListener(new AnimatorListenerAdapter() {
@@ -317,7 +340,7 @@ public class LocationBarTablet extends LocationBarLayout {
             public void onAnimationEnd(Animator animation) {
                 // Only reset values if the animation is ending because it's completely finished
                 // and not because it was canceled.
-                if (mWidthChangePercent == 0.f) {
+                if (mWidthChangeFraction == 0.f) {
                     mAnimatingWidthChange = false;
                     resetValuesAfterAnimation();
                 }
@@ -357,7 +380,7 @@ public class LocationBarTablet extends LocationBarLayout {
         ArrayList<Animator> animators = new ArrayList<>();
 
         Animator widthChangeAnimator =
-                ObjectAnimator.ofFloat(this, mWidthChangePercentProperty, 1f);
+                ObjectAnimator.ofFloat(this, mWidthChangeFractionProperty, 1f);
         widthChangeAnimator.setStartDelay(WIDTH_CHANGE_ANIMATION_DELAY_MS);
         widthChangeAnimator.setDuration(WIDTH_CHANGE_ANIMATION_DURATION_MS);
         widthChangeAnimator.setInterpolator(BakedBezierInterpolator.TRANSFORM_CURVE);
@@ -371,7 +394,7 @@ public class LocationBarTablet extends LocationBarLayout {
             public void onAnimationEnd(Animator animation) {
                 // Only reset values if the animation is ending because it's completely finished
                 // and not because it was canceled.
-                if (mWidthChangePercent == 1.f) {
+                if (mWidthChangeFraction == 1.f) {
                     mAnimatingWidthChange = false;
                     resetValuesAfterAnimation();
                     setShouldShowButtonsWhenUnfocused(false);
@@ -401,6 +424,11 @@ public class LocationBarTablet extends LocationBarLayout {
         return animators;
     }
 
+    /** Returns amount by which to adjust to move value inside the given range. */
+    private static float distanceToRange(float min, float max, float value) {
+        return value < min ? (min - value) : value > max ? (max - value) : 0;
+    }
+
     /**
      * Resets the alpha and translation X for all views affected by the animations for showing or
      * hiding buttons.
@@ -420,15 +448,16 @@ public class LocationBarTablet extends LocationBarLayout {
     }
 
     /**
-     * Updates completion percentage for the location bar width change animation.
-     * @param percent How complete the animation is, where 0 represents the normal width (toolbar
-     *                buttons fully visible) and 1.f represents the expanded width (toolbar buttons
-     *                fully hidden).
+     * Updates completion progress for the location bar width change animation.
+     *
+     * @param fraction How complete the animation is, where 0 represents the normal width (toolbar
+     *         buttons fully visible) and 1.f represents the expanded width (toolbar buttons fully
+     *         hidden).
      */
-    private void setWidthChangeAnimationPercent(float percent) {
-        mWidthChangePercent = percent;
+    private void setWidthChangeAnimationFraction(float fraction) {
+        mWidthChangeFraction = fraction;
 
-        float offset = (mToolbarButtonsWidth + mToolbarStartPaddingDifference) * percent;
+        float offset = (mToolbarButtonsWidth + mToolbarStartPaddingDifference) * fraction;
 
         if (LocalizationUtils.isLayoutRtl()) {
             // The location bar's right edge is its regular layout position when toolbar buttons are
@@ -445,7 +474,7 @@ public class LocationBarTablet extends LocationBarLayout {
         // As the location bar's right edge moves right (increases) or left edge moves left
         // (decreases), the child views' translation X increases, keeping them visually in the same
         // location for the duration of the animation.
-        int deleteOffset = (int) (mMicButtonWidth * percent);
+        int deleteOffset = (int) (mMicButtonWidth * fraction);
         setChildTranslationsForWidthChangeAnimation((int) offset, deleteOffset);
     }
 
@@ -491,8 +520,8 @@ public class LocationBarTablet extends LocationBarLayout {
     }
 
     private boolean shouldShowSaveOfflineButton() {
-        if (!mNativeInitialized || mToolbarDataProvider == null) return false;
-        Tab tab = mToolbarDataProvider.getTab();
+        if (!mNativeInitialized || mLocationBarDataProvider == null) return false;
+        Tab tab = mLocationBarDataProvider.getTab();
         if (tab == null) return false;
         // The save offline button should not be shown on native pages. Currently, trying to
         // save an offline page in incognito crashes, so don't show it on incognito either.
@@ -500,8 +529,8 @@ public class LocationBarTablet extends LocationBarLayout {
     }
 
     private boolean isSaveOfflineButtonEnabled() {
-        if (mToolbarDataProvider == null) return false;
-        return DownloadUtils.isAllowedToDownloadPage(mToolbarDataProvider.getTab());
+        if (mLocationBarDataProvider == null) return false;
+        return DownloadUtils.isAllowedToDownloadPage(mLocationBarDataProvider.getTab());
     }
 
     private boolean shouldShowPageActionButtons() {

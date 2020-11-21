@@ -4,6 +4,7 @@
 
 package org.chromium.chrome.browser.webapps;
 
+import android.content.Intent;
 import android.graphics.Bitmap;
 
 import org.chromium.base.Callback;
@@ -13,6 +14,7 @@ import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.NativeMethods;
 import org.chromium.base.task.AsyncTask;
 import org.chromium.chrome.browser.AppHooks;
+import org.chromium.chrome.browser.browserservices.BrowserServicesIntentDataProvider;
 import org.chromium.chrome.browser.metrics.WebApkUma;
 
 /**
@@ -82,16 +84,18 @@ public class WebApkInstaller {
 
                 // Stores the source info of WebAPK in WebappDataStorage.
                 WebappRegistry.getInstance().register(
-                        WebappRegistry.webApkIdForPackage(packageName),
+                        WebappIntentUtils.getIdForWebApkPackage(packageName),
                         new WebappRegistry.FetchWebappDataStorageCallback() {
                             @Override
                             public void onWebappDataStorageRetrieved(WebappDataStorage storage) {
-                                WebappInfo webApkInfo = WebApkInfo.create(packageName, null, source,
-                                        false /* forceNavigation */,
-                                        false /* canUseSplashFromContentProvider */,
-                                        null /* shareData */,
-                                        null /* shareDataActivityClassName */);
-                                storage.updateFromWebappInfo(webApkInfo);
+                                BrowserServicesIntentDataProvider intentDataProvider =
+                                        WebApkIntentDataProviderFactory.create(new Intent(),
+                                                packageName, null, source,
+                                                false /* forceNavigation */,
+                                                false /* canUseSplashFromContentProvider */,
+                                                null /* shareData */,
+                                                null /* shareDataActivityClassName */);
+                                storage.updateFromWebappIntentDataProvider(intentDataProvider);
                                 storage.updateSource(source);
                                 storage.updateTimeOfLastCheckForUpdatedWebManifest();
                             }

@@ -5,7 +5,6 @@
 #include "chrome/browser/chromeos/power/ml/smart_dim/download_worker.h"
 
 #include "base/bind.h"
-#include "base/task/post_task.h"
 #include "base/task/task_traits.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "chrome/browser/chromeos/power/ml/smart_dim/metrics.h"
@@ -21,7 +20,7 @@ namespace power {
 namespace ml {
 
 namespace {
-using ::chromeos::machine_learning::mojom::FlatBufferModelSpec;
+using chromeos::machine_learning::mojom::FlatBufferModelSpec;
 }  // namespace
 
 DownloadWorker::DownloadWorker() : SmartDimWorker(), metrics_model_name_("") {}
@@ -33,9 +32,28 @@ DownloadWorker::GetPreprocessorConfig() {
   return preprocessor_config_.get();
 }
 
-const mojo::Remote<::chromeos::machine_learning::mojom::GraphExecutor>&
+const mojo::Remote<chromeos::machine_learning::mojom::GraphExecutor>&
 DownloadWorker::GetExecutor() {
   return executor_;
+}
+
+void DownloadWorker::LoadModelCallback(
+    chromeos::machine_learning::mojom::LoadModelResult result) {
+  if (result != chromeos::machine_learning::mojom::LoadModelResult::OK) {
+    LogLoadComponentEvent(LoadComponentEvent::kLoadModelError);
+    DVLOG(1) << "Failed to load Smart Dim flatbuffer model.";
+  }
+}
+
+void DownloadWorker::CreateGraphExecutorCallback(
+    chromeos::machine_learning::mojom::CreateGraphExecutorResult result) {
+  if (result !=
+      chromeos::machine_learning::mojom::CreateGraphExecutorResult::OK) {
+    LogLoadComponentEvent(LoadComponentEvent::kCreateGraphExecutorError);
+    DVLOG(1) << "Failed to create a Smart Dim graph executor.";
+  } else {
+    LogLoadComponentEvent(LoadComponentEvent::kSuccess);
+  }
 }
 
 bool DownloadWorker::IsReady() {
@@ -79,10 +97,11 @@ void DownloadWorker::OnJsonParsed(
     DVLOG(1) << "Failed to parse meta info from metadata_json.";
     return;
   }
-  base::PostTask(
-      FROM_HERE, {content::BrowserThread::UI, base::TaskPriority::BEST_EFFORT},
-      base::BindOnce(&DownloadWorker::LoadModelAndCreateGraphExecutor,
-                     base::Unretained(this), std::move(model_flatbuffer)));
+  content::GetUIThreadTaskRunner({base::TaskPriority::BEST_EFFORT})
+      ->PostTask(
+          FROM_HERE,
+          base::BindOnce(&DownloadWorker::LoadModelAndCreateGraphExecutor,
+                         base::Unretained(this), std::move(model_flatbuffer)));
 }
 
 void DownloadWorker::LoadModelAndCreateGraphExecutor(
@@ -95,12 +114,14 @@ void DownloadWorker::LoadModelAndCreateGraphExecutor(
           FlatBufferModelSpec::New(std::move(model_flatbuffer), inputs_,
                                    outputs_, metrics_model_name_),
           model_.BindNewPipeAndPassReceiver(),
-          base::BindOnce(&LoadModelCallback));
-  model_->CreateGraphExecutor(executor_.BindNewPipeAndPassReceiver(),
-                              base::BindOnce(&CreateGraphExecutorCallback));
+          base::BindOnce(&DownloadWorker::LoadModelCallback,
+                         base::Unretained(this)));
+  model_->CreateGraphExecutor(
+      executor_.BindNewPipeAndPassReceiver(),
+      base::BindOnce(&DownloadWorker::CreateGraphExecutorCallback,
+                     base::Unretained(this)));
   executor_.set_disconnect_handler(base::BindOnce(
       &DownloadWorker::OnConnectionError, base::Unretained(this)));
-  LogLoadComponentEvent(LoadComponentEvent::kSuccess);
 }
 
 }  // namespace ml

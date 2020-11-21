@@ -14,6 +14,7 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/observer_list.h"
+#include "chrome/browser/chromeos/cert_provisioning/cert_provisioning_scheduler.h"
 #include "chrome/browser/chromeos/policy/server_backed_state_keys_broker.h"
 #include "components/policy/core/common/cloud/cloud_policy_client.h"
 #include "components/policy/core/common/cloud/cloud_policy_manager.h"
@@ -73,26 +74,11 @@ class DeviceCloudPolicyManagerChromeOS : public CloudPolicyManager {
       ServerBackedStateKeysBroker* state_keys_broker);
   ~DeviceCloudPolicyManagerChromeOS() override;
 
-  // Initializes state keys and requisition information.
+  // Initializes state keys.
   void Initialize(PrefService* local_state);
 
   void AddDeviceCloudPolicyManagerObserver(Observer* observer);
   void RemoveDeviceCloudPolicyManagerObserver(Observer* observer);
-
-  // TODO(davidyu): Move these two functions to a more appropriate place. See
-  // http://crbug.com/383695.
-  // Gets/Sets the device requisition.
-  std::string GetDeviceRequisition() const;
-  void SetDeviceRequisition(const std::string& requisition);
-  bool IsRemoraRequisition() const;
-  bool IsSharkRequisition() const;
-
-  // Gets/Sets the sub organization.
-  std::string GetSubOrganization() const;
-  void SetSubOrganization(const std::string& sub_organization);
-
-  // If set, the device will start the enterprise enrollment OOBE.
-  void SetDeviceEnrollmentAutoStart();
 
   // CloudPolicyManager:
   void Shutdown() override;
@@ -165,9 +151,6 @@ class DeviceCloudPolicyManagerChromeOS : public CloudPolicyManager {
  private:
   // Saves the state keys received from |session_manager_client_|.
   void OnStateKeysUpdated();
-
-  // Initializes requisition settings at OOBE with values from VPD.
-  void InitializeRequisition();
 
   void NotifyConnected();
   void NotifyDisconnected();

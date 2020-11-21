@@ -39,13 +39,9 @@ class ResourceResponse;
 // https://docs.google.com/document/d/1O-fB83mrE0B_V8gzXNqHgmRLCvstTB4MMi3RnVLr8bE/edit?usp=sharing
 // TODO(hiroshige): Make ImageResourceContent ResourceClient and remove the
 // word 'observer' from ImageResource.
-// TODO(hiroshige): Rename local variables of type ImageResourceContent to
-// e.g. |imageContent|. Currently they have Resource-like names.
 class CORE_EXPORT ImageResourceContent final
     : public GarbageCollected<ImageResourceContent>,
       public ImageObserver {
-  USING_GARBAGE_COLLECTED_MIXIN(ImageResourceContent);
-
  public:
   // Used for loading.
   // Returned content will be associated immediately later with ImageResource.
@@ -84,7 +80,12 @@ class CORE_EXPORT ImageResourceContent final
     return size_available_ != Image::kSizeUnavailable;
   }
 
-  void Trace(Visitor*) override;
+  // Correct the image orientation preference for potentially cross-origin
+  // content.
+  RespectImageOrientationEnum ForceOrientationIfNecessary(
+      RespectImageOrientationEnum default_orientation) const;
+
+  void Trace(Visitor*) const override;
 
   // Content status and deriving predicates.
   // https://docs.google.com/document/d/1O-fB83mrE0B_V8gzXNqHgmRLCvstTB4MMi3RnVLr8bE/edit#heading=h.6cyqmir0f30h
@@ -108,7 +109,7 @@ class CORE_EXPORT ImageResourceContent final
   // Redirecting methods to Resource.
   const KURL& Url() const;
   base::TimeTicks LoadResponseEnd() const;
-  bool IsAccessAllowed();
+  bool IsAccessAllowed() const;
   const ResourceResponse& GetResponse() const;
   base::Optional<ResourceError> GetResourceError() const;
   // DEPRECATED: ImageResourceContents consumers shouldn't need to worry about

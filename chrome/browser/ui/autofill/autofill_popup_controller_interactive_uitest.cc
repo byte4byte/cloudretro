@@ -21,6 +21,7 @@
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "content/public/test/browser_test.h"
 #include "ui/compositor/scoped_animation_duration_scale_mode.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/vector2d.h"
@@ -63,7 +64,7 @@ class AutofillPopupControllerBrowserTest : public InProcessBrowserTest,
   std::unique_ptr<ui::ScopedAnimationDurationScaleMode> disable_animation_;
 };
 
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
 // Fails on Mac OS. http://crbug.com/453256
 #define MAYBE_HidePopupOnWindowMove DISABLED_HidePopupOnWindowMove
 #else
@@ -100,7 +101,7 @@ IN_PROC_BROWSER_TEST_F(AutofillPopupControllerBrowserTest,
 
 // This test checks that the browser doesn't crash if the delegate is deleted
 // before the popup is hidden.
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
 // Flaky on Mac 10.9 in debug mode. http://crbug.com/710439
 #define MAYBE_DeleteDelegateBeforePopupHidden \
   DISABLED_DeleteDelegateBeforePopupHidden
@@ -132,13 +133,14 @@ IN_PROC_BROWSER_TEST_F(AutofillPopupControllerBrowserTest, ResetSelectedLine) {
       base::ASCIIToUTF16("suggestion1"), base::ASCIIToUTF16("suggestion2"),
       base::ASCIIToUTF16("suggestion3"), base::ASCIIToUTF16("suggestion4")};
   client->UpdateAutofillPopupDataListValues(rows, rows);
+  int original_suggestions_count = controller->GetLineCount();
   controller->SetSelectedLine(3);
 
   // Replace the list with the smaller one.
   rows = {base::ASCIIToUTF16("suggestion1")};
   client->UpdateAutofillPopupDataListValues(rows, rows);
   // Make sure that previously selected line #3 doesn't exist.
-  ASSERT_LT(controller->GetLineCount(), 4);
+  ASSERT_LT(controller->GetLineCount(), original_suggestions_count);
   // Selecting a new line should not crash.
   controller->SetSelectedLine(0);
 }

@@ -13,10 +13,7 @@
 
 namespace chromeos {
 
-// A fake implementation of DlcserviceClient. The user of this class can
-// use set_update_engine_client_status() to set a fake last Status and
-// GetLastStatus() returns the fake with no modification. Other methods do
-// nothing.
+// A fake implementation of DlcserviceClient.
 class COMPONENT_EXPORT(DLCSERVICE_CLIENT) FakeDlcserviceClient
     : public DlcserviceClient {
  public:
@@ -24,27 +21,54 @@ class COMPONENT_EXPORT(DLCSERVICE_CLIENT) FakeDlcserviceClient
   ~FakeDlcserviceClient() override;
 
   // DlcserviceClient:
-  void Install(const dlcservice::DlcModuleList& dlc_module_list,
+  void Install(const std::string& dlc_id,
                InstallCallback callback,
                ProgressCallback progress_callback) override;
+  // Uninstalling disables the DLC.
   void Uninstall(const std::string& dlc_id,
                  UninstallCallback callback) override;
-  void GetInstalled(GetInstalledCallback callback) override;
-  void OnInstallStatusForTest(dbus::Signal* signal) override;
+  // Purging removes the DLC entirely from disk.
+  void Purge(const std::string& dlc_id, PurgeCallback callback) override;
+  void GetDlcState(const std::string& dlc_if,
+                   GetDlcStateCallback callback) override;
+  void GetExistingDlcs(GetExistingDlcsCallback callback) override;
+  void DlcStateChangedForTest(dbus::Signal* signal) override;
+  void AddObserver(Observer* observer) override;
+  void RemoveObserver(Observer* observer) override;
+
+  void NotifyObserversForTest(const dlcservice::DlcState& dlc_state);
 
   // Setters:
-  inline void SetInstallError(const std::string& err) { install_err_ = err; }
-  inline void SetUninstallError(const std::string& err) {
-    uninstall_err_ = err;
+  void set_install_error(const std::string& err) { install_err_ = err; }
+  void set_install_root_path(const std::string& path) {
+    install_root_path_ = path;
   }
-  inline void SetGetInstalledError(const std::string& err) {
-    get_installed_err_ = err;
+  void set_uninstall_error(const std::string& err) { uninstall_err_ = err; }
+  void set_purge_error(const std::string& err) { purge_err_ = err; }
+  void set_get_dlc_state_error(const std::string& err) {
+    get_dlc_state_err_ = err;
+  }
+  void set_get_existing_dlcs_error(const std::string& err) {
+    get_existing_dlcs_err_ = err;
+  }
+  void set_dlcs_with_content(
+      const dlcservice::DlcsWithContent& dlcs_with_content) {
+    dlcs_with_content_ = dlcs_with_content;
   }
 
  private:
   std::string install_err_ = dlcservice::kErrorNone;
   std::string uninstall_err_ = dlcservice::kErrorNone;
+  std::string purge_err_ = dlcservice::kErrorNone;
+  std::string get_dlc_state_err_ = dlcservice::kErrorNone;
   std::string get_installed_err_ = dlcservice::kErrorNone;
+  std::string get_existing_dlcs_err_ = dlcservice::kErrorNone;
+  std::string install_root_path_;
+  dlcservice::DlcsWithContent dlcs_with_content_;
+  dlcservice::DlcState dlc_state_;
+
+  // A list of observers that are listening on state changes, etc.
+  base::ObserverList<Observer> observers_;
 };
 
 }  // namespace chromeos

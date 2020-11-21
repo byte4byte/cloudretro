@@ -15,6 +15,7 @@
 #import "ios/chrome/browser/ui/commands/popup_menu_commands.h"
 #import "ios/chrome/browser/ui/commands/qr_scanner_commands.h"
 #import "ios/chrome/browser/ui/commands/snackbar_commands.h"
+#import "ios/chrome/browser/ui/commands/whats_new_commands.h"
 
 class GURL;
 @class ReadingListAddCommand;
@@ -30,25 +31,15 @@ class GURL;
                            PageInfoCommands,
                            PopupMenuCommands,
                            QRScannerCommands,
-                           SnackbarCommands>
+                           SnackbarCommands,
+                           WhatsNewCommands>
 
 // Closes the current tab.
 - (void)closeCurrentTab;
 
-// Navigates backwards in the current tab's history.
-- (void)goBack;
-
-// Navigates forwards in the current tab's history.
-- (void)goForward;
-
-// Stops loading the current web page.
-- (void)stopLoading;
-
-// Reloads the current web page
-- (void)reload;
-
 // Bookmarks the current page.
-- (void)bookmarkPage;
+// TODO(crbug.com/1134586): Reuse BookmarksCommands' bookmarkPage instead.
+- (void)bookmarkCurrentPage;
 
 // Adds a page to the reading list using data in |command|.
 - (void)addToReadingList:(ReadingListAddCommand*)command;

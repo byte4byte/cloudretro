@@ -13,7 +13,7 @@
        see http://crbug.com/121785 -->
   <?if $(var.Branding) ~= Chrome ?>
     <?define ChromotingHost = "Chrome Remote Desktop Host" ?>
-    <?define Manufacturer = "Google Inc." ?>
+    <?define Manufacturer = "Google LLC" ?>
   <?else?>
     <?define ChromotingHost = "Chromoting Host" ?>
     <?define Manufacturer = "The Chromium Authors" ?>
@@ -111,24 +111,14 @@
     <Upgrade Id="$(var.UpgradeCode)">
       <UpgradeVersion IncludeMinimum="no"
                       Minimum="$(var.Version)"
-                      OnlyDetect="yes"
+                      OnlyDetect="no"
                       Property="NEWERVERSIONDETECTED" />
       <UpgradeVersion IncludeMaximum="yes"
                       IncludeMinimum="yes"
                       Maximum="$(var.Version)"
                       Minimum="0.0.0.0"
                       Property="OLDERVERSIONBEINGUPGRADED" />
-      <!-- Detect versions that didn't handle the usagestats value properly. -->
-      <UpgradeVersion IncludeMaximum="yes"
-                      IncludeMinimum="yes"
-                      Maximum="24.0.1312.29"
-                      Minimum="0.0.0.0"
-                      Property="BROKENUSAGESTATSVERSION" />
     </Upgrade>
-
-    <Condition Message="A later version of [ProductName] is already installed. Setup will now exit.">
-      NOT NEWERVERSIONDETECTED
-    </Condition>
 
     <Media Id="1" Cabinet="chromoting.cab" EmbedCab="yes"/>
 
@@ -179,7 +169,8 @@
                           CategoryMessageFile="[#$(var.CoreBinary)]"
                           EventMessageFile="[#$(var.CoreBinary)]"
                           SupportsErrors="yes"
-                          SupportsInformationals="yes"/>
+                          SupportsInformationals="yes"
+                          SupportsWarnings="yes"/>
       </Component>
 
       <Component Id="remoting_desktop" Guid="*">
@@ -280,9 +271,7 @@
                         Account="LocalSystem"
                         ErrorControl="ignore"
                         Interactive="no">
-          <!-- Configure the service to restart after one minute when it
-               crashes.
-          -->
+          <!-- Configure the service to restart after 1 minute if it crashes -->
           <util:ServiceConfig
               xmlns:util="http://schemas.microsoft.com/wix/UtilExtension"
               FirstFailureActionType="restart"
@@ -503,7 +492,7 @@
             <!-- Gives full access to SYSTEM only. -->
             <!-- Cannot use the builtin PermissionEx element because it maps
                  to the MsiLockPermissionsEx table which is not supported on
-                 Windows Installer version 4.5 or lower. Also Cannot use
+                 Windows Installer version 4.5 or lower. Also cannot use
                  PermissionEx in WixUtilExtension because it automatically
                  inherits all the ACLs from the parent. -->
             <Permission User="[WIX_ACCOUNT_LOCALSYSTEM]"
@@ -613,17 +602,13 @@
         <CreateFolder/>
       </Component>
 
-      <!-- Delete the usagestats flag to reset the crash dump reporting settings
-           for existing users. -->
-      <Component Id="delete_usagestats"
-                 Guid="5c73f2b9-b865-426f-81cc-90a27ebb54aa"
-                 KeyPath="yes">
-        <Condition>BROKENUSAGESTATSVERSION</Condition>
-        <RemoveRegistryValue
-            Id="usagestats"
-            Key="SOFTWARE\Google\Update\ClientStateMedium\$(var.OmahaAppid)"
-            Name="usagestats"
-            Root="HKLM" />
+      <Component Id="remoting_logging_registry"
+                 Guid="b640a025-18dd-49b9-b26d-b31252a12f8a">
+        <RegistryKey Root="HKLM"
+                     Key="SOFTWARE\$(var.ChromotingKeyPath)\logging"
+                     Action="create">
+        </RegistryKey>
+        <CreateFolder/>
       </Component>
 
     </DirectoryRef>
@@ -648,16 +633,6 @@
             </RegistryKey>
           </RegistryKey>
         </RegistryKey>
-      </Component>
-    </DirectoryRef>
-
-    <DirectoryRef Id="config_files">
-      <!-- Delete debug.log from previous versions -->
-      <Component Id="delete_debug_log"
-                 Guid="b309082a-e6fa-4dc7-98e4-3d83c896561d">
-        <RemoveFile Id="debug.log"
-                    Name="debug.log"
-                    On="both" />
       </Component>
     </DirectoryRef>
 
@@ -706,8 +681,6 @@
 
     <Feature Id="chromoting_host" Level="1" Title="$(var.ChromotingHost)">
       <ComponentRef Id="credits"/>
-      <ComponentRef Id="delete_debug_log"/>
-      <ComponentRef Id="delete_usagestats"/>
       <?if $(var.OfficialBuild) != 0 ?>
         <ComponentRef Id="omaha_registration"/>
       <?endif?>
@@ -731,6 +704,7 @@
       <ComponentRef Id="remoting_desktop"/>
       <ComponentRef Id="remoting_host"/>
       <ComponentRef Id="remoting_lib"/>
+      <ComponentRef Id="remoting_logging_registry"/>
       <ComponentRef Id="remoting_pairing_registry"/>
       <ComponentRef Id="remoting_start_host"/>
       <ComponentRef Id="sawbuck_provider"/>
@@ -766,9 +740,9 @@
        Impersonate="no"
        Return="ignore"/>
 
-    <CustomAction Id="remove_debug_log"
+    <CustomAction Id="remove_logs"
       Directory="binaries"
-      ExeCommand='cmd /c del /f debug.log'
+      ExeCommand='cmd /c del /f *.log'
       Execute="deferred"
       Impersonate="no"
       Return="ignore"/>
@@ -800,7 +774,7 @@
            See http://msdn.microsoft.com/en-us/library/aa371197.aspx. -->
       <RemoveExistingProducts After="InstallInitialize" />
 
-      <Custom Action="remove_debug_log" Before="RemoveFiles">
+      <Custom Action="remove_logs" Before="RemoveFiles">
         Installed AND (NOT MAINTENANCE)
       </Custom>
       <Custom Action="remove_symbolic_link" Before="RemoveFiles">

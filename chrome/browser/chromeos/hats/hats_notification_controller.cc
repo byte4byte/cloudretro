@@ -8,6 +8,8 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/feature_list.h"
+#include "base/logging.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/task/post_task.h"
 #include "base/task/thread_pool.h"
 #include "chrome/app/vector_icons/vector_icons.h"
@@ -101,6 +103,8 @@ HatsNotificationController::HatsNotificationController(Profile* profile)
 HatsNotificationController::~HatsNotificationController() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
+  base::UmaHistogramEnumeration("Browser.ChromeOS.HatsStatus", state_);
+
   if (network_portal_detector::IsInitialized())
     network_portal_detector::GetInstance()->RemoveObserver(this);
 }
@@ -112,6 +116,8 @@ void HatsNotificationController::Initialize(bool is_new_device) {
     // This device has been chosen for a survey, but it is too new. Instead
     // of showing the user the survey, just mark it as completed.
     UpdateLastInteractionTime();
+
+    state_ = HatsState::kNewDevice;
     return;
   }
 
@@ -137,6 +143,10 @@ bool HatsNotificationController::ShouldShowSurveyToProfile(Profile* profile) {
   if (profile->IsGuestSession())
     return false;
 
+  // Do not show survey if the user is supervised.
+  if (profile->IsChild())
+    return false;
+
   const bool is_enterprise_enrolled = g_browser_process->platform_part()
                                           ->browser_policy_connector_chromeos()
                                           ->IsEnterpriseManaged();
@@ -148,8 +158,6 @@ bool HatsNotificationController::ShouldShowSurveyToProfile(Profile* profile) {
 
   // In an enterprise enrolled device, the user can never be the owner, hence
   // only check for ownership on a non enrolled device.
-  // TODO(crbug/1060436): Remove the IsOwnerProfile() check so that HaTS is
-  // enabled for all users, not just device owners.
   if (!is_enterprise_enrolled && !ProfileHelper::IsOwnerProfile(profile))
     return false;
 
@@ -164,8 +172,11 @@ bool HatsNotificationController::ShouldShowSurveyToProfile(Profile* profile) {
           : kHatsThreshold;
   // Do not show survey to user if user has interacted with HaTS within the past
   // |threshold_time| time delta.
-  if (DidShowSurveyToProfileRecently(profile, threshold_time))
+  if (DidShowSurveyToProfileRecently(profile, threshold_time)) {
+    base::UmaHistogramEnumeration("Browser.ChromeOS.HatsStatus",
+                                  HatsState::kSurveyShownRecently);
     return false;
+  }
 
   return true;
 }
@@ -177,9 +188,9 @@ void HatsNotificationController::Click(
 
   UpdateLastInteractionTime();
 
-  // The dialog deletes itself on close.
-  HatsDialog::CreateAndShow(
-      gaia::IsGoogleInternalAccountEmail(profile_->GetProfileUserName()));
+  hats_dialog_ = HatsDialog::CreateAndShow();
+
+  state_ = HatsState::kNotificationClicked;
 
   // Remove the notification.
   network_portal_detector::GetInstance()->RemoveObserver(this);
@@ -196,19 +207,19 @@ void HatsNotificationController::Close(bool by_user) {
     UpdateLastInteractionTime();
     network_portal_detector::GetInstance()->RemoveObserver(this);
     notification_.reset(nullptr);
+    state_ = HatsState::kNotificationDismissed;
   }
 }
 
 // NetworkPortalDetector::Observer override:
 void HatsNotificationController::OnPortalDetectionCompleted(
     const NetworkState* network,
-    const NetworkPortalDetector::CaptivePortalState& state) {
+    const NetworkPortalDetector::CaptivePortalStatus status) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   VLOG(1) << "HatsController::OnPortalDetectionCompleted(): "
           << "network=" << (network ? network->path() : "") << ", "
-          << "state.status=" << state.status << ", "
-          << "state.response_code=" << state.response_code;
-  if (state.status == NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_ONLINE) {
+          << "status=" << status;
+  if (status == NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_ONLINE) {
     // Create and display the notification for the user.
     if (!notification_) {
       notification_ = ash::CreateSystemNotification(
@@ -226,6 +237,8 @@ void HatsNotificationController::OnPortalDetectionCompleted(
     NotificationDisplayService::GetForProfile(profile_)->Display(
         NotificationHandler::Type::TRANSIENT, *notification_,
         /*metadata=*/nullptr);
+
+    state_ = HatsState::kNotificationDisplayed;
   } else if (notification_) {
     // Hide the notification if device loses its connection to the internet.
     NotificationDisplayService::GetForProfile(profile_)->Close(

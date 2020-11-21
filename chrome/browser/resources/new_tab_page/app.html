@@ -4,6 +4,19 @@
     --ntp-theme-text-color: var(--google-grey-800);
     --ntp-theme-text-shadow: none;
     --ntp-one-google-bar-height: 56px;
+    --ntp-search-box-width: 337px;
+  }
+
+  @media (min-width: 560px) {
+    :host {
+      --ntp-search-box-width: 449px;
+    }
+  }
+
+  @media (min-width: 672px) {
+    :host {
+      --ntp-search-box-width: 561px;
+    }
   }
 
   @media (prefers-color-scheme: dark) {
@@ -17,13 +30,6 @@
     --ntp-theme-text-shadow: 0 0 16px rgba(0, 0, 0, .3);
   }
 
-  #background {
-    height: 100%;
-    position: relative;
-    width: 100%;
-  }
-
-  #background > *,
   #oneGoogleBar {
     height: 100%;
     position: absolute;
@@ -31,36 +37,64 @@
     width: 100%;
   }
 
-  #backgroundImage {
-    border: none;
-    pointer-events: none;
+  #oneGoogleBarOverlayBackdrop {
+    background: rgba(0, 0, 0, .6);
+    display: none;
+    height: 100%;
+    position: fixed;
+    top: 0;
+    width: 100%;
+    z-index: 999;
   }
 
-  #backgroundGradient {
-    background: linear-gradient(rgba(0, 0, 0, 0), rgba(0, 0, 0, .3));
-  }
-
-  #contentContainer {
-    overflow: auto;
+  #oneGoogleBarOverlayBackdrop[show] {
+    display: block;
   }
 
   #content {
     align-items: center;
     display: flex;
     flex-direction: column;
-    min-height: calc(100% - var(--ntp-one-google-bar-height));
-    padding-top: var(--ntp-one-google-bar-height);
+    height: calc(100vh - var(--ntp-one-google-bar-height));
     position: relative;
   }
 
+  :host([iframe-one-google-bar-enabled_]) #content {
+    padding-top: var(--ntp-one-google-bar-height);
+  }
+
   #logo {
-    margin-bottom: 8px;
-    z-index: 1;  /* Needed so it layers on top of OGB. */
+    margin-bottom: 38px;
+    z-index: 1;  /* Needed so it layers on top of OneGoogleBar. */
   }
 
   ntp-fakebox,
   ntp-realbox {
     margin-bottom: 32px;
+  }
+
+  ntp-fakebox,
+  ntp-realbox,
+  ntp-module-wrapper {
+    flex-shrink: 0;
+    width: var(--ntp-search-box-width);
+  }
+
+  :host([modules-enabled_]) ntp-middle-slot-promo {
+    width: var(--ntp-search-box-width);
+  }
+
+  :host(:not([modules-enabled_])) ntp-middle-slot-promo {
+    bottom: 16px;
+    position: fixed;
+  }
+
+  ntp-realbox {
+    visibility: hidden;
+  }
+
+  ntp-realbox[shown] {
+    visibility: visible;
   }
 
   ntp-most-visited[dark] {
@@ -69,13 +103,15 @@
     --tile-hover-color: rgba(255, 255, 255, .1);
   }
 
-  #promo {
-    bottom: 16px;
-    height: 35px;
-    left: 0;
-    position: fixed;
-    right: 0;
-    width: 100%;
+  ntp-middle-slot-promo:not([hidden]) + ntp-module-wrapper,
+  ntp-module-wrapper + ntp-module-wrapper {
+    margin-top: 16px;
+  }
+
+  :host(:not([promo-and-modules-loaded_])) ntp-middle-slot-promo,
+  :host(:not([promo-and-modules-loaded_])) ntp-module-wrapper,
+  :host(:not([modules-visible_])) ntp-module-wrapper {
+    display: none;
   }
 
   #customizeButtonSpacer {
@@ -112,6 +148,10 @@
     padding: 0;
   }
 
+  :host-context(.focus-outline-visible) #customizeButton:focus {
+    box-shadow: var(--ntp-focus-shadow);
+  }
+
   #customizeIcon {
     -webkit-mask-image: url(icons/icon_pencil.svg);
     -webkit-mask-repeat: no-repeat;
@@ -139,6 +179,14 @@
     #customizeText {
       display: none;
     }
+  }
+
+  #themeAttribution {
+    align-self: flex-start;
+    bottom: 16px;
+    color: var(--cr-secondary-text-color);
+    margin-inline-start: 16px;
+    position: fixed;
   }
 
   #backgroundImageAttribution {
@@ -194,60 +242,60 @@
   #backgroundImageAttribution2 {
     font-size: .75rem;
   }
+
+  @keyframes fadein {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  .fadein {
+    animation: 100ms ease-in-out fadein;
+  }
+
+  svg {
+    position: fixed;
+  }
 </style>
-<div id="background"
-    style="background-color: [[rgbaOrInherit_(theme_.backgroundColor)]];
-        --ntp-theme-text-color: [[rgbaOrInherit_(theme_.shortcutTextColor)]];
+<div id="content"
+    style="--ntp-theme-text-color: [[rgbaOrInherit_(theme_.shortcutTextColor)]];
         --ntp-theme-shortcut-background-color:
               [[rgbaOrInherit_(theme_.shortcutBackgroundColor)]];
         --ntp-logo-color: [[rgbaOrInherit_(logoColor_)]];">
-  <ntp-untrusted-iframe id="backgroundImage" hidden="[[!showBackgroundImage_]]">
-  </ntp-untrusted-iframe>
-  <div id="backgroundGradient" hidden="[[!showBackgroundImage_]]"></div>
-  <div id="contentContainer">
-    <div id="content">
-      <ntp-untrusted-iframe id="oneGoogleBar" path="one-google-bar"
-          hidden$="[[!oneGoogleBarLoaded_]]">
-      </ntp-untrusted-iframe>
-      <ntp-logo id="logo" doodle-allowed$="[[doodleAllowed_]]"
-          single-colored$="[[singleColoredLogo_]]">
-      </ntp-logo>
-      <ntp-fakebox id="fakebox" on-open-voice-search="onVoiceSearchClick_"
-          hidden$="[[realboxEnabled_]]">
-      </ntp-fakebox>
-      <ntp-realbox id="realbox" on-open-voice-search="onVoiceSearchClick_"
-          theme="[[theme_.searchBox]]" hidden$="[[!realboxEnabled_]]">
-      </ntp-realbox>
-      <ntp-most-visited id="mostVisited" dark$="[[theme_.isDark]]">
+  <template is="dom-if" if="[[showIframedOneGoogleBar_]]">
+    <ntp-iframe id="oneGoogleBar" src="[[oneGoogleBarIframePath_]]"
+        hidden$="[[!oneGoogleBarLoaded_]]">
+    </ntp-iframe>
+  </template>
+  <ntp-logo id="logo" doodle-allowed$="[[doodleAllowed_]]"
+      single-colored$="[[singleColoredLogo_]]" dark="[[theme_.isDark]]"
+      background-color="[[backgroundColor_]]">
+  </ntp-logo>
+  <ntp-fakebox id="fakebox" on-open-voice-search="onOpenVoiceSearch_"
+      hidden$="[[realboxEnabled_]]">
+  </ntp-fakebox>
+  <ntp-realbox id="realbox" on-open-voice-search="onOpenVoiceSearch_"
+      theme="[[theme_.searchBox]]" shown$="[[realboxShown_]]"
+      hidden$="[[!realboxEnabled_]]">
+  </ntp-realbox>
+  <dom-if if="[[lazyRender_]]" on-dom-change="onLazyRendered_">
+    <template>
+      <ntp-most-visited id="mostVisited" dark$="[[theme_.isDark]]"
+          use-white-add-icon$="[[theme_.shortcutUseWhiteAddIcon]]"
+          use-title-pill$="[[theme_.shortcutUseTitlePill]]">
       </ntp-most-visited>
-      <dom-if if="[[showCustomizeDialog_]]" restamp>
-        <template>
-          <ntp-customize-dialog on-close="onCustomizeDialogClose_"
-              theme="[[theme_]]"
-              background-selection="{{backgroundSelection_}}">
-          </ntp-customize-dialog>
-        </template>
-      </dom-if>
-      <dom-if if="[[showVoiceSearchOverlay_]]" restamp>
-        <template>
-          <ntp-voice-search-overlay on-close="onVoiceSearchOverlayClose_">
-          </ntp-voice-search-overlay>
-        </template>
-      </dom-if>
-      <ntp-untrusted-iframe id="promo" path="promo" hidden$="[[!promoLoaded_]]">
-      </ntp-untrusted-iframe>
-      <div id="customizeButtonSpacer"></div>
-      <!-- cr-button is transparent on hover. This leads to incorrect results
-           when a custom background is set. Therefore, wrap customize button in
-           container to enfore solid background color. -->
-      <div id="customizeButtonContainer">
-        <cr-button id="customizeButton" on-click="onCustomizeClick_">
-          <div id="customizeIcon"></div>
-          <div id="customizeText" hidden$="[[showBackgroundImage_]]">
-            $i18n{customizeButton}
-          </div>
-        </cr-button>
-      </div>
+      <ntp-middle-slot-promo
+          on-ntp-middle-slot-promo-loaded="onMiddleSlotPromoLoaded_">
+      </ntp-middle-slot-promo>
+      <template is="dom-repeat" items="[[moduleDescriptors_]]" id="modules"
+          on-dom-change="onModulesLoaded_">
+        <ntp-module-wrapper descriptor="[[item]]"
+            on-dismiss-module="onDismissModule_">
+        </ntp-module-wrapper>
+      </template>
       <a id="backgroundImageAttribution"
           href="[[backgroundImageAttributionUrl_]]"
           hidden="[[!backgroundImageAttribution1_]]">
@@ -262,6 +310,56 @@
           [[backgroundImageAttribution2_]]
         </div>
       </a>
-    </div>
-  </div>
+      <div id="customizeButtonSpacer"></div>
+      <!-- cr-button has a transparent background. This leads to incorrect
+           results when a custom background is set. Therefore, wrap customize
+           button in container to enfore solid background color. -->
+      <div id="customizeButtonContainer">
+        <cr-button id="customizeButton" on-click="onCustomizeClick_"
+            title="$i18n{customizeThisPage}">
+          <div id="customizeIcon"></div>
+          <div id="customizeText" hidden$="[[showBackgroundImage_]]">
+            $i18n{customizeButton}
+          </div>
+        </cr-button>
+      </div>
+      <div id="themeAttribution"
+          hidden$="[[!theme_.backgroundImage.attributionUrl]]">
+        <div>$i18n{themeCreatedBy}</div>
+        <img src="[[theme_.backgroundImage.attributionUrl.url]]"><img>
+      </div>
+    </template>
+  </dom-if>
 </div>
+<dom-if if="[[showVoiceSearchOverlay_]]" restamp>
+  <template>
+    <ntp-voice-search-overlay on-close="onVoiceSearchOverlayClose_">
+    </ntp-voice-search-overlay>
+  </template>
+</dom-if>
+<dom-if if="[[showCustomizeDialog_]]" restamp>
+  <template>
+    <ntp-customize-dialog on-close="onCustomizeDialogClose_"
+        theme="[[theme_]]"
+        background-selection="{{backgroundSelection_}}">
+    </ntp-customize-dialog>
+  </template>
+</dom-if>
+<dom-if if="[[lazyRender_]]" restamp>
+  <template>
+    <cr-toast id="dismissModuleToast" duration="10000">
+      <div id="dismissModuleToastMessage">[[dismissModuleToastMessage_]]</div>
+      <cr-button id="undoDismissModuleButton"
+          aria-label="$i18n{undoDescription}"
+          on-click="onUndoDismissModuleButtonClick_">
+        $i18n{undo}
+      </cr-button>
+    </cr-toast>
+  </template>
+</dom-if>
+<div id="oneGoogleBarOverlayBackdrop"></div>
+<svg>
+  <defs>
+    <clipPath id="oneGoogleBarClipPath"></clipPath>
+  </defs>
+</svg>

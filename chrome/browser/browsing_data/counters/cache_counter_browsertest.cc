@@ -22,6 +22,7 @@
 #include "components/prefs/pref_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/storage_partition.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/simple_url_loader_test_helper.h"
 #include "net/test/embedded_test_server/default_handlers.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
@@ -130,7 +131,7 @@ class CacheCounterTest : public InProcessBrowserTest {
 
 // Tests that for the empty cache, the result is zero.
 // Flaky. See crbug.com/971650.
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
 #define MAYBE_Empty DISABLED_Empty
 #else
 #define MAYBE_Empty Empty

@@ -5,7 +5,8 @@
 #include "services/network/trust_tokens/has_trust_tokens_answerer.h"
 
 #include "base/strings/stringprintf.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
+#include "services/network/public/cpp/trust_token_parameterization.h"
 #include "services/network/public/mojom/trust_tokens.mojom.h"
 #include "services/network/trust_tokens/pending_trust_token_store.h"
 #include "services/network/trust_tokens/trust_token_parameterization.h"
@@ -58,7 +59,7 @@ TEST(HasTrustTokensAnswerer, HandlesNonHttpNonHttpsIssuerOrigin) {
 }
 
 TEST(HasTrustTokensAnswerer, HandlesFailureToAssociateIssuer) {
-  std::unique_ptr<TrustTokenStore> store = TrustTokenStore::CreateInMemory();
+  std::unique_ptr<TrustTokenStore> store = TrustTokenStore::CreateForTesting();
 
   const SuitableTrustTokenOrigin kToplevel =
       *SuitableTrustTokenOrigin::Create(GURL("https://toplevel.com"));
@@ -94,7 +95,7 @@ TEST(HasTrustTokensAnswerer, HandlesFailureToAssociateIssuer) {
 }
 
 TEST(HasTrustTokensAnswerer, SuccessWithNoTokens) {
-  std::unique_ptr<TrustTokenStore> store = TrustTokenStore::CreateInMemory();
+  std::unique_ptr<TrustTokenStore> store = TrustTokenStore::CreateForTesting();
   TrustTokenStore* raw_store = store.get();
 
   const SuitableTrustTokenOrigin kIssuer =
@@ -127,7 +128,7 @@ TEST(HasTrustTokensAnswerer, SuccessWithNoTokens) {
 }
 
 TEST(HasTrustTokensAnswerer, SuccessWithTokens) {
-  std::unique_ptr<TrustTokenStore> store = TrustTokenStore::CreateInMemory();
+  std::unique_ptr<TrustTokenStore> store = TrustTokenStore::CreateForTesting();
   TrustTokenStore* raw_store = store.get();
 
   const SuitableTrustTokenOrigin kIssuer =

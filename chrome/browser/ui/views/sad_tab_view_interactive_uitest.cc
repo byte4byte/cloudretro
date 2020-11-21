@@ -17,6 +17,7 @@
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/common/result_codes.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "ui/views/controls/button/md_text_button.h"
 #include "ui/views/widget/widget.h"
@@ -125,7 +126,7 @@ class SadTabViewInteractiveUITest : public InProcessBrowserTest {
   DISALLOW_COPY_AND_ASSIGN(SadTabViewInteractiveUITest);
 };
 
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
 // Focusing or input is not completely working on Mac: http://crbug.com/824418
 #define MAYBE_SadTabKeyboardAccessibility DISABLED_SadTabKeyboardAccessibility
 #else
@@ -200,7 +201,7 @@ IN_PROC_BROWSER_TEST_F(SadTabViewInteractiveUITest,
   ClickOnActionButtonInSadTab();
 
   // Ensure the first WebContents reloads.
-  content::WaitForLoadStop(web_contents);
+  EXPECT_TRUE(content::WaitForLoadStop(web_contents));
   EXPECT_FALSE(web_contents->IsCrashed());
 
   // Switch to the second tab, reload it too.
@@ -208,6 +209,6 @@ IN_PROC_BROWSER_TEST_F(SadTabViewInteractiveUITest,
   web_contents = tab_strip_model->GetActiveWebContents();
   EXPECT_TRUE(web_contents->IsCrashed());
   ClickOnActionButtonInSadTab();
-  content::WaitForLoadStop(web_contents);
+  EXPECT_TRUE(content::WaitForLoadStop(web_contents));
   EXPECT_FALSE(web_contents->IsCrashed());
 }

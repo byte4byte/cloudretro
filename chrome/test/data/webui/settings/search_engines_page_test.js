@@ -4,12 +4,13 @@
 
 // clang-format off
 import 'chrome://settings/lazy_load.js';
-import {eventToPromise} from 'chrome://test/test_util.m.js';
-import {ExtensionControlBrowserProxyImpl, SearchEnginesBrowserProxyImpl} from 'chrome://settings/settings.js';
+
+import {webUIListenerCallback} from 'chrome://resources/js/cr.m.js';
 import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+import {ExtensionControlBrowserProxyImpl, SearchEnginesBrowserProxyImpl} from 'chrome://settings/settings.js';
 import {TestExtensionControlBrowserProxy} from 'chrome://test/settings/test_extension_control_browser_proxy.js';
 import {TestSearchEnginesBrowserProxy} from 'chrome://test/settings/test_search_engines_browser_proxy.m.js';
-import {webUIListenerCallback} from 'chrome://resources/js/cr.m.js';
+import {eventToPromise} from 'chrome://test/test_util.m.js';
 // clang-format on
 
 /**
@@ -105,7 +106,7 @@ suite('AddSearchEngineDialogTests', function() {
       const inputElement = dialog.$[inputId];
       browserProxy.resetResolver('validateSearchEngineInput');
       inputElement.fire('input');
-      return inputElement.value != '' ?
+      return inputElement.value !== '' ?
           // Expecting validation only on non-empty values.
           browserProxy.whenCalled('validateSearchEngineInput') :
           Promise.resolve();
@@ -243,18 +244,16 @@ suite('SearchEngineEntryTests', function() {
     assertTrue(!!editButton);
     assertFalse(editButton.hidden);
 
-    const promise =
-        eventToPromise('edit-search-engine', entry).then(e => {
-          assertEquals(engine, e.detail.engine);
-          assertEquals(entry.$$('cr-icon-button'), e.detail.anchorElement);
-        });
+    const promise = eventToPromise('edit-search-engine', entry).then(e => {
+      assertEquals(engine, e.detail.engine);
+      assertEquals(entry.$$('cr-icon-button'), e.detail.anchorElement);
+    });
     editButton.click();
     return promise;
   });
 
   /**
-   * Checks that the given button is disabled (by being hidden), for the
-   * given search engine.
+   * Checks that the given button is disabled for the given search engine.
    * @param {!SearchEngine} searchEngine
    * @param {string} buttonId
    */
@@ -262,7 +261,7 @@ suite('SearchEngineEntryTests', function() {
     entry.engine = searchEngine;
     const button = entry.$[buttonId];
     assertTrue(!!button);
-    assertTrue(button.hidden);
+    assertTrue(button.disabled);
   }
 
   test('Remove_Disabled', function() {
@@ -278,16 +277,6 @@ suite('SearchEngineEntryTests', function() {
   test('Edit_Disabled', function() {
     testButtonDisabled(
         createSampleSearchEngine(0, 'G', true, false, true), 'edit');
-  });
-
-  test('All_Disabled', function() {
-    entry.engine = createSampleSearchEngine(0, 'G', true, false, false);
-    flush();
-    assertTrue(entry.hasAttribute('show-dots_'));
-
-    entry.engine = createSampleSearchEngine(1, 'G', false, false, false);
-    flush();
-    assertFalse(entry.hasAttribute('show-dots_'));
   });
 });
 
@@ -351,8 +340,8 @@ suite('SearchEnginePageTests', function() {
 
     // Ensure that the search engines have reverse alphabetical order in the
     // model.
-    assertGT(
-        searchEnginesInfo.others[0].name, searchEnginesInfo.others[1].name);
+    assertTrue(
+        searchEnginesInfo.others[0].name > searchEnginesInfo.others[1].name);
 
     // Ensure that they are displayed in alphabetical order.
     assertEquals(searchEnginesInfo.others[1].name, othersEntries[0].name);
@@ -420,7 +409,7 @@ suite('SearchEnginePageTests', function() {
     flush();
 
     function getListItems(listIndex) {
-      const ironList = listIndex == 2 /* extensions */ ?
+      const ironList = listIndex === 2 /* extensions */ ?
           page.shadowRoot.querySelector('iron-list') :
           page.shadowRoot
               .querySelectorAll('settings-search-engines-list')[listIndex]

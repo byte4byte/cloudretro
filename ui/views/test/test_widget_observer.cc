@@ -4,7 +4,7 @@
 
 #include "ui/views/test/test_widget_observer.h"
 
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "ui/views/widget/widget.h"
 
 namespace views {
@@ -17,6 +17,7 @@ TestWidgetObserver::TestWidgetObserver(Widget* widget) : widget_(widget) {
 TestWidgetObserver::~TestWidgetObserver() {
   if (widget_)
     widget_->RemoveObserver(this);
+  CHECK(!IsInObserverList());
 }
 
 void TestWidgetObserver::OnWidgetDestroying(Widget* widget) {

@@ -4,35 +4,48 @@
 
 package org.chromium.chrome.browser.tasks;
 
+import static com.google.android.material.appbar.AppBarLayout.LayoutParams.SCROLL_FLAG_ENTER_ALWAYS;
+import static com.google.android.material.appbar.AppBarLayout.LayoutParams.SCROLL_FLAG_SCROLL;
+
 import android.content.Context;
 import android.content.res.Resources;
+import android.os.Build;
 import android.util.AttributeSet;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewStub;
 import android.widget.CompoundButton.OnCheckedChangeListener;
 import android.widget.FrameLayout;
+import android.widget.TextView;
 
 import androidx.annotation.Nullable;
 import androidx.appcompat.content.res.AppCompatResources;
+import androidx.core.view.ViewCompat;
 
 import com.google.android.material.appbar.AppBarLayout;
 
 import org.chromium.base.ApiCompatibilityUtils;
-import org.chromium.chrome.browser.coordinator.CoordinatorLayoutForPointer;
+import org.chromium.base.MathUtils;
+import org.chromium.chrome.browser.feed.shared.FeedFeatures;
 import org.chromium.chrome.browser.lifecycle.ActivityLifecycleDispatcher;
 import org.chromium.chrome.browser.ntp.IncognitoDescriptionView;
 import org.chromium.chrome.browser.ntp.search.SearchBoxCoordinator;
+import org.chromium.chrome.features.start_surface.StartSurfaceConfiguration;
 import org.chromium.chrome.tab_ui.R;
 import org.chromium.components.browser_ui.styles.ChromeColors;
+import org.chromium.components.browser_ui.widget.CoordinatorLayoutForPointer;
 import org.chromium.components.content_settings.CookieControlsEnforcement;
+import org.chromium.ui.base.ViewUtils;
 
 // The view of the tasks surface.
 class TasksView extends CoordinatorLayoutForPointer {
+    private static final int OMNIBOX_BOTTOM_PADDING_DP = 4;
+
     private final Context mContext;
     private FrameLayout mBodyViewContainer;
     private FrameLayout mCarouselTabSwitcherContainer;
     private AppBarLayout mHeaderView;
+    private AppBarLayout.OnOffsetChangedListener mFakeSearchBoxShrinkAnimation;
     private SearchBoxCoordinator mSearchBoxCoordinator;
     private IncognitoDescriptionView mIncognitoDescriptionView;
     private View.OnClickListener mIncognitoDescriptionLearnMoreListener;
@@ -65,8 +78,57 @@ class TasksView extends CoordinatorLayoutForPointer {
         mSearchBoxCoordinator = new SearchBoxCoordinator(getContext(), this);
         mHeaderView = (AppBarLayout) findViewById(R.id.task_surface_header);
         AppBarLayout.LayoutParams layoutParams =
-                (AppBarLayout.LayoutParams) mSearchBoxCoordinator.getView().getLayoutParams();
-        layoutParams.setScrollFlags(AppBarLayout.LayoutParams.SCROLL_FLAG_SCROLL);
+                (AppBarLayout.LayoutParams) (findViewById(R.id.scroll_component_container)
+                                                     .getLayoutParams());
+        layoutParams.setScrollFlags(SCROLL_FLAG_SCROLL);
+        adjustScrollMode(layoutParams);
+        setTabCarouselTitleStyle();
+    }
+
+    private void adjustScrollMode(AppBarLayout.LayoutParams layoutParams) {
+        if (!StartSurfaceConfiguration.START_SURFACE_VARIATION.getValue().equals("omniboxonly")
+                && !StartSurfaceConfiguration.START_SURFACE_VARIATION.getValue().equals(
+                        "trendyterms")) {
+            // Scroll mode is only relevant in omnibox-only variation and trendy-terms variation.
+            return;
+        }
+        String scrollMode = StartSurfaceConfiguration.START_SURFACE_OMNIBOX_SCROLL_MODE.getValue();
+        switch (scrollMode) {
+            case "quick":
+                layoutParams.setScrollFlags(SCROLL_FLAG_SCROLL | SCROLL_FLAG_ENTER_ALWAYS);
+                break;
+            case "pinned":
+                layoutParams.setScrollFlags(0 /* SCROLL_FLAG_NO_SCROLL */);
+                break;
+            case "top":
+            default:
+                return;
+        }
+        // This is only needed when the scroll mode is not "top".
+        layoutParams.bottomMargin = ViewUtils.dpToPx(getContext(), OMNIBOX_BOTTOM_PADDING_DP);
+    }
+
+    private void setTabCarouselTitleStyle() {
+        // Match the tab carousel title style with the feed header.
+        // There are many places checking FeedFeatures.isReportingUserActions, like in
+        // ExploreSurfaceCoordinator.
+        TextView titleDescription = (TextView) findViewById(R.id.tab_switcher_title_description);
+        TextView moreTabs = (TextView) findViewById(R.id.more_tabs);
+        if (FeedFeatures.cachedIsReportingUserActions()) {
+            ApiCompatibilityUtils.setTextAppearance(
+                    titleDescription, R.style.TextAppearance_TextSmall_Secondary);
+            ApiCompatibilityUtils.setTextAppearance(
+                    moreTabs, R.style.TextAppearance_TextSmall_Blue);
+            ViewCompat.setPaddingRelative(titleDescription,
+                    mContext.getResources().getDimensionPixelSize(R.dimen.card_padding),
+                    titleDescription.getPaddingTop(), titleDescription.getPaddingEnd(),
+                    titleDescription.getPaddingBottom());
+        } else {
+            ApiCompatibilityUtils.setTextAppearance(
+                    titleDescription, R.style.TextAppearance_TextMediumThick_Primary);
+            ApiCompatibilityUtils.setTextAppearance(
+                    moreTabs, R.style.TextAppearance_TextMedium_Blue);
+        }
     }
 
     ViewGroup getCarouselTabSwitcherContainer() {
@@ -75,6 +137,14 @@ class TasksView extends CoordinatorLayoutForPointer {
 
     ViewGroup getBodyViewContainer() {
         return findViewById(R.id.tasks_surface_body);
+    }
+
+    /**
+     * Set the visibility of the tasks surface body.
+     * @param isVisible Whether it's visible.
+     */
+    void setSurfaceBodyVisibility(boolean isVisible) {
+        getBodyViewContainer().setVisibility(isVisible ? View.VISIBLE : View.GONE);
     }
 
     /**
@@ -131,8 +201,15 @@ class TasksView extends CoordinatorLayoutForPointer {
      */
     void initializeIncognitoDescriptionView() {
         assert mIncognitoDescriptionView == null;
-        ViewStub stub = (ViewStub) findViewById(R.id.incognito_description_layout_stub);
-        mIncognitoDescriptionView = (IncognitoDescriptionView) stub.inflate();
+        ViewStub containerStub =
+                (ViewStub) findViewById(R.id.incognito_description_container_layout_stub);
+        View containerView = containerStub.inflate();
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+            containerView.setFocusable(true);
+            containerView.setFocusableInTouchMode(true);
+        }
+        mIncognitoDescriptionView = (IncognitoDescriptionView) containerView.findViewById(
+                R.id.new_tab_incognito_container);
         if (mIncognitoDescriptionLearnMoreListener != null) {
             setIncognitoDescriptionLearnMoreClickListener(mIncognitoDescriptionLearnMoreListener);
         }
@@ -223,5 +300,133 @@ class TasksView extends CoordinatorLayoutForPointer {
             mIncognitoDescriptionView.setCookieControlsIconOnclickListener(listener);
             mIncognitoCookieControlsIconClickListener = null;
         }
+    }
+
+    /**
+     * Set the top margin for the tasks surface body.
+     * @param topMargin The top margin to set.
+     */
+    void setTasksSurfaceBodyTopMargin(int topMargin) {
+        MarginLayoutParams params = (MarginLayoutParams) getBodyViewContainer().getLayoutParams();
+        params.topMargin = topMargin;
+    }
+
+    /**
+     * Set the top margin for the mv tiles container.
+     * @param topMargin The top margin to set.
+     */
+    void setMVTilesContainerTopMargin(int topMargin) {
+        MarginLayoutParams params =
+                (MarginLayoutParams) mHeaderView.findViewById(R.id.mv_tiles_container)
+                        .getLayoutParams();
+        params.topMargin = topMargin;
+    }
+
+    /**
+     * Set the top margin for the tab switcher title.
+     * @param topMargin The top margin to set.
+     */
+    void setTabSwitcherTitleTopMargin(int topMargin) {
+        MarginLayoutParams params =
+                (MarginLayoutParams) mHeaderView.findViewById(R.id.tab_switcher_title)
+                        .getLayoutParams();
+        params.topMargin = topMargin;
+    }
+
+    /**
+     * Set the visibility of the trendy terms section.
+     * @param isVisible whether the trendy terms section is visible or not.
+     */
+    void setTrendyTermsVisibility(boolean isVisible) {
+        findViewById(R.id.trendy_terms_recycler_view).setVisibility(isVisible ? VISIBLE : GONE);
+    }
+
+    /**
+     * Add a header offset change listener.
+     * @param onOffsetChangedListener The given header offset change listener.
+     */
+    void addHeaderOffsetChangeListener(
+            AppBarLayout.OnOffsetChangedListener onOffsetChangedListener) {
+        if (mHeaderView != null) {
+            mHeaderView.addOnOffsetChangedListener(onOffsetChangedListener);
+        }
+    }
+
+    /**
+     * Remove the given header offset change listener.
+     * @param onOffsetChangedListener The header offset change listener which should be removed.
+     */
+    void removeHeaderOffsetChangeListener(
+            AppBarLayout.OnOffsetChangedListener onOffsetChangedListener) {
+        if (mHeaderView != null) {
+            mHeaderView.removeOnOffsetChangedListener(onOffsetChangedListener);
+        }
+    }
+
+    /**
+     * Create the fake box shrink animation if it doesn't exist yet and add the omnibox shrink
+     * animation when the homepage is scrolled.
+     */
+    void addFakeSearchBoxShrinkAnimation() {
+        if (mHeaderView == null) return;
+        if (mFakeSearchBoxShrinkAnimation == null) {
+            int fakeSearchBoxHeight =
+                    getResources().getDimensionPixelSize(R.dimen.ntp_search_box_height);
+            int toolbarContainerTopMargin =
+                    getResources().getDimensionPixelSize(R.dimen.location_bar_vertical_margin);
+            View fakeSearchBoxView = findViewById(R.id.search_box);
+            if (fakeSearchBoxView == null) return;
+            // If fake search box view is not null when creating this animation, it will not change.
+            // So checking it once above is enough.
+            mFakeSearchBoxShrinkAnimation = (appbarLayout, headerVerticalOffset)
+                    -> updateFakeSearchBoxShrinkAnimation(headerVerticalOffset, fakeSearchBoxHeight,
+                            toolbarContainerTopMargin, fakeSearchBoxView);
+        }
+        mHeaderView.addOnOffsetChangedListener(mFakeSearchBoxShrinkAnimation);
+    }
+
+    /** Remove the fake box shrink animation. */
+    void removeFakeSearchBoxShrinkAnimation() {
+        if (mHeaderView != null) {
+            mHeaderView.removeOnOffsetChangedListener(mFakeSearchBoxShrinkAnimation);
+        }
+    }
+
+    /**
+     * When the start surface toolbar is about to be scrolled out of the screen and the fake search
+     * box is almost at the screen top, start to reduce its height to make it finally the same as
+     * toolbar container view's height. This makes fake search box exactly overlap the toolbar
+     * container view and makes the transition smooth.
+     *
+     * <p>This function should be called together with
+     * StartSurfaceToolbarMediator#updateTranslationY, which scroll up the start surface toolbar
+     * together with the header.
+     *
+     * @param headerOffset The current offset of the header.
+     * @param originalFakeSearchBoxHeight The height of fake search box.
+     * @param toolbarContainerTopMargin The top margin of toolbar container view.
+     * @param fakeSearchBox The fake search box in start surface homepage.
+     */
+    private void updateFakeSearchBoxShrinkAnimation(int headerOffset,
+            int originalFakeSearchBoxHeight, int toolbarContainerTopMargin, View fakeSearchBox) {
+        // When the header is scrolled up by fake search box height or so, reduce the fake search
+        // box height.
+        int reduceHeight = MathUtils.clamp(
+                -headerOffset - originalFakeSearchBoxHeight, 0, toolbarContainerTopMargin);
+
+        ViewGroup.LayoutParams layoutParams = fakeSearchBox.getLayoutParams();
+        if (layoutParams.height == originalFakeSearchBoxHeight - reduceHeight) {
+            return;
+        }
+
+        layoutParams.height = originalFakeSearchBoxHeight - reduceHeight;
+
+        // Update the top margin of the fake search box.
+        ViewGroup.MarginLayoutParams marginLayoutParams =
+                (ViewGroup.MarginLayoutParams) fakeSearchBox.getLayoutParams();
+        marginLayoutParams.setMargins(marginLayoutParams.leftMargin, reduceHeight,
+                marginLayoutParams.rightMargin, marginLayoutParams.bottomMargin);
+
+        fakeSearchBox.setLayoutParams(layoutParams);
     }
 }

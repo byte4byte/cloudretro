@@ -7,7 +7,7 @@
 #include <memory>
 #include <utility>
 
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "components/policy/core/common/policy_bundle.h"
 
 namespace policy {
@@ -52,6 +52,10 @@ void ProxyPolicyProvider::RefreshPolicies() {
     bundle->CopyFrom(policies());
     UpdatePolicy(std::move(bundle));
   }
+}
+
+bool ProxyPolicyProvider::IsFirstPolicyLoadComplete(PolicyDomain domain) const {
+  return delegate_ && delegate_->IsInitializationComplete(domain);
 }
 
 void ProxyPolicyProvider::OnUpdatePolicy(

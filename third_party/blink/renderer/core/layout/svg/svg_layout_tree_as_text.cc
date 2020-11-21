@@ -55,6 +55,9 @@
 #include "third_party/blink/renderer/core/svg/linear_gradient_attributes.h"
 #include "third_party/blink/renderer/core/svg/pattern_attributes.h"
 #include "third_party/blink/renderer/core/svg/radial_gradient_attributes.h"
+#include "third_party/blink/renderer/core/svg/svg_animated_angle.h"
+#include "third_party/blink/renderer/core/svg/svg_animated_length.h"
+#include "third_party/blink/renderer/core/svg/svg_animated_point_list.h"
 #include "third_party/blink/renderer/core/svg/svg_circle_element.h"
 #include "third_party/blink/renderer/core/svg/svg_ellipse_element.h"
 #include "third_party/blink/renderer/core/svg/svg_enumeration_map.h"
@@ -228,30 +231,48 @@ static WTF::TextStream& operator<<(WTF::TextStream& ts,
   return ts;
 }
 
-static void WriteSVGPaintingResource(
-    WTF::TextStream& ts,
-    const SVGPaintDescription& paint_description) {
-  DCHECK(paint_description.is_valid);
-  if (!paint_description.resource) {
-    ts << "[type=SOLID] [color=" << paint_description.color << "]";
-    return;
+static void WriteSVGPaintingResource(WTF::TextStream& ts,
+                                     const SVGResource& resource) {
+  const LayoutSVGResourceContainer* container = resource.ResourceContainer();
+  DCHECK(container);
+  switch (container->ResourceType()) {
+    case kPatternResourceType:
+      ts << "[type=PATTERN]";
+      break;
+    case kLinearGradientResourceType:
+      ts << "[type=LINEAR-GRADIENT]";
+      break;
+    case kRadialGradientResourceType:
+      ts << "[type=RADIAL-GRADIENT]";
+      break;
+    default:
+      NOTREACHED();
+      break;
   }
+  ts << " [id=\"" << resource.Target()->GetIdAttribute() << "\"]";
+}
 
-  LayoutSVGResourcePaintServer* paint_server_container =
-      paint_description.resource;
-  SVGElement* element = paint_server_container->GetElement();
-  DCHECK(element);
-
-  if (paint_server_container->ResourceType() == kPatternResourceType)
-    ts << "[type=PATTERN]";
-  else if (paint_server_container->ResourceType() ==
-           kLinearGradientResourceType)
-    ts << "[type=LINEAR-GRADIENT]";
-  else if (paint_server_container->ResourceType() ==
-           kRadialGradientResourceType)
-    ts << "[type=RADIAL-GRADIENT]";
-
-  ts << " [id=\"" << element->GetIdAttribute() << "\"]";
+static bool WriteSVGPaint(WTF::TextStream& ts,
+                          const ComputedStyle& style,
+                          const SVGPaint& paint,
+                          const CSSProperty& property,
+                          const char* paint_name) {
+  TextStreamSeparator s(" ");
+  if (const StyleSVGResource* resource = paint.Resource()) {
+    const SVGResource* paint_resource = resource->Resource();
+    if (GetSVGResourceAsType<LayoutSVGResourcePaintServer>(paint_resource)) {
+      ts << " [" << paint_name << "={" << s;
+      WriteSVGPaintingResource(ts, *paint_resource);
+      return true;
+    }
+  }
+  if (paint.HasColor()) {
+    Color color = style.VisitedDependentColor(property);
+    ts << " [" << paint_name << "={" << s;
+    ts << "[type=SOLID] [color=" << color << "]";
+    return true;
+  }
+  return false;
 }
 
 static void WriteStyle(WTF::TextStream& ts, const LayoutObject& object) {
@@ -266,17 +287,10 @@ static void WriteStyle(WTF::TextStream& ts, const LayoutObject& object) {
   WriteIfNotDefault(ts, "opacity", style.Opacity(),
                     ComputedStyleInitialValues::InitialOpacity());
   if (object.IsSVGShape()) {
-    const LayoutSVGShape& shape = static_cast<const LayoutSVGShape&>(object);
-    DCHECK(shape.GetElement());
-
-    SVGPaintDescription stroke_paint_description =
-        LayoutSVGResourcePaintServer::RequestPaintDescription(
-            shape, shape.StyleRef(), kApplyToStrokeMode);
-    if (stroke_paint_description.is_valid) {
-      TextStreamSeparator s(" ");
-      ts << " [stroke={" << s;
-      WriteSVGPaintingResource(ts, stroke_paint_description);
-
+    if (WriteSVGPaint(ts, style, svg_style.StrokePaint(),
+                      GetCSSPropertyStroke(), "stroke")) {
+      const LayoutSVGShape& shape = static_cast<const LayoutSVGShape&>(object);
+      DCHECK(shape.GetElement());
       SVGLengthContext length_context(shape.GetElement());
       double dash_offset =
           length_context.ValueForLength(svg_style.StrokeDashOffset(), style);
@@ -297,14 +311,8 @@ static void WriteStyle(WTF::TextStream& ts, const LayoutObject& object) {
       ts << "}]";
     }
 
-    SVGPaintDescription fill_paint_description =
-        LayoutSVGResourcePaintServer::RequestPaintDescription(
-            shape, shape.StyleRef(), kApplyToFillMode);
-    if (fill_paint_description.is_valid) {
-      TextStreamSeparator s(" ");
-      ts << " [fill={" << s;
-      WriteSVGPaintingResource(ts, fill_paint_description);
-
+    if (WriteSVGPaint(ts, style, svg_style.FillPaint(), GetCSSPropertyFill(),
+                      "fill")) {
       WriteIfNotDefault(ts, "opacity", svg_style.FillOpacity(), 1.0f);
       WriteIfNotDefault(ts, "fill rule", svg_style.FillRule(), RULE_NONZERO);
       ts << "}]";
@@ -547,17 +555,17 @@ void WriteSVGResourceContainer(WTF::TextStream& ts,
   const AtomicString& id = element->GetIdAttribute();
   WriteNameAndQuotedValue(ts, "id", id);
 
-  LayoutSVGResourceContainer* resource =
-      ToLayoutSVGResourceContainer(const_cast<LayoutObject*>(&object));
+  auto* resource =
+      To<LayoutSVGResourceContainer>(const_cast<LayoutObject*>(&object));
   DCHECK(resource);
 
   if (resource->ResourceType() == kMaskerResourceType) {
-    LayoutSVGResourceMasker* masker = ToLayoutSVGResourceMasker(resource);
+    auto* masker = To<LayoutSVGResourceMasker>(resource);
     WriteNameValuePair(ts, "maskUnits", masker->MaskUnits());
     WriteNameValuePair(ts, "maskContentUnits", masker->MaskContentUnits());
     ts << "\n";
   } else if (resource->ResourceType() == kFilterResourceType) {
-    LayoutSVGResourceFilter* filter = ToLayoutSVGResourceFilter(resource);
+    auto* filter = To<LayoutSVGResourceFilter>(resource);
     WriteNameValuePair(ts, "filterUnits", filter->FilterUnits());
     WriteNameValuePair(ts, "primitiveUnits", filter->PrimitiveUnits());
     ts << "\n";
@@ -572,10 +580,10 @@ void WriteSVGResourceContainer(WTF::TextStream& ts,
       last_effect->ExternalRepresentation(ts, indent + 1);
   } else if (resource->ResourceType() == kClipperResourceType) {
     WriteNameValuePair(ts, "clipPathUnits",
-                       ToLayoutSVGResourceClipper(resource)->ClipPathUnits());
+                       To<LayoutSVGResourceClipper>(resource)->ClipPathUnits());
     ts << "\n";
   } else if (resource->ResourceType() == kMarkerResourceType) {
-    LayoutSVGResourceMarker* marker = ToLayoutSVGResourceMarker(resource);
+    auto* marker = To<LayoutSVGResourceMarker>(resource);
     WriteNameValuePair(ts, "markerUnits", marker->MarkerUnits());
     ts << " [ref at " << marker->ReferencePoint() << "]";
     ts << " [angle=";
@@ -619,8 +627,7 @@ void WriteSVGResourceContainer(WTF::TextStream& ts,
     ts << " [start=" << gradient->StartPoint(attributes)
        << "] [end=" << gradient->EndPoint(attributes) << "]\n";
   } else if (resource->ResourceType() == kRadialGradientResourceType) {
-    LayoutSVGResourceRadialGradient* gradient =
-        ToLayoutSVGResourceRadialGradient(resource);
+    auto* gradient = To<LayoutSVGResourceRadialGradient>(resource);
 
     // Dump final results that are used for layout. No use in asking
     // SVGGradientElement for its gradientUnits(), as it may link to other
@@ -721,7 +728,7 @@ void WriteResources(WTF::TextStream& ts,
                            tree_scope);
     ts << " ";
     WriteStandardPrefix(ts, *masker, 0);
-    ts << " " << masker->ResourceBoundingBox(reference_box) << "\n";
+    ts << " " << masker->ResourceBoundingBox(reference_box, 1) << "\n";
   }
   if (LayoutSVGResourceClipper* clipper = resources->Clipper()) {
     DCHECK(style.ClipPath());

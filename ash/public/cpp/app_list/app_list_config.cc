@@ -236,12 +236,6 @@ int ItemIconInFolderIconMarginForType(ash::AppListConfigType type) {
   }
 }
 
-int SuggestionChipIconDimension() {
-  // This is needed because chrome uses default instance when generating icons
-  // for suggestion chip and needs to be done for all configs including kShared.
-  return app_list_features::IsScalableAppListEnabled() ? 20 : 16;
-}
-
 int SuggestionChipContainerTopMarginForType(ash::AppListConfigType type) {
   switch (type) {
     case ash::AppListConfigType::kSmall:
@@ -281,7 +275,7 @@ AppListConfig::AppListConfig(AppListConfigType type)
       search_list_icon_dimension_(20),
       search_list_icon_vertical_bar_dimension_(48),
       search_list_badge_icon_dimension_(14),
-      suggestion_chip_icon_dimension_(SuggestionChipIconDimension()),
+      suggestion_chip_icon_dimension_(20),
       suggestion_chip_container_top_margin_(
           SuggestionChipContainerTopMarginForType(type)),
       suggestion_chip_container_height_(32),
@@ -299,7 +293,13 @@ AppListConfig::AppListConfig(AppListConfigType type)
       expand_arrow_tile_height_(72),
       folder_bubble_radius_(FolderUnclippedIconDimensionForType(type) / 2),
       folder_bubble_y_offset_(0),
-      folder_header_height_(20),
+      folder_header_height_(32),
+      folder_header_min_width_(24),
+      folder_header_max_width_(200),
+      folder_header_min_tap_width_(32),
+      folder_name_border_radius_(4),
+      folder_name_border_thickness_(2),
+      folder_name_padding_(8),
       folder_icon_dimension_(FolderClippedIconDimensionForType(type)),
       folder_unclipped_icon_dimension_(
           FolderUnclippedIconDimensionForType(type)),
@@ -311,13 +311,11 @@ AppListConfig::AppListConfig(AppListConfigType type)
       item_icon_in_folder_icon_margin_(ItemIconInFolderIconMarginForType(type)),
       folder_dropping_circle_radius_(folder_bubble_radius_),
       folder_dropping_delay_(0),
-      folder_background_color_(gfx::kGoogleGrey100),
+      folder_background_color_(SK_ColorWHITE),
       page_flip_zone_size_(20),
       grid_tile_spacing_in_folder_(8),
       blur_radius_(30),
-      contents_background_color_(SkColorSetRGB(0xF2, 0xF2, 0xF2)),
       grid_selected_color_(gfx::kGoogleBlue300),
-      card_background_color_(SK_ColorWHITE),
       page_transition_duration_(base::TimeDelta::FromMilliseconds(250)),
       overscroll_page_transition_duration_(
           base::TimeDelta::FromMilliseconds(50)),
@@ -331,7 +329,10 @@ AppListConfig::AppListConfig(AppListConfigType type)
       all_apps_opacity_start_px_(8.0f),
       all_apps_opacity_end_px_(144.0f),
       search_result_title_font_style_(ui::ResourceBundle::BaseFont),
-      search_tile_height_(92) {}
+      search_tile_height_(92),
+      cardified_background_color_(SkColorSetA(SK_ColorWHITE, 26 /* 10% */)),
+      cardified_background_color_active_(
+          SkColorSetA(SK_ColorWHITE, 41 /* 16% */)) {}
 
 AppListConfig::AppListConfig(const AppListConfig& base_config,
                              float scale_x,
@@ -423,6 +424,12 @@ AppListConfig::AppListConfig(const AppListConfig& base_config,
                                      inner_tile_scale_y)),
       folder_bubble_y_offset_(base_config.folder_bubble_y_offset_),
       folder_header_height_(base_config.folder_header_height_),
+      folder_header_min_width_(base_config.folder_header_min_width_),
+      folder_header_max_width_(base_config.folder_header_max_width_),
+      folder_header_min_tap_width_(base_config.folder_header_min_tap_width_),
+      folder_name_border_radius_(base_config.folder_name_border_radius_),
+      folder_name_border_thickness_(base_config.folder_name_border_thickness_),
+      folder_name_padding_(base_config.folder_name_padding_),
       folder_icon_dimension_(MinScale(base_config.folder_icon_dimension_,
                                       scale_x,
                                       inner_tile_scale_y)),
@@ -456,9 +463,7 @@ AppListConfig::AppListConfig(const AppListConfig& base_config,
                    scale_x,
                    inner_tile_scale_y)),
       blur_radius_(base_config.blur_radius_),
-      contents_background_color_(base_config.contents_background_color_),
       grid_selected_color_(base_config.grid_selected_color_),
-      card_background_color_(base_config.card_background_color_),
       page_transition_duration_(base_config.page_transition_duration_),
       overscroll_page_transition_duration_(
           base_config.overscroll_page_transition_duration_),
@@ -475,7 +480,10 @@ AppListConfig::AppListConfig(const AppListConfig& base_config,
       all_apps_opacity_end_px_(base_config.all_apps_opacity_end_px_),
       search_result_title_font_style_(
           base_config.search_result_title_font_style_),
-      search_tile_height_(base_config.search_tile_height_) {}
+      search_tile_height_(base_config.search_tile_height_),
+      cardified_background_color_(base_config.cardified_background_color_),
+      cardified_background_color_active_(
+          base_config.cardified_background_color_active_) {}
 
 AppListConfig::~AppListConfig() = default;
 
@@ -527,6 +535,11 @@ int AppListConfig::GetIdealHorizontalMargin(
 int AppListConfig::GetIdealVerticalMargin(
     const gfx::Rect& available_bounds) const {
   return available_bounds.height() / kAppsGridMarginRatio;
+}
+
+SkColor AppListConfig::GetCardifiedBackgroundColor(bool is_active) const {
+  return is_active ? cardified_background_color_active_
+                   : cardified_background_color_;
 }
 
 }  // namespace ash

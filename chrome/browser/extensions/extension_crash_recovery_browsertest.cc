@@ -22,6 +22,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/result_codes.h"
 #include "content/public/common/url_constants.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/no_renderer_crashes_assertion.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/browser/extension_host.h"
@@ -188,7 +189,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest, DISABLED_CloseAndReload) {
 }
 
 // Flaky. crbug.com/846172
-#if defined(OS_LINUX) || defined(OS_WIN)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_WIN)
 #define MAYBE_ReloadIndependently DISABLED_ReloadIndependently
 #else
 #define MAYBE_ReloadIndependently ReloadIndependently
@@ -214,7 +215,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest, ReloadIndependently) {
 }
 
 // Flaky. crbug.com/846172
-#if defined(OS_LINUX) || defined(OS_WIN)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_WIN)
 #define MAYBE_ReloadIndependentlyChangeTabs \
   DISABLED_ReloadIndependentlyChangeTabs
 #else

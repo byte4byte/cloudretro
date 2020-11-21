@@ -4,12 +4,13 @@
 
 #include "components/performance_manager/public/decorators/tab_properties_decorator.h"
 
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "components/performance_manager/graph/page_node_impl.h"
 #include "components/performance_manager/public/performance_manager.h"
+#include "content/public/test/browser_test.h"
 
 namespace performance_manager {
 

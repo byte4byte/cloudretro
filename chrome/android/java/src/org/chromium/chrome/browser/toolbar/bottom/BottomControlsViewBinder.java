@@ -36,10 +36,6 @@ class BottomControlsViewBinder {
             View bottomControlsWrapper = view.root.findViewById(R.id.bottom_controls_wrapper);
             bottomControlsWrapper.getLayoutParams().height =
                     model.get(BottomControlsProperties.BOTTOM_CONTROLS_CONTAINER_HEIGHT_PX);
-        } else if (BottomControlsProperties.BOTTOM_CONTROLS_HEIGHT_PX == propertyKey) {
-            View bottomContainerSlot = view.root.findViewById(R.id.bottom_toolbar);
-            bottomContainerSlot.getLayoutParams().height =
-                    model.get(BottomControlsProperties.BOTTOM_CONTROLS_HEIGHT_PX);
         } else if (BottomControlsProperties.Y_OFFSET == propertyKey) {
             // Native may not have completely initialized by the time this is set.
             if (view.sceneLayer == null) return;
@@ -53,10 +49,6 @@ class BottomControlsViewBinder {
             final boolean showCompositedView =
                     model.get(BottomControlsProperties.COMPOSITED_VIEW_VISIBLE);
             view.sceneLayer.setIsVisible(showCompositedView);
-            if (model.get(BottomControlsProperties.TOOLBAR_SWIPE_LAYOUT) != null) {
-                model.get(BottomControlsProperties.TOOLBAR_SWIPE_LAYOUT)
-                        .setBottomToolbarSceneLayersVisibility(showCompositedView);
-            }
             model.get(BottomControlsProperties.LAYOUT_MANAGER).requestUpdate();
         } else if (BottomControlsProperties.LAYOUT_MANAGER == propertyKey) {
             assert view.sceneLayer == null;
@@ -64,21 +56,11 @@ class BottomControlsViewBinder {
                     new ScrollingBottomViewSceneLayer(view.root, view.root.getTopShadowHeight());
             view.sceneLayer.setIsVisible(
                     model.get(BottomControlsProperties.COMPOSITED_VIEW_VISIBLE));
-            model.get(BottomControlsProperties.LAYOUT_MANAGER)
-                    .addSceneOverlayToBack(view.sceneLayer);
-        } else if (BottomControlsProperties.TOOLBAR_SWIPE_LAYOUT == propertyKey) {
-            assert view.sceneLayer != null;
-            assert model.get(BottomControlsProperties.TOOLBAR_SWIPE_LAYOUT) != null;
-            model.get(BottomControlsProperties.TOOLBAR_SWIPE_LAYOUT)
-                    .setBottomToolbarSceneLayers(new ScrollingBottomViewSceneLayer(view.sceneLayer),
-                            new ScrollingBottomViewSceneLayer(view.sceneLayer),
-                            model.get(BottomControlsProperties.COMPOSITED_VIEW_VISIBLE));
+            model.get(BottomControlsProperties.LAYOUT_MANAGER).addSceneOverlay(view.sceneLayer);
         } else if (BottomControlsProperties.RESOURCE_MANAGER == propertyKey) {
             model.get(BottomControlsProperties.RESOURCE_MANAGER)
                     .getDynamicResourceLoader()
                     .registerResource(view.root.getId(), view.root.getResourceAdapter());
-        } else if (BottomControlsProperties.TOOLBAR_SWIPE_HANDLER == propertyKey) {
-            view.root.setSwipeDetector(model.get(BottomControlsProperties.TOOLBAR_SWIPE_HANDLER));
         } else {
             assert false : "Unhandled property detected in BottomControlsViewBinder!";
         }

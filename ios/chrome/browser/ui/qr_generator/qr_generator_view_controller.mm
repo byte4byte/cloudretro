@@ -5,7 +5,9 @@
 
 #import "ios/chrome/browser/ui/qr_generator/qr_generator_view_controller.h"
 
+#include "base/feature_list.h"
 #import "ios/chrome/browser/ui/qr_generator/qr_generator_util.h"
+#include "ios/chrome/browser/ui/ui_feature_flags.h"
 #include "ios/chrome/grit/ios_strings.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 
@@ -26,6 +28,8 @@ const CGFloat kQRCodeImageSize = 200.0;
 
 - (void)loadView {
   self.image = [self createQRCodeImage];
+  self.imageAccessibilityLabel =
+      l10n_util::GetNSString(IDS_IOS_QR_CODE_ACCESSIBILITY_LABEL);
   self.imageHasFixedSize = YES;
 
   self.titleTextStyle = UIFontTextStyleTitle3;
@@ -35,10 +39,21 @@ const CGFloat kQRCodeImageSize = 200.0;
   self.primaryActionAvailable = YES;
   self.primaryActionString = l10n_util::GetNSString(IDS_IOS_SHARE_BUTTON_LABEL);
 
+  self.helpButtonAvailable = YES;
+  self.helpButtonAccessibilityLabel =
+      l10n_util::GetNSString(IDS_IOS_HELP_ACCESSIBILITY_LABEL);
+
   self.alwaysShowImage = YES;
   self.primaryActionBarButtonStyle = UIBarButtonSystemItemAction;
 
-  self.helpButtonAvailable = YES;
+#if defined(__IPHONE_13_4)
+  if (@available(iOS 13.4, *)) {
+    if (base::FeatureList::IsEnabled(kPointerSupport)) {
+      self.pointerInteractionEnabled = YES;
+    }
+  }
+#endif  // defined(__IPHONE_13_4)
+
   [super loadView];
 }
 

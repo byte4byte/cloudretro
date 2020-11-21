@@ -10,7 +10,7 @@
 
 #include "base/base64.h"
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/command_line.h"
 #include "base/feature_list.h"
 #include "base/json/json_writer.h"
@@ -90,7 +90,6 @@ const net::BackoffEntry::Policy kDefaultBackoffPolicy = {
     -1,               // entry_lifetime_ms
     true,             // always_use_initial_delay
 };
-
 
 bool AllowInsecurePrefetchProxy() {
   return base::CommandLine::ForCurrentProcess()->HasSwitch(
@@ -194,8 +193,7 @@ DataReductionProxyConfigServiceClient::DataReductionProxyConfigServiceClient(
   DCHECK(request_options);
   DCHECK(service);
   DCHECK(config_service_url_.is_valid());
-  DCHECK(previews::params::IsLitePageServerPreviewsEnabled() ||
-         params::ForceEnableClientConfigServiceForAllDataSaverUsers());
+  DCHECK(params::ForceEnableClientConfigServiceForAllDataSaverUsers());
 
   const base::CommandLine& command_line =
       *base::CommandLine::ForCurrentProcess();
@@ -377,8 +375,7 @@ void DataReductionProxyConfigServiceClient::OnURLLoadComplete(
 
 void DataReductionProxyConfigServiceClient::RetrieveRemoteConfig() {
   DCHECK(thread_checker_.CalledOnValidThread());
-  DCHECK(previews::params::IsLitePageServerPreviewsEnabled() ||
-         params::ForceEnableClientConfigServiceForAllDataSaverUsers());
+  DCHECK(params::ForceEnableClientConfigServiceForAllDataSaverUsers());
 
   CreateClientConfigRequest request;
   std::string serialized_request;
@@ -534,10 +531,6 @@ bool DataReductionProxyConfigServiceClient::ParseAndApplyProxyConfig(
 
   service_->UpdatePrefetchProxyHosts(
       GetPrefetchProxyHosts(config.prefetch_proxy_config()));
-
-  service_->SetIgnoreLongTermBlackListRules(
-      config.ignore_long_term_black_list_rules());
-
 
   request_options_->SetSecureSession(config.session_key());
   remote_config_applied_ = true;

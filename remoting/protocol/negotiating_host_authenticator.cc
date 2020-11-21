@@ -10,7 +10,8 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/logging.h"
+#include "base/check_op.h"
+#include "base/notreached.h"
 #include "base/strings/string_split.h"
 #include "remoting/base/rsa_key_pair.h"
 #include "remoting/protocol/channel_authenticator.h"
@@ -184,8 +185,8 @@ void NegotiatingHostAuthenticator::CreateAuthenticator(
 
     case Method::THIRD_PARTY_SPAKE2_P224:
       current_authenticator_.reset(new ThirdPartyHostAuthenticator(
-          base::Bind(&V2Authenticator::CreateForHost, local_cert_,
-                     local_key_pair_),
+          base::BindRepeating(&V2Authenticator::CreateForHost, local_cert_,
+                              local_key_pair_),
           token_validator_factory_->CreateTokenValidator(local_id_,
                                                          remote_id_)));
       std::move(resume_callback).Run();
@@ -193,8 +194,8 @@ void NegotiatingHostAuthenticator::CreateAuthenticator(
 
     case Method::THIRD_PARTY_SPAKE2_CURVE25519:
       current_authenticator_.reset(new ThirdPartyHostAuthenticator(
-          base::Bind(&Spake2Authenticator::CreateForHost, local_id_, remote_id_,
-                     local_cert_, local_key_pair_),
+          base::BindRepeating(&Spake2Authenticator::CreateForHost, local_id_,
+                              remote_id_, local_cert_, local_key_pair_),
           token_validator_factory_->CreateTokenValidator(local_id_,
                                                          remote_id_)));
       std::move(resume_callback).Run();
@@ -203,8 +204,9 @@ void NegotiatingHostAuthenticator::CreateAuthenticator(
     case Method::PAIRED_SPAKE2_P224: {
       PairingHostAuthenticator* pairing_authenticator =
           new PairingHostAuthenticator(
-              pairing_registry_, base::Bind(&V2Authenticator::CreateForHost,
-                                            local_cert_, local_key_pair_),
+              pairing_registry_,
+              base::BindRepeating(&V2Authenticator::CreateForHost, local_cert_,
+                                  local_key_pair_),
               shared_secret_hash_);
       current_authenticator_.reset(pairing_authenticator);
       pairing_authenticator->Initialize(client_id_, preferred_initial_state,
@@ -216,8 +218,9 @@ void NegotiatingHostAuthenticator::CreateAuthenticator(
       PairingHostAuthenticator* pairing_authenticator =
           new PairingHostAuthenticator(
               pairing_registry_,
-              base::Bind(&Spake2Authenticator::CreateForHost, local_id_,
-                         remote_id_, local_cert_, local_key_pair_),
+              base::BindRepeating(&Spake2Authenticator::CreateForHost,
+                                  local_id_, remote_id_, local_cert_,
+                                  local_key_pair_),
               shared_secret_hash_);
       current_authenticator_.reset(pairing_authenticator);
       pairing_authenticator->Initialize(client_id_, preferred_initial_state,

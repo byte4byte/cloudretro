@@ -5,7 +5,7 @@
 #include "components/password_manager/core/browser/password_feature_manager_impl.h"
 
 #include "base/test/scoped_feature_list.h"
-#include "components/autofill/core/common/password_form.h"
+#include "components/password_manager/core/browser/password_form.h"
 #include "components/password_manager/core/browser/password_manager_client.h"
 #include "components/password_manager/core/browser/password_manager_util.h"
 #include "components/password_manager/core/common/password_manager_features.h"
@@ -37,8 +37,7 @@ class PasswordFeatureManagerImplTest : public ::testing::Test {
   CoreAccountInfo account_;
 };
 
-TEST_F(PasswordFeatureManagerImplTest,
-       GenerationEnabledForOptedInUserOnlyIfDefaultStoreIsAccount) {
+TEST_F(PasswordFeatureManagerImplTest, GenerationEnabledIfUserIsOptedIn) {
   base::test::ScopedFeatureList features;
   features.InitAndEnableFeature(
       password_manager::features::kEnablePasswordsAccountStorage);
@@ -48,21 +47,13 @@ TEST_F(PasswordFeatureManagerImplTest,
   sync_service_.SetDisableReasons({});
   sync_service_.SetTransportState(syncer::SyncService::TransportState::ACTIVE);
 
-  password_feature_manager_.SetAccountStorageOptIn(true);
+  password_feature_manager_.OptInToAccountStorage();
 
   ASSERT_EQ(
       password_manager_util::GetPasswordSyncState(&sync_service_),
       password_manager::SyncState::ACCOUNT_PASSWORDS_ACTIVE_NORMAL_ENCRYPTION);
 
-  password_feature_manager_.SetDefaultPasswordStore(
-      autofill::PasswordForm::Store::kAccountStore);
-
   EXPECT_TRUE(password_feature_manager_.IsGenerationEnabled());
-
-  password_feature_manager_.SetDefaultPasswordStore(
-      autofill::PasswordForm::Store::kProfileStore);
-
-  EXPECT_FALSE(password_feature_manager_.IsGenerationEnabled());
 }
 
 TEST_F(PasswordFeatureManagerImplTest,

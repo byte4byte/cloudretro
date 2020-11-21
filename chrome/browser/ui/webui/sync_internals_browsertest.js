@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 GEN('#include "components/sync/driver/sync_driver_switches.h"');
+GEN('#include "content/public/test/browser_test.h"');
 
 /**
  * Test fixture for sync internals WebUI testing.
@@ -26,13 +27,6 @@ SyncInternalsWebUITest.prototype = {
    */
   runAccessibilityChecks: false,
 
-  /** @override */
-  preLoad: function() {
-    this.makeAndRegisterMockHandler([
-        'getAllNodes',
-    ]);
-  },
-
   /**
    * Checks aboutInfo's details section for the specified field.
    * @param {boolean} isValid Whether the field is valid.
@@ -53,7 +47,8 @@ SyncInternalsWebUITest.prototype = {
       for (let j = 0; j < details[i].data.length; ++j) {
         const obj = details[i].data[j];
         if (obj.stat_name === key) {
-          return obj.is_valid === isValid && obj.stat_value === value;
+          return (obj.stat_status !== 'uninitialized') === isValid &&
+              obj.stat_value === value;
         }
       }
     }
@@ -162,22 +157,22 @@ const HARD_CODED_ALL_NODES = [{
 HARD_CODED_ABOUT_INFO = {
   'actionable_error': [
     {
-      'is_valid': false,
+      'stat_status': 'uninitialized',
       'stat_name': 'Error Type',
       'stat_value': 'Uninitialized'
     },
     {
-      'is_valid': false,
+      'stat_status': 'uninitialized',
       'stat_name': 'Action',
       'stat_value': 'Uninitialized'
     },
     {
-      'is_valid': false,
+      'stat_status': 'uninitialized',
       'stat_name': 'URL',
       'stat_value': 'Uninitialized'
     },
     {
-      'is_valid': false,
+      'stat_status': 'uninitialized',
       'stat_name': 'Error Description',
       'stat_value': 'Uninitialized'
     }
@@ -187,7 +182,7 @@ HARD_CODED_ABOUT_INFO = {
     {
       'data': [
         {
-          'is_valid': true,
+          'stat_status': '',
           'stat_name': 'Summary',
           'stat_value': 'Sync service initialized'
         }
@@ -204,7 +199,6 @@ HARD_CODED_ABOUT_INFO = {
       'num_live': 'Live Entries',
       'message': 'Message',
       'state': 'State',
-      'group_type': 'Group Type',
     },
     {
       'status': 'ok',
@@ -213,7 +207,6 @@ HARD_CODED_ABOUT_INFO = {
       'num_live': 2793,
       'message': '',
       'state': 'Running',
-      'group_type': 'Group UI',
     },
   ],
   'unrecoverable_error_detected': false
@@ -242,7 +235,13 @@ GEN('#if defined(OS_CHROMEOS)');
 // Sync should be disabled if there was no primary account set.
 TEST_F('SyncInternalsWebUITest', 'SyncDisabledByDefaultChromeOS', function() {
   expectTrue(this.hasInDetails(true, 'Transport State', 'Disabled'));
-  expectTrue(this.hasInDetails(true, 'Disable Reasons', 'Not signed in'));
+  // We don't check 'Disable Reasons' here because the string depends on the
+  // flag SplitSettingsSync. There's not a good way to check a C++ flag value
+  // in the middle of a JS test, nor is there a simple way to enable or disable
+  // platform-specific flags in a cross-platform JS test suite.
+  // TODO(crbug.com/1087165): When SplitSettingsSync is the default, delete this
+  // test and use SyncInternalsWebUITest.SyncDisabledByDefault on all
+  // platforms.
   expectTrue(this.hasInDetails(true, 'Username', ''));
 });
 
@@ -328,12 +327,9 @@ TEST_F('SyncInternalsWebUITest', 'SearchTabDoesntChangeOnItemSelect',
 });
 
 TEST_F('SyncInternalsWebUITest', 'NodeBrowserTest', function() {
-  const getAllNodesSavedArgs = new SaveMockArguments();
-  this.mockHandler.expects(once()).
-      getAllNodes(getAllNodesSavedArgs.match(ANYTHING)).
-      will(callFunctionWithSavedArgs(getAllNodesSavedArgs,
-                                     chrome.sync.getAllNodesCallback,
-                                     HARD_CODED_ALL_NODES));
+  chrome.sync.getAllNodes = (callback) => {
+    callback(HARD_CODED_ALL_NODES);
+  };
 
   // Hit the refresh button.
   $('node-browser-refresh-button').click();
@@ -341,7 +337,7 @@ TEST_F('SyncInternalsWebUITest', 'NodeBrowserTest', function() {
   // Check that the refresh time was updated.
   expectNotEquals($('node-browser-refresh-time').textContent, 'Never');
 
-  // Verify some hard-coded assumptions.  These depend on the vaue of the
+  // Verify some hard-coded assumptions.  These depend on the value of the
   // hard-coded nodes, specified elsewhere in this file.
 
   // Start with the tree itself.
@@ -364,12 +360,9 @@ TEST_F('SyncInternalsWebUITest', 'NodeBrowserTest', function() {
 });
 
 TEST_F('SyncInternalsWebUITest', 'NodeBrowserRefreshOnTabSelect', function() {
-  const getAllNodesSavedArgs = new SaveMockArguments();
-  this.mockHandler.expects(once()).
-      getAllNodes(getAllNodesSavedArgs.match(ANYTHING)).
-      will(callFunctionWithSavedArgs(getAllNodesSavedArgs,
-                                     chrome.sync.getAllNodesCallback,
-                                     HARD_CODED_ALL_NODES));
+  chrome.sync.getAllNodes = (callback) => {
+    callback(HARD_CODED_ALL_NODES);
+  };
 
   // Should start with non-refreshed node browser.
   expectEquals($('node-browser-refresh-time').textContent, 'Never');

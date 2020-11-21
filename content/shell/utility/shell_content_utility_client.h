@@ -19,10 +19,7 @@ class ShellContentUtilityClient : public ContentUtilityClient {
 
   // ContentUtilityClient:
   void ExposeInterfacesToBrowser(mojo::BinderMap* binders) override;
-  bool HandleServiceRequest(
-      const std::string& service_name,
-      service_manager::mojom::ServiceRequest request) override;
-  mojo::ServiceFactory* GetIOThreadServiceFactory() override;
+  void RegisterIOThreadServices(mojo::ServiceFactory& services) override;
   void RegisterNetworkBinders(
       service_manager::BinderRegistry* registry) override;
 

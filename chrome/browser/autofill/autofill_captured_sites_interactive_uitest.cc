@@ -46,6 +46,7 @@
 #include "components/autofill/core/common/autofill_features.h"
 #include "components/autofill/core/common/autofill_switches.h"
 #include "components/autofill/core/common/autofill_util.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/test_renderer_host.h"
 #include "content/public/test/test_utils.h"
 #include "net/dns/mock_host_resolver.h"
@@ -166,7 +167,7 @@ class AutofillCapturedSitesInteractiveTest
   }
 
   bool SetupAutofillProfile() override {
-    AddTestAutofillData(browser(), profile(), credit_card());
+    AddTestAutofillData(browser()->profile(), profile(), credit_card());
     return true;
   }
 
@@ -224,6 +225,7 @@ class AutofillCapturedSitesInteractiveTest
     // Allow access exception to live Autofill Server for
     // overriding cache replay behavior.
     host_resolver()->AllowDirectLookup("clients1.google.com");
+    host_resolver()->AllowDirectLookup("content-autofill.googleapis.com");
     AutofillUiTest::SetUpInProcessBrowserTestFixture();
   }
 
@@ -234,11 +236,9 @@ class AutofillCapturedSitesInteractiveTest
     // elements in a form to determine if the form is ready for interaction.
     feature_list_.InitWithFeatures(
         /*enabled_features=*/{features::kAutofillShowTypePredictions},
-        /*disabled_features=*/{features::kAutofillCacheQueryResponses,
-                               features::kAutofillUseApi});
+        /*disabled_features=*/{features::kAutofillCacheQueryResponses});
     command_line->AppendSwitch(switches::kShowAutofillTypePredictions);
-    command_line->AppendSwitchASCII(::switches::kForceFieldTrials,
-                                    "AutofillFieldMetadata/Enabled/");
+    command_line->AppendSwitchASCII(::switches::kForceFieldTrials, "Foo/Bar");
 
     captured_sites_test_utils::TestRecipeReplayer::SetUpCommandLine(
         command_line);

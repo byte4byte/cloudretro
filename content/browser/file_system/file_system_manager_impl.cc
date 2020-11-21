@@ -7,13 +7,15 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/check_op.h"
+#include "base/feature_list.h"
 #include "base/files/file_path.h"
-#include "base/logging.h"
 #include "base/macros.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics.h"
+#include "base/notreached.h"
 #include "base/sequenced_task_runner.h"
 #include "base/strings/string_util.h"
-#include "base/task/post_task.h"
 #include "base/threading/thread.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
@@ -24,6 +26,7 @@
 #include "content/browser/file_system/browser_file_system_helper.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/common/content_features.h"
 #include "ipc/ipc_platform_file.h"
 #include "net/base/mime_util.h"
 #include "storage/browser/blob/blob_data_builder.h"
@@ -212,6 +215,24 @@ void FileSystemManagerImpl::Open(const url::Origin& origin,
                                  blink::mojom::FileSystemType file_system_type,
                                  OpenCallback callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
+
+  if (!security_policy_->CanAccessDataForOrigin(process_id_, origin)) {
+    const std::string& scheme =
+        origin.GetTupleOrPrecursorTupleIfOpaque().scheme();
+    bool is_http_based_scheme =
+        (scheme == url::kHttpsScheme) || (scheme == url::kHttpsScheme);
+    UMA_HISTOGRAM_BOOLEAN(
+        "SiteIsolation.FileSystemApi.CanAccessDataForOriginFailure."
+        "IsHttpBasedScheme",
+        is_http_based_scheme);
+
+    if (base::FeatureList::IsEnabled(
+            features::kSiteIsolationEnforcementForFileSystemApi)) {
+      receivers_.ReportBadMessage("FSMI_OPEN_INVALID_ORIGIN");
+      return;
+    }
+  }
+
   if (file_system_type == blink::mojom::FileSystemType::kTemporary) {
     RecordAction(base::UserMetricsAction("OpenFileSystemTemporary"));
   } else if (file_system_type == blink::mojom::FileSystemType::kPersistent) {
@@ -829,8 +850,8 @@ void FileSystemManagerImpl::GetPlatformPathOnFileThread(
           [](base::WeakPtr<FileSystemManagerImpl> file_system_manager,
              GetPlatformPathCallback callback,
              const base::FilePath& platform_path) {
-            base::PostTask(
-                FROM_HERE, {BrowserThread::IO},
+            GetIOThreadTaskRunner({})->PostTask(
+                FROM_HERE,
                 base::BindOnce(&FileSystemManagerImpl::DidGetPlatformPath,
                                std::move(file_system_manager),
                                std::move(callback), platform_path));

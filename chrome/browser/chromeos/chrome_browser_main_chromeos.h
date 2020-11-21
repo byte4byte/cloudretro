@@ -13,28 +13,36 @@
 #include "chrome/browser/chromeos/external_metrics.h"
 #include "chrome/browser/memory/memory_kills_monitor.h"
 
+class AccessibilityEventRewriterDelegate;
 class AssistantClientImpl;
 class AssistantStateClient;
 class ChromeKeyboardControllerClient;
-class SpokenFeedbackEventRewriterDelegate;
-
-namespace lock_screen_apps {
-class StateController;
-}
+class ImageDownloaderImpl;
 
 namespace arc {
+namespace data_snapshotd {
+class ArcDataSnapshotdManager;
+}  // namespace data_snapshotd
+
 class ArcServiceLauncher;
 }  // namespace arc
 
-namespace policy {
-class LockToSingleUserManager;
-}  // namespace policy
-
+namespace crosapi {
+class BrowserManager;
+}  // namespace crosapi
 
 namespace crostini {
 class CrostiniUnsupportedActionNotifier;
 class CrosvmMetrics;
 }  // namespace crostini
+
+namespace lock_screen_apps {
+class StateController;
+}
+
+namespace policy {
+class LockToSingleUserManager;
+}  // namespace policy
 
 namespace chromeos {
 
@@ -51,7 +59,6 @@ class LoginScreenExtensionsLifetimeManager;
 class LoginScreenExtensionsStorageCleaner;
 class LowDiskNotification;
 class NetworkChangeManagerClient;
-class NetworkHealth;
 class NetworkPrefStateObserver;
 class NetworkThrottlingObserver;
 class PowerMetricsReporter;
@@ -59,7 +66,6 @@ class RendererFreezer;
 class SessionTerminationManager;
 class ShutdownPolicyForwarder;
 class SystemTokenCertDBInitializer;
-class WakeOnWifiManager;
 class WebKioskAppManager;
 class WilcoDtcSupportdManager;
 
@@ -70,6 +76,10 @@ class ExternalLoader;
 namespace internal {
 class DBusServices;
 }  // namespace internal
+
+namespace platform_keys {
+class KeyPermissionsManager;
+}
 
 namespace power {
 class SmartChargingManager;
@@ -114,12 +124,10 @@ class ChromeBrowserMainPartsChromeos : public ChromeBrowserMainPartsLinux {
 
  private:
   std::unique_ptr<default_app_order::ExternalLoader> app_order_loader_;
-  std::unique_ptr<NetworkHealth> network_health_;
   std::unique_ptr<NetworkPrefStateObserver> network_pref_state_observer_;
   std::unique_ptr<IdleActionWarningObserver> idle_action_warning_observer_;
   std::unique_ptr<RendererFreezer> renderer_freezer_;
   std::unique_ptr<PowerMetricsReporter> power_metrics_reporter_;
-  std::unique_ptr<WakeOnWifiManager> wake_on_wifi_manager_;
   std::unique_ptr<FastTransitionObserver> fast_transition_observer_;
   std::unique_ptr<NetworkThrottlingObserver> network_throttling_observer_;
   std::unique_ptr<NetworkChangeManagerClient> network_change_manager_client_;
@@ -133,13 +141,15 @@ class ChromeBrowserMainPartsChromeos : public ChromeBrowserMainPartsLinux {
 
   std::unique_ptr<EventRewriterDelegateImpl> event_rewriter_delegate_;
 
-  // Handles event dispatch to the spoken feedback extension (ChromeVox).
-  std::unique_ptr<SpokenFeedbackEventRewriterDelegate>
-      spoken_feedback_event_rewriter_delegate_;
+  // Handles event dispatch to the accessibility component extensions.
+  std::unique_ptr<AccessibilityEventRewriterDelegate>
+      accessibility_event_rewriter_delegate_;
 
   scoped_refptr<chromeos::ExternalMetrics> external_metrics_;
 
   std::unique_ptr<arc::ArcServiceLauncher> arc_service_launcher_;
+
+  std::unique_ptr<ImageDownloaderImpl> image_downloader_;
 
   std::unique_ptr<AssistantStateClient> assistant_state_client_;
 
@@ -149,13 +159,12 @@ class ChromeBrowserMainPartsChromeos : public ChromeBrowserMainPartsLinux {
   std::unique_ptr<ArcKioskAppManager> arc_kiosk_app_manager_;
   std::unique_ptr<WebKioskAppManager> web_kiosk_app_manager_;
 
-  std::unique_ptr<memory::MemoryKillsMonitor::Handle> memory_kills_monitor_;
-
   std::unique_ptr<ChromeKeyboardControllerClient>
       chrome_keyboard_controller_client_;
 
   std::unique_ptr<lock_screen_apps::StateController>
       lock_screen_apps_state_controller_;
+  std::unique_ptr<crosapi::BrowserManager> browser_manager_;
 
   std::unique_ptr<power::SmartChargingManager> smart_charging_manager_;
 
@@ -196,6 +205,12 @@ class ChromeBrowserMainPartsChromeos : public ChromeBrowserMainPartsLinux {
 
   std::unique_ptr<GnubbyNotification> gnubby_notification_;
   std::unique_ptr<system::BreakpadConsentWatcher> breakpad_consent_watcher_;
+
+  std::unique_ptr<arc::data_snapshotd::ArcDataSnapshotdManager>
+      arc_data_snapshotd_manager_;
+
+  std::unique_ptr<platform_keys::KeyPermissionsManager>
+      system_token_key_permissions_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeBrowserMainPartsChromeos);
 };

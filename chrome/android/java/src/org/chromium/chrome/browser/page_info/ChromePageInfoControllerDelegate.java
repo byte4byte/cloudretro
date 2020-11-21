@@ -4,98 +4,89 @@
 
 package org.chromium.chrome.browser.page_info;
 
+import android.content.Context;
 import android.content.Intent;
+import android.content.res.Resources;
+import android.graphics.drawable.BitmapDrawable;
+import android.graphics.drawable.Drawable;
 import android.text.SpannableString;
 import android.text.TextUtils;
 
-import androidx.annotation.IntDef;
+import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.annotation.VisibleForTesting;
+import androidx.appcompat.content.res.AppCompatResources;
 
 import org.chromium.base.Callback;
 import org.chromium.base.Consumer;
+import org.chromium.base.supplier.Supplier;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.feature_engagement.TrackerFactory;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.instantapps.InstantAppsHandler;
 import org.chromium.chrome.browser.offlinepages.OfflinePageItem;
 import org.chromium.chrome.browser.offlinepages.OfflinePageUtils;
 import org.chromium.chrome.browser.offlinepages.OfflinePageUtils.OfflinePageLoadUrlDelegate;
 import org.chromium.chrome.browser.omnibox.ChromeAutocompleteSchemeClassifier;
+import org.chromium.chrome.browser.performance_hints.PerformanceHintsObserver;
+import org.chromium.chrome.browser.performance_hints.PerformanceHintsObserver.PerformanceClass;
 import org.chromium.chrome.browser.previews.PreviewsAndroidBridge;
 import org.chromium.chrome.browser.previews.PreviewsUma;
 import org.chromium.chrome.browser.profiles.Profile;
-import org.chromium.chrome.browser.site_settings.CookieControlsBridge;
+import org.chromium.chrome.browser.site_settings.ChromeSiteSettingsClient;
+import org.chromium.chrome.browser.ui.favicon.FaviconHelper;
 import org.chromium.chrome.browser.vr.VrModuleProvider;
-import org.chromium.components.content_settings.ContentSettingValues;
+import org.chromium.components.browser_ui.settings.SettingsUtils;
+import org.chromium.components.browser_ui.site_settings.SiteSettingsCategory;
+import org.chromium.components.browser_ui.site_settings.SiteSettingsClient;
+import org.chromium.components.content_settings.CookieControlsBridge;
 import org.chromium.components.content_settings.CookieControlsObserver;
+import org.chromium.components.embedder_support.browser_context.BrowserContextHandle;
+import org.chromium.components.embedder_support.util.UrlUtilities;
 import org.chromium.components.feature_engagement.EventConstants;
-import org.chromium.components.omnibox.AutocompleteSchemeClassifier;
 import org.chromium.components.page_info.PageInfoControllerDelegate;
-import org.chromium.components.page_info.PageInfoView;
 import org.chromium.components.page_info.PageInfoView.PageInfoViewParams;
-import org.chromium.components.page_info.SystemSettingsActivityRequiredListener;
-import org.chromium.components.page_info.VrHandler;
 import org.chromium.components.security_state.ConnectionSecurityLevel;
 import org.chromium.components.security_state.SecurityStateModel;
 import org.chromium.content_public.browser.WebContents;
-import org.chromium.ui.base.AndroidPermissionDelegate;
 import org.chromium.ui.modaldialog.ModalDialogManager;
 import org.chromium.ui.text.NoUnderlineClickableSpan;
 import org.chromium.ui.text.SpanApplier;
 import org.chromium.ui.text.SpanApplier.SpanInfo;
+import org.chromium.url.GURL;
 
-import java.lang.annotation.Retention;
-import java.lang.annotation.RetentionPolicy;
 import java.text.DateFormat;
 import java.util.Date;
 
 /**
- * Chrome's implementation of PageInfoControllerDelegate, that provides Chrome-specific info to
+ * Chrome's customization of PageInfoControllerDelegate. This class provides Chrome-specific info to
  * PageInfoController. It also contains logic for Chrome-specific features, like {@link Previews}
  */
-public class ChromePageInfoControllerDelegate implements PageInfoControllerDelegate {
-    @IntDef({OfflinePageState.NOT_OFFLINE_PAGE, OfflinePageState.TRUSTED_OFFLINE_PAGE,
-            OfflinePageState.UNTRUSTED_OFFLINE_PAGE})
-    @Retention(RetentionPolicy.SOURCE)
-    public @interface OfflinePageState {
-        int NOT_OFFLINE_PAGE = 1;
-        int TRUSTED_OFFLINE_PAGE = 2;
-        int UNTRUSTED_OFFLINE_PAGE = 3;
-    }
-
-    @IntDef({PreviewPageState.NOT_PREVIEW, PreviewPageState.SECURE_PAGE_PREVIEW,
-            PreviewPageState.INSECURE_PAGE_PREVIEW})
-    @Retention(RetentionPolicy.SOURCE)
-    public @interface PreviewPageState {
-        int NOT_PREVIEW = 1;
-        int SECURE_PAGE_PREVIEW = 2;
-        int INSECURE_PAGE_PREVIEW = 3;
-    }
-
+public class ChromePageInfoControllerDelegate extends PageInfoControllerDelegate {
     private final WebContents mWebContents;
-    private final ChromeActivity mActivity;
-    private final @PreviewPageState int mPreviewPageState;
-    private String mOfflinePageUrl;
+    private final Context mContext;
+    private final Profile mProfile;
     private String mOfflinePageCreationDate;
-    private @OfflinePageState int mOfflinePageState;
     private OfflinePageLoadUrlDelegate mOfflinePageLoadUrlDelegate;
-    private PermissionParamsListBuilder mPermissionParamsListBuilder;
 
-    // Bridge updating the CookieControlsView when cookie settings change.
-    private CookieControlsBridge mBridge;
-
-    public ChromePageInfoControllerDelegate(ChromeActivity activity, WebContents webContents,
+    public ChromePageInfoControllerDelegate(Context context, WebContents webContents,
+            Supplier<ModalDialogManager> modalDialogManagerSupplier,
             OfflinePageLoadUrlDelegate offlinePageLoadUrlDelegate) {
+        super(modalDialogManagerSupplier,
+                new ChromeAutocompleteSchemeClassifier(Profile.fromWebContents(webContents)),
+                VrModuleProvider.getDelegate(),
+                /** isSiteSettingsAvailable= */
+                SiteSettingsHelper.isSiteSettingsAvailable(webContents),
+                /** cookieControlsShown= */
+                CookieControlsBridge.isCookieControlsEnabled(Profile.fromWebContents(webContents)));
+        mContext = context;
         mWebContents = webContents;
-        mActivity = activity;
+        mProfile = Profile.fromWebContents(mWebContents);
+
         mPreviewPageState = getPreviewPageStateAndRecordUma();
         initOfflinePageParams();
         mOfflinePageLoadUrlDelegate = offlinePageLoadUrlDelegate;
-    }
-
-    private Profile profile() {
-        return Profile.fromWebContents(mWebContents);
+        initHttpsImageCompressionStateAndRecordUMA();
     }
 
     /**
@@ -112,7 +103,7 @@ public class ChromePageInfoControllerDelegate implements PageInfoControllerDeleg
                     : PreviewPageState.INSECURE_PAGE_PREVIEW;
 
             PreviewsUma.recordPageInfoOpened(bridge.getPreviewsType(mWebContents));
-            TrackerFactory.getTrackerForProfile(profile()).notifyEvent(
+            TrackerFactory.getTrackerForProfile(mProfile).notifyEvent(
                     EventConstants.PREVIEWS_VERBOSE_STATUS_OPENED);
         }
         return previewPageState;
@@ -140,36 +131,12 @@ public class ChromePageInfoControllerDelegate implements PageInfoControllerDeleg
         }
     }
 
-    /**
-     * {@inheritDoc}
-     */
-    @Override
-    public AutocompleteSchemeClassifier createAutocompleteSchemeClassifier() {
-        return new ChromeAutocompleteSchemeClassifier(profile());
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-    @Override
-    public boolean cookieControlsShown() {
-        return CookieControlsBridge.isCookieControlsEnabled(profile());
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-    @Override
-    public ModalDialogManager getModalDialogManager() {
-        return mActivity.getModalDialogManager();
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-    @Override
-    public boolean useDarkColors() {
-        return !mActivity.getNightModeStateProvider().isInNightMode();
+    private void initHttpsImageCompressionStateAndRecordUMA() {
+        mIsHttpsImageCompressionApplied =
+                PreviewsAndroidBridge.getInstance().isHttpsImageCompressionApplied(mWebContents);
+        if (mIsHttpsImageCompressionApplied) {
+            PreviewsUma.recordHttpsImageCompressionPageInfoOpened();
+        }
     }
 
     /**
@@ -194,34 +161,16 @@ public class ChromePageInfoControllerDelegate implements PageInfoControllerDeleg
             };
             final String previewOriginalHost =
                     bridge.getOriginalHost(mWebContents.getVisibleUrlString());
-            final String loadOriginalText = mActivity.getString(
+            final String loadOriginalText = mContext.getString(
                     R.string.page_info_preview_load_original, previewOriginalHost);
             final SpannableString loadOriginalSpan = SpanApplier.applySpans(loadOriginalText,
                     new SpanInfo("<link>", "</link>",
                             // The callback given to NoUnderlineClickableSpan is overridden in
                             // PageInfoView so use previewShowOriginalClickCallback (above) instead
                             // because the entire TextView will be clickable.
-                            new NoUnderlineClickableSpan(mActivity.getResources(), (view) -> {})));
+                            new NoUnderlineClickableSpan(mContext.getResources(), (view) -> {})));
             viewParams.previewLoadOriginalMessage = loadOriginalSpan;
-
-            viewParams.previewStaleTimestamp = bridge.getStalePreviewTimestamp(mWebContents);
         }
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-    @Override
-    public boolean isShowingPreview() {
-        return mPreviewPageState != PreviewPageState.NOT_PREVIEW;
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-    @Override
-    public boolean isPreviewPageInsecure() {
-        return mPreviewPageState == PreviewPageState.INSECURE_PAGE_PREVIEW;
     }
 
     /**
@@ -241,30 +190,6 @@ public class ChromePageInfoControllerDelegate implements PageInfoControllerDeleg
     public Intent getInstantAppIntentForUrl(String url) {
         InstantAppsHandler instantAppsHandler = InstantAppsHandler.getInstance();
         return instantAppsHandler.getInstantAppIntentForUrl(url);
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-    @Override
-    public VrHandler getVrHandler() {
-        return VrModuleProvider.getDelegate();
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-    @Override
-    public String getOfflinePageUrl() {
-        return mOfflinePageUrl;
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-    @Override
-    public boolean isShowingOfflinePage() {
-        return mOfflinePageState != OfflinePageState.NOT_OFFLINE_PAGE && !isShowingPreview();
     }
 
     /**
@@ -294,16 +219,15 @@ public class ChromePageInfoControllerDelegate implements PageInfoControllerDeleg
     @Nullable
     public String getOfflinePageConnectionMessage() {
         if (mOfflinePageState == OfflinePageState.TRUSTED_OFFLINE_PAGE) {
-            return String.format(mActivity.getString(R.string.page_info_connection_offline),
+            return String.format(mContext.getString(R.string.page_info_connection_offline),
                     mOfflinePageCreationDate);
         } else if (mOfflinePageState == OfflinePageState.UNTRUSTED_OFFLINE_PAGE) {
             // For untrusted pages, if there's a creation date, show it in the message.
             if (TextUtils.isEmpty(mOfflinePageCreationDate)) {
-                return mActivity.getString(
-                        R.string.page_info_offline_page_not_trusted_without_date);
+                return mContext.getString(R.string.page_info_offline_page_not_trusted_without_date);
             } else {
                 return String.format(
-                        mActivity.getString(R.string.page_info_offline_page_not_trusted_with_date),
+                        mContext.getString(R.string.page_info_offline_page_not_trusted_with_date),
                         mOfflinePageCreationDate);
             }
         }
@@ -314,8 +238,14 @@ public class ChromePageInfoControllerDelegate implements PageInfoControllerDeleg
      * {@inheritDoc}
      */
     @Override
-    public boolean isSiteSettingsAvailable() {
-        return SiteSettingsHelper.isSiteSettingsAvailable(mWebContents);
+    public boolean shouldShowPerformanceBadge(String url) {
+        if (!ChromeFeatureList.isEnabled(ChromeFeatureList.PAGE_INFO_PERFORMANCE_HINTS)) {
+            return false;
+        }
+        @PerformanceClass
+        int pagePerformanceClass =
+                PerformanceHintsObserver.getPerformanceClassForURL(mWebContents, url);
+        return pagePerformanceClass == PerformanceClass.PERFORMANCE_FAST;
     }
 
     /**
@@ -323,63 +253,66 @@ public class ChromePageInfoControllerDelegate implements PageInfoControllerDeleg
      */
     @Override
     public void showSiteSettings(String url) {
-        SiteSettingsHelper.showSiteSettings(mActivity, url);
+        SiteSettingsHelper.showSiteSettings(mContext, url);
+    }
+
+    @Override
+    public void showCookieSettings() {
+        SiteSettingsHelper.showCategorySettings(mContext, SiteSettingsCategory.Type.COOKIES);
     }
 
     /**
      * {@inheritDoc}
      */
     @Override
-    public void createCookieControlsBridge(CookieControlsObserver observer) {
-        mBridge = new CookieControlsBridge(observer, mWebContents);
+    @NonNull
+    public CookieControlsBridge createCookieControlsBridge(CookieControlsObserver observer) {
+        return new CookieControlsBridge(observer, mWebContents,
+                mProfile.isOffTheRecord() ? mProfile.getOriginalProfile() : null);
     }
 
     /**
      * {@inheritDoc}
      */
     @Override
-    public void onUiClosing() {
-        mBridge.onUiClosing();
+    @NonNull
+    public BrowserContextHandle getBrowserContext() {
+        return mProfile;
     }
 
     /**
      * {@inheritDoc}
      */
     @Override
-    public void setThirdPartyCookieBlockingEnabledForSite(boolean blockCookies) {
-        mBridge.setThirdPartyCookieBlockingEnabledForSite(blockCookies);
+    @NonNull
+    public SiteSettingsClient getSiteSettingsClient() {
+        return new ChromeSiteSettingsClient(mContext, getBrowserContext());
     }
 
-    /**
-     * {@inheritDoc}
-     */
+    @NonNull
     @Override
-    public void createPermissionParamsListBuilder(AndroidPermissionDelegate permissionDelegate,
-            String fullUrl, boolean shouldShowTitle,
-            SystemSettingsActivityRequiredListener systemSettingsActivityRequiredListener,
-            Callback<PageInfoView.PermissionParams> displayPermissionsCallback) {
-        mPermissionParamsListBuilder = new PermissionParamsListBuilder(mActivity,
-                permissionDelegate, fullUrl, shouldShowTitle,
-                systemSettingsActivityRequiredListener, displayPermissionsCallback);
+    public void getFavicon(String url, Callback<Drawable> callback) {
+        Resources resources = mContext.getResources();
+        int size = resources.getDimensionPixelSize(R.dimen.page_info_favicon_size);
+        new FaviconHelper().getLocalFaviconImageForURL(mProfile, url, size, (image, iconUrl) -> {
+            if (isShowingPreview()) {
+                callback.onResult(SettingsUtils.getTintedIcon(mContext,
+                        R.drawable.preview_pin_round, R.color.infobar_icon_drawable_color));
+            } else if (image != null) {
+                callback.onResult(new BitmapDrawable(resources, image));
+            } else if (UrlUtilities.isInternalScheme(new GURL(url))) {
+                callback.onResult(
+                        AppCompatResources.getDrawable(mContext, R.drawable.chromelogo16));
+            } else {
+                callback.onResult(null);
+            }
+        });
     }
 
-    /**
-     * {@inheritDoc}
-     */
     @Override
-    public void addPermissionEntry(
-            String name, int type, @ContentSettingValues int currentSettingValue) {
-        assert (mPermissionParamsListBuilder != null);
-        mPermissionParamsListBuilder.addPermissionEntry(name, type, currentSettingValue);
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-    @Override
-    public void updatePermissionDisplay(PageInfoView view) {
-        assert (mPermissionParamsListBuilder != null);
-        view.setPermissions(mPermissionParamsListBuilder.build());
+    public Drawable getPreviewUiIcon() {
+        return SettingsUtils.getTintedIcon(mContext,
+            R.drawable.preview_pin_round, R.color.infobar_icon_drawable_color);
     }
 
     @VisibleForTesting

@@ -47,14 +47,15 @@ class OpaqueBrowserFrameViewLayoutDelegate {
   // Controls window state.
   virtual bool IsMaximized() const = 0;
   virtual bool IsMinimized() const = 0;
+  virtual bool IsFullscreen() const = 0;
 
   virtual bool IsTabStripVisible() const = 0;
   virtual int GetTabStripHeight() const = 0;
   virtual bool IsToolbarVisible() const = 0;
 
-  // Returns the tabstrips preferred size so the frame layout can work around
+  // Returns the tabstrips minimum size so the frame layout can work around
   // it.
-  virtual gfx::Size GetTabstripPreferredSize() const = 0;
+  virtual gfx::Size GetTabstripMinimumSize() const = 0;
 
   // Computes the height of the top area of the frame.
   virtual int GetTopAreaHeight() const = 0;

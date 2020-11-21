@@ -25,9 +25,9 @@
 #include "content/public/browser/storage_partition.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/test/browser_test.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
-#include "net/url_request/url_request_context_getter.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/re2/src/re2/re2.h"
 
@@ -173,9 +173,14 @@ class ServiceWorkerPaymentAppFinderBrowserTest : public InProcessBrowserTest {
     downloader->AddTestServerURL(
         "https://larry.example.com/",
         larry_example_.GetURL("larry.example.com", "/"));
-    ServiceWorkerPaymentAppFinder::GetInstance()
-        ->SetDownloaderAndIgnorePortInOriginComparisonForTesting(
-            std::move(downloader));
+
+    ui_test_utils::NavigateToURL(browser(),
+                                 alicepay_.GetURL("chromium.org", "/"));
+
+    auto* finder = ServiceWorkerPaymentAppFinder::GetOrCreateForCurrentDocument(
+        browser()->tab_strip_model()->GetActiveWebContents()->GetMainFrame());
+    finder->SetDownloaderAndIgnorePortInOriginComparisonForTesting(
+        std::move(downloader));
 
     std::vector<mojom::PaymentMethodDataPtr> method_data;
     for (const auto& identifier : payment_method_identifiers) {
@@ -184,9 +189,8 @@ class ServiceWorkerPaymentAppFinderBrowserTest : public InProcessBrowserTest {
     }
 
     base::RunLoop run_loop;
-    ServiceWorkerPaymentAppFinder::GetInstance()->GetAllPaymentApps(
+    finder->GetAllPaymentApps(
         url::Origin::Create(GURL("https://chromium.org")),
-        web_contents->GetMainFrame(), web_contents,
         WebDataServiceFactory::GetPaymentManifestWebDataForProfile(
             Profile::FromBrowserContext(context),
             ServiceAccessType::EXPLICIT_ACCESS),
@@ -201,7 +205,9 @@ class ServiceWorkerPaymentAppFinderBrowserTest : public InProcessBrowserTest {
 
   // Returns the installed apps that have been found in
   // GetAllPaymentAppsForMethods().
-  const content::PaymentAppProvider::PaymentApps& apps() const { return apps_; }
+  const content::InstalledPaymentAppsFinder::PaymentApps& apps() const {
+    return apps_;
+  }
 
   // Returns the installable apps that have been found in
   // GetAllPaymentAppsForMethods().
@@ -261,7 +267,7 @@ class ServiceWorkerPaymentAppFinderBrowserTest : public InProcessBrowserTest {
   // Called by the factory upon completed app lookup. These |apps| have only
   // valid payment methods.
   void OnGotAllPaymentApps(
-      content::PaymentAppProvider::PaymentApps apps,
+      content::InstalledPaymentAppsFinder::PaymentApps apps,
       ServiceWorkerPaymentAppFinder::InstallablePaymentApps installable_apps,
       const std::string& error_message) {
     apps_ = std::move(apps);
@@ -341,7 +347,7 @@ class ServiceWorkerPaymentAppFinderBrowserTest : public InProcessBrowserTest {
 
   // The installed apps that have been found by the factory in
   // GetAllPaymentAppsForMethods() method.
-  content::PaymentAppProvider::PaymentApps apps_;
+  content::InstalledPaymentAppsFinder::PaymentApps apps_;
 
   // The installable apps that have been found by the factory in
   // GetAllPaymentAppsForMethods() method.
@@ -483,19 +489,18 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerPaymentAppFinderBrowserTest,
   }
 }
 
-// A payment app from https://alicepay.com can use the payment method
+// A payment app from https://alicepay.com can not use the payment method
 // https://frankpay.com/webpay, because https://frankpay.com/payment-method.json
-// specifies "supported_origins": "*" (all origins supported).
+// invalid "supported_origins": "*".
 IN_PROC_BROWSER_TEST_F(ServiceWorkerPaymentAppFinderBrowserTest,
-                       AllOringsSupported) {
+                       OriginWildcardNotSupportedInPaymentMethodManifest) {
   InstallPaymentAppForMethod("https://frankpay.com/webpay");
 
   {
     GetAllPaymentAppsForMethods({"https://frankpay.com/webpay"});
 
     EXPECT_TRUE(installable_apps().empty());
-    ASSERT_EQ(1U, apps().size());
-    ExpectPaymentAppWithMethod("https://frankpay.com/webpay");
+    ASSERT_EQ(0U, apps().size());
     EXPECT_TRUE(error_message().empty()) << error_message();
   }
 
@@ -504,8 +509,7 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerPaymentAppFinderBrowserTest,
     GetAllPaymentAppsForMethods({"https://frankpay.com/webpay"});
 
     EXPECT_TRUE(installable_apps().empty());
-    ASSERT_EQ(1U, apps().size());
-    ExpectPaymentAppWithMethod("https://frankpay.com/webpay");
+    ASSERT_EQ(0U, apps().size());
     EXPECT_TRUE(error_message().empty()) << error_message();
   }
 }
@@ -573,12 +577,12 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerPaymentAppFinderBrowserTest,
   }
 }
 
-// Multiple payment apps from https://alicepay.com can use either
-// https://georgepay.com/webpay or https://frankepay.com/webpay payment method,
-// because https://frankpay.com/payment-method.json specifies
-// "supported_origins": "*" (all origins supported) and
+// A Payment app from https://alicepay.com can use only the payment method
+// https://georgepay.com/webpay. Because
 // https://georgepay.com/payment-method.json explicitly includes
-// "https://alicepay.com" as on of the "supported_origins".
+// "https://alicepay.com" as on of the "supported_origins". Also
+// https://frankpay.com/payment-method.json does not explicitly authorize any
+// payment app.
 IN_PROC_BROWSER_TEST_F(ServiceWorkerPaymentAppFinderBrowserTest,
                        TwoAppsDifferentMethods) {
   InstallPaymentAppInScopeForMethod("/app1/", "https://georgepay.com/webpay");
@@ -589,11 +593,9 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerPaymentAppFinderBrowserTest,
         {"https://georgepay.com/webpay", "https://frankpay.com/webpay"});
 
     EXPECT_TRUE(installable_apps().empty());
-    ASSERT_EQ(2U, apps().size());
+    ASSERT_EQ(1U, apps().size());
     ExpectPaymentAppFromScopeWithMethod("/app1/",
                                         "https://georgepay.com/webpay");
-    ExpectPaymentAppFromScopeWithMethod("/app2/",
-                                        "https://frankpay.com/webpay");
     EXPECT_TRUE(error_message().empty()) << error_message();
   }
 
@@ -603,11 +605,9 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerPaymentAppFinderBrowserTest,
         {"https://georgepay.com/webpay", "https://frankpay.com/webpay"});
 
     EXPECT_TRUE(installable_apps().empty());
-    ASSERT_EQ(2U, apps().size());
+    ASSERT_EQ(1U, apps().size());
     ExpectPaymentAppFromScopeWithMethod("/app1/",
                                         "https://georgepay.com/webpay");
-    ExpectPaymentAppFromScopeWithMethod("/app2/",
-                                        "https://frankpay.com/webpay");
     EXPECT_TRUE(error_message().empty()) << error_message();
   }
 }

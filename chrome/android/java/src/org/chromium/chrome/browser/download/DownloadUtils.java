@@ -11,17 +11,13 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
-import android.content.res.ColorStateList;
 import android.net.Uri;
 import android.os.Build;
-import android.os.StrictMode;
 import android.text.TextUtils;
 
 import androidx.annotation.MainThread;
 import androidx.annotation.Nullable;
-import androidx.appcompat.content.res.AppCompatResources;
 
-import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.ApplicationStatus;
 import org.chromium.base.ContentUriUtils;
 import org.chromium.base.ContextUtils;
@@ -45,14 +41,11 @@ import org.chromium.chrome.browser.offlinepages.OfflinePageBridge;
 import org.chromium.chrome.browser.offlinepages.OfflinePageOrigin;
 import org.chromium.chrome.browser.offlinepages.OfflinePageUtils;
 import org.chromium.chrome.browser.offlinepages.downloads.OfflinePageDownloadBridge;
-import org.chromium.chrome.browser.preferences.Pref;
-import org.chromium.chrome.browser.preferences.PrefServiceBridge;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.tab.TabImpl;
 import org.chromium.chrome.browser.tab.TabLaunchType;
 import org.chromium.chrome.browser.tabmodel.document.TabDelegate;
-import org.chromium.chrome.browser.util.AccessibilityUtil;
+import org.chromium.chrome.browser.util.ChromeAccessibilityUtil;
 import org.chromium.components.download.DownloadState;
 import org.chromium.components.download.ResumeMode;
 import org.chromium.components.embedder_support.util.UrlConstants;
@@ -70,18 +63,12 @@ import org.chromium.ui.base.DeviceFormFactor;
 import org.chromium.ui.widget.Toast;
 
 import java.io.File;
-import java.util.Calendar;
-import java.util.Date;
 
 /**
  * A class containing some utility static methods.
  */
 public class DownloadUtils {
     private static final String TAG = "download";
-
-    private static final String DEFAULT_MIME_TYPE = "*/*";
-    private static final String MIME_TYPE_DELIMITER = "/";
-    private static final String MIME_TYPE_SHARING_URL = "text/plain";
 
     private static final String EXTRA_IS_OFF_THE_RECORD =
             "org.chromium.chrome.browser.download.IS_OFF_THE_RECORD";
@@ -199,8 +186,8 @@ public class DownloadUtils {
      * @return Whether or not pagination headers should be shown on download home.
      */
     public static boolean shouldShowPaginationHeaders() {
-        return AccessibilityUtil.isAccessibilityEnabled()
-                || AccessibilityUtil.isHardwareKeyboardAttached(
+        return ChromeAccessibilityUtil.get().isAccessibilityEnabled()
+                || ChromeAccessibilityUtil.isHardwareKeyboardAttached(
                         ContextUtils.getApplicationContext().getResources().getConfiguration());
     }
 
@@ -291,8 +278,6 @@ public class DownloadUtils {
             return bridge.isShowingDownloadButtonInErrorPage(tab.getWebContents());
         }
 
-        if (((TabImpl) tab).isShowingInterstitialPage()) return false;
-
         // Don't allow re-downloading the currently displayed offline page.
         if (OfflinePageUtils.isOfflinePage(tab)) return false;
 
@@ -310,23 +295,13 @@ public class DownloadUtils {
 
         // It's ok to use blocking calls on main thread here, since the user is waiting to open or
         // share the file to other apps.
-        StrictMode.ThreadPolicy oldPolicy = StrictMode.allowThreadDiskReads();
-        Uri uri = null;
-
-        try {
-            boolean isOnSDCard = DownloadDirectoryProvider.isDownloadOnSDCard(filePath);
-            if (ChromeFeatureList.isEnabled(ChromeFeatureList.DOWNLOAD_FILE_PROVIDER)
-                    && isOnSDCard) {
-                // Use custom file provider to generate content URI for download on SD card.
-                uri = DownloadFileProvider.createContentUri(filePath);
-            } else {
-                // Use FileProvider to generate content URI or file URI.
-                uri = FileUtils.getUriForFile(new File(filePath));
-            }
-        } finally {
-            StrictMode.setThreadPolicy(oldPolicy);
+        boolean isOnSDCard = DownloadDirectoryProvider.isDownloadOnSDCard(filePath);
+        if (ChromeFeatureList.isEnabled(ChromeFeatureList.DOWNLOAD_FILE_PROVIDER) && isOnSDCard) {
+            // Use custom file provider to generate content URI for download on SD card.
+            return DownloadFileProvider.createContentUri(filePath);
         }
-        return uri;
+        // Use FileProvider to generate content URI or file URI.
+        return FileUtils.getUriForFile(new File(filePath));
     }
 
     /**
@@ -412,10 +387,8 @@ public class DownloadUtils {
         // Check if any apps can open the file.
         try {
             // TODO(qinmin): Move this to an AsyncTask so we don't need to temper with strict mode.
-            StrictMode.ThreadPolicy oldPolicy = StrictMode.allowThreadDiskReads();
             Uri uri = ContentUriUtils.isContentUri(filePath) ? Uri.parse(filePath)
                                                              : getUriForOtherApps(filePath);
-            StrictMode.setThreadPolicy(oldPolicy);
             Intent viewIntent =
                     MediaViewerUtils.createViewIntentForUri(uri, mimeType, originalUrl, referrer);
             context.startActivity(viewIntent);
@@ -459,14 +432,6 @@ public class DownloadUtils {
         if (!canOpen) {
             DownloadUtils.showDownloadManager(null, null, source);
         }
-    }
-
-    private static void recordShareHistograms(int count, int filterType) {
-        RecordHistogram.recordEnumeratedHistogram("Android.DownloadManager.Share.FileTypes",
-                filterType, DownloadFilter.Type.NUM_ENTRIES);
-
-        RecordHistogram.recordLinearCountHistogram("Android.DownloadManager.Share.Count",
-                count, 1, 20, 20);
     }
 
     /**
@@ -545,80 +510,6 @@ public class DownloadUtils {
                 helper.getDownloadSharedPreferenceEntry(item.getContentId());
         return entry != null && item.getDownloadInfo().state() == DownloadState.INTERRUPTED
                 && entry.isAutoResumable;
-    }
-
-    /**
-     * Return a background color for the file type icon.
-     * @param context Context from which to extract the resources.
-     * @return Background color.
-     */
-    public static int getIconBackgroundColor(Context context) {
-        return ApiCompatibilityUtils.getColor(context.getResources(), R.color.light_active_color);
-    }
-
-    /**
-     * Return a foreground color list for the file type icon.
-     * @param context Context from which to extract the resources.
-     * @return a foreground color list.
-     */
-    public static ColorStateList getIconForegroundColorList(Context context) {
-        return AppCompatResources.getColorStateList(context, R.color.white_mode_tint);
-    }
-
-    /**
-     * Return if a download item is already viewed by the user. Will return false if the last
-     * access time is not available.
-     * @param item The download item.
-     * @return true if the item is viewed by the user.
-     */
-    public static boolean isDownloadViewed(DownloadItem item) {
-        if (item == null || item.getDownloadInfo() == null) return false;
-        return item.getDownloadInfo().getLastAccessTime() != 0;
-    }
-
-    /**
-     * Returns |true| if the offline item is not null and has already been viewed by the user.
-     * @param offlineItem The offline item to check.
-     * @return true if the item is valid has been viewed by the user.
-     */
-    public static boolean isOfflineItemViewed(OfflineItem offlineItem) {
-        return offlineItem != null && offlineItem.lastAccessedTimeMs > offlineItem.completionTimeMs;
-    }
-
-    /**
-     * Given two timestamps, calculates if both occur on the same date.
-     * @return True if they belong in the same day. False otherwise.
-     */
-    public static boolean isSameDay(long timestamp1, long timestamp2) {
-        return getDateAtMidnight(timestamp1).equals(getDateAtMidnight(timestamp2));
-    }
-
-    /**
-     * Calculates the {@link Date} for midnight of the date represented by the |timestamp|.
-     */
-    public static Date getDateAtMidnight(long timestamp) {
-        Calendar cal = Calendar.getInstance();
-        cal.setTimeInMillis(timestamp);
-        cal.set(Calendar.HOUR_OF_DAY, 0);
-        cal.set(Calendar.MINUTE, 0);
-        cal.set(Calendar.SECOND, 0);
-        cal.set(Calendar.MILLISECOND, 0);
-        return cal.getTime();
-    }
-
-    /**
-     * @return The status of prompt for download pref, defined by {@link DownloadPromptStatus}.
-     */
-    @DownloadPromptStatus
-    public static int getPromptForDownloadAndroid() {
-        return PrefServiceBridge.getInstance().getInteger(Pref.PROMPT_FOR_DOWNLOAD_ANDROID);
-    }
-
-    /**
-     * @param status New status to update the prompt for download preference.
-     */
-    public static void setPromptForDownloadAndroid(@DownloadPromptStatus int status) {
-        PrefServiceBridge.getInstance().setInteger(Pref.PROMPT_FOR_DOWNLOAD_ANDROID, status);
     }
 
     @NativeMethods

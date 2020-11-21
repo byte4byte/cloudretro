@@ -4,6 +4,7 @@
 
 #include "components/sync/driver/sync_user_settings_impl.h"
 
+#include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
 #include "components/sync/base/sync_prefs.h"
 #include "components/sync/base/user_selectable_type.h"
@@ -173,11 +174,6 @@ bool SyncUserSettingsImpl::IsEncryptEverythingEnabled() const {
   return crypto_->IsEncryptEverythingEnabled();
 }
 
-void SyncUserSettingsImpl::EnableEncryptEverything() {
-  DCHECK(IsEncryptEverythingAllowed());
-  crypto_->EnableEncryptEverything();
-}
-
 bool SyncUserSettingsImpl::IsPassphraseRequired() const {
   return crypto_->IsPassphraseRequired();
 }
@@ -196,6 +192,13 @@ bool SyncUserSettingsImpl::IsTrustedVaultKeyRequired() const {
 bool SyncUserSettingsImpl::IsTrustedVaultKeyRequiredForPreferredDataTypes()
     const {
   return IsEncryptedDatatypeEnabled() && crypto_->IsTrustedVaultKeyRequired();
+}
+
+bool SyncUserSettingsImpl::IsTrustedVaultRecoverabilityDegraded() const {
+  // TODO(crbug.com/1081649): This should verify that at least one sync entity
+  // is affected.
+  return IsEncryptedDatatypeEnabled() &&
+         crypto_->IsTrustedVaultRecoverabilityDegraded();
 }
 
 bool SyncUserSettingsImpl::IsUsingSecondaryPassphrase() const {
@@ -223,9 +226,7 @@ bool SyncUserSettingsImpl::SetDecryptionPassphrase(
 
   DVLOG(1) << "Setting passphrase for decryption.";
 
-  bool result = crypto_->SetDecryptionPassphrase(passphrase);
-  UMA_HISTOGRAM_BOOLEAN("Sync.PassphraseDecryptionSucceeded", result);
-  return result;
+  return crypto_->SetDecryptionPassphrase(passphrase);
 }
 
 void SyncUserSettingsImpl::SetSyncRequestedIfNotSetExplicitly() {
@@ -247,6 +248,7 @@ ModelTypeSet SyncUserSettingsImpl::GetPreferredDataTypes() const {
   types.PutAll(ControlTypes());
   if (prefs_->IsLocalSyncEnabled()) {
     types.Remove(APP_LIST);
+    types.Remove(AUTOFILL_WALLET_OFFER);
     types.Remove(SECURITY_EVENTS);
     types.Remove(SEND_TAB_TO_SELF);
     types.Remove(SHARING_MESSAGE);
@@ -261,16 +263,12 @@ ModelTypeSet SyncUserSettingsImpl::GetEncryptedDataTypes() const {
 }
 
 bool SyncUserSettingsImpl::IsEncryptedDatatypeEnabled() const {
-  if (IsEncryptionPending())
+  if (crypto_->encryption_pending())
     return true;
   const ModelTypeSet preferred_types = GetPreferredDataTypes();
   const ModelTypeSet encrypted_types = GetEncryptedDataTypes();
   DCHECK(encrypted_types.Has(PASSWORDS));
   return !Intersection(preferred_types, encrypted_types).Empty();
-}
-
-bool SyncUserSettingsImpl::IsEncryptionPending() const {
-  return crypto_->encryption_pending();
 }
 
 // static

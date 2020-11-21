@@ -5,7 +5,9 @@
 #ifndef CHROME_BROWSER_CHROMEOS_CROSTINI_CROSTINI_FEATURES_H_
 #define CHROME_BROWSER_CHROMEOS_CROSTINI_CROSTINI_FEATURES_H_
 
+#include "base/callback.h"
 #include "base/macros.h"
+#include "base/memory/weak_ptr.h"
 
 class Profile;
 
@@ -17,17 +19,16 @@ class CrostiniFeatures {
  public:
   static CrostiniFeatures* Get();
 
-  // Returns true if crostini is allowed to run for |profile|.
-  // Otherwise, returns false, e.g. if crostini is not available on the device,
-  // or it is in the flow to set up managed account creation.
-  virtual bool IsAllowed(Profile* profile);
+  // Returns false if this |profile| will never be allowed to run crostini for
+  // the lifetime of this process, otherwise returns true. The return value of
+  // this method is guaranteed not to change for a given |profile| within the
+  // lifetime of the process.
+  virtual bool CouldBeAllowed(Profile* profile);
 
-  // When |check_policy| is true, returns true if fully interactive crostini UI
-  // may be shown. Implies crostini is allowed to run.
-  // When check_policy is false, returns true if crostini UI is not forbidden by
-  // hardware, flags, etc, even if it is forbidden by the enterprise policy. The
-  // UI uses this to indicate that crostini is available but disabled by policy.
-  virtual bool IsUIAllowed(Profile*, bool check_policy = true);
+  // Returns true if |profile| is allowed to run crostini at this moment. This
+  // method will never return true if CouldBeAllowed returns false for the same
+  // profile, but otherwise may change return value at any time.
+  virtual bool IsAllowedNow(Profile* profile);
 
   // Returns whether if Crostini has been enabled, i.e. the user has launched it
   // at least once and not deleted it.
@@ -43,10 +44,23 @@ class CrostiniFeatures {
   // Returns true if container upgrade ui is allowed by flag.
   virtual bool IsContainerUpgradeUIAllowed(Profile*);
 
-  // Returns whether the user is allowed to enable and disable ADB sideloading
+  using CanChangeAdbSideloadingCallback =
+      base::OnceCallback<void(bool can_change_adb_sideloading)>;
+
+  // Checks whether the user is allowed to enable and disable ADB sideloading
   // based on whether the user is the owner, whether the user and the device
-  // are managed, and feature flag and policies for managed case.
-  virtual bool CanChangeAdbSideloading(Profile* profile);
+  // are managed, and feature flag and policies for managed case. Once this is
+  // established, the callback is invoked and passed a boolean indicating
+  // whether changes to ADB sideloading are allowed.
+  virtual void CanChangeAdbSideloading(
+      Profile* profile,
+      CanChangeAdbSideloadingCallback callback);
+
+  // Returns whether the user is allowed to configure port forwarding into
+  // Crostini. If the user is not managed or if the policy is unset or true,
+  // then this returns true, else if the policy is set to false, this returns
+  // false.
+  virtual bool IsPortForwardingAllowed(Profile* profile);
 
   // TODO(crbug.com/1004708): Move other functions from crostini_util to here.
 
@@ -55,6 +69,9 @@ class CrostiniFeatures {
 
   CrostiniFeatures();
   virtual ~CrostiniFeatures();
+
+ private:
+  base::WeakPtrFactory<CrostiniFeatures> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(CrostiniFeatures);
 };

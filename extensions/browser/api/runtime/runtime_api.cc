@@ -8,10 +8,11 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/check.h"
 #include "base/lazy_instance.h"
 #include "base/location.h"
-#include "base/logging.h"
 #include "base/metrics/histogram.h"
+#include "base/notreached.h"
 #include "base/one_shot_event.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
@@ -566,8 +567,8 @@ void RuntimeEventRouter::OnExtensionUninstalled(
     return;
   }
 
-  // Blacklisted extensions should not open uninstall_url.
-  if (extensions::ExtensionPrefs::Get(context)->IsExtensionBlacklisted(
+  // Blocklisted extensions should not open uninstall_url.
+  if (extensions::ExtensionPrefs::Get(context)->IsExtensionBlocklisted(
           extension_id)) {
     return;
   }
@@ -656,11 +657,11 @@ void RuntimeRequestUpdateCheckFunction::CheckComplete(
   if (result.success) {
     std::unique_ptr<base::DictionaryValue> details(new base::DictionaryValue);
     details->SetString("version", result.version);
-    Respond(TwoArguments(std::make_unique<base::Value>(result.response),
-                         std::move(details)));
+    Respond(TwoArguments(base::Value(result.response),
+                         base::Value::FromUniquePtrValue(std::move(details))));
   } else {
     // HMM(kalman): Why does !success not imply Error()?
-    Respond(OneArgument(std::make_unique<base::Value>(result.response)));
+    Respond(OneArgument(base::Value(result.response)));
   }
 }
 
@@ -741,7 +742,8 @@ RuntimeGetPackageDirectoryEntryFunction::Run() {
   std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
   dict->SetString("fileSystemId", filesystem.id());
   dict->SetString("baseName", relative_path);
-  return RespondNow(OneArgument(std::move(dict)));
+  return RespondNow(
+      OneArgument(base::Value::FromUniquePtrValue(std::move(dict))));
 }
 
 }  // namespace extensions

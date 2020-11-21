@@ -40,12 +40,12 @@ suite('OSSettingsPage', function() {
 
     const children = pages.getContentChildren();
     const stampedChildren = children.filter(function(element) {
-      return element.tagName != 'TEMPLATE';
+      return element.tagName !== 'TEMPLATE';
     });
 
     // The section's main child should be stamped and visible.
     const main = stampedChildren.filter(function(element) {
-      return element.getAttribute('route-path') == 'default';
+      return element.getAttribute('route-path') === 'default';
     });
     assertEquals(
         main.length, 1,
@@ -54,7 +54,7 @@ suite('OSSettingsPage', function() {
 
     // Any other stamped subpages should not be visible.
     const subpages = stampedChildren.filter(function(element) {
-      return element.getAttribute('route-path') != 'default';
+      return element.getAttribute('route-path') !== 'default';
     });
     for (const subpage of subpages) {
       assertEquals(
@@ -84,8 +84,10 @@ suite('OSSettingsPage', function() {
     Polymer.dom.flush();
     await test_util.flushTasks();
 
-    const sectionNames =
-        ['osPrivacy', 'osLanguages', 'files', 'osReset', 'dateTime', 'a11y'];
+    const sectionNames = [
+      'osPrivacy', 'osLanguages', 'files', 'osReset', 'dateTime',
+      'osAccessibility'
+    ];
 
     for (const name of sectionNames) {
       const section = settingsPage.shadowRoot.querySelector(
@@ -113,12 +115,35 @@ suite('OSSettingsPage', function() {
 
     const visibleSections = [
       'internet', 'bluetooth', 'device', 'osSearch', 'apps', 'osPrivacy',
-      'osLanguages', 'files', 'osReset', 'dateTime', 'a11y'
+      'osLanguages', 'files', 'osReset', 'dateTime', 'osAccessibility'
     ];
     for (const name of visibleSections) {
       const section = settingsPage.shadowRoot.querySelector(
           `settings-section[section=${name}]`);
       assertTrue(!!section, 'Expected section ' + name);
     }
+  });
+
+  test('Update required end of life banner visibility', function() {
+    Polymer.dom.flush();
+    assertFalse(settingsPage.showUpdateRequiredEolBanner_);
+    assertFalse(!!settingsPage.$$('#updateRequiredEolBanner'));
+
+    settingsPage.showUpdateRequiredEolBanner_ = true;
+    Polymer.dom.flush();
+    assertTrue(!!settingsPage.$$('#updateRequiredEolBanner'));
+  });
+
+  test('Update required end of life banner close button click', function() {
+    settingsPage.showUpdateRequiredEolBanner_ = true;
+    Polymer.dom.flush();
+    const banner = settingsPage.$$('#updateRequiredEolBanner');
+    assertTrue(!!banner);
+
+    const closeButton = assert(settingsPage.$$('#closeUpdateRequiredEol'));
+    closeButton.click();
+    Polymer.dom.flush();
+    assertFalse(settingsPage.showUpdateRequiredEolBanner_);
+    assertEquals('none', banner.style.display);
   });
 });

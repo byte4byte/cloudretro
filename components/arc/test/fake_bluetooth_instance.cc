@@ -5,7 +5,7 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "components/arc/test/fake_bluetooth_instance.h"
 
 namespace arc {
@@ -32,13 +32,35 @@ FakeBluetoothInstance::LEDeviceFoundData::LEDeviceFoundData(
 
 FakeBluetoothInstance::LEDeviceFoundData::~LEDeviceFoundData() {}
 
-void FakeBluetoothInstance::InitDeprecated(mojom::BluetoothHostPtr host_ptr) {
-  Init(std::move(host_ptr), base::DoNothing());
+FakeBluetoothInstance::ConnectionStateChangedData::ConnectionStateChangedData(
+    mojom::BluetoothAddressPtr addr,
+    device::BluetoothTransport device_type,
+    bool connected)
+    : addr_(std::move(addr)),
+      device_type_(device_type),
+      connected_(connected) {}
+
+FakeBluetoothInstance::ConnectionStateChangedData::
+    ~ConnectionStateChangedData() = default;
+
+FakeBluetoothInstance::LEConnectionStateChangeData::LEConnectionStateChangeData(
+    mojom::BluetoothAddressPtr addr,
+    bool connected)
+    : addr_(std::move(addr)), connected_(connected) {}
+
+FakeBluetoothInstance::LEConnectionStateChangeData::
+    ~LEConnectionStateChangeData() = default;
+
+void FakeBluetoothInstance::InitDeprecated(
+    mojo::PendingRemote<mojom::BluetoothHost> host_remote) {
+  Init(std::move(host_remote), base::DoNothing());
 }
 
-void FakeBluetoothInstance::Init(mojom::BluetoothHostPtr host_ptr,
-                                 InitCallback callback) {
-  host_ = std::move(host_ptr);
+void FakeBluetoothInstance::Init(
+    mojo::PendingRemote<mojom::BluetoothHost> host_remote,
+    InitCallback callback) {
+  host_remote_.reset();
+  host_remote_.Bind(std::move(host_remote));
   std::move(callback).Run();
 }
 
@@ -65,6 +87,15 @@ void FakeBluetoothInstance::OnBondStateChanged(
     mojom::BluetoothAddressPtr remote_addr,
     mojom::BluetoothBondState state) {}
 
+void FakeBluetoothInstance::OnConnectionStateChanged(
+    mojom::BluetoothAddressPtr remote_addr,
+    device::BluetoothTransport device_type,
+    bool connected) {
+  connection_state_changed_data_.push_back(
+      std::make_unique<ConnectionStateChangedData>(std::move(remote_addr),
+                                                   device_type, connected));
+}
+
 void FakeBluetoothInstance::OnLEDeviceFoundForN(
     mojom::BluetoothAddressPtr addr,
     int32_t rssi,
@@ -83,7 +114,11 @@ void FakeBluetoothInstance::OnLEDeviceFound(mojom::BluetoothAddressPtr addr,
 
 void FakeBluetoothInstance::OnLEConnectionStateChange(
     mojom::BluetoothAddressPtr remote_addr,
-    bool connected) {}
+    bool connected) {
+  le_connection_state_change_data_.push_back(
+      std::make_unique<LEConnectionStateChangeData>(std::move(remote_addr),
+                                                    connected));
+}
 
 void FakeBluetoothInstance::OnLEDeviceAddressChange(
     mojom::BluetoothAddressPtr old_addr,

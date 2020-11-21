@@ -180,6 +180,8 @@ circle{
   ],
   "showRulers": true,
   "showExtensionLines": true,
+  "showAccessibilityInfo": true,
+  "colorFormat": "hex",
   "elementInfo": {
     "tagName": "div",
     "idValue": "circle",
@@ -188,7 +190,9 @@ circle{
     "nodeHeight": "128",
     "isKeyboardFocusable": false,
     "accessibleName": "",
-    "accessibleRole": "generic"
+    "accessibleRole": "generic",
+    "layoutObjectName": "LayoutNGBlockFlow",
+    "showAccessibilityInfo": true
   }
 }
 insetSimpleRound{
@@ -371,6 +375,8 @@ insetSimpleRound{
   ],
   "showRulers": true,
   "showExtensionLines": true,
+  "showAccessibilityInfo": true,
+  "colorFormat": "hex",
   "elementInfo": {
     "tagName": "div",
     "idValue": "insetSimpleRound",
@@ -379,7 +385,9 @@ insetSimpleRound{
     "nodeHeight": "128",
     "isKeyboardFocusable": false,
     "accessibleName": "",
-    "accessibleRole": "generic"
+    "accessibleRole": "generic",
+    "layoutObjectName": "LayoutNGBlockFlow",
+    "showAccessibilityInfo": true
   }
 }
 insetComplexRound{
@@ -586,6 +594,8 @@ insetComplexRound{
   ],
   "showRulers": true,
   "showExtensionLines": true,
+  "showAccessibilityInfo": true,
+  "colorFormat": "hex",
   "elementInfo": {
     "tagName": "div",
     "idValue": "insetComplexRound",
@@ -594,7 +604,9 @@ insetComplexRound{
     "nodeHeight": "128",
     "isKeyboardFocusable": false,
     "accessibleName": "",
-    "accessibleRole": "generic"
+    "accessibleRole": "generic",
+    "layoutObjectName": "LayoutNGBlockFlow",
+    "showAccessibilityInfo": true
   }
 }
 ellipse{
@@ -777,6 +789,8 @@ ellipse{
   ],
   "showRulers": true,
   "showExtensionLines": true,
+  "showAccessibilityInfo": true,
+  "colorFormat": "hex",
   "elementInfo": {
     "tagName": "div",
     "idValue": "ellipse",
@@ -785,7 +799,9 @@ ellipse{
     "nodeHeight": "80",
     "isKeyboardFocusable": false,
     "accessibleName": "",
-    "accessibleRole": "generic"
+    "accessibleRole": "generic",
+    "layoutObjectName": "LayoutNGBlockFlow",
+    "showAccessibilityInfo": true
   }
 }
 contentBox{
@@ -992,6 +1008,8 @@ contentBox{
   ],
   "showRulers": true,
   "showExtensionLines": true,
+  "showAccessibilityInfo": true,
+  "colorFormat": "hex",
   "elementInfo": {
     "tagName": "div",
     "idValue": "contentBox",
@@ -1000,7 +1018,9 @@ contentBox{
     "nodeHeight": "160",
     "isKeyboardFocusable": false,
     "accessibleName": "",
-    "accessibleRole": "generic"
+    "accessibleRole": "generic",
+    "layoutObjectName": "LayoutNGBlockFlow",
+    "showAccessibilityInfo": true
   }
 }
 polygon{
@@ -1100,6 +1120,8 @@ polygon{
   ],
   "showRulers": true,
   "showExtensionLines": true,
+  "showAccessibilityInfo": true,
+  "colorFormat": "hex",
   "elementInfo": {
     "tagName": "div",
     "idValue": "polygon",
@@ -1108,7 +1130,9 @@ polygon{
     "nodeHeight": "128",
     "isKeyboardFocusable": false,
     "accessibleName": "",
-    "accessibleRole": "generic"
+    "accessibleRole": "generic",
+    "layoutObjectName": "LayoutNGBlockFlow",
+    "showAccessibilityInfo": true
   }
 }
 raster{
@@ -1541,6 +1565,8 @@ raster{
   ],
   "showRulers": true,
   "showExtensionLines": true,
+  "showAccessibilityInfo": true,
+  "colorFormat": "hex",
   "elementInfo": {
     "tagName": "div",
     "idValue": "raster",
@@ -1549,7 +1575,9 @@ raster{
     "nodeHeight": "128",
     "isKeyboardFocusable": false,
     "accessibleName": "",
-    "accessibleRole": "generic"
+    "accessibleRole": "generic",
+    "layoutObjectName": "LayoutNGBlockFlow",
+    "showAccessibilityInfo": true
   }
 }
 

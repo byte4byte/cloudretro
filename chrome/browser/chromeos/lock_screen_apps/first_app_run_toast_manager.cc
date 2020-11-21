@@ -42,6 +42,7 @@ class FirstAppRunToastManager::AppWidgetObserver
   ~AppWidgetObserver() override {
     // This is a no-op of the observer was previously removed.
     widget_->RemoveObserver(this);
+    CHECK(!IsInObserverList());
   }
 
   // views::WidgetObserver:
@@ -136,8 +137,8 @@ void FirstAppRunToastManager::CreateAndShowToastDialog() {
       base::UTF8ToUTF16(app_window_->GetExtension()->short_name()),
       base::BindOnce(&FirstAppRunToastManager::ToastDialogDismissed,
                      weak_ptr_factory_.GetWeakPtr()));
-  toast_dialog->Show();
-  toast_widget_ = toast_dialog->GetWidget();
+  toast_widget_ = views::BubbleDialogDelegateView::CreateBubble(toast_dialog);
+  toast_widget_->Show();
   AdjustToastWidgetBounds();
   toast_widget_observer_.Add(toast_widget_);
 }

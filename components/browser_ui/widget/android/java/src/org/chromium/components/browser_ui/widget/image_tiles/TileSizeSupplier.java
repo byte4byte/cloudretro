@@ -7,6 +7,7 @@ package org.chromium.components.browser_ui.widget.image_tiles;
 import android.content.Context;
 import android.content.res.Resources;
 
+import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.supplier.Supplier;
 import org.chromium.components.browser_ui.widget.R;
 import org.chromium.components.browser_ui.widget.image_tiles.TileSizeSupplier.TileSize;
@@ -27,6 +28,7 @@ class TileSizeSupplier implements Supplier<TileSize> {
     private final Resources mResources;
     private final int mIdealTileWidth;
     private final int mInterTilePadding;
+    private final int mStartMargin;
 
     /** Constructor. */
     public TileSizeSupplier(Context context) {
@@ -35,6 +37,7 @@ class TileSizeSupplier implements Supplier<TileSize> {
         mIdealTileWidth = mResources.getDimensionPixelOffset(R.dimen.tile_ideal_width);
         mInterTilePadding =
                 mResources.getDimensionPixelOffset(R.dimen.tile_grid_inter_tile_padding);
+        mStartMargin = mResources.getDimensionPixelOffset(R.dimen.tile_grid_inter_tile_padding);
         recompute();
     }
 
@@ -49,23 +52,31 @@ class TileSizeSupplier implements Supplier<TileSize> {
      * @return The {@link TileSize} containing results of the computation.
      */
     public void recompute() {
-        double idealSpanCount =
-                (double) getAvailableWidth() / (mIdealTileWidth + mInterTilePadding);
-        double adjustedSpanCount = Math.round(idealSpanCount);
+        double idealSpanCount = (double) (getAvailableWidth() + mInterTilePadding)
+                / (mIdealTileWidth + mInterTilePadding);
+        double delta = idealSpanCount - Math.floor(idealSpanCount);
 
-        // For carousel, we need to have the last cell peeking out of the screen.
-        adjustedSpanCount += 0.5f;
+        // For carousel, we need to have the last cell peeking out of the screen. So clamp the last
+        // cell between 30% and 70%.
+        delta = Math.max(0.3, Math.min(0.7, delta));
+        double adjustedSpanCount = Math.floor(idealSpanCount) + delta;
 
-        double tileWidthToUse = (getAvailableWidth() - mInterTilePadding * (idealSpanCount - 1))
+        double tileWidthToUse =
+                (getAvailableWidth() - mInterTilePadding * Math.floor(adjustedSpanCount))
                 / adjustedSpanCount;
 
         mComputedTileSize.interTilePadding = mInterTilePadding;
         mComputedTileSize.width = (int) tileWidthToUse;
+
+        int tileWidthToUseInDp = (int) (tileWidthToUse / mResources.getDisplayMetrics().density);
+        RecordHistogram.recordLinearCountHistogram(
+                "Search.QueryTiles.TileWidth", tileWidthToUseInDp, 50, 150, 101);
+        RecordHistogram.recordLinearCountHistogram(
+                "Search.QueryTiles.TilesFitPerRow", (int) adjustedSpanCount, 0, 20, 21);
     }
 
     private int getAvailableWidth() {
         // TODO(shaktisahu): Cap this for tablet and landscape to 600dp.
-        return mResources.getDisplayMetrics().widthPixels
-                - 2 * mResources.getDimensionPixelOffset(R.dimen.default_list_row_padding);
+        return mResources.getDisplayMetrics().widthPixels - 2 * mStartMargin;
     }
 }

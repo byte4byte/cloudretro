@@ -25,11 +25,6 @@ namespace chromeos {
 
 class PrintJobDatabaseImpl : public PrintJobDatabase {
  public:
-  // UMA histogram names
-  static const char* const kPrintJobDatabaseEntries;
-  static const char* const kPrintJobDatabaseEntrySize;
-  static const char* const kPrintJobDatabaseLoadTime;
-
   PrintJobDatabaseImpl(leveldb_proto::ProtoDatabaseProvider* database_provider,
                        base::FilePath profile_path);
   ~PrintJobDatabaseImpl() override;
@@ -41,6 +36,7 @@ class PrintJobDatabaseImpl : public PrintJobDatabase {
                     SavePrintJobCallback callback) override;
   void DeletePrintJobs(const std::vector<std::string>& ids,
                        DeletePrintJobsCallback callback) override;
+  void Clear(DeletePrintJobsCallback callback) override;
   void GetPrintJobs(GetPrintJobsCallback callback) override;
 
  private:
@@ -63,9 +59,9 @@ class PrintJobDatabaseImpl : public PrintJobDatabase {
                        SavePrintJobCallback callback,
                        bool success);
 
-  void OnPrintJobDeleted(const std::vector<std::string>& ids,
-                         DeletePrintJobsCallback callback,
-                         bool success);
+  void OnPrintJobsDeleted(const std::vector<std::string>& ids,
+                          DeletePrintJobsCallback callback,
+                          bool success);
 
   void GetPrintJobsFromProtoDatabase(
       GetPrintJobsFromProtoDatabaseCallback callback);

@@ -26,10 +26,12 @@ static NGConstraintSpace ConstructConstraintSpace(
     WritingMode writing_mode = WritingMode::kHorizontalTb) {
   LogicalSize size = {LayoutUnit(inline_size), LayoutUnit(block_size)};
 
-  NGConstraintSpaceBuilder builder(writing_mode, writing_mode,
+  NGConstraintSpaceBuilder builder(writing_mode,
+                                   {writing_mode, TextDirection::kLtr},
                                    /* is_new_fc */ false);
   builder.SetAvailableSize(size);
   builder.SetPercentageResolutionSize(size);
+  builder.SetStretchInlineSizeIfAuto(true);
   builder.SetIsFixedInlineSize(fixed_inline);
   builder.SetIsFixedBlockSize(fixed_block);
   return builder.ToConstraintSpace();
@@ -98,7 +100,7 @@ class NGLengthUtilsTestWithNode : public NGLayoutTest {
   LayoutUnit ComputeInlineSizeForFragment(
       NGConstraintSpace constraint_space = ConstructConstraintSpace(200, 300),
       const MinMaxSizes& sizes = MinMaxSizes()) {
-    LayoutBox* body = ToLayoutBox(GetDocument().body()->GetLayoutObject());
+    LayoutBox* body = GetDocument().body()->GetLayoutBox();
     body->SetStyle(style_);
     body->SetIntrinsicLogicalWidthsDirty();
     NGBlockNode node(body);
@@ -111,15 +113,16 @@ class NGLengthUtilsTestWithNode : public NGLayoutTest {
 
   LayoutUnit ComputeBlockSizeForFragment(
       NGConstraintSpace constraint_space = ConstructConstraintSpace(200, 300),
-      LayoutUnit content_size = LayoutUnit()) {
-    LayoutBox* body = ToLayoutBox(GetDocument().body()->GetLayoutObject());
+      LayoutUnit content_size = LayoutUnit(),
+      base::Optional<LayoutUnit> inline_size = base::nullopt) {
+    LayoutBox* body = GetDocument().body()->GetLayoutBox();
     body->SetStyle(style_);
     body->SetIntrinsicLogicalWidthsDirty();
 
     NGBoxStrut border_padding = ComputeBordersForTest(*style_) +
                                 ComputePadding(constraint_space, *style_);
-    return ::blink::ComputeBlockSizeForFragment(constraint_space, *style_,
-                                                border_padding, content_size);
+    return ::blink::ComputeBlockSizeForFragment(
+        constraint_space, *style_, border_padding, content_size, inline_size);
   }
 
   scoped_refptr<ComputedStyle> style_;
@@ -130,7 +133,6 @@ TEST_F(NGLengthUtilsTest, testResolveInlineLength) {
   EXPECT_EQ(LayoutUnit(150), ResolveMainInlineLength(Length::Fixed(150)));
   EXPECT_EQ(LayoutUnit(0), ResolveMinInlineLength(
                                Length::Auto(), LengthResolvePhase::kIntrinsic));
-  EXPECT_EQ(LayoutUnit(200), ResolveMainInlineLength(Length::Auto()));
   EXPECT_EQ(LayoutUnit(200), ResolveMainInlineLength(Length::FillAvailable()));
 
   EXPECT_EQ(LayoutUnit::Max(),
@@ -161,98 +163,99 @@ TEST_F(NGLengthUtilsTest, testResolveInlineLength) {
 TEST_F(NGLengthUtilsTest, testResolveBlockLength) {
   EXPECT_EQ(LayoutUnit(90), ResolveMainBlockLength(Length::Percent(30)));
   EXPECT_EQ(LayoutUnit(150), ResolveMainBlockLength(Length::Fixed(150)));
-  EXPECT_EQ(LayoutUnit(0), ResolveMainBlockLength(Length::Auto()));
-  EXPECT_EQ(LayoutUnit(300), ResolveMainBlockLength(Length::FillAvailable()));
-
   EXPECT_EQ(LayoutUnit(300), ResolveMainBlockLength(Length::FillAvailable()));
 }
 
-TEST_F(NGLengthUtilsTest, testComputeContentContribution) {
+TEST_F(NGLengthUtilsTestWithNode, testComputeContentContribution) {
   MinMaxSizes sizes;
   sizes.min_size = LayoutUnit(30);
   sizes.max_size = LayoutUnit(40);
+  LayoutBox* body = GetDocument().body()->GetLayoutBox();
+  body->SetStyle(style_);
+  NGBlockNode node(body);
 
   MinMaxSizes expected = sizes;
   style_->SetLogicalWidth(Length::Percent(30));
   EXPECT_EQ(expected, ComputeMinAndMaxContentContributionForTest(
-                          style_->GetWritingMode(), *style_, sizes));
+                          style_->GetWritingMode(), node, sizes));
 
   style_->SetLogicalWidth(Length::FillAvailable());
   EXPECT_EQ(expected, ComputeMinAndMaxContentContributionForTest(
-                          style_->GetWritingMode(), *style_, sizes));
+                          style_->GetWritingMode(), node, sizes));
 
   expected = MinMaxSizes{LayoutUnit(150), LayoutUnit(150)};
   style_->SetLogicalWidth(Length::Fixed(150));
   EXPECT_EQ(expected, ComputeMinAndMaxContentContributionForTest(
-                          style_->GetWritingMode(), *style_, sizes));
+                          style_->GetWritingMode(), node, sizes));
 
   expected = sizes;
   style_->SetLogicalWidth(Length::Auto());
   EXPECT_EQ(expected, ComputeMinAndMaxContentContributionForTest(
-                          style_->GetWritingMode(), *style_, sizes));
+                          style_->GetWritingMode(), node, sizes));
 
   expected = MinMaxSizes{LayoutUnit(430), LayoutUnit(440)};
   style_->SetPaddingLeft(Length::Fixed(400));
   auto sizes_padding400 = sizes;
   sizes_padding400 += LayoutUnit(400);
   EXPECT_EQ(expected, ComputeMinAndMaxContentContributionForTest(
-                          style_->GetWritingMode(), *style_, sizes_padding400));
+                          style_->GetWritingMode(), node, sizes_padding400));
 
   expected = MinMaxSizes{LayoutUnit(30), LayoutUnit(40)};
   style_->SetPaddingLeft(Length::Fixed(0));
   style_->SetLogicalWidth(Length(CalculationValue::Create(
       PixelsAndPercent(100, -10), kValueRangeNonNegative)));
   EXPECT_EQ(expected, ComputeMinAndMaxContentContributionForTest(
-                          style_->GetWritingMode(), *style_, sizes));
+                          style_->GetWritingMode(), node, sizes));
 
   expected = MinMaxSizes{LayoutUnit(30), LayoutUnit(35)};
   style_->SetLogicalWidth(Length::Auto());
   style_->SetMaxWidth(Length::Fixed(35));
   EXPECT_EQ(expected, ComputeMinAndMaxContentContributionForTest(
-                          style_->GetWritingMode(), *style_, sizes));
+                          style_->GetWritingMode(), node, sizes));
 
   expected = MinMaxSizes{LayoutUnit(80), LayoutUnit(80)};
   style_->SetLogicalWidth(Length::Fixed(50));
   style_->SetMinWidth(Length::Fixed(80));
   EXPECT_EQ(expected, ComputeMinAndMaxContentContributionForTest(
-                          style_->GetWritingMode(), *style_, sizes));
+                          style_->GetWritingMode(), node, sizes));
 
   expected = MinMaxSizes{LayoutUnit(150), LayoutUnit(150)};
   style_ = ComputedStyle::Create();
   style_->SetLogicalWidth(Length::Fixed(100));
   style_->SetPaddingLeft(Length::Fixed(50));
+  body->SetStyle(style_);
   auto sizes_padding50 = sizes;
   sizes_padding50 += LayoutUnit(50);
   EXPECT_EQ(expected, ComputeMinAndMaxContentContributionForTest(
-                          style_->GetWritingMode(), *style_, sizes_padding50));
+                          style_->GetWritingMode(), node, sizes_padding50));
 
   expected = MinMaxSizes{LayoutUnit(100), LayoutUnit(100)};
   style_->SetBoxSizing(EBoxSizing::kBorderBox);
   EXPECT_EQ(expected, ComputeMinAndMaxContentContributionForTest(
-                          style_->GetWritingMode(), *style_, sizes_padding50));
+                          style_->GetWritingMode(), node, sizes_padding50));
 
   // Content size should never be below zero, even with box-sizing: border-box
   // and a large padding...
   expected = MinMaxSizes{LayoutUnit(400), LayoutUnit(400)};
   style_->SetPaddingLeft(Length::Fixed(400));
   EXPECT_EQ(expected, ComputeMinAndMaxContentContributionForTest(
-                          style_->GetWritingMode(), *style_, sizes_padding400));
+                          style_->GetWritingMode(), node, sizes_padding400));
 
   expected.min_size = expected.max_size = sizes.min_size + LayoutUnit(400);
   style_->SetLogicalWidth(Length::MinContent());
   EXPECT_EQ(expected, ComputeMinAndMaxContentContributionForTest(
-                          style_->GetWritingMode(), *style_, sizes_padding400));
+                          style_->GetWritingMode(), node, sizes_padding400));
   style_->SetLogicalWidth(Length::Fixed(100));
   style_->SetMaxWidth(Length::MaxContent());
   // Due to padding and box-sizing, width computes to 400px and max-width to
   // 440px, so the result is 400.
   expected = MinMaxSizes{LayoutUnit(400), LayoutUnit(400)};
   EXPECT_EQ(expected, ComputeMinAndMaxContentContributionForTest(
-                          style_->GetWritingMode(), *style_, sizes_padding400));
+                          style_->GetWritingMode(), node, sizes_padding400));
   expected = MinMaxSizes{LayoutUnit(40), LayoutUnit(40)};
   style_->SetPaddingLeft(Length::Fixed(0));
   EXPECT_EQ(expected, ComputeMinAndMaxContentContributionForTest(
-                          style_->GetWritingMode(), *style_, sizes));
+                          style_->GetWritingMode(), node, sizes));
 }
 
 TEST_F(NGLengthUtilsTestWithNode, testComputeInlineSizeForFragment) {
@@ -380,6 +383,28 @@ TEST_F(NGLengthUtilsTestWithNode, testComputeBlockSizeForFragment) {
   // ...and the same goes for fill-available with a large padding.
   style_->SetLogicalHeight(Length::FillAvailable());
   EXPECT_EQ(LayoutUnit(400), ComputeBlockSizeForFragment());
+
+  // Now check aspect-ratio.
+  style_ = ComputedStyle::Create();
+  style_->SetLogicalWidth(Length::Fixed(100));
+  style_->SetAspectRatio(
+      StyleAspectRatio(EAspectRatioType::kRatio, FloatSize(2, 1)));
+  EXPECT_EQ(LayoutUnit(50),
+            ComputeBlockSizeForFragment(ConstructConstraintSpace(200, 300),
+                                        LayoutUnit(), LayoutUnit(100)));
+
+  // Default box-sizing
+  style_->SetPaddingRight(Length::Fixed(10));
+  style_->SetPaddingBottom(Length::Fixed(20));
+  // Should be (100 - 10) / 2 + 20 = 65.
+  EXPECT_EQ(LayoutUnit(65),
+            ComputeBlockSizeForFragment(ConstructConstraintSpace(200, 300),
+                                        LayoutUnit(20), LayoutUnit(100)));
+  // With box-sizing: border-box, should be 50.
+  style_->SetBoxSizing(EBoxSizing::kBorderBox);
+  EXPECT_EQ(LayoutUnit(50),
+            ComputeBlockSizeForFragment(ConstructConstraintSpace(200, 300),
+                                        LayoutUnit(20), LayoutUnit(100)));
 
   // TODO(layout-ng): test {min,max}-content on max-height.
 }

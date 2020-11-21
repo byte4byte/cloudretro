@@ -10,7 +10,6 @@
 #include <utility>
 #include <vector>
 
-#include "base/json/json_parser.h"
 #include "base/no_destructor.h"
 #include "base/strings/string_number_conversions.h"
 #include "components/schema_org/common/improved_metadata.mojom.h"
@@ -22,13 +21,11 @@ namespace schema_org {
 
 namespace {
 
-// App Indexing enforces a max nesting depth of 5. Our top level message
-// corresponds to the WebPage, so this only leaves 4 more levels. We will parse
-// entities up to this depth, and ignore any further nesting. If an object at
-// the max nesting depth has a property corresponding to an entity, that
-// property will be dropped. Note that we will still parse json-ld blocks deeper
-// than this, but it won't be passed to App Indexing.
-constexpr int kMaxDictionaryDepth = 5;
+// Use a max entity nesting depth of 10. This is higher than AppIndexing allows
+// (depth of 5), but we need at least a depth of 6 for MediaFeeds, and this
+// extractor is no longer used by AppIndexing. Round up to 10 since feeds could
+// conceivably nest deeper than the test cases we have.
+constexpr int kMaxDictionaryDepth = 10;
 // Maximum amount of nesting of arrays to support, where 0 is a completely flat
 // array.
 constexpr int kMaxNestedArrayDepth = 1;
@@ -305,15 +302,23 @@ EntityPtr Extractor::ExtractTopLevelEntity(const base::DictionaryValue& val) {
   return entity;
 }
 
-EntityPtr Extractor::Extract(const std::string& content) {
-  base::Optional<base::Value> value(base::JSONReader::Read(content));
+void Extractor::Extract(const std::string& content,
+                        ExtractorCallback callback) {
+  data_decoder::DataDecoder::ParseJsonIsolated(
+      content, base::BindOnce(&Extractor::OnJsonParsed,
+                              weak_factory_.GetWeakPtr(), std::move(callback)));
+}
+
+void Extractor::OnJsonParsed(ExtractorCallback callback,
+                             data_decoder::DataDecoder::ValueOrError result) {
   const base::DictionaryValue* dict_value = nullptr;
 
-  if (!value || !value.value().GetAsDictionary(&dict_value)) {
-    return nullptr;
+  if (!result.value || !result.value.value().GetAsDictionary(&dict_value)) {
+    std::move(callback).Run(nullptr);
+    return;
   }
 
-  return ExtractTopLevelEntity(*dict_value);
+  std::move(callback).Run(ExtractTopLevelEntity(*dict_value));
 }
 
 }  // namespace schema_org

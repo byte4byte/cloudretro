@@ -6,13 +6,25 @@
 
 #include "base/json/json_string_value_serializer.h"
 #include "base/strings/sys_string_conversions.h"
+#include "components/autofill/core/common/autofill_prefs.h"
 #include "components/password_manager/core/common/password_manager_pref_names.h"
 #include "components/policy/policy_constants.h"
 #include "components/strings/grit/components_strings.h"
 #include "ios/chrome/browser/chrome_switches.h"
 #import "ios/chrome/browser/policy/policy_app_interface.h"
 #include "ios/chrome/browser/pref_names.h"
+#import "ios/chrome/browser/translate/translate_app_interface.h"
+#import "ios/chrome/browser/ui/popup_menu/popup_menu_constants.h"
+#import "ios/chrome/browser/ui/settings/autofill/autofill_constants.h"
+#import "ios/chrome/browser/ui/settings/elements/elements_constants.h"
+#import "ios/chrome/browser/ui/settings/language/language_settings_ui_constants.h"
+#import "ios/chrome/browser/ui/settings/password/passwords_table_view_constants.h"
+#import "ios/chrome/browser/ui/settings/settings_table_view_controller_constants.h"
+#import "ios/chrome/browser/ui/table_view/cells/table_view_cells_constants.h"
+#include "ios/chrome/grit/ios_strings.h"
 #include "ios/chrome/test/earl_grey/chrome_earl_grey.h"
+#import "ios/chrome/test/earl_grey/chrome_earl_grey_ui.h"
+#import "ios/chrome/test/earl_grey/chrome_matchers.h"
 #include "ios/chrome/test/earl_grey/chrome_test_case.h"
 #include "ios/testing/earl_grey/app_launch_configuration.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
@@ -57,8 +69,13 @@ void SetPolicy(bool enabled, const std::string& policy_key) {
   SetPolicy(base::Value(enabled), policy_key);
 }
 
+// Sets the value of the policy with the |policy_key| key to the given integer
+// value.
+void SetPolicy(int value, const std::string& policy_key) {
+  SetPolicy(base::Value(value), policy_key);
+}
+
 // TODO(crbug.com/1065522): Add helpers as needed for:
-//    - INTEGER
 //    - STRING
 //    - LIST (and subtypes, e.g. int list, string list, etc)
 //    - DICTIONARY (and subtypes, e.g. int dictionary, string dictionary, etc)
@@ -72,7 +89,7 @@ void VerifyBoolPolicy(const std::string& policy_key,
   // provides some visual feedback as the test runs.
   [ChromeEarlGrey loadURL:GURL("chrome://policy")];
   [ChromeEarlGrey waitForWebStateContainingText:l10n_util::GetStringUTF8(
-                                                    IDS_POLICY_SHOW_UNSET)];
+                                                    IDS_POLICY_HEADER_NAME)];
   // Force the preference off via policy.
   SetPolicy(false, policy_key);
   GREYAssertFalse([ChromeEarlGrey userBooleanPref:pref_name],
@@ -82,6 +99,41 @@ void VerifyBoolPolicy(const std::string& policy_key,
   SetPolicy(true, policy_key);
   GREYAssertTrue([ChromeEarlGrey userBooleanPref:pref_name],
                  @"Preference was unexpectedly false");
+}
+
+// Returns a matcher for the Translate manual trigger button in the tools menu.
+id<GREYMatcher> ToolsMenuTranslateButton() {
+  return grey_allOf(grey_accessibilityID(kToolsMenuTranslateId),
+                    grey_interactable(), nil);
+}
+
+// Verifies that a managed setting item is shown and react properly.
+void VerifyManagedSettingItem(NSString* accessibilityID,
+                              NSString* containerViewAccessibilityID) {
+  // Check if the managed item is shown in the corresponding table view.
+  [[[EarlGrey selectElementWithMatcher:grey_accessibilityID(accessibilityID)]
+         usingSearchAction:grey_scrollInDirection(kGREYDirectionDown, 200)
+      onElementWithMatcher:grey_accessibilityID(containerViewAccessibilityID)]
+      assertWithMatcher:grey_sufficientlyVisible()];
+
+  // Click the info button.
+  [ChromeEarlGreyUI tapSettingsMenuButton:grey_accessibilityID(
+                                              kTableViewCellInfoButtonViewId)];
+
+  // Check if the contextual bubble is shown.
+  [[EarlGrey selectElementWithMatcher:grey_accessibilityID(
+                                          kEnterpriseInfoBubbleViewId)]
+      assertWithMatcher:grey_sufficientlyVisible()];
+
+  // Tap outside of the bubble.
+  [[EarlGrey selectElementWithMatcher:grey_accessibilityID(
+                                          kTableViewCellInfoButtonViewId)]
+      performAction:grey_tap()];
+
+  // Check if the contextual bubble is hidden.
+  [[EarlGrey selectElementWithMatcher:grey_accessibilityID(
+                                          kEnterpriseInfoBubbleViewId)]
+      assertWithMatcher:grey_notVisible()];
 }
 
 }  // namespace
@@ -107,21 +159,84 @@ void VerifyBoolPolicy(const std::string& policy_key,
 - (void)testAboutPolicy {
   [ChromeEarlGrey loadURL:GURL("chrome://policy")];
   [ChromeEarlGrey waitForWebStateContainingText:l10n_util::GetStringUTF8(
-                                                    IDS_POLICY_SHOW_UNSET)];
+                                                    IDS_POLICY_HEADER_NAME)];
 }
 
 // Tests for the DefaultSearchProviderEnabled policy.
+// 1. Test if the policy can be properly set.
+// 2. Test the managed UI item and clicking action.
 - (void)testDefaultSearchProviderEnabled {
   // Disable default search provider via policy and make sure it does not crash
   // the omnibox UI.
   SetPolicy(false, policy::key::kDefaultSearchProviderEnabled);
   [ChromeEarlGrey loadURL:GURL("chrome://policy")];
+  [EarlGrey dismissKeyboardWithError:nil];
+
+  // Open a new tab and verify that the NTP does not crash. Regression test for
+  // http://crbug.com/1148903.
+  [ChromeEarlGrey openNewTab];
+
+  // Open settings menu.
+  [ChromeEarlGreyUI openSettingsMenu];
+
+  VerifyManagedSettingItem(kSettingsManagedSearchEngineCellId,
+                           kSettingsTableViewId);
 }
 
 // Tests for the PasswordManagerEnabled policy.
 - (void)testPasswordManagerEnabled {
   VerifyBoolPolicy(policy::key::kPasswordManagerEnabled,
                    password_manager::prefs::kCredentialsEnableService);
+}
+
+// Tests for the PasswordManagerEnabled policy Settings UI.
+- (void)testPasswordManagerEnabledSettingsUI {
+  // Force the preference off via policy.
+  SetPolicy(false, policy::key::kPasswordManagerEnabled);
+  GREYAssertFalse(
+      [ChromeEarlGrey
+          userBooleanPref:password_manager::prefs::kCredentialsEnableService],
+      @"Preference was unexpectedly true");
+  // Open settings menu and tap password settings.
+  [ChromeEarlGreyUI openSettingsMenu];
+  [ChromeEarlGreyUI
+      tapSettingsMenuButton:chrome_test_util::SettingsMenuPasswordsButton()];
+
+  VerifyManagedSettingItem(kSavePasswordManagedTableViewId,
+                           kPasswordsTableViewId);
+}
+
+// Tests for the AutofillAddressEnabled policy Settings UI.
+- (void)testAutofillAddressSettingsUI {
+  // Force the preference off via policy.
+  SetPolicy(false, policy::key::kAutofillAddressEnabled);
+  GREYAssertFalse(
+      [ChromeEarlGrey userBooleanPref:autofill::prefs::kAutofillProfileEnabled],
+      @"Preference was unexpectedly true");
+  // Open settings menu and tap Address and More setting.
+  [ChromeEarlGreyUI openSettingsMenu];
+  [ChromeEarlGreyUI
+      tapSettingsMenuButton:chrome_test_util::AddressesAndMoreButton()];
+
+  VerifyManagedSettingItem(kAutofillAddressManagedViewId,
+                           kAutofillProfileTableViewID);
+}
+
+// Tests for the AutofillCreditCardEnabled policy Settings UI.
+- (void)testAutofillCreditCardSettingsUI {
+  // Force the preference off via policy.
+  SetPolicy(false, policy::key::kAutofillCreditCardEnabled);
+  GREYAssertFalse(
+      [ChromeEarlGrey
+          userBooleanPref:autofill::prefs::kAutofillCreditCardEnabled],
+      @"Preference was unexpectedly true");
+  // Open settings menu and tap Payment Method setting.
+  [ChromeEarlGreyUI openSettingsMenu];
+  [ChromeEarlGreyUI
+      tapSettingsMenuButton:chrome_test_util::PaymentMethodsButton()];
+
+  VerifyManagedSettingItem(kAutofillCreditCardManagedViewId,
+                           kAutofillCreditCardTableViewId);
 }
 
 // Tests for the SavingBrowserHistoryDisabled policy.
@@ -133,7 +248,7 @@ void VerifyBoolPolicy(const std::string& policy_key,
   // Set history to a clean state and verify it is clean.
   [ChromeEarlGrey clearBrowsingHistory];
   [ChromeEarlGrey resetBrowsingDataPrefs];
-  GREYAssertEqual([ChromeEarlGrey getBrowsingHistoryEntryCount], 0,
+  GREYAssertEqual([ChromeEarlGrey browsingHistoryEntryCount], 0,
                   @"History was unexpectedly non-empty");
 
   // Verify that the unmanaged pref's default value is false. While we generally
@@ -154,7 +269,7 @@ void VerifyBoolPolicy(const std::string& policy_key,
   // Perform a navigation and make sure the history isn't changed.
   [ChromeEarlGrey loadURL:testURL];
   [ChromeEarlGrey waitForWebStateContainingText:pageText];
-  GREYAssertEqual([ChromeEarlGrey getBrowsingHistoryEntryCount], 0,
+  GREYAssertEqual([ChromeEarlGrey browsingHistoryEntryCount], 0,
                   @"History was unexpectedly non-empty");
 
   // Force the preference to false via policy (enables history).
@@ -166,7 +281,7 @@ void VerifyBoolPolicy(const std::string& policy_key,
   // Perform a navigation and make sure history is being saved.
   [ChromeEarlGrey loadURL:testURL];
   [ChromeEarlGrey waitForWebStateContainingText:pageText];
-  GREYAssertEqual([ChromeEarlGrey getBrowsingHistoryEntryCount], 1,
+  GREYAssertEqual([ChromeEarlGrey browsingHistoryEntryCount], 1,
                   @"History had an unexpected entry count");
 }
 
@@ -174,6 +289,123 @@ void VerifyBoolPolicy(const std::string& policy_key,
 - (void)testSearchSuggestEnabled {
   VerifyBoolPolicy(policy::key::kSearchSuggestEnabled,
                    prefs::kSearchSuggestEnabled);
+}
+
+// Tests that language detection is not performed and the tool manual trigger
+// button is disabled when the pref kOfferTranslateEnabled is set to false.
+- (void)testTranslateEnabled {
+  GREYAssertTrue(self.testServer->Start(), @"Test server failed to start.");
+  const GURL testURL = self.testServer->GetURL("/pony.html");
+  const std::string pageText = "pony";
+
+  // Set up a fake language detection observer.
+  [TranslateAppInterface
+      setUpWithScriptServer:base::SysUTF8ToNSString(testURL.spec())];
+
+  // Disable TranslateEnabled policy.
+  SetPolicy(false, policy::key::kTranslateEnabled);
+
+  // Open some webpage.
+  [ChromeEarlGrey loadURL:testURL];
+
+  // Check that no language has been detected.
+  GREYCondition* condition = [GREYCondition
+      conditionWithName:@"Wait for language detection"
+                  block:^BOOL() {
+                    return [TranslateAppInterface isLanguageDetected];
+                  }];
+
+  GREYAssertFalse([condition waitWithTimeout:2],
+                  @"The Language is unexpectedly detected.");
+
+  // Make sure the Translate manual trigger button disabled.
+  [ChromeEarlGreyUI openToolsMenu];
+  [[[EarlGrey selectElementWithMatcher:ToolsMenuTranslateButton()]
+         usingSearchAction:grey_scrollInDirection(kGREYDirectionDown,
+                                                  /*amount=*/200)
+      onElementWithMatcher:chrome_test_util::ToolsMenuView()]
+      assertWithMatcher:grey_accessibilityTrait(
+                            UIAccessibilityTraitNotEnabled)];
+
+  // Close the tools menu.
+  [ChromeTestCase removeAnyOpenMenusAndInfoBars];
+
+  // Remove any tranlation related setup properly.
+  [TranslateAppInterface tearDown];
+
+  // Enable the policy.
+  SetPolicy(true, policy::key::kTranslateEnabled);
+}
+
+- (void)testBlockPopupsSettingsUI {
+  // Set the policy to int value 2, which stands for "do not allow any site to
+  // show popups".
+  SetPolicy(2, policy::key::kDefaultPopupsSetting);
+
+  // Open settings menu and tap Content Settings setting.
+  [ChromeEarlGreyUI openSettingsMenu];
+  [ChromeEarlGreyUI
+      tapSettingsMenuButton:chrome_test_util::ContentSettingsButton()];
+  [[EarlGrey
+      selectElementWithMatcher:grey_accessibilityID(kSettingsBlockPopupsCellId)]
+      performAction:grey_tap()];
+
+  VerifyManagedSettingItem(@"blockPopupsContentView_managed",
+                           @"block_popups_settings_view_controller");
+}
+
+- (void)testTranslateEnabledSettingsUI {
+  // Disable TranslateEnabled policy.
+  SetPolicy(false, policy::key::kTranslateEnabled);
+
+  // Open settings menu and tap Languages setting.
+  [ChromeEarlGreyUI openSettingsMenu];
+  [ChromeEarlGreyUI tapSettingsMenuButton:chrome_test_util::LanguagesButton()];
+
+  VerifyManagedSettingItem(kTranslateManagedAccessibilityIdentifier,
+                           kLanguageSettingsTableViewAccessibilityIdentifier);
+}
+
+// Test whether the managed item will be shown if a policy is set.
+- (void)testPopupMenuItem {
+  // Setup a machine level policy.
+  SetPolicy(false, policy::key::kTranslateEnabled);
+
+  // Open the menu and click on the item.
+  [ChromeEarlGreyUI openToolsMenu];
+  [ChromeEarlGreyUI
+      tapToolsMenuButton:grey_accessibilityID(kTextMenuEnterpriseInfo)];
+  [ChromeEarlGrey waitForPageToFinishLoading];
+
+  // Check the navigation.
+  [[EarlGrey selectElementWithMatcher:chrome_test_util::OmniboxText(
+                                          "chrome://management")]
+      assertWithMatcher:grey_notNil()];
+}
+
+// Test the chrome://management page when no machine level policy is set.
+- (void)testManagementPageUnmanaged {
+  // Open the management page and check if the content is expected.
+  [ChromeEarlGrey loadURL:GURL("chrome://management")];
+  [ChromeEarlGrey
+      waitForWebStateContainingText:l10n_util::GetStringUTF8(
+                                        IDS_IOS_MANAGEMENT_UI_UNMANAGED_DESC)];
+}
+
+// Test the chrome://management page when one or more machine level policies are
+// set.
+- (void)testManagementPageManaged {
+  // Setup a machine level policy.
+  SetPolicy(false, policy::key::kTranslateEnabled);
+
+  // Open the management page and check if the content is expected.
+  [ChromeEarlGrey loadURL:GURL("chrome://management")];
+  [ChromeEarlGrey
+      waitForWebStateContainingText:l10n_util::GetStringUTF8(
+                                        IDS_IOS_MANAGEMENT_UI_MESSAGE)];
+
+  // Open the "learn more" link.
+  [ChromeEarlGrey tapWebStateElementWithID:@"learn-more-link"];
 }
 
 @end

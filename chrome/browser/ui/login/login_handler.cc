@@ -15,15 +15,13 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/lock.h"
-#include "base/task/post_task.h"
 #include "build/build_config.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/password_manager/chrome_password_manager_client.h"
-#include "chrome/browser/prerender/prerender_contents.h"
+#include "chrome/browser/prefetch/no_state_prefetch/chrome_prerender_contents_delegate.h"
 #include "chrome/browser/tab_contents/tab_util.h"
-#include "chrome/browser/ui/login/login_tab_helper.h"
-#include "chrome/common/chrome_features.h"
 #include "components/autofill/core/browser/logging/log_manager.h"
+#include "components/no_state_prefetch/browser/prerender_contents.h"
 #include "components/password_manager/core/browser/browser_save_password_progress_logger.h"
 #include "components/password_manager/core/browser/http_auth_manager.h"
 #include "components/strings/grit/components_strings.h"
@@ -37,7 +35,6 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
-#include "content/public/common/origin_util.h"
 #include "extensions/buildflags/buildflags.h"
 #include "net/base/auth.h"
 #include "net/base/host_port_pair.h"
@@ -45,6 +42,7 @@
 #include "net/http/http_auth_scheme.h"
 #include "net/http/http_transaction_factory.h"
 #include "net/url_request/url_request_context.h"
+#include "third_party/blink/public/common/loader/network_utils.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/text_elider.h"
 #include "url/origin.h"
@@ -55,10 +53,10 @@
 #include "extensions/browser/view_type_utils.h"
 #endif
 
-using autofill::PasswordForm;
 using content::BrowserThread;
 using content::NavigationController;
 using content::WebContents;
+using password_manager::PasswordForm;
 
 namespace {
 
@@ -84,19 +82,9 @@ void RecordHttpAuthPromptType(AuthPromptType prompt_type) {
 
 LoginHandler::LoginModelData::LoginModelData(
     password_manager::HttpAuthManager* login_model,
-    const autofill::PasswordForm& observed_form)
+    const password_manager::PasswordForm& observed_form)
     : model(login_model), form(observed_form) {
   DCHECK(model);
-}
-
-LoginHandler::LoginHandler(const net::AuthChallengeInfo& auth_info,
-                           content::WebContents* web_contents,
-                           LoginAuthRequiredCallback auth_required_callback)
-    : WebContentsObserver(web_contents),
-      auth_info_(auth_info),
-      auth_required_callback_(std::move(auth_required_callback)),
-      prompt_started_(false) {
-  DCHECK(web_contents);
 }
 
 LoginHandler::~LoginHandler() {
@@ -113,49 +101,30 @@ LoginHandler::~LoginHandler() {
   }
 }
 
-void LoginHandler::Start(
+void LoginHandler::StartMainFrame(
     const content::GlobalRequestID& request_id,
-    bool is_main_frame,
+    const GURL& request_url,
+    scoped_refptr<net::HttpResponseHeaders> response_headers,
+    base::OnceCallback<void(const content::GlobalRequestID& request_id)>
+        extension_cancellation_callback) {
+  extension_main_frame_cancellation_callback_ =
+      std::move(extension_cancellation_callback);
+  StartInternal(request_id, true /* is_main_frame */, request_url,
+                response_headers);
+}
+
+void LoginHandler::StartSubresource(
+    const content::GlobalRequestID& request_id,
     const GURL& request_url,
     scoped_refptr<net::HttpResponseHeaders> response_headers) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  DCHECK(web_contents());
-  DCHECK(!WasAuthHandled());
-
-  // Create the LoginTabHelper so that it can observe the interstitial
-  // committing and show the prompt when it commits.
-  LoginTabHelper::CreateForWebContents(web_contents());
-
-#if BUILDFLAG(ENABLE_EXTENSIONS)
-  // If the WebRequest API wants to take a shot at intercepting this, we can
-  // return immediately. |continuation| will eventually be invoked if the
-  // request isn't cancelled.
-    auto* api = extensions::BrowserContextKeyedAPIFactory<
-        extensions::WebRequestAPI>::Get(web_contents()->GetBrowserContext());
-    auto continuation =
-        base::BindOnce(&LoginHandler::MaybeSetUpLoginPromptBeforeCommit,
-                       weak_factory_.GetWeakPtr(), request_url, is_main_frame);
-    if (api->MaybeProxyAuthRequest(web_contents()->GetBrowserContext(),
-                                   auth_info_, std::move(response_headers),
-                                   request_id, is_main_frame,
-                                   std::move(continuation))) {
-      return;
-    }
-#endif
-
-    // To avoid reentrancy problems, this function must not call
-    // |auth_required_callback_| synchronously. Defer
-    // MaybeSetUpLoginPromptBeforeCommit by an event loop iteration.
-    base::PostTask(
-        FROM_HERE, {BrowserThread::UI},
-        base::BindOnce(&LoginHandler::MaybeSetUpLoginPromptBeforeCommit,
-                       weak_factory_.GetWeakPtr(), request_url, is_main_frame,
-                       base::nullopt, false /* should_cancel */));
+  StartInternal(request_id, false /* is_main_frame */, request_url,
+                response_headers);
 }
 
 void LoginHandler::ShowLoginPromptAfterCommit(const GURL& request_url) {
   // The request may have been handled while the WebRequest API was processing.
-  if (!web_contents() || !web_contents()->GetDelegate() || WasAuthHandled()) {
+  if (!web_contents() || !web_contents()->GetDelegate() ||
+      web_contents()->IsBeingDestroyed() || WasAuthHandled()) {
     CancelAuth();
     return;
   }
@@ -281,6 +250,53 @@ void LoginHandler::Observe(int type,
   }
 }
 
+LoginHandler::LoginHandler(const net::AuthChallengeInfo& auth_info,
+                           content::WebContents* web_contents,
+                           LoginAuthRequiredCallback auth_required_callback)
+    : WebContentsObserver(web_contents),
+      auth_info_(auth_info),
+      auth_required_callback_(std::move(auth_required_callback)),
+      prompt_started_(false) {
+  DCHECK(web_contents);
+}
+
+void LoginHandler::StartInternal(
+    const content::GlobalRequestID& request_id,
+    bool is_main_frame,
+    const GURL& request_url,
+    scoped_refptr<net::HttpResponseHeaders> response_headers) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK(web_contents());
+  DCHECK(!WasAuthHandled());
+
+#if BUILDFLAG(ENABLE_EXTENSIONS)
+  // If the WebRequest API wants to take a shot at intercepting this, we can
+  // return immediately. |continuation| will eventually be invoked if the
+  // request isn't cancelled.
+  auto* api =
+      extensions::BrowserContextKeyedAPIFactory<extensions::WebRequestAPI>::Get(
+          web_contents()->GetBrowserContext());
+  auto continuation = base::BindOnce(
+      &LoginHandler::MaybeSetUpLoginPromptBeforeCommit,
+      weak_factory_.GetWeakPtr(), request_url, request_id, is_main_frame);
+  if (api->MaybeProxyAuthRequest(web_contents()->GetBrowserContext(),
+                                 auth_info_, std::move(response_headers),
+                                 request_id, is_main_frame,
+                                 std::move(continuation))) {
+    return;
+  }
+#endif
+
+  // To avoid reentrancy problems, this function must not call
+  // |auth_required_callback_| synchronously. Defer
+  // MaybeSetUpLoginPromptBeforeCommit by an event loop iteration.
+  content::GetUIThreadTaskRunner({})->PostTask(
+      FROM_HERE,
+      base::BindOnce(&LoginHandler::MaybeSetUpLoginPromptBeforeCommit,
+                     weak_factory_.GetWeakPtr(), request_url, request_id,
+                     is_main_frame, base::nullopt, false /* should_cancel */));
+}
+
 void LoginHandler::NotifyAuthNeeded() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (WasAuthHandled() || !prompt_started_)
@@ -392,10 +408,10 @@ PasswordForm LoginHandler::MakeInputForPasswordManager(
   } else {
     dialog_form.scheme = PasswordForm::Scheme::kOther;
   }
-  dialog_form.origin = auth_info.challenger.GetURL();
+  dialog_form.url = auth_info.challenger.GetURL();
   DCHECK(auth_info.is_proxy || auth_info.challenger.IsSameOriginWith(
                                    url::Origin::Create(request_url)));
-  dialog_form.signon_realm = GetSignonRealm(dialog_form.origin, auth_info);
+  dialog_form.signon_realm = GetSignonRealm(dialog_form.url, auth_info);
   return dialog_form;
 }
 
@@ -423,7 +439,7 @@ void LoginHandler::GetDialogStrings(const GURL& request_url,
     authority_url = request_url;
   }
 
-  if (!content::IsOriginSecure(authority_url)) {
+  if (!blink::network_utils::IsOriginSecure(authority_url)) {
     // TODO(asanka): The string should be different for proxies and servers.
     // http://crbug.com/620756
     *explanation = l10n_util::GetStringUTF16(IDS_LOGIN_DIALOG_NOT_PRIVATE);
@@ -434,14 +450,19 @@ void LoginHandler::GetDialogStrings(const GURL& request_url,
 
 void LoginHandler::MaybeSetUpLoginPromptBeforeCommit(
     const GURL& request_url,
+    const content::GlobalRequestID& request_id,
     bool is_request_for_main_frame,
     const base::Optional<net::AuthCredentials>& credentials,
-    bool should_cancel) {
+    bool cancelled_by_extension) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   // The request may have been handled while the WebRequest API was processing.
   if (!web_contents() || !web_contents()->GetDelegate() || WasAuthHandled() ||
-      should_cancel) {
+      cancelled_by_extension) {
+    if (cancelled_by_extension && is_request_for_main_frame &&
+        !extension_main_frame_cancellation_callback_.is_null()) {
+      std::move(extension_main_frame_cancellation_callback_).Run(request_id);
+    }
     CancelAuth();
     return;
   }
@@ -499,7 +520,8 @@ void LoginHandler::ShowLoginPrompt(const GURL& request_url) {
     return;
   }
   prerender::PrerenderContents* prerender_contents =
-      prerender::PrerenderContents::FromWebContents(web_contents());
+      prerender::ChromePrerenderContentsDelegate::FromWebContents(
+          web_contents());
   if (prerender_contents) {
     prerender_contents->Destroy(prerender::FINAL_STATUS_AUTH_NEEDED);
     CancelAuth();
@@ -556,21 +578,4 @@ void LoginHandler::BuildViewAndNotify(
   // WeakPtr before NotifyAuthNeeded.
   if (guard)
     NotifyAuthNeeded();
-}
-
-// ----------------------------------------------------------------------------
-// Public API
-std::unique_ptr<content::LoginDelegate> CreateLoginHandler(
-    const net::AuthChallengeInfo& auth_info,
-    content::WebContents* web_contents,
-    const content::GlobalRequestID& request_id,
-    bool is_request_for_main_frame,
-    const GURL& url,
-    scoped_refptr<net::HttpResponseHeaders> response_headers,
-    LoginAuthRequiredCallback auth_required_callback) {
-  std::unique_ptr<LoginHandler> handler = LoginHandler::Create(
-      auth_info, web_contents, std::move(auth_required_callback));
-  handler->Start(request_id, is_request_for_main_frame, url,
-                 std::move(response_headers));
-  return handler;
 }

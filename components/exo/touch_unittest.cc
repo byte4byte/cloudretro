@@ -15,10 +15,12 @@
 #include "components/exo/shell_surface.h"
 #include "components/exo/surface.h"
 #include "components/exo/test/exo_test_base.h"
+#include "components/exo/test/exo_test_file_helper.h"
 #include "components/exo/test/exo_test_helper.h"
 #include "components/exo/touch_delegate.h"
 #include "components/exo/touch_stylus_delegate.h"
 #include "testing/gmock/include/gmock/gmock.h"
+#include "ui/base/dragdrop/mojom/drag_drop_types.mojom-shared.h"
 #include "ui/events/base_event_utils.h"
 #include "ui/events/test/event_generator.h"
 #include "ui/views/widget/widget.h"
@@ -238,7 +240,7 @@ TEST_F(TouchTest, OnTouchCancel) {
   EXPECT_CALL(delegate, OnTouchFrame());
   ui::TouchEvent cancel_event(
       ui::ET_TOUCH_CANCELLED, gfx::Point(), ui::EventTimeForNow(),
-      ui::PointerDetails(ui::EventPointerType::POINTER_TYPE_TOUCH, 1));
+      ui::PointerDetails(ui::EventPointerType::kTouch, 1));
   generator.Dispatch(&cancel_event);
 
   EXPECT_CALL(delegate, OnTouchDestroying(touch.get()));
@@ -411,14 +413,13 @@ TEST_F(TouchTest, OnTouchTool) {
     testing::InSequence sequence;
     EXPECT_CALL(delegate, OnTouchDown(window.surface(), testing::_, testing::_,
                                       gfx::PointF()));
-    EXPECT_CALL(stylus_delegate,
-                OnTouchTool(0, ui::EventPointerType::POINTER_TYPE_PEN));
+    EXPECT_CALL(stylus_delegate, OnTouchTool(0, ui::EventPointerType::kPen));
     EXPECT_CALL(delegate, OnTouchFrame());
     EXPECT_CALL(delegate, OnTouchUp(testing::_, testing::_));
     EXPECT_CALL(delegate, OnTouchFrame());
   }
   generator.set_current_screen_location(window.origin());
-  generator.SetTouchPointerType(ui::EventPointerType::POINTER_TYPE_PEN);
+  generator.SetTouchPointerType(ui::EventPointerType::kPen);
   generator.PressTouch();
   generator.ReleaseTouch();
 
@@ -446,15 +447,14 @@ TEST_F(TouchTest, OnTouchForce) {
     testing::InSequence sequence;
     EXPECT_CALL(delegate, OnTouchDown(window.surface(), testing::_, testing::_,
                                       gfx::PointF()));
-    EXPECT_CALL(stylus_delegate,
-                OnTouchTool(0, ui::EventPointerType::POINTER_TYPE_PEN));
+    EXPECT_CALL(stylus_delegate, OnTouchTool(0, ui::EventPointerType::kPen));
     EXPECT_CALL(stylus_delegate, OnTouchForce(testing::_, 0, 1.0));
     EXPECT_CALL(delegate, OnTouchFrame());
     EXPECT_CALL(delegate, OnTouchUp(testing::_, testing::_));
     EXPECT_CALL(delegate, OnTouchFrame());
   }
   generator.set_current_screen_location(window.origin());
-  generator.SetTouchPointerType(ui::EventPointerType::POINTER_TYPE_PEN);
+  generator.SetTouchPointerType(ui::EventPointerType::kPen);
   generator.SetTouchForce(1.0);
   generator.PressTouch();
   generator.ReleaseTouch();
@@ -483,8 +483,7 @@ TEST_F(TouchTest, OnTouchTilt) {
     testing::InSequence sequence;
     EXPECT_CALL(delegate, OnTouchDown(window.surface(), testing::_, testing::_,
                                       gfx::PointF()));
-    EXPECT_CALL(stylus_delegate,
-                OnTouchTool(0, ui::EventPointerType::POINTER_TYPE_PEN));
+    EXPECT_CALL(stylus_delegate, OnTouchTool(0, ui::EventPointerType::kPen));
     EXPECT_CALL(stylus_delegate,
                 OnTouchTilt(testing::_, 0, gfx::Vector2dF(1.0, 2.0)));
     EXPECT_CALL(delegate, OnTouchFrame());
@@ -492,7 +491,7 @@ TEST_F(TouchTest, OnTouchTilt) {
     EXPECT_CALL(delegate, OnTouchFrame());
   }
   generator.set_current_screen_location(window.origin());
-  generator.SetTouchPointerType(ui::EventPointerType::POINTER_TYPE_PEN);
+  generator.SetTouchPointerType(ui::EventPointerType::kPen);
   generator.SetTouchTilt(1.0, 2.0);
   generator.PressTouch();
   generator.ReleaseTouch();
@@ -508,6 +507,7 @@ TEST_F(TouchTest, DragDropAbort) {
   TestDataSourceDelegate data_source_delegate;
   DataSource source(&data_source_delegate);
   Surface origin, icon;
+  TestFileHelper file_helper;
 
   // Make origin into a real window so the touch can click it
   ShellSurface shell_surface(&origin);
@@ -522,8 +522,8 @@ TEST_F(TouchTest, DragDropAbort) {
   EXPECT_CALL(touch_delegate, OnTouchFrame()).Times(2);
   generator.MoveTouch(origin.window()->GetBoundsInScreen().origin());
 
-  seat.StartDrag(&source, &origin, &icon,
-                 ui::DragDropTypes::DragEventSource::DRAG_EVENT_SOURCE_MOUSE);
+  seat.StartDrag(&file_helper, &source, &origin, &icon,
+                 ui::mojom::DragEventSource::kMouse);
   EXPECT_TRUE(seat.get_drag_drop_operation_for_testing());
 
   EXPECT_CALL(touch_delegate, OnTouchDown).Times(1);

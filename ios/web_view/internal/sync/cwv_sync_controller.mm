@@ -138,6 +138,11 @@ __weak id<CWVSyncControllerDataSource> gSyncDataSource;
            selector:@selector(reloadAccounts)
                name:UIApplicationWillEnterForegroundNotification
              object:nil];
+
+    // This allows internals of |_identityManager| to fetch and store the user's
+    // info and profile image. This must be called manually *after* all services
+    // have been started to avoid issues in https://crbug.com/441399.
+    _identityManager->OnNetworkInitialized();
   }
   return self;
 }
@@ -183,10 +188,10 @@ __weak id<CWVSyncControllerDataSource> gSyncDataSource;
   autofill::prefs::SetUserOptedInWalletSyncTransport(_prefService, accountId,
                                                      /*opted_in=*/true);
   password_manager::features_util::SetDefaultPasswordStore(
-      _prefService, _syncService, autofill::PasswordForm::Store::kAccountStore);
-  password_manager::features_util::SetAccountStorageOptIn(_prefService,
-                                                          _syncService,
-                                                          /*opt_in=*/true);
+      _prefService, _syncService,
+      password_manager::PasswordForm::Store::kAccountStore);
+  password_manager::features_util::OptInToAccountStorage(_prefService,
+                                                         _syncService);
 }
 
 - (void)stopSyncAndClearIdentity {

@@ -4,7 +4,7 @@
 
 #include "ios/chrome/browser/autocomplete/autocomplete_provider_client_impl.h"
 
-#include "base/logging.h"
+#include "base/notreached.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/history/core/browser/history_service.h"
 #include "components/keyed_service/core/service_access_type.h"
@@ -45,7 +45,9 @@ AutocompleteProviderClientImpl::AutocompleteProviderClientImpl(
       url_consent_helper_(unified_consent::UrlKeyedDataCollectionConsentHelper::
                               NewPersonalizedDataCollectionConsentHelper(
                                   ProfileSyncServiceFactory::GetForBrowserState(
-                                      browser_state_))) {}
+                                      browser_state_))),
+      omnibox_triggered_feature_service_(
+          std::make_unique<OmniboxTriggeredFeatureService>()) {}
 
 AutocompleteProviderClientImpl::~AutocompleteProviderClientImpl() {}
 
@@ -56,6 +58,10 @@ AutocompleteProviderClientImpl::GetURLLoaderFactory() {
 
 PrefService* AutocompleteProviderClientImpl::GetPrefs() {
   return browser_state_->GetPrefs();
+}
+
+PrefService* AutocompleteProviderClientImpl::GetLocalState() {
+  return GetApplicationContext()->GetLocalState();
 }
 
 const AutocompleteSchemeClassifier&
@@ -134,6 +140,16 @@ std::unique_ptr<KeywordExtensionsDelegate>
 AutocompleteProviderClientImpl::GetKeywordExtensionsDelegate(
     KeywordProvider* keyword_provider) {
   return nullptr;
+}
+
+query_tiles::TileService* AutocompleteProviderClientImpl::GetQueryTileService()
+    const {
+  return nullptr;
+}
+
+OmniboxTriggeredFeatureService*
+AutocompleteProviderClientImpl::GetOmniboxTriggeredFeatureService() const {
+  return omnibox_triggered_feature_service_.get();
 }
 
 std::string AutocompleteProviderClientImpl::GetAcceptLanguages() const {

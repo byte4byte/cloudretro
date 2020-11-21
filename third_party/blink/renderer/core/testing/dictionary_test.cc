@@ -32,8 +32,6 @@ void DictionaryTest::set(const InternalDictionary* testing_dictionary) {
   long_member_with_default_ = testing_dictionary->longMemberWithDefault();
   if (testing_dictionary->hasLongOrNullMember())
     long_or_null_member_ = testing_dictionary->longOrNullMember();
-  // |longOrNullMemberWithDefault| has a default value but can be null, so
-  // we need to check availability.
   if (testing_dictionary->hasLongOrNullMemberWithDefault()) {
     long_or_null_member_with_default_ =
         testing_dictionary->longOrNullMemberWithDefault();
@@ -92,8 +90,8 @@ void DictionaryTest::set(const InternalDictionary* testing_dictionary) {
     callback_function_member_ = testing_dictionary->callbackFunctionMember();
 }
 
-InternalDictionary* DictionaryTest::get() {
-  InternalDictionary* result = InternalDictionary::Create();
+InternalDictionary* DictionaryTest::get(v8::Isolate* isolate) {
+  InternalDictionary* result = InternalDictionary::Create(isolate);
   GetInternals(result);
   return result;
 }
@@ -108,8 +106,9 @@ void DictionaryTest::setDerived(const InternalDictionaryDerived* derived) {
   required_boolean_member_ = derived->requiredBooleanMember();
 }
 
-InternalDictionaryDerived* DictionaryTest::getDerived() {
-  InternalDictionaryDerived* result = InternalDictionaryDerived::Create();
+InternalDictionaryDerived* DictionaryTest::getDerived(v8::Isolate* isolate) {
+  InternalDictionaryDerived* result =
+      InternalDictionaryDerived::Create(isolate);
   GetDerivedInternals(result);
   return result;
 }
@@ -121,9 +120,10 @@ void DictionaryTest::setDerivedDerived(
     derived_derived_string_member_ = derived->derivedDerivedStringMember();
 }
 
-InternalDictionaryDerivedDerived* DictionaryTest::getDerivedDerived() {
+InternalDictionaryDerivedDerived* DictionaryTest::getDerivedDerived(
+    v8::Isolate* isolate) {
   InternalDictionaryDerivedDerived* result =
-      InternalDictionaryDerivedDerived::Create();
+      InternalDictionaryDerivedDerived::Create(isolate);
   GetDerivedDerivedInternals(result);
   return result;
 }
@@ -138,22 +138,25 @@ void DictionaryTest::Reset() {
   boolean_member_ = base::nullopt;
   double_member_ = base::nullopt;
   unrestricted_double_member_ = base::nullopt;
-  string_member_ = String();
+  string_member_ = base::nullopt;
   string_member_with_default_ = String("Should not be returned");
+  byte_string_member_ = base::nullopt;
+  usv_string_member_ = base::nullopt;
   string_sequence_member_ = base::nullopt;
   string_sequence_member_with_default_.Fill("Should not be returned", 1);
   string_sequence_or_null_member_ = base::nullopt;
-  enum_member_ = String();
+  enum_member_ = base::nullopt;
   enum_member_with_default_ = String();
-  enum_or_null_member_ = String();
+  enum_or_null_member_ = base::nullopt;
   element_member_ = nullptr;
   element_or_null_member_.reset();
   object_member_ = ScriptValue();
   object_or_null_member_with_default_ = ScriptValue();
   double_or_string_member_ = DoubleOrString();
   event_target_or_null_member_ = nullptr;
-  derived_string_member_ = String();
+  derived_string_member_ = base::nullopt;
   derived_string_member_with_default_ = String();
+  derived_derived_string_member_ = base::nullopt;
   required_boolean_member_ = false;
   dictionary_member_properties_ = base::nullopt;
   internal_enum_or_internal_enum_sequence_ =
@@ -186,10 +189,13 @@ void DictionaryTest::GetInternals(InternalDictionary* dict) {
     dict->setDoubleMember(double_member_.value());
   if (unrestricted_double_member_)
     dict->setUnrestrictedDoubleMember(unrestricted_double_member_.value());
-  dict->setStringMember(string_member_);
+  if (string_member_)
+    dict->setStringMember(string_member_.value());
   dict->setStringMemberWithDefault(string_member_with_default_);
-  dict->setByteStringMember(byte_string_member_);
-  dict->setUsvStringMember(usv_string_member_);
+  if (byte_string_member_)
+    dict->setByteStringMember(byte_string_member_.value());
+  if (usv_string_member_)
+    dict->setUsvStringMember(usv_string_member_.value());
   if (string_sequence_member_)
     dict->setStringSequenceMember(string_sequence_member_.value());
   dict->setStringSequenceMemberWithDefault(
@@ -198,9 +204,11 @@ void DictionaryTest::GetInternals(InternalDictionary* dict) {
     dict->setStringSequenceOrNullMember(
         string_sequence_or_null_member_.value());
   }
-  dict->setEnumMember(enum_member_);
+  if (enum_member_)
+    dict->setEnumMember(enum_member_.value());
   dict->setEnumMemberWithDefault(enum_member_with_default_);
-  dict->setEnumOrNullMember(enum_or_null_member_);
+  if (enum_or_null_member_)
+    dict->setEnumOrNullMember(enum_or_null_member_.value());
   if (element_member_)
     dict->setElementMember(element_member_);
   if (element_or_null_member_.has_value())
@@ -217,13 +225,15 @@ void DictionaryTest::GetInternals(InternalDictionary* dict) {
   dict->setInternalEnumOrInternalEnumSequenceMember(
       internal_enum_or_internal_enum_sequence_);
   dict->setAnyMember(any_member_);
-  dict->setCallbackFunctionMember(callback_function_member_);
+  if (callback_function_member_)
+    dict->setCallbackFunctionMember(callback_function_member_);
 }
 
 void DictionaryTest::GetDerivedInternals(InternalDictionaryDerived* dict) {
   GetInternals(dict);
 
-  dict->setDerivedStringMember(derived_string_member_);
+  if (derived_string_member_)
+    dict->setDerivedStringMember(derived_string_member_.value());
   dict->setDerivedStringMemberWithDefault(derived_string_member_with_default_);
   dict->setRequiredBooleanMember(required_boolean_member_);
 }
@@ -232,10 +242,11 @@ void DictionaryTest::GetDerivedDerivedInternals(
     InternalDictionaryDerivedDerived* dict) {
   GetDerivedInternals(dict);
 
-  dict->setDerivedDerivedStringMember(derived_derived_string_member_);
+  if (derived_derived_string_member_)
+    dict->setDerivedDerivedStringMember(derived_derived_string_member_.value());
 }
 
-void DictionaryTest::Trace(Visitor* visitor) {
+void DictionaryTest::Trace(Visitor* visitor) const {
   visitor->Trace(element_member_);
   visitor->Trace(element_or_null_member_);
   visitor->Trace(object_member_);

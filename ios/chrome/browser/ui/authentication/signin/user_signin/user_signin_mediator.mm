@@ -6,7 +6,7 @@
 
 #include <memory>
 
-#include "base/logging.h"
+#include "base/check.h"
 #import "base/metrics/user_metrics.h"
 #import "base/strings/sys_string_conversions.h"
 #import "components/consent_auditor/consent_auditor.h"
@@ -75,20 +75,19 @@
 
 - (void)cancelSignin {
   if (self.isAuthenticationInProgress) {
-    [self cancelAndDismissAuthenticationFlow];
+    [self cancelAndDismissAuthenticationFlowAnimated:NO];
   } else {
     [self.delegate userSigninMediatorSigninFinishedWithResult:
                        SigninCoordinatorResultCanceledByUser];
   }
 }
 
-- (void)cancelAndDismissAuthenticationFlow {
+- (void)cancelAndDismissAuthenticationFlowAnimated:(BOOL)animated {
   if (!self.isAuthenticationInProgress) {
     return;
   }
 
-  // TODO(crbug.com/1056634): Support cancelAndDismiss with animation parameter.
-  [self.authenticationFlow cancelAndDismiss];
+  [self.authenticationFlow cancelAndDismissAnimated:animated];
   self.authenticationService->SignOut(signin_metrics::ABORT_SIGNIN,
                                       /*force_clear_browsing_data=*/false, nil);
 }
@@ -105,8 +104,7 @@
   if (success) {
     [self signinCompletedWithIdentity:identity];
   } else {
-    [self.delegate userSigninMediatorNeedPrimaryButtonUpdate];
-    [self.delegate userSigninMediatorDidTapResetSettingLink];
+    [self.delegate userSigninMediatorSigninFailed];
   }
 }
 

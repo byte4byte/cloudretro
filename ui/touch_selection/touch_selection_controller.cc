@@ -5,9 +5,10 @@
 #include "ui/touch_selection/touch_selection_controller.h"
 
 #include "base/auto_reset.h"
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics.h"
+#include "base/notreached.h"
 
 namespace ui {
 namespace {
@@ -363,6 +364,23 @@ bool TouchSelectionController::WillHandleTouchEventImpl(
   }
 
   return false;
+}
+
+void TouchSelectionController::OnSwipeToMoveCursorBegin() {
+  if (config_.hide_active_handle) {
+    // Hide the handle when magnifier is showing since it can confuse the user.
+    SetTemporarilyHidden(true);
+
+    // If the user has typed something, the insertion handle might be hidden.
+    // Prepare to show touch handles on end.
+    show_touch_handles_ = true;
+  }
+}
+
+void TouchSelectionController::OnSwipeToMoveCursorEnd() {
+  // Show the handle at the end if magnifier was showing.
+  if (config_.hide_active_handle)
+    SetTemporarilyHidden(false);
 }
 
 void TouchSelectionController::OnDragBegin(

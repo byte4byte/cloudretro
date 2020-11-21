@@ -36,6 +36,7 @@ namespace blink {
 
 class ChromeClient;
 class ColorChooserClient;
+class Page;
 class PagePopup;
 class PagePopupController;
 
@@ -47,7 +48,7 @@ class CORE_EXPORT ColorChooserPopupUIController final
                                 ChromeClient*,
                                 blink::ColorChooserClient*);
   ~ColorChooserPopupUIController() override;
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
 
   // ColorChooserUIController functions:
   void OpenUI() override;
@@ -64,7 +65,7 @@ class CORE_EXPORT ColorChooserPopupUIController final
   void CancelPopup() override;
   Element& OwnerElement() override;
   void DidClosePopup() override;
-  PagePopupController* CreatePagePopupController(PagePopup&) override;
+  PagePopupController* CreatePagePopupController(Page&, PagePopup&) override;
 
   void OpenEyeDropper();
   void EyeDropperResponseHandler(bool success, uint32_t color);

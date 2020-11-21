@@ -42,9 +42,8 @@ class AppsContainerView;
 class AppsGridView;
 class AssistantPageView;
 class ExpandArrowView;
-class HorizontalPageContainer;
+class PrivacyContainerView;
 class SearchBoxView;
-class SearchResultAnswerCardView;
 class SearchResultListView;
 class SearchResultPageView;
 class SearchResultTileItemListView;
@@ -57,16 +56,6 @@ class SearchResultTileItemListView;
 class APP_LIST_EXPORT ContentsView : public views::View,
                                      public PaginationModelObserver {
  public:
-  // This class observes the search box Updates.
-  class SearchBoxUpdateObserver : public base::CheckedObserver {
-   public:
-    // Called when search box bounds is updated.
-    virtual void OnSearchBoxBoundsUpdated() = 0;
-
-    // Called when the search box is cleaded and deactivated.
-    virtual void OnSearchBoxClearAndDeactivated() = 0;
-  };
-
   // Used to SetActiveState without animations.
   class ScopedSetActiveStateAnimationDisabler {
    public:
@@ -142,13 +131,8 @@ class APP_LIST_EXPORT ContentsView : public views::View,
 
   int NumLauncherPages() const;
 
-  AppsContainerView* GetAppsContainerView();
-
   SearchResultPageView* search_results_page_view() const {
     return search_results_page_view_;
-  }
-  SearchResultAnswerCardView* search_result_answer_card_view_for_test() const {
-    return search_result_answer_card_view_;
   }
   SearchResultTileItemListView* search_result_tile_item_list_view_for_test()
       const {
@@ -157,8 +141,11 @@ class APP_LIST_EXPORT ContentsView : public views::View,
   SearchResultListView* search_result_list_view_for_test() const {
     return search_result_list_view_;
   }
-  HorizontalPageContainer* horizontal_page_container() const {
-    return horizontal_page_container_;
+  PrivacyContainerView* privacy_container_view() const {
+    return privacy_container_view_;
+  }
+  AppsContainerView* apps_container_view() const {
+    return apps_container_view_;
   }
   AppListPage* GetPageView(int index) const;
 
@@ -207,9 +194,6 @@ class APP_LIST_EXPORT ContentsView : public views::View,
   void TransitionStarted() override;
   void TransitionChanged() override;
 
-  // Returns selected view in active page.
-  views::View* GetSelectedView() const;
-
   // Updates y position and opacity of the items in this view during dragging.
   void UpdateYPositionAndOpacity();
 
@@ -225,11 +209,6 @@ class APP_LIST_EXPORT ContentsView : public views::View,
 
   std::unique_ptr<ui::ScopedLayerAnimationSettings>
   CreateTransitionAnimationSettings(ui::Layer* layer) const;
-
-  void NotifySearchBoxBoundsUpdated();
-
-  void AddSearchBoxUpdateObserver(SearchBoxUpdateObserver* observer);
-  void RemoveSearchBoxUpdateObserver(SearchBoxUpdateObserver* observer);
 
   // Adjusts search box view size so it fits within the contents view margins
   // (when centered).
@@ -256,14 +235,18 @@ class APP_LIST_EXPORT ContentsView : public views::View,
   void UpdateSearchBoxVisibility(AppListState current_state);
 
   // Adds |view| as a new page to the end of the list of launcher pages. The
-  // view is inserted as a child of the ContentsView. There is no name
-  // associated with the page. Returns the index of the new page.
-  int AddLauncherPage(AppListPage* view);
-
-  // Adds |view| as a new page to the end of the list of launcher pages. The
   // view is inserted as a child of the ContentsView. The page is associated
-  // with the name |state|. Returns the index of the new page.
-  int AddLauncherPage(AppListPage* view, AppListState state);
+  // with the name |state|. Returns a pointer to the instance of the new page.
+  template <typename T>
+  T* AddLauncherPage(std::unique_ptr<T> view, AppListState state) {
+    auto* result = view.get();
+    AddLauncherPageInternal(std::move(view), state);
+    return result;
+  }
+
+  // Internal version of the above that does the actual work.
+  void AddLauncherPageInternal(std::unique_ptr<AppListPage> view,
+                               AppListState state);
 
   // Gets the PaginationModel owned by the AppsGridView.
   // Note: This is different to |pagination_model_|, which manages top-level
@@ -291,11 +274,11 @@ class APP_LIST_EXPORT ContentsView : public views::View,
 
   // Sub-views of the ContentsView. All owned by the views hierarchy.
   AssistantPageView* assistant_page_view_ = nullptr;
-  HorizontalPageContainer* horizontal_page_container_ = nullptr;
+  AppsContainerView* apps_container_view_ = nullptr;
   SearchResultPageView* search_results_page_view_ = nullptr;
-  SearchResultAnswerCardView* search_result_answer_card_view_ = nullptr;
   SearchResultTileItemListView* search_result_tile_item_list_view_ = nullptr;
   SearchResultListView* search_result_list_view_ = nullptr;
+  PrivacyContainerView* privacy_container_view_ = nullptr;
 
   // The child page views. Owned by the views hierarchy.
   std::vector<AppListPage*> app_list_pages_;
@@ -330,8 +313,6 @@ class APP_LIST_EXPORT ContentsView : public views::View,
   // to a new app list view state.
   base::Optional<AppListState> target_page_for_last_view_state_update_;
   base::Optional<AppListViewState> last_target_view_state_;
-
-  base::ObserverList<SearchBoxUpdateObserver> search_box_observers_;
 
   DISALLOW_COPY_AND_ASSIGN(ContentsView);
 };

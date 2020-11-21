@@ -13,8 +13,12 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/apps/intent_helper/apps_navigation_throttle.h"
-#include "content/public/browser/navigation_throttle.h"
+#include "chrome/browser/apps/intent_helper/apps_navigation_types.h"
 #include "url/gurl.h"
+
+namespace apps {
+enum class PickerShowState;
+}
 
 namespace content {
 class NavigationHandle;
@@ -72,15 +76,6 @@ class ChromeOsAppsNavigationThrottle : public apps::AppsNavigationThrottle {
       const GURL& url,
       std::vector<apps::IntentPickerAppInfo> apps);
 
-  // Determines the destination of the current navigation. We know that if the
-  // |picker_action| is either ERROR or DIALOG_DEACTIVATED the navigation MUST
-  // stay in Chrome, and when |picker_action| is PWA_APP_PRESSED the navigation
-  // goes to a PWA. Otherwise we can assume the navigation goes to ARC with the
-  // exception of the |selected_launch_name| being Chrome.
-  static Platform GetDestinationPlatform(
-      const std::string& selected_launch_name,
-      PickerAction picker_action);
-
   void MaybeRemoveComingFromArcFlag(content::WebContents* web_contents,
                                     const GURL& previous_url,
                                     const GURL& current_url) override;
@@ -97,15 +92,6 @@ class ChromeOsAppsNavigationThrottle : public apps::AppsNavigationThrottle {
       apps::AppsNavigationAction action,
       std::vector<apps::IntentPickerAppInfo> apps);
 
-  PickerShowState GetPickerShowState(
-      const std::vector<apps::IntentPickerAppInfo>& apps_for_picker,
-      content::WebContents* web_contents,
-      const GURL& url) override;
-
-  IntentPickerResponse GetOnPickerClosedCallback(
-      content::WebContents* web_contents,
-      IntentPickerAutoDisplayService* ui_auto_display_service,
-      const GURL& url) override;
 
   void CloseTab();
 
@@ -119,8 +105,27 @@ class ChromeOsAppsNavigationThrottle : public apps::AppsNavigationThrottle {
   // Whether or not we should launch preferred ARC apps.
   bool ShouldLaunchPreferredApp(const GURL& url);
 
+  // Append PWA to the app list and show intent picker.
+  void AddPwaAndShowIntentPicker(std::vector<apps::IntentPickerAppInfo> apps);
+
+  apps::PickerShowState GetPickerShowState(
+      const std::vector<apps::IntentPickerAppInfo>& apps_for_picker,
+      content::WebContents* web_contents,
+      const GURL& url);
+
+  void ShowIntentPickerForApps(
+      content::WebContents* web_contents,
+      IntentPickerAutoDisplayService* ui_auto_display_service,
+      const GURL& url,
+      std::vector<apps::IntentPickerAppInfo> apps,
+      IntentPickerResponse callback);
+
   // True if ARC is enabled, false otherwise.
   const bool arc_enabled_;
+
+  // Points to the service in charge of controlling auto-display for the related
+  // UI.
+  IntentPickerAutoDisplayService* ui_auto_display_service_;
 
   base::WeakPtrFactory<ChromeOsAppsNavigationThrottle> weak_factory_{this};
 

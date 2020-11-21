@@ -5,12 +5,13 @@
 #include "chrome/browser/chromeos/accessibility/speech_monitor.h"
 
 #include "base/strings/pattern.h"
-#include "base/task/post_task.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "content/public/browser/browser_task_traits.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/tts_controller.h"
 
 namespace chromeos {
+namespace test {
 
 namespace {
 
@@ -29,7 +30,11 @@ SpeechMonitor::~SpeechMonitor() {
     CHECK(replay_called_) << "Expectation was made, but Replay() not called.";
 }
 
-bool SpeechMonitor::PlatformImplAvailable() {
+bool SpeechMonitor::PlatformImplSupported() {
+  return true;
+}
+
+bool SpeechMonitor::PlatformImplInitialized() {
   return true;
 }
 
@@ -39,6 +44,12 @@ void SpeechMonitor::Speak(int utterance_id,
                           const content::VoiceData& voice,
                           const content::UtteranceContinuousParameters& params,
                           base::OnceCallback<void(bool)> on_speak_finished) {
+  CHECK(!utterance.empty())
+      << "If you're deliberately speaking the "
+         "empty string in a test, that's probably not the correct way to "
+         "achieve stopping speech. If it is unintended, it indicates a deeper "
+         "underlying issue.";
+
   content::TtsController::GetInstance()->OnTtsEvent(
       utterance_id, content::TTS_EVENT_END, static_cast<int>(utterance.size()),
       0, std::string());
@@ -87,6 +98,8 @@ void SpeechMonitor::ClearError() {
 void SpeechMonitor::SetError(const std::string& error) {
   error_ = error;
 }
+
+void SpeechMonitor::Shutdown() {}
 
 double SpeechMonitor::CalculateUtteranceDelayMS() {
   std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
@@ -213,8 +226,8 @@ void SpeechMonitor::MaybeContinueReplay() {
   }
 
   if (!replay_queue_.empty()) {
-    base::PostDelayedTask(
-        FROM_HERE, {content::BrowserThread::UI},
+    content::GetUIThreadTaskRunner({})->PostDelayedTask(
+        FROM_HERE,
         base::BindOnce(&SpeechMonitor::MaybePrintExpectations,
                        weak_factory_.GetWeakPtr()),
         base::TimeDelta::FromMilliseconds(kPrintExpectationDelayMs));
@@ -254,4 +267,5 @@ void SpeechMonitor::MaybePrintExpectations() {
              << base::JoinString(replayed_queue_, "\n");
 }
 
+}  // namespace test
 }  // namespace chromeos

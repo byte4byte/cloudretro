@@ -15,6 +15,7 @@
 #include "chrome/test/ppapi/ppapi_test.h"
 #include "components/nacl/browser/nacl_browser.h"
 #include "components/nacl/common/nacl_switches.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/test_utils.h"
 
 class NaClGdbDebugStubTest : public PPAPINaClNewlibTest {
@@ -56,8 +57,8 @@ void NaClGdbDebugStubTest::RunDebugStubTest(const std::string& nacl_module,
   base::Process test_script;
   std::unique_ptr<base::Environment> env(base::Environment::Create());
   nacl::NaClBrowser::SetGdbDebugStubPortListenerForTest(
-      base::Bind(&NaClGdbDebugStubTest::StartTestScript, base::Unretained(this),
-                 &test_script, test_name));
+      base::BindRepeating(&NaClGdbDebugStubTest::StartTestScript,
+                          base::Unretained(this), &test_script, test_name));
   // Turn on debug stub logging.
   env->SetVar("NACLVERBOSITY", "1");
   RunTestViaHTTP(nacl_module);

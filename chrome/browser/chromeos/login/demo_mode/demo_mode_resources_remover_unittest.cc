@@ -37,7 +37,7 @@ constexpr char kAccumulatedUsagePref[] =
     "demo_mode_resources_remover.accumulated_device_usage_s";
 
 // Used as a callback to DemoModeResourcesRemover::AttemptRemoval - it records
-// the result of the attempt to |result_out|.
+// the result of the attempt to `result_out`.
 void RecordRemovalResult(
     base::Optional<DemoModeResourcesRemover::RemovalResult>* result_out,
     DemoModeResourcesRemover::RemovalResult result) {
@@ -86,16 +86,14 @@ class DemoModeResourcesRemoverTest : public testing::Test {
         "version": "0.0.1",
         "min_env_version": "1.0"
     })";
-    if (base::WriteFile(demo_resources_path_.AppendASCII("manifest.json"),
-                        manifest.data(),
-                        manifest.size()) != static_cast<int>(manifest.size())) {
+    if (!base::WriteFile(demo_resources_path_.AppendASCII("manifest.json"),
+                         manifest)) {
       return false;
     }
 
     const std::string image = "fake image content";
-    if (base::WriteFile(demo_resources_path_.AppendASCII("image.squash"),
-                        image.data(),
-                        image.size()) != static_cast<int>(image.size())) {
+    if (!base::WriteFile(demo_resources_path_.AppendASCII("image.squash"),
+                         image)) {
       return false;
     }
 

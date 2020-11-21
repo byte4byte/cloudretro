@@ -18,6 +18,7 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "chromeos/services/network_config/public/mojom/cros_network_config.mojom-forward.h"
+#include "chromeos/services/network_config/public/mojom/network_types.mojom-forward.h"
 
 namespace views {
 class Separator;
@@ -81,11 +82,6 @@ class NetworkListView : public NetworkStateListDetailedView,
   // that the network is managed by policy. Returns |nullptr| if the network is
   // not managed by policy.
   views::View* CreatePolicyView(const NetworkInfo& info);
-
-  // Creates the view of an extra icon appearing next to the network name
-  // indicating that the network is controlled by an extension. If no extension
-  // is registered for this network, returns |nullptr|.
-  views::View* CreateControlledByExtensionView(const NetworkInfo& info);
 
   // Adds or updates child views representing the network connections when
   // |is_wifi| is matching the attribute of a network connection starting at

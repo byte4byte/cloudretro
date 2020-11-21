@@ -8,8 +8,8 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
 #include "base/callback.h"
+#include "base/callback_helpers.h"
 #include "base/memory/ref_counted.h"
 #include "base/run_loop.h"
 #include "dbus/object_path.h"
@@ -31,10 +31,6 @@
 namespace device {
 
 namespace {
-
-void AdapterCallback(const base::Closure& quit_closure) {
-  quit_closure.Run();
-}
 
 void GetValueCallback(
     base::OnceClosure quit_closure,
@@ -107,8 +103,8 @@ bool BluetoothTestBlueZ::PlatformSupportsLowEnergy() {
 
 void BluetoothTestBlueZ::InitWithFakeAdapter() {
   base::RunLoop run_loop;
-  adapter_ = new bluez::BluetoothAdapterBlueZ(
-      base::BindOnce(&AdapterCallback, run_loop.QuitClosure()));
+  adapter_ = bluez::BluetoothAdapterBlueZ::CreateAdapter();
+  adapter_->Initialize(run_loop.QuitClosure());
   run_loop.Run();
   adapter_->SetPowered(true, base::DoNothing(), base::DoNothing());
 }

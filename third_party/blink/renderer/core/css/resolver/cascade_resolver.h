@@ -10,6 +10,7 @@
 #include "third_party/blink/renderer/core/css/css_property_name.h"
 #include "third_party/blink/renderer/core/css/properties/css_property.h"
 #include "third_party/blink/renderer/core/css/resolver/cascade_filter.h"
+#include "third_party/blink/renderer/core/css/resolver/cascade_origin.h"
 #include "third_party/blink/renderer/core/css/rule_set.h"
 
 namespace blink {
@@ -33,13 +34,17 @@ class CORE_EXPORT CascadeResolver {
 
  public:
   // TODO(crbug.com/985047): Probably use a HashMap for this.
-  using NameStack = Vector<CSSPropertyName, 8>;
+  using PropertyStack = Vector<const CSSProperty*, 8>;
 
   // A 'locked' property is a property we are in the process of applying.
   // In other words, once a property is locked, locking it again would form
   // a cycle, and is therefore an error.
   bool IsLocked(const CSSProperty&) const;
-  bool IsLocked(const CSSPropertyName&) const;
+
+  // Returns the property we're currently applying.
+  const CSSProperty* CurrentProperty() const {
+    return stack_.size() ? stack_.back() : nullptr;
+  }
 
   // We do not allow substitution of animation-tainted values into
   // an animation-affecting property.
@@ -57,6 +62,14 @@ class CORE_EXPORT CascadeResolver {
   // used to skip application of a declaration).
   void MarkApplied(CascadePriority*) const;
 
+  // If the incoming origin is kAuthor, collect flags from 'property'.
+  // AuthorFlags() can then later be used to see which flags have been observed.
+  void CollectAuthorFlags(const CSSProperty& property, CascadeOrigin origin) {
+    author_flags_ |=
+        (origin == CascadeOrigin::kAuthor ? property.GetFlags() : 0);
+  }
+  CSSProperty::Flags AuthorFlags() const { return author_flags_; }
+
   // Automatically locks and unlocks the given property. (See
   // CascadeResolver::IsLocked).
   class CORE_EXPORT AutoLock {
@@ -64,29 +77,14 @@ class CORE_EXPORT CascadeResolver {
 
    public:
     AutoLock(const CSSProperty&, CascadeResolver&);
-    AutoLock(const CSSPropertyName&, CascadeResolver&);
     ~AutoLock();
 
    private:
     CascadeResolver& resolver_;
   };
 
-  // Automatically sets (and resets) the current surrogate.
-  //
-  // We need to know the current surrogate in order to make 'revert' work for
-  // e.g. css-logical properties. See TargetPropertyForRevert for more
-  // information.
-  class CORE_EXPORT AutoSurrogateScope
-      : private base::AutoReset<const CSSProperty*> {
-    STACK_ALLOCATED();
-
-   public:
-    AutoSurrogateScope(const CSSProperty& surrogate, CascadeResolver&);
-  };
-
  private:
   friend class AutoLock;
-  friend class AutoSurrogateScope;
   friend class StyleCascade;
   friend class TestCascadeResolver;
 
@@ -107,12 +105,16 @@ class CORE_EXPORT CascadeResolver {
   // Returns true whenever the CascadeResolver is in a cycle state.
   // This DOES NOT detect cycles; the caller must call DetectCycle first.
   bool InCycle() const;
+  // Returns the index of the given property (compared using the property's
+  // CSSPropertyName), or kNotFound if the property (name) is not present in
+  // stack_.
+  wtf_size_t Find(const CSSProperty&) const;
 
-  NameStack stack_;
+  PropertyStack stack_;
   wtf_size_t cycle_depth_ = kNotFound;
   CascadeFilter filter_;
   const uint8_t generation_ = 0;
-  const CSSProperty* current_surrogate_ = nullptr;
+  CSSProperty::Flags author_flags_ = 0;
 
   // A very simple cache for CSSPendingSubstitutionValues. We cache only the
   // most recently parsed CSSPendingSubstitutionValue, such that consecutive

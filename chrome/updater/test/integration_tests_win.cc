@@ -2,23 +2,30 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <wrl/client.h>
+
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/path_service.h"
-#include "base/process/launch.h"
-#include "base/process/process.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/task/task_traits.h"
 #include "base/task/thread_pool.h"
+#include "base/version.h"
+#include "base/win/registry.h"
+#include "chrome/updater/app/server/win/updater_idl.h"
+#include "chrome/updater/app/server/win/updater_internal_idl.h"
+#include "chrome/updater/app/server/win/updater_legacy_idl.h"
+#include "chrome/updater/constants.h"
+#include "chrome/updater/test/integration_tests.h"
 #include "chrome/updater/updater_version.h"
 #include "chrome/updater/util.h"
+#include "chrome/updater/win/constants.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace updater {
-
 namespace test {
-
 namespace {
 
 base::FilePath GetInstallerPath() {
@@ -28,26 +35,26 @@ base::FilePath GetInstallerPath() {
   return test_executable.DirName().AppendASCII("UpdaterSetup.exe");
 }
 
-bool Run(base::CommandLine command_line, int* exit_code) {
-  auto process = base::LaunchProcess(command_line, {});
-  if (!process.IsValid())
-    return false;
-  if (!process.WaitForExitWithTimeout(base::TimeDelta::FromSeconds(60),
-                                      exit_code))
-    return false;
-  base::WaitableEvent sleep(base::WaitableEvent::ResetPolicy::MANUAL,
-                            base::WaitableEvent::InitialState::NOT_SIGNALED);
-  // The process will exit before it is done uninstalling: sleep for five
-  // seconds to allow uninstall to complete.
-  base::ThreadPool::PostDelayedTask(
-      FROM_HERE, {base::MayBlock()},
-      base::BindOnce(&base::WaitableEvent::Signal, base::Unretained(&sleep)),
-      base::TimeDelta::FromSeconds(5));
-  sleep.Wait();
-  return true;
+base::FilePath GetProductPath() {
+  base::FilePath app_data_dir;
+  if (!base::PathService::Get(base::DIR_LOCAL_APP_DATA, &app_data_dir))
+    return base::FilePath();
+  return app_data_dir.AppendASCII(COMPANY_SHORTNAME_STRING)
+      .AppendASCII(PRODUCT_FULLNAME_STRING)
+      .AppendASCII(UPDATER_VERSION_STRING);
 }
 
-base::FilePath GetProductPath() {
+}  // namespace
+
+base::FilePath GetInstalledExecutablePath() {
+  return GetProductPath().AppendASCII("updater.exe");
+}
+
+base::FilePath GetFakeUpdaterInstallFolderPath(const base::Version& version) {
+  return GetProductPath().AppendASCII(version.GetString());
+}
+
+base::FilePath GetDataDirPath() {
   base::FilePath app_data_dir;
   if (!base::PathService::Get(base::DIR_LOCAL_APP_DATA, &app_data_dir))
     return base::FilePath();
@@ -55,32 +62,43 @@ base::FilePath GetProductPath() {
       .AppendASCII(PRODUCT_FULLNAME_STRING);
 }
 
-base::FilePath GetExecutablePath() {
-  return GetProductPath().AppendASCII("updater.exe");
-}
-
-}  // namespace
-
 void Clean() {
   // TODO(crbug.com/1062288): Delete the Client / ClientState registry keys.
+  base::win::RegKey(HKEY_CURRENT_USER, L"", KEY_SET_VALUE)
+      .DeleteKey(UPDATE_DEV_KEY);
   // TODO(crbug.com/1062288): Delete the COM server items.
   // TODO(crbug.com/1062288): Delete the COM service items.
   // TODO(crbug.com/1062288): Delete the COM interfaces.
-  // TODO(crbug.com/1062288): Delete the UpdateApps task.
-  EXPECT_TRUE(base::DeleteFile(GetProductPath(), true));
+  // TODO(crbug.com/1062288): Delete the Wake task.
+  EXPECT_TRUE(base::DeletePathRecursively(GetProductPath()));
+  EXPECT_TRUE(base::DeletePathRecursively(GetDataDirPath()));
 }
 
 void ExpectClean() {
   // TODO(crbug.com/1062288): Assert there are no Client / ClientState registry
   // keys.
+  // TODO(crbug.com/1062288): Assert there is no UpdateDev registry key.
   // TODO(crbug.com/1062288): Assert there are no COM server items.
   // TODO(crbug.com/1062288): Assert there are no COM service items.
   // TODO(crbug.com/1062288): Assert there are no COM interfaces.
-  // TODO(crbug.com/1062288): Assert there are no UpdateApps tasks.
+  // TODO(crbug.com/1062288): Assert there are no Wake tasks.
 
   // Files must not exist on the file system.
-
   EXPECT_FALSE(base::PathExists(GetProductPath()));
+  EXPECT_FALSE(base::PathExists(GetDataDirPath()));
+}
+
+void EnterTestMode() {
+  // TODO(crbug.com/1119857): Point this to an actual fake server.
+  base::win::RegKey key(HKEY_CURRENT_USER, L"", KEY_SET_VALUE);
+  ASSERT_EQ(key.Create(HKEY_CURRENT_USER, UPDATE_DEV_KEY, KEY_WRITE),
+            ERROR_SUCCESS);
+  ASSERT_EQ(key.WriteValue(base::UTF8ToUTF16(kDevOverrideKeyUrl).c_str(),
+                           L"http://localhost:8367"),
+            ERROR_SUCCESS);
+  ASSERT_EQ(key.WriteValue(base::UTF8ToUTF16(kDevOverrideKeyUseCUP).c_str(),
+                           DWORD{0}),
+            ERROR_SUCCESS);
 }
 
 void ExpectInstalled() {
@@ -89,28 +107,87 @@ void ExpectInstalled() {
   // TODO(crbug.com/1062288): Assert there are COM server items.
   // TODO(crbug.com/1062288): Assert there are COM service items. (Maybe.)
   // TODO(crbug.com/1062288): Assert there are COM interfaces.
-  // TODO(crbug.com/1062288): Assert there are UpdateApps tasks.
+  // TODO(crbug.com/1062288): Assert there are Wake tasks.
+
+  // Files must exist on the file system.
+  EXPECT_TRUE(base::PathExists(GetProductPath()));
+}
+
+void ExpectCandidateUninstalled() {
+  // TODO(crbug.com/1062288): Assert there are no side-by-side COM interfaces.
+  // TODO(crbug.com/1062288): Assert there are no Wake tasks.
+
+  // Files must not exist on the file system.
+  EXPECT_FALSE(base::PathExists(GetProductPath()));
+}
+
+void ExpectActive() {
+  // TODO(crbug.com/1062288): Assert that COM interfaces point to this version.
 
   // Files must exist on the file system.
   EXPECT_TRUE(base::PathExists(GetProductPath()));
 }
 
 void Install() {
+  const base::FilePath path = GetInstallerPath();
+  ASSERT_FALSE(path.empty());
+  base::CommandLine command_line(path);
+  command_line.AppendSwitch(kInstallSwitch);
   int exit_code = -1;
-  ASSERT_TRUE(Run(base::CommandLine(GetInstallerPath()), &exit_code));
+  ASSERT_TRUE(Run(command_line, &exit_code));
   EXPECT_EQ(0, exit_code);
 }
 
 void Uninstall() {
-  base::FilePath path = GetExecutablePath();
+  // Note: updater.exe --uninstall is run from the build dir, not the install
+  // dir, because it is useful for tests to be able to run it to clean the
+  // system even if installation has failed or the installed binaries have
+  // already been removed.
+  base::FilePath path = GetInstallerPath().DirName().AppendASCII("updater.exe");
   ASSERT_FALSE(path.empty());
   base::CommandLine command_line(path);
   command_line.AppendSwitch("uninstall");
   int exit_code = -1;
   ASSERT_TRUE(Run(command_line, &exit_code));
   EXPECT_EQ(0, exit_code);
+
+  // Uninstallation involves a race with the uninstall.cmd script and the
+  // process exit. Sleep to allow the script to complete its work.
+  SleepFor(5);
+}
+
+// Tests if the typelibs and some of the public, internal, and
+// legacy interfaces are available. Failure to query these interfaces indicates
+// an issue with typelib registration.
+void ExpectInterfacesRegistered() {
+  // IUpdater.
+  Microsoft::WRL::ComPtr<IUnknown> updater_server;
+  EXPECT_HRESULT_SUCCEEDED(::CoCreateInstance(__uuidof(UpdaterClass), nullptr,
+                                              CLSCTX_LOCAL_SERVER,
+                                              IID_PPV_ARGS(&updater_server)));
+  Microsoft::WRL::ComPtr<IUpdater> updater;
+  EXPECT_HRESULT_SUCCEEDED(updater_server.As(&updater));
+
+  // IUpdaterInternal.
+  Microsoft::WRL::ComPtr<IUnknown> updater_internal_server;
+  EXPECT_HRESULT_SUCCEEDED(::CoCreateInstance(
+      __uuidof(UpdaterInternalClass), nullptr, CLSCTX_LOCAL_SERVER,
+      IID_PPV_ARGS(&updater_internal_server)));
+  Microsoft::WRL::ComPtr<IUpdaterInternal> updater_internal;
+  EXPECT_HRESULT_SUCCEEDED(updater_internal_server.As(&updater_internal));
+
+  // IGoogleUpdate3Web and IAppBundleWeb.
+  Microsoft::WRL::ComPtr<IUnknown> updater_legacy_server;
+  EXPECT_HRESULT_SUCCEEDED(::CoCreateInstance(
+      __uuidof(GoogleUpdate3WebUserClass), nullptr, CLSCTX_LOCAL_SERVER,
+      IID_PPV_ARGS(&updater_legacy_server)));
+  Microsoft::WRL::ComPtr<IGoogleUpdate3Web> google_update;
+  EXPECT_HRESULT_SUCCEEDED(updater_legacy_server.As(&google_update));
+  Microsoft::WRL::ComPtr<IAppBundleWeb> app_bundle;
+  Microsoft::WRL::ComPtr<IDispatch> dispatch;
+  EXPECT_HRESULT_SUCCEEDED(google_update->createAppBundleWeb(&dispatch));
+  EXPECT_HRESULT_SUCCEEDED(dispatch.As(&app_bundle));
 }
 
 }  // namespace test
-
 }  // namespace updater

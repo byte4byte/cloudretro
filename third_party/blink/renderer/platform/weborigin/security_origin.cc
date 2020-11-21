@@ -133,13 +133,24 @@ static bool ShouldTreatAsOpaqueOrigin(const KURL& url) {
 }
 
 SecurityOrigin::SecurityOrigin(const KURL& url)
-    : protocol_(EnsureNonNull(url.Protocol())),
-      host_(EnsureNonNull(url.Host())),
-      domain_(host_),
-      port_(IsDefaultPortForProtocol(url.Port(), protocol_) ? kInvalidPort
-                                                            : url.Port()),
-      effective_port_(port_ ? port_ : DefaultPortForProtocol(protocol_)) {
-  DCHECK(!ShouldTreatAsOpaqueOrigin(url));
+    : SecurityOrigin(
+          EnsureNonNull(url.Protocol()),
+          EnsureNonNull(url.Host()),
+          // This mimics the logic in url::SchemeHostPort(const GURL&). In
+          // particular, it ensures a URL with a port of 0 will translate into
+          // an origin with an effective port of 0.
+          (url.HasPort() || !url.IsValid() || !url.IsHierarchical())
+              ? url.Port()
+              : DefaultPortForProtocol(url.Protocol())) {}
+
+SecurityOrigin::SecurityOrigin(const String& protocol,
+                               const String& host,
+                               uint16_t port)
+    : protocol_(protocol), host_(host), domain_(host_), port_(port) {
+  DCHECK(url::SchemeHostPort(protocol.Utf8(), host.Utf8(), port,
+                             url::SchemeHostPort::CHECK_CANONICALIZATION)
+             .IsValid());
+  DCHECK(!IsOpaque());
   // By default, only local SecurityOrigins can load local resources.
   can_load_local_resources_ = IsLocal();
 }
@@ -154,7 +165,6 @@ SecurityOrigin::SecurityOrigin(const SecurityOrigin* other,
       host_(other->host_.IsolatedCopy()),
       domain_(other->domain_.IsolatedCopy()),
       port_(other->port_),
-      effective_port_(other->effective_port_),
       nonce_if_opaque_(other->nonce_if_opaque_),
       universal_access_(other->universal_access_),
       domain_was_set_in_dom_(other->domain_was_set_in_dom_),
@@ -175,7 +185,6 @@ SecurityOrigin::SecurityOrigin(const SecurityOrigin* other,
       host_(other->host_),
       domain_(other->domain_),
       port_(other->port_),
-      effective_port_(other->effective_port_),
       nonce_if_opaque_(other->nonce_if_opaque_),
       universal_access_(other->universal_access_),
       domain_was_set_in_dom_(other->domain_was_set_in_dom_),
@@ -238,14 +247,9 @@ scoped_refptr<SecurityOrigin> SecurityOrigin::CreateFromUrlOrigin(
 
   scoped_refptr<SecurityOrigin> tuple_origin;
   if (tuple.IsValid()) {
-    String scheme = String::FromUTF8(tuple.scheme());
-    String host = String::FromUTF8(tuple.host());
-    uint16_t port = tuple.port();
-
-    // url::Origin is percent encoded and SecurityOrigin is percent decoded.
-    host = DecodeURLEscapeSequences(host, DecodeURLMode::kUTF8OrIsomorphic);
-
-    tuple_origin = Create(scheme, host, port);
+    tuple_origin =
+        CreateFromValidTuple(String::FromUTF8(tuple.scheme()),
+                             String::FromUTF8(tuple.host()), tuple.port());
   }
   base::Optional<base::UnguessableToken> nonce_if_opaque =
       origin.GetNonceForSerialization();
@@ -262,7 +266,7 @@ url::Origin SecurityOrigin::ToUrlOrigin() const {
   const SecurityOrigin* unmasked = GetOriginOrPrecursorOriginIfOpaque();
   std::string scheme = unmasked->protocol_.Utf8();
   std::string host = unmasked->host_.Utf8();
-  uint16_t port = unmasked->effective_port_;
+  uint16_t port = unmasked->port_;
   if (nonce_if_opaque_) {
     url::Origin result = url::Origin::CreateOpaqueFromNormalizedPrecursorTuple(
         std::move(scheme), std::move(host), port, *nonce_if_opaque_);
@@ -514,7 +518,8 @@ void SecurityOrigin::BuildRawString(StringBuilder& builder) const {
   builder.Append("://");
   builder.Append(host_);
 
-  if (port_) {
+  if (DefaultPortForProtocol(protocol_) &&
+      port_ != DefaultPortForProtocol(protocol_)) {
     builder.Append(':');
     builder.AppendNumber(port_);
   }
@@ -539,14 +544,11 @@ scoped_refptr<SecurityOrigin> SecurityOrigin::CreateFromString(
   return SecurityOrigin::Create(KURL(NullURL(), origin_string));
 }
 
-scoped_refptr<SecurityOrigin> SecurityOrigin::Create(const String& protocol,
-                                                     const String& host,
-                                                     uint16_t port) {
-  DCHECK_EQ(host,
-            DecodeURLEscapeSequences(host, DecodeURLMode::kUTF8OrIsomorphic));
-
-  String port_part = port ? ":" + String::Number(port) : String();
-  return Create(KURL(NullURL(), protocol + "://" + host + port_part + "/"));
+scoped_refptr<SecurityOrigin> SecurityOrigin::CreateFromValidTuple(
+    const String& protocol,
+    const String& host,
+    uint16_t port) {
+  return base::AdoptRef(new SecurityOrigin(protocol, host, port));
 }
 
 bool SecurityOrigin::IsSameOriginWith(const SecurityOrigin* other) const {

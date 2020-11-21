@@ -36,6 +36,7 @@
 #include "components/policy/core/common/policy_map.h"
 #include "components/policy/core/common/policy_service.h"
 #include "components/policy/policy_constants.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/test_utils.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -51,7 +52,7 @@ const char kExternalDataPathUpdated[] =
 const char kExternalDataPathOverSizeLimit[] =
     "policy/printers_configuration_over_size_limit.json";
 // The name of an External Data Policy in Device Policy.
-const char* const kPolicyName = policy::key::kDeviceNativePrinters;
+const char* const kPolicyName = policy::key::kDevicePrinters;
 
 const int64_t kTestCacheMaxSize = 64;
 
@@ -113,9 +114,9 @@ class DevicePolicyCloudExternalDataManagerTest
   }
 
   int64_t ComputeExternalDataCacheDirectorySize() {
-    base::FilePath device_policy_external_data_path;
-    CHECK(base::PathService::Get(chromeos::DIR_DEVICE_POLICY_EXTERNAL_DATA,
-                                 &device_policy_external_data_path));
+    const base::FilePath device_policy_external_data_path =
+        base::PathService::CheckedGet(
+            chromeos::DIR_DEVICE_POLICY_EXTERNAL_DATA);
     base::ScopedAllowBlockingForTesting allow_blocking;
     return base::ComputeDirectorySize(device_policy_external_data_path);
   }

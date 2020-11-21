@@ -135,6 +135,23 @@ let kRTCInboundRtpStreamStats = new RTCStats(kRTCReceivedRtpStreamStats, {
   firCount: 'number',
   pliCount: 'number',
   sliCount: 'number',
+  frameWidth: 'number',
+  frameHeight: 'number',
+  frameBitDepth: 'number',
+  framesPerSecond: 'number',
+  jitterBufferDelay: 'number',
+  jitterBufferEmittedCount: 'number',
+  totalSamplesReceived: 'number',
+  concealedSamples: 'number',
+  silentConcealedSamples: 'number',
+  concealmentEvents: 'number',
+  insertedSamplesForDeceleration: 'number',
+  removedSamplesForAcceleration: 'number',
+  audioLevel: 'number',
+  totalAudioEnergy: 'number',
+  totalSamplesDuration: 'number',
+  framesReceived: 'number',
+  framesDropped: 'number',
   estimatedPlayoutTimestamp: 'number',
   fractionLost: 'number',  // Obsolete, moved to RTCRemoteInboundRtpStreamStats.
   decoderImplementation: 'string',
@@ -286,15 +303,12 @@ addRTCStatsToWhitelist(
  * @private
  */
 let kRTCCodecStats = new RTCStats(null, {
+  transportId: 'string',
   payloadType: 'number',
   mimeType: 'string',
-  // TODO(hbos): As soon as |codec| has been renamed |mimeType| in the webrtc
-  // repo, remove this line. https://bugs.webrtc.org/7061
-  codec: 'string',
   clockRate: 'number',
   channels: 'number',
   sdpFmtpLine: 'string',
-  implementation: 'string',
 });
 addRTCStatsToWhitelist(Presence.MANDATORY, 'codec', kRTCCodecStats);
 
@@ -477,7 +491,7 @@ addRTCStatsToWhitelist(
 let kRTCDataChannelStats = new RTCStats(null, {
   label: 'string',
   protocol: 'string',
-  datachannelid: 'number',
+  dataChannelIdentifier: 'number',
   state: 'string',
   messagesSent: 'number',
   bytesSent: 'number',
@@ -494,7 +508,9 @@ addRTCStatsToWhitelist(
  */
 let kRTCTransportStats = new RTCStats(null, {
   bytesSent: 'number',
+  packetsSent: 'number',
   bytesReceived: 'number',
+  packetsReceived: 'number',
   rtcpTransportStatsId: 'string',
   dtlsState: 'string',
   selectedCandidatePairId: 'string',

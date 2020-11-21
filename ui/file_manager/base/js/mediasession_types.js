@@ -3,10 +3,14 @@
 // found in the LICENSE file.
 
 /**
+ * @fileoverview
+ */
+
+/**
  * @see https://wicg.github.io/mediasession/#enumdef-mediasessionplaybackstate
  * @enum {string}
  */
-const MediaSessionPlaybackState = {
+/* #export */ const MediaSessionPlaybackState = {
   NONE: 'none',
   PAUSED: 'paused',
   PLAYING: 'playing'

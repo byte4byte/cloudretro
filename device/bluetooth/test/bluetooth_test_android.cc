@@ -79,12 +79,11 @@ bool BluetoothTestAndroid::PlatformSupportsLowEnergy() {
 
 void BluetoothTestAndroid::InitWithDefaultAdapter() {
   adapter_ = BluetoothAdapterAndroid::Create(
-                 BluetoothAdapterWrapper_CreateWithDefaultAdapter())
-                 .get();
+      BluetoothAdapterWrapper_CreateWithDefaultAdapter());
 }
 
 void BluetoothTestAndroid::InitWithoutDefaultAdapter() {
-  adapter_ = BluetoothAdapterAndroid::Create(NULL).get();
+  adapter_ = BluetoothAdapterAndroid::Create(nullptr);
 }
 
 void BluetoothTestAndroid::InitWithFakeAdapter() {
@@ -164,7 +163,9 @@ void BluetoothTestAndroid::SimulateGattDisconnection(BluetoothDevice* device) {
 
 void BluetoothTestAndroid::SimulateGattServicesDiscovered(
     BluetoothDevice* device,
-    const std::vector<std::string>& uuids) {
+    const std::vector<std::string>& uuids,
+    const std::vector<std::string>& blocked_uuids) {
+  DCHECK(blocked_uuids.empty()) << "Setting blocked_uuids unsupported.";
   BluetoothDeviceAndroid* device_android = nullptr;
   if (device) {
     device_android = static_cast<BluetoothDeviceAndroid*>(device);

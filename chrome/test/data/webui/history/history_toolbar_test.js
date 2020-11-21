@@ -17,7 +17,7 @@ suite('history-toolbar', function() {
       [createHistoryEntry('2016-03-15', 'https://google.com')];
 
   setup(function() {
-    PolymerTest.clearBody();
+    document.body.innerHTML = '';
     testService = new TestBrowserService();
     BrowserService.instance_ = testService;
 
@@ -90,11 +90,4 @@ suite('history-toolbar', function() {
         });
   });
 
-  test('menu promo hides when drawer is opened', function() {
-    app.showMenuPromo_ = true;
-    app.hasDrawer_ = true;
-    flush();
-    toolbar.$['main-toolbar'].$$('#menuButton').click();
-    assertFalse(app.showMenuPromo_);
-  });
 });

@@ -9,14 +9,14 @@
 
 import 'chrome://resources/cr_elements/shared_vars_css.m.js';
 import '../settings_shared_css.m.js';
+import './credit_card_list_entry.js';
 import './passwords_shared_css.js';
 import './upi_id_list_entry.js';
 
 import {html, Polymer} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
-import {loadTimeData} from '../i18n_setup.m.js';
+import {loadTimeData} from '../i18n_setup.js';
 
-import {CreditCardEntry} from './credit_card_list_entry.js';
 
 Polymer({
   is: 'settings-payments-list',
@@ -26,7 +26,7 @@ Polymer({
   properties: {
     /**
      * An array of all saved credit cards.
-     * @type {!Array<!CreditCardEntry>}
+     * @type {!Array<!chrome.autofillPrivate.CreditCardEntry>}
      */
     creditCards: Array,
 

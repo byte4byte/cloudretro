@@ -51,6 +51,8 @@ class PendingCastComponent {
   PendingCastComponent& operator=(const PendingCastComponent&) = delete;
 
  private:
+  void RequestCorsExemptHeaders();
+
   // Handlers for completing initialization of some |params_| fields.
   void OnApplicationConfigReceived(
       chromium::cast::ApplicationConfig app_config);

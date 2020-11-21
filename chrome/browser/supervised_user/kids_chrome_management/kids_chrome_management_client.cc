@@ -28,7 +28,6 @@
 #include "net/base/load_flags.h"
 #include "net/http/http_status_code.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
-#include "net/url_request/url_request_status.h"
 #include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/cpp/simple_url_loader.h"
@@ -216,9 +215,6 @@ void KidsChromeManagementClient::MakeHTTPRequest(
 
   StartFetching(requests_in_progress_.begin());
 }
-
-// Helpful reading for the next 4 methods:
-// https://chromium.googlesource.com/chromium/src.git/+/master/docs/callback.md#partial-binding-of-parameters-currying
 
 void KidsChromeManagementClient::StartFetching(
     KidsChromeRequestList::iterator it) {

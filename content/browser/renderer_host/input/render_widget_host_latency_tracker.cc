@@ -7,9 +7,10 @@
 #include <stddef.h>
 #include <string>
 
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/notreached.h"
 #include "build/build_config.h"
 #include "content/browser/renderer_host/render_widget_host_delegate.h"
 #include "content/public/browser/browser_thread.h"
@@ -82,77 +83,12 @@ const char* GetTraceNameFromType(blink::WebInputEvent::Type type) {
 RenderWidgetHostLatencyTracker::RenderWidgetHostLatencyTracker(
     RenderWidgetHostDelegate* delegate)
     : has_seen_first_gesture_scroll_update_(false),
+      gesture_scroll_id_(-1),
       active_multi_finger_gesture_(false),
       touch_start_default_prevented_(false),
       render_widget_host_delegate_(delegate) {}
 
 RenderWidgetHostLatencyTracker::~RenderWidgetHostLatencyTracker() {}
-
-void RenderWidgetHostLatencyTracker::ComputeInputLatencyHistograms(
-    WebInputEvent::Type type,
-    const LatencyInfo& latency,
-    blink::mojom::InputEventResultState ack_result,
-    base::TimeTicks ack_timestamp) {
-  DCHECK(!ack_timestamp.is_null());
-  // If this event was coalesced into another event, ignore it, as the event it
-  // was coalesced into will reflect the full latency.
-  if (latency.coalesced())
-    return;
-
-  if (latency.source_event_type() == ui::SourceEventType::UNKNOWN ||
-      latency.source_event_type() == ui::SourceEventType::OTHER) {
-    return;
-  }
-
-  // The event will have gone through OnInputEvent(). So the BEGIN_RWH component
-  // should always be available here.
-  base::TimeTicks rwh_timestamp;
-  bool found_component = latency.FindLatency(
-      ui::INPUT_EVENT_LATENCY_BEGIN_RWH_COMPONENT, &rwh_timestamp);
-  DCHECK(found_component);
-
-  bool multi_finger_touch_gesture =
-      WebInputEvent::IsTouchEventType(type) && active_multi_finger_gesture_;
-
-  bool action_prevented =
-      ack_result == blink::mojom::InputEventResultState::kConsumed;
-  // Touchscreen tap and scroll gestures depend on the disposition of the touch
-  // start and the current touch. For touch start,
-  // touch_start_default_prevented_ == (ack_result ==
-  // blink::mojom::InputEventResultState::kConsumed).
-  if (WebInputEvent::IsTouchEventType(type))
-    action_prevented |= touch_start_default_prevented_;
-
-  std::string event_name = WebInputEvent::GetName(type);
-
-  if (latency.source_event_type() == ui::SourceEventType::KEY_PRESS) {
-    event_name = "KeyPress";
-  } else if (event_name != "TouchEnd" && event_name != "TouchMove" &&
-             event_name != "TouchStart") {
-    // Only log events we care about (that are documented in histograms.xml),
-    // to avoid using memory and bandwidth for metrics that are not important.
-    return;
-  }
-
-  std::string default_action_status =
-      action_prevented ? "DefaultPrevented" : "DefaultAllowed";
-
-  base::TimeTicks main_thread_timestamp;
-  if (latency.FindLatency(ui::INPUT_EVENT_LATENCY_RENDERER_MAIN_COMPONENT,
-                          &main_thread_timestamp)) {
-    if (!multi_finger_touch_gesture) {
-      UMA_HISTOGRAM_INPUT_LATENCY_MILLISECONDS(
-          "Event.Latency.QueueingTime." + event_name + default_action_status,
-          rwh_timestamp, main_thread_timestamp);
-    }
-  }
-
-  if (!multi_finger_touch_gesture && !main_thread_timestamp.is_null()) {
-    UMA_HISTOGRAM_INPUT_LATENCY_MILLISECONDS(
-        "Event.Latency.BlockingTime." + event_name + default_action_status,
-        main_thread_timestamp, ack_timestamp);
-  }
-}
 
 void RenderWidgetHostLatencyTracker::OnInputEvent(
     const blink::WebInputEvent& event,
@@ -203,6 +139,8 @@ void RenderWidgetHostLatencyTracker::OnInputEvent(
 
   if (event.GetType() == blink::WebInputEvent::Type::kGestureScrollBegin) {
     has_seen_first_gesture_scroll_update_ = false;
+    gesture_scroll_id_ = latency->trace_id();
+    latency->set_gesture_scroll_id(gesture_scroll_id_);
   } else if (event.GetType() ==
              blink::WebInputEvent::Type::kGestureScrollUpdate) {
     // Make a copy of the INPUT_EVENT_LATENCY_ORIGINAL_COMPONENT with a
@@ -222,10 +160,14 @@ void RenderWidgetHostLatencyTracker::OnInputEvent(
     }
 
     has_seen_first_gesture_scroll_update_ = true;
+    latency->set_gesture_scroll_id(gesture_scroll_id_);
     latency->set_scroll_update_delta(
         static_cast<const WebGestureEvent&>(event).data.scroll_update.delta_y);
     latency->set_predicted_scroll_update_delta(
         static_cast<const WebGestureEvent&>(event).data.scroll_update.delta_y);
+  } else if (event.GetType() == blink::WebInputEvent::Type::kGestureScrollEnd) {
+    latency->set_gesture_scroll_id(gesture_scroll_id_);
+    gesture_scroll_id_ = -1;
   }
 }
 
@@ -262,9 +204,6 @@ void RenderWidgetHostLatencyTracker::OnInputEventAck(
        ack_result == blink::mojom::InputEventResultState::kNoConsumerExists)) {
     latency->Terminate();
   }
-
-  ComputeInputLatencyHistograms(event.GetType(), *latency, ack_result,
-                                base::TimeTicks::Now());
 }
 
 void RenderWidgetHostLatencyTracker::OnEventStart(ui::LatencyInfo* latency) {

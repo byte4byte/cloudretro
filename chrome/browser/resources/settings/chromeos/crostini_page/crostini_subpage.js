@@ -7,11 +7,24 @@
  * 'crostini-subpage' is the settings subpage for managing Crostini.
  */
 
+/**
+ * The current confirmation state.
+ * @enum {string}
+ */
+const ConfirmationState = {
+  NOT_CONFIRMED: 'notConfirmed',
+  CONFIRMED: 'confirmed',
+};
+
 Polymer({
   is: 'settings-crostini-subpage',
 
-  behaviors:
-      [PrefsBehavior, WebUIListenerBehavior, settings.RouteOriginBehavior],
+  behaviors: [
+    DeepLinkingBehavior,
+    PrefsBehavior,
+    settings.RouteOriginBehavior,
+    WebUIListenerBehavior,
+  ],
 
   properties: {
     /** Preferences state. */
@@ -90,15 +103,10 @@ Polymer({
       },
     },
 
-    /**
-     * Whether the toggle to share the mic with Crostini should be shown.
-     * @private {boolean}
-     */
-    showCrostiniMic_: {
+    /** @private */
+    showDiskResizeConfirmationDialog_: {
       type: Boolean,
-      value() {
-        return loadTimeData.getBoolean('showCrostiniMic');
-      },
+      value: false,
     },
 
     /*
@@ -137,14 +145,65 @@ Polymer({
     },
 
     /** @private {boolean} */
+    crostiniMicSharingEnabled_: {
+      type: Boolean,
+      value: false,
+    },
+
+    /** @private {boolean} */
     showCrostiniMicSharingDialog_: {
       type: Boolean,
       value: false,
+    },
+
+    /** @private {string} */
+    diskSizeLabel_: {
+      type: String,
+      value: loadTimeData.getString('crostiniDiskSizeCalculating'),
+    },
+
+    /** @private {string} */
+    diskResizeButtonLabel_: {
+      type: String,
+      value: loadTimeData.getString('crostiniDiskResizeShowButton'),
+    },
+
+    /** @private {string} */
+    diskResizeButtonAriaLabel_: {
+      type: String,
+      value: loadTimeData.getString('crostiniDiskResizeShowButtonAriaLabel'),
+    },
+
+    /** @private {boolean} */
+    canDiskResize_: {
+      type: Boolean,
+      value: false,
+    },
+
+    /**
+     * Used by DeepLinkingBehavior to focus this page's deep links.
+     * @type {!Set<!chromeos.settings.mojom.Setting>}
+     */
+    supportedSettingIds: {
+      type: Object,
+      value: () => new Set([
+        chromeos.settings.mojom.Setting.kUninstallCrostini,
+        chromeos.settings.mojom.Setting.kCrostiniDiskResize,
+        chromeos.settings.mojom.Setting.kCrostiniMicAccess,
+        chromeos.settings.mojom.Setting.kCrostiniContainerUpgrade,
+      ]),
     },
   },
 
   /** settings.RouteOriginBehavior override */
   route_: settings.routes.CROSTINI_DETAILS,
+
+
+  /** @private {boolean} */
+  isDiskUserChosenSize_: false,
+
+  /** @private {!ConfirmationState} */
+  diskResizeConfirmationState_: ConfirmationState.NOT_CONFIRMED,
 
   observers: [
     'onCrostiniEnabledChanged_(prefs.crostini.enabled.value)',
@@ -162,12 +221,19 @@ Polymer({
         'crostini-container-upgrade-available-changed', (canUpgrade) => {
           this.showCrostiniContainerUpgrade_ = canUpgrade;
         });
+    this.addWebUIListener(
+        'crostini-mic-sharing-enabled-changed',
+        this.onCrostiniMicSharingEnabledChanged_.bind(this));
     settings.CrostiniBrowserProxyImpl.getInstance()
         .requestCrostiniInstallerStatus();
     settings.CrostiniBrowserProxyImpl.getInstance()
         .requestCrostiniUpgraderDialogStatus();
     settings.CrostiniBrowserProxyImpl.getInstance()
         .requestCrostiniContainerUpgradeAvailable();
+    settings.CrostiniBrowserProxyImpl.getInstance()
+        .getCrostiniMicSharingEnabled()
+        .then(this.onCrostiniMicSharingEnabledChanged_.bind(this));
+    this.loadDiskInfo_();
   },
 
   ready() {
@@ -181,12 +247,30 @@ Polymer({
         r.CROSTINI_PORT_FORWARDING, '#crostini-port-forwarding');
   },
 
+  /**
+   * @param {!settings.Route} route
+   * @param {!settings.Route} oldRoute
+   */
+  currentRouteChanged(route, oldRoute) {
+    // Does not apply to this page.
+    if (route !== settings.routes.CROSTINI_DETAILS) {
+      return;
+    }
+
+    this.attemptDeepLink();
+  },
+
   /** @private */
   onCrostiniEnabledChanged_(enabled) {
     if (!enabled &&
-        settings.Router.getInstance().getCurrentRoute() ==
+        settings.Router.getInstance().getCurrentRoute() ===
             settings.routes.CROSTINI_DETAILS) {
       settings.Router.getInstance().navigateToPreviousRoute();
+    }
+    if (enabled) {
+      // The disk size or type could have changed due to the user reinstalling
+      // Crostini, update our info.
+      this.loadDiskInfo_();
     }
   },
 
@@ -208,13 +292,84 @@ Polymer({
   },
 
   /** @private */
+  loadDiskInfo_() {
+    // TODO(davidmunro): No magic 'termina' string.
+    const vmName = 'termina';
+    settings.CrostiniBrowserProxyImpl.getInstance()
+        .getCrostiniDiskInfo(vmName, /*requestFullInfo=*/ false)
+        .then(
+            diskInfo => {
+              if (diskInfo.succeeded) {
+                this.setResizeLabels_(diskInfo);
+              }
+            },
+            reason => {
+              console.log(`Unable to get info: ${reason}`);
+            });
+  },
+
+  /**
+   * @param {!CrostiniDiskInfo} diskInfo
+   * @private
+   */
+  setResizeLabels_(diskInfo) {
+    this.canDiskResize_ = diskInfo.canResize;
+    if (!this.canDiskResize_) {
+      this.diskSizeLabel_ =
+          loadTimeData.getString('crostiniDiskResizeNotSupportedSubtext');
+      return;
+    }
+    this.isDiskUserChosenSize_ = diskInfo.isUserChosenSize;
+    if (this.isDiskUserChosenSize_) {
+      if (diskInfo.ticks) {
+        this.diskSizeLabel_ = diskInfo.ticks[diskInfo.defaultIndex].label;
+      }
+      this.diskResizeButtonLabel_ =
+          loadTimeData.getString('crostiniDiskResizeShowButton');
+      this.diskResizeButtonAriaLabel_ =
+          loadTimeData.getString('crostiniDiskResizeShowButtonAriaLabel');
+    } else {
+      this.diskSizeLabel_ = loadTimeData.getString(
+          'crostiniDiskResizeDynamicallyAllocatedSubtext');
+      this.diskResizeButtonLabel_ =
+          loadTimeData.getString('crostiniDiskReserveSizeButton');
+      this.diskResizeButtonAriaLabel_ =
+          loadTimeData.getString('crostiniDiskReserveSizeButtonAriaLabel');
+    }
+  },
+
+  /** @private */
   onDiskResizeClick_() {
+    if (!this.isDiskUserChosenSize_ &&
+        this.diskResizeConfirmationState_ !== ConfirmationState.CONFIRMED) {
+      this.showDiskResizeConfirmationDialog_ = true;
+      return;
+    }
     this.showDiskResizeDialog_ = true;
   },
 
   /** @private */
   onDiskResizeDialogClose_() {
     this.showDiskResizeDialog_ = false;
+    this.diskResizeConfirmationState_ = ConfirmationState.NOT_CONFIRMED;
+    // DiskInfo could have changed.
+    this.loadDiskInfo_();
+  },
+
+  /** @private */
+  onDiskResizeConfirmationDialogClose_() {
+    // The on_cancel is followed by on_close, so check cancel didn't happen
+    // first.
+    if (this.showDiskResizeConfirmationDialog_) {
+      this.diskResizeConfirmationState_ = ConfirmationState.CONFIRMED;
+      this.showDiskResizeConfirmationDialog_ = false;
+      this.showDiskResizeDialog_ = true;
+    }
+  },
+
+  /** @private */
+  onDiskResizeConfirmationDialogCancel_() {
+    this.showDiskResizeConfirmationDialog_ = false;
   },
 
   /**
@@ -259,13 +414,19 @@ Polymer({
    * @private
    */
   onMicSharingChange_: function() {
-    const proposedValue = /** @type {!SettingsToggleButtonElement} */
-        (this.$$('#crostini-mic-sharing')).checked;
+    // Manually resetting the toggle so that it is only changed by the dialog
+    // or when the dialog isn't required.
+    this.$$('#crostini-mic-sharing-toggle').checked =
+        this.crostiniMicSharingEnabled_;
+    const proposedValue = !this.crostiniMicSharingEnabled_;
     settings.CrostiniBrowserProxyImpl.getInstance()
         .checkCrostiniMicSharingStatus(proposedValue)
         .then(requiresRestart => {
           if (requiresRestart) {
             this.showCrostiniMicSharingDialog_ = true;
+          } else {
+            settings.CrostiniBrowserProxyImpl.getInstance()
+                .setCrostiniMicSharingEnabled(proposedValue);
           }
         });
   },
@@ -273,6 +434,11 @@ Polymer({
   /** @private */
   onCrostiniMicSharingDialogClose_: function() {
     this.showCrostiniMicSharingDialog_ = false;
+  },
+
+  /** @private */
+  onCrostiniMicSharingEnabledChanged_: function(enabled) {
+    this.crostiniMicSharingEnabled_ = enabled;
   },
 
   /**

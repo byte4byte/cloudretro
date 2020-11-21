@@ -39,8 +39,19 @@ namespace blink {
 const char SpeechRecognitionController::kSupplementName[] =
     "SpeechRecognitionController";
 
-SpeechRecognitionController::SpeechRecognitionController(LocalFrame& frame)
-    : Supplement<LocalFrame>(frame), speech_recognizer_(frame.DomWindow()) {}
+SpeechRecognitionController* SpeechRecognitionController::From(
+    LocalDOMWindow& window) {
+  SpeechRecognitionController* controller =
+      Supplement<LocalDOMWindow>::From<SpeechRecognitionController>(window);
+  if (!controller) {
+    controller = MakeGarbageCollected<SpeechRecognitionController>(window);
+    Supplement<LocalDOMWindow>::ProvideTo(window, controller);
+  }
+  return controller;
+}
+
+SpeechRecognitionController::SpeechRecognitionController(LocalDOMWindow& window)
+    : Supplement<LocalDOMWindow>(window), speech_recognizer_(&window) {}
 
 SpeechRecognitionController::~SpeechRecognitionController() {
   // FIXME: Call m_client->pageDestroyed(); once we have implemented a client.
@@ -73,14 +84,9 @@ void SpeechRecognitionController::Start(
   GetSpeechRecognizer()->Start(std::move(msg_params));
 }
 
-void SpeechRecognitionController::Trace(Visitor* visitor) {
+void SpeechRecognitionController::Trace(Visitor* visitor) const {
   Supplement::Trace(visitor);
   visitor->Trace(speech_recognizer_);
-}
-
-void ProvideSpeechRecognitionTo(LocalFrame& frame) {
-  SpeechRecognitionController::ProvideTo(
-      frame, MakeGarbageCollected<SpeechRecognitionController>(frame));
 }
 
 mojom::blink::SpeechRecognizer*
@@ -88,8 +94,7 @@ SpeechRecognitionController::GetSpeechRecognizer() {
   if (!speech_recognizer_.is_bound()) {
     GetSupplementable()->GetBrowserInterfaceBroker().GetInterface(
         speech_recognizer_.BindNewPipeAndPassReceiver(
-            GetSupplementable()->DomWindow()->GetTaskRunner(
-                TaskType::kMiscPlatformAPI)));
+            GetSupplementable()->GetTaskRunner(TaskType::kMiscPlatformAPI)));
   }
   return speech_recognizer_.get();
 }

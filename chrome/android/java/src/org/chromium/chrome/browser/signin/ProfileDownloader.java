@@ -30,13 +30,13 @@ public class ProfileDownloader {
     public interface Observer {
         /**
          * Notifies that an account data in the profile has been updated.
-         * @param accountId An account ID.
+         * @param accountEmail An account email.
          * @param fullName A full name.
          * @param givenName A given name.
          * @param bitmap A user picture.
          */
         void onProfileDownloaded(
-                String accountId, String fullName, String givenName, Bitmap bitmap);
+                String accountEmail, String fullName, String givenName, Bitmap bitmap);
     }
 
     /**
@@ -79,7 +79,7 @@ public class ProfileDownloader {
             if (sPendingProfileDownloads == null) {
                 sPendingProfileDownloads = new PendingProfileDownloads();
                 IdentityServicesProvider.get()
-                        .getAccountTrackerService()
+                        .getAccountTrackerService(Profile.getLastUsedRegularProfile())
                         .addSystemAccountsSeededListener(sPendingProfileDownloads);
             }
             return sPendingProfileDownloads;
@@ -125,7 +125,7 @@ public class ProfileDownloader {
         ThreadUtils.assertOnUiThread();
         Profile profile = Profile.getLastUsedRegularProfile();
         if (!IdentityServicesProvider.get()
-                        .getAccountTrackerService()
+                        .getAccountTrackerService(profile)
                         .checkAndSeedSystemAccounts()) {
             PendingProfileDownloads.get(context).pendProfileDownload(
                     profile, accountId, imageSidePixels);

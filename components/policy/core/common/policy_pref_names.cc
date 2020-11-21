@@ -19,6 +19,10 @@ const char kSafeSitesFilterBehavior[] = "policy.safe_sites_filter_behavior";
 // "SystemFeaturesDisableList").
 const char kSystemFeaturesDisableList[] = "policy.system_features_disable_list";
 
+// Enum specifying the user experience of disabled features.
+// See the SystemFeaturesDisableMode policy for details.
+const char kSystemFeaturesDisableMode[] = "policy.system_features_disable_mode";
+
 // Blocks access to the listed host patterns.
 const char kUrlBlacklist[] = "policy.url_blacklist";
 
@@ -39,10 +43,32 @@ const char kCloudManagementEnrollmentMandatory[] =
 // machine policy.
 const char kCloudPolicyOverridesPlatformPolicy[] = "policy.cloud_override";
 
+// A list of Data leak prevention rules.
+const char kDlpRulesList[] = "policy.dlp_rules_list";
+
 // A boolean value that can be used to disable native window occlusion
 // calculation, even if the Finch feature is enabled.
 const char kNativeWindowOcclusionEnabled[] =
     "policy.native_window_occlusion_enabled";
+
+// Boolean policy preference for force enabling or disabling the
+// IntensiveWakeUpThrottling web feature. Only applied if the policy is managed.
+const char kIntensiveWakeUpThrottlingEnabled[] =
+    "policy.intensive_wake_up_throttling_enabled";
+
+// Boolean policy preference to disable the User-Agent Client Hints feature.
+const char kUserAgentClientHintsEnabled[] =
+    "policy.user_agent_client_hints_enabled";
+
+// Boolean that controls whether a window spawned from an anchor targeting
+// _blank receives an opener. TODO(crbug.com/898942): Remove this in Chrome 95.
+const char kTargetBlankImpliesNoOpener[] =
+    "policy.target_blank_implies_noopener";
+
+#if defined(OS_ANDROID)
+// Boolean policy preference to disable the BackForwardCache feature.
+const char kBackForwardCacheEnabled[] = "policy.back_forward_cache_enabled";
+#endif  // defined(OS_ANDROID)
 
 }  // namespace policy_prefs
 }  // namespace policy

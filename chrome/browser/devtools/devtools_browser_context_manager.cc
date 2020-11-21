@@ -5,7 +5,7 @@
 #include "chrome/browser/devtools/devtools_browser_context_manager.h"
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "chrome/browser/profiles/profile_destroyer.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
@@ -35,7 +35,7 @@ content::BrowserContext* DevToolsBrowserContextManager::CreateBrowserContext() {
       ProfileManager::GetActiveUserProfile()->GetOriginalProfile();
 
   Profile* otr_profile = original_profile->GetOffTheRecordProfile(
-      Profile::OTRProfileID::CreateUnique("Devtools::BrowserContext"));
+      Profile::OTRProfileID::CreateUniqueForDevTools());
   const std::string& context_id = otr_profile->UniqueId();
   otr_profiles_[context_id] = otr_profile;
   otr_profile->AddObserver(this);
@@ -127,7 +127,12 @@ void DevToolsBrowserContextManager::OnBrowserRemoved(Browser* browser) {
   Profile* otr_profile = it->second;
   otr_profiles_.erase(it);
   otr_profile->RemoveObserver(this);
-  ProfileDestroyer::DestroyProfileWhenAppropriate(otr_profile);
+  // We cannot delete immediately here: the profile might still be referenced
+  // during the browser tear-down process.
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE,
+      base::BindOnce(&ProfileDestroyer::DestroyProfileWhenAppropriate,
+                     base::Unretained(otr_profile)));
 
   std::move(pending_disposal->second).Run(true, "");
   pending_context_disposals_.erase(pending_disposal);

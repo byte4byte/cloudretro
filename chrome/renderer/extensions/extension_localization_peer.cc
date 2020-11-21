@@ -61,7 +61,8 @@ void ExtensionLocalizationPeer::OnUploadProgress(uint64_t position,
 
 bool ExtensionLocalizationPeer::OnReceivedRedirect(
     const net::RedirectInfo& redirect_info,
-    network::mojom::URLResponseHeadPtr head) {
+    network::mojom::URLResponseHeadPtr head,
+    std::vector<std::string>*) {
   NOTREACHED();
   return false;
 }
@@ -113,10 +114,6 @@ void ExtensionLocalizationPeer::OnCompletedRequest(
 
   // We've sent all the body to the peer. Complete the request.
   CompleteRequest();
-}
-
-scoped_refptr<base::TaskRunner> ExtensionLocalizationPeer::GetTaskRunner() {
-  return original_peer_->GetTaskRunner();
 }
 
 void ExtensionLocalizationPeer::OnReadableBody(

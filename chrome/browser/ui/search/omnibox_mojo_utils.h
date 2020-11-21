@@ -36,14 +36,15 @@ extern const char kDriveVideoIconResourceName[];
 extern const char kExtensionAppIconResourceName[];
 extern const char kPageIconResourceName[];
 extern const char kSearchIconResourceName[];
+extern const char kTrendingUpIconResourceName[];
 
 std::string AutocompleteMatchVectorIconToResourceName(
     const gfx::VectorIcon& icon);
 
-std::vector<chrome::mojom::AutocompleteMatchPtr> CreateAutocompleteMatches(
+std::vector<search::mojom::AutocompleteMatchPtr> CreateAutocompleteMatches(
     const AutocompleteResult& result);
 
-chrome::mojom::AutocompleteResultPtr CreateAutocompleteResult(
+search::mojom::AutocompleteResultPtr CreateAutocompleteResult(
     const base::string16& input,
     const AutocompleteResult& result,
     PrefService* prefs);

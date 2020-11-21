@@ -49,7 +49,7 @@ class ModeIndicatorFrameView : public views::BubbleFrameView {
 ImeModeIndicatorView::ImeModeIndicatorView(const gfx::Rect& cursor_bounds,
                                            const base::string16& label)
     : cursor_bounds_(cursor_bounds), label_view_(new views::Label(label)) {
-  DialogDelegate::SetButtons(ui::DIALOG_BUTTON_NONE);
+  SetButtons(ui::DIALOG_BUTTON_NONE);
   SetCanActivate(false);
   set_accept_events(false);
   set_shadow(views::BubbleBorder::BIG_SHADOW);
@@ -95,13 +95,15 @@ void ImeModeIndicatorView::Init() {
   SetAnchorRect(cursor_bounds_);
 }
 
-views::NonClientFrameView* ImeModeIndicatorView::CreateNonClientFrameView(
-    views::Widget* widget) {
-  views::BubbleFrameView* frame = new ModeIndicatorFrameView();
+std::unique_ptr<views::NonClientFrameView>
+ImeModeIndicatorView::CreateNonClientFrameView(views::Widget* widget) {
+  auto frame = std::make_unique<ModeIndicatorFrameView>();
   // arrow adjustment in BubbleDialogDelegateView is unnecessary because arrow
   // of this bubble is always center.
   frame->SetBubbleBorder(std::unique_ptr<views::BubbleBorder>(
       new views::BubbleBorder(arrow(), GetShadow(), color())));
+  frame->SetBubbleBorder(
+      std::make_unique<views::BubbleBorder>(arrow(), GetShadow(), color()));
   return frame;
 }
 

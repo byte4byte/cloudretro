@@ -30,9 +30,16 @@ public class WebViewPackageError {
     private PersistentErrorView mErrorMessage;
     private Activity mContext;
 
-    private static final String OPEN_WEBVIEW_PROVIDER_BUTTON_TEXT =
+    public static final String OPEN_WEBVIEW_PROVIDER_BUTTON_TEXT =
             "Open DevTools in current provider";
-    private static final String CHANGE_WEBVIEW_PROVIDER_BUTTON_TEXT = "Change provider";
+    public static final String CHANGE_WEBVIEW_PROVIDER_BUTTON_TEXT = "Change provider";
+    // The developer UI application label should be used in the placeholder.
+    public static final String DIFFERENT_WEBVIEW_PROVIDER_ERROR_MESSAGE =
+            "%s is not the system's currently selected WebView provider";
+    // The developer UI application label should be used in the placeholder.
+    public static final String DIFFERENT_WEBVIEW_PROVIDER_DIALOG_MESSAGE =
+            "You are using DevTools for (%s) which is not the system's currently selected "
+            + "WebView provider";
 
     private static final String NO_VALID_WEBVIEW_MESSAGE =
             "Cannot find a valid WebView provider installed. "
@@ -43,21 +50,23 @@ public class WebViewPackageError {
      * @param context The {@link Activity} where the error is yield.
      * @param linearLayout the linearLayout to show error message at it's top.
      */
-    public WebViewPackageError(Activity context) {
+    public WebViewPackageError(Activity context, PersistentErrorView errorView) {
         mContext = context;
-        mErrorMessage = new PersistentErrorView(context, R.id.webview_package_error);
+        mErrorMessage = errorView;
     }
 
     /**
      * Show the persistent error message at the top of the LinearLayout, if the system uses a
      * different WebView implementation. Hide it otherwise.
      */
-    public void showMessageIfDifferent() {
+    public boolean showMessageIfDifferent() {
         if (WebViewPackageHelper.isCurrentSystemWebViewImplementation(mContext)) {
             mErrorMessage.hide();
+            return false;
         } else {
             buildErrorMessage();
             mErrorMessage.show();
+            return true;
         }
     }
 
@@ -74,13 +83,11 @@ public class WebViewPackageError {
 
         AlertDialog.Builder dialogBuilder = new AlertDialog.Builder(mContext);
         CharSequence label = WebViewPackageHelper.loadLabel(mContext);
-        mErrorMessage.setText(String.format(
-                Locale.US, "%s is not the system's current selected WebView provider", label));
+        mErrorMessage.setText(
+                String.format(Locale.US, DIFFERENT_WEBVIEW_PROVIDER_ERROR_MESSAGE, label));
         dialogBuilder.setTitle("Different WebView Provider");
-        dialogBuilder.setMessage(String.format(Locale.US,
-                "You are using DevTools for (%s) which is not the system's currently selected "
-                        + "WebView provider",
-                label));
+        dialogBuilder.setMessage(
+                String.format(Locale.US, DIFFERENT_WEBVIEW_PROVIDER_DIALOG_MESSAGE, label));
 
         boolean canOpenCurrentProvider = canOpenCurrentWebViewProviderDevTools();
         boolean canChangeProvider = canChangeWebViewProvider();

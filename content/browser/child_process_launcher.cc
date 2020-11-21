@@ -7,17 +7,16 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/check_op.h"
 #include "base/clang_profiling_buildflags.h"
 #include "base/command_line.h"
 #include "base/files/file_util.h"
 #include "base/i18n/icu_util.h"
-#include "base/logging.h"
 #include "base/process/launch.h"
 #include "build/build_config.h"
 #include "content/public/browser/child_process_launcher_utils.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/sandboxed_process_launcher_delegate.h"
-#include "services/service_manager/embedder/result_codes.h"
 
 namespace content {
 

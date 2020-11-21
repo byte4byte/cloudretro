@@ -8,6 +8,7 @@
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/session/session_controller_impl.h"
 #include "ash/shell.h"
+#include "ash/strings/grit/ash_strings.h"
 #include "ash/system/accessibility/floating_menu_utils.h"
 #include "ash/system/tray/tray_background_view.h"
 #include "ash/system/tray/tray_constants.h"
@@ -15,6 +16,7 @@
 #include "ash/wm/work_area_insets.h"
 #include "base/check.h"
 #include "base/notreached.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
 
 namespace ash {
@@ -69,19 +71,25 @@ void FloatingAccessibilityController::Show(FloatingMenuPosition position) {
   init_params.has_shadow = false;
   init_params.max_height = kFloatingMenuHeight;
   init_params.translucent = true;
+  init_params.close_on_deactivate = false;
   bubble_view_ = new FloatingAccessibilityBubbleView(init_params);
 
   menu_view_ = new FloatingAccessibilityView(this);
   menu_view_->SetBorder(
       views::CreateEmptyBorder(kUnifiedTopShortcutSpacing, 0, 0, 0));
   bubble_view_->AddChildView(menu_view_);
+  bubble_view_->SetFocusBehavior(
+      ActionableView::FocusBehavior::ACCESSIBLE_ONLY);
 
   menu_view_->SetPaintToLayer();
   menu_view_->layer()->SetFillsBoundsOpaquely(false);
 
   bubble_widget_ = views::BubbleDialogDelegateView::CreateBubble(bubble_view_);
+  bubble_view_->SetCanActivate(true);
   TrayBackgroundView::InitializeBubbleAnimations(bubble_widget_);
   bubble_view_->InitializeAndShowBubble();
+
+  menu_view_->Initialize();
 
   SetMenuPosition(position);
 }
@@ -135,6 +143,11 @@ void FloatingAccessibilityController::SetMenuPosition(
   }
 }
 
+void FloatingAccessibilityController::FocusOnMenu() {
+  bubble_view_->GetFocusManager()->ClearFocus();
+  bubble_view_->GetFocusManager()->AdvanceFocus(false /* reverse */);
+}
+
 void FloatingAccessibilityController::OnDetailedMenuEnabled(bool enabled) {
   if (enabled) {
     detailed_menu_controller_ =
@@ -155,18 +168,34 @@ void FloatingAccessibilityController::OnDetailedMenuEnabled(bool enabled) {
   }
 }
 
+void FloatingAccessibilityController::OnLayoutChanged() {
+  if (on_layout_change_)
+    on_layout_change_.Run();
+  SetMenuPosition(position_);
+}
+
 void FloatingAccessibilityController::OnDetailedMenuClosed() {
   detailed_menu_controller_.reset();
 
   if (!menu_view_)
     return;
   menu_view_->SetDetailedViewShown(false);
+  if (bubble_widget_->IsActive())
+    menu_view_->FocusOnDetailedViewButton();
+}
+
+views::Widget* FloatingAccessibilityController::GetBubbleWidget() {
+  return bubble_widget_;
 }
 
 void FloatingAccessibilityController::BubbleViewDestroyed() {
   bubble_view_ = nullptr;
   bubble_widget_ = nullptr;
   menu_view_ = nullptr;
+}
+
+base::string16 FloatingAccessibilityController::GetAccessibleNameForBubble() {
+  return l10n_util::GetStringUTF16(IDS_ASH_FLOATING_ACCESSIBILITY_MAIN_MENU);
 }
 
 void FloatingAccessibilityController::OnLocaleChanged() {

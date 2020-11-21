@@ -13,7 +13,6 @@ import android.view.KeyEvent;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
-import android.view.ViewGroup;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.EditText;
@@ -299,7 +298,8 @@ public class Shell extends LinearLayout {
     @CalledByNative
     private void initFromNativeTabContents(WebContents webContents) {
         Context context = getContext();
-        ContentView cv = ContentView.createContentView(context, webContents);
+        ContentView cv =
+                ContentView.createContentView(context, null /* eventOffsetHandler */, webContents);
         mViewAndroidDelegate = new ShellViewAndroidDelegate(cv);
         assert (mWebContents != webContents);
         if (mWebContents != null) mWebContents.clearNativeReference();
@@ -367,11 +367,6 @@ public class Shell extends LinearLayout {
         }
     }
 
-    @CalledByNative
-    public void sizeTo(int width, int height) {
-        mWebContents.setSize(width, height);
-    }
-
     public void setOverayModeChangedCallbackForTesting(Callback<Boolean> callback) {
         mOverlayModeChangedCallbackForTesting = callback;
     }
@@ -392,9 +387,9 @@ public class Shell extends LinearLayout {
     }
 
     /**
-     * @return The {@link ViewGroup} currently shown by this Shell.
+     * @return The {@link View} currently shown by this Shell.
      */
-    public ViewGroup getContentView() {
+    public View getContentView() {
         ViewAndroidDelegate viewDelegate = mWebContents.getViewAndroidDelegate();
         return viewDelegate != null ? viewDelegate.getContainerView() : null;
     }

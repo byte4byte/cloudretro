@@ -28,10 +28,6 @@
 #include "media/test/test_media_source.h"
 #include "third_party/libaom/libaom_buildflags.h"
 
-#if BUILDFLAG(ENABLE_LIBAOM)
-#include "media/filters/aom_video_decoder.h"
-#endif
-
 #if BUILDFLAG(ENABLE_DAV1D_DECODER)
 #include "media/filters/dav1d_video_decoder.h"
 #endif
@@ -89,8 +85,6 @@ static std::vector<std::unique_ptr<VideoDecoder>> CreateVideoDecodersForTest(
 #if BUILDFLAG(ENABLE_DAV1D_DECODER)
     video_decoders.push_back(
         std::make_unique<OffloadingDav1dVideoDecoder>(media_log));
-#elif BUILDFLAG(ENABLE_LIBAOM)
-    video_decoders.push_back(std::make_unique<AomVideoDecoder>(media_log));
 #endif
   }
 
@@ -126,7 +120,7 @@ PipelineIntegrationTestBase::PipelineIntegrationTestBase()
 // Use a UI type message loop on macOS, because it doesn't seem to schedule
 // callbacks with enough precision to drive our fake audio output. See
 // https://crbug.com/1014646 for more details.
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
       task_environment_(base::test::TaskEnvironment::MainThreadType::UI),
 #endif
       hashing_enabled_(false),
@@ -245,9 +239,9 @@ void PipelineIntegrationTestBase::OnError(PipelineStatus status) {
     std::move(on_error_closure_).Run();
 }
 
-void PipelineIntegrationTestBase::SetWrapRendererCB(
-    WrapRendererCB wrap_renderer_cb) {
-  wrap_renderer_cb_ = std::move(wrap_renderer_cb);
+void PipelineIntegrationTestBase::SetCreateRendererCB(
+    CreateRendererCB create_renderer_cb) {
+  create_renderer_cb_ = std::move(create_renderer_cb);
 }
 
 PipelineStatus PipelineIntegrationTestBase::StartInternal(
@@ -470,7 +464,20 @@ void PipelineIntegrationTestBase::CreateDemuxer(
 }
 
 std::unique_ptr<Renderer> PipelineIntegrationTestBase::CreateRenderer(
-    base::Optional<RendererFactoryType> /* factory_type */) {
+    base::Optional<RendererFactoryType> factory_type) {
+  if (create_renderer_cb_)
+    return create_renderer_cb_.Run(factory_type);
+
+  return CreateDefaultRenderer(factory_type);
+}
+
+std::unique_ptr<Renderer> PipelineIntegrationTestBase::CreateDefaultRenderer(
+    base::Optional<RendererFactoryType> factory_type) {
+  if (factory_type && *factory_type != RendererFactoryType::kDefault) {
+    DVLOG(1) << __func__ << ": factory_type not supported";
+    return nullptr;
+  }
+
   // Simulate a 60Hz rendering sink.
   video_sink_.reset(new NullVideoSink(
       clockless_playback_, base::TimeDelta::FromSecondsD(1.0 / 60),
@@ -516,7 +523,7 @@ std::unique_ptr<Renderer> PipelineIntegrationTestBase::CreateRenderer(
       base::BindRepeating(&CreateAudioDecodersForTest, &media_log_,
                           task_environment_.GetMainThreadTaskRunner(),
                           prepend_audio_decoders_cb_),
-      &media_log_, AudioRendererImpl::TranscribeAudioCallback()));
+      &media_log_, nullptr));
   if (hashing_enabled_) {
     if (clockless_playback_)
       clockless_audio_sink_->StartAudioHashForTesting();
@@ -538,8 +545,7 @@ std::unique_ptr<Renderer> PipelineIntegrationTestBase::CreateRenderer(
   if (clockless_playback_)
     renderer_impl->EnableClocklessVideoPlaybackForTesting();
 
-  return wrap_renderer_cb_ ? wrap_renderer_cb_.Run(std::move(renderer_impl))
-                           : std::move(renderer_impl);
+  return renderer_impl;
 }
 
 void PipelineIntegrationTestBase::OnVideoFramePaint(

@@ -22,6 +22,7 @@
 #include "extensions/browser/extension_prefs_observer.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_registry_observer.h"
+#include "extensions/browser/extension_system.h"
 
 class Profile;
 
@@ -49,19 +50,6 @@ class ExtensionSyncService : public syncer::SyncableService,
   // an existing extension. Call this when you change an extension setting that
   // is synced as part of ExtensionSyncData (e.g. incognito_enabled).
   void SyncExtensionChangeIfNeeded(const extensions::Extension& extension);
-
-  // Returns whether the extension with the given |id| will be re-enabled once
-  // it is updated to the given |version|. This happens when we get a Sync
-  // update telling us to re-enable a newer version than what is currently
-  // installed.
-  // TODO(crbug/1019813): The logic for this function was broken after forced
-  // custodian installations were removed. See
-  // ExtensionServiceTestSupervised.
-  // UpdateWithPermissionIncreaseApprovalNewVersion
-  // for an example of when this function should return true but returns false
-  // instead in the test code.
-  bool HasPendingReenable(const std::string& id,
-                          const base::Version& version) const;
 
   // syncer::SyncableService implementation.
   void WaitUntilReadyToSync(base::OnceClosure done) override;
@@ -139,6 +127,8 @@ class ExtensionSyncService : public syncer::SyncableService,
 
   // The normal profile associated with this ExtensionSyncService.
   Profile* profile_;
+
+  extensions::ExtensionSystem* system_;
 
   ScopedObserver<extensions::ExtensionRegistry,
                  extensions::ExtensionRegistryObserver>

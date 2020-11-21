@@ -14,49 +14,50 @@
 #include "ui/gfx/geometry/size.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/layout/fill_layout.h"
+#include "ui/views/metadata/metadata_impl_macros.h"
 
 // static
 void DownloadInProgressDialogView::Show(
     gfx::NativeWindow parent,
     int download_count,
     Browser::DownloadCloseType dialog_type,
-    bool app_modal,
     const base::Callback<void(bool)>& callback) {
-  DownloadInProgressDialogView* window = new DownloadInProgressDialogView(
-      download_count, dialog_type, app_modal, callback);
+  DownloadInProgressDialogView* window =
+      new DownloadInProgressDialogView(download_count, dialog_type, callback);
   constrained_window::CreateBrowserModalDialogViews(window, parent)->Show();
 }
 
 DownloadInProgressDialogView::DownloadInProgressDialogView(
     int download_count,
     Browser::DownloadCloseType dialog_type,
-    bool app_modal,
     const base::Callback<void(bool)>& callback)
-    : download_count_(download_count),
-      app_modal_(app_modal),
-      callback_(callback) {
-  DialogDelegate::SetDefaultButton(ui::DIALOG_BUTTON_CANCEL);
-  DialogDelegate::SetButtonLabel(
+    : callback_(callback) {
+  SetTitle(l10n_util::GetPluralStringFUTF16(IDS_ABANDON_DOWNLOAD_DIALOG_TITLE,
+                                            download_count));
+  SetShowCloseButton(false);
+  SetModalType(ui::MODAL_TYPE_WINDOW);
+  SetDefaultButton(ui::DIALOG_BUTTON_CANCEL);
+  SetButtonLabel(
       ui::DIALOG_BUTTON_OK,
       l10n_util::GetStringUTF16(IDS_ABANDON_DOWNLOAD_DIALOG_EXIT_BUTTON));
-  DialogDelegate::SetButtonLabel(
+  SetButtonLabel(
       ui::DIALOG_BUTTON_CANCEL,
       l10n_util::GetStringUTF16(IDS_ABANDON_DOWNLOAD_DIALOG_CONTINUE_BUTTON));
   SetLayoutManager(std::make_unique<views::FillLayout>());
   set_margins(ChromeLayoutProvider::Get()->GetDialogInsetsForContentType(
       views::TEXT, views::TEXT));
+  set_fixed_width(views::LayoutProvider::Get()->GetDistanceMetric(
+      views::DISTANCE_MODAL_DIALOG_PREFERRED_WIDTH));
 
   auto run_callback = [](DownloadInProgressDialogView* dialog, bool accept) {
     // Note that accepting this dialog means "cancel the download", while cancel
     // means "continue the download".
     dialog->callback_.Run(accept);
   };
-  DialogDelegate::SetAcceptCallback(
-      base::BindOnce(run_callback, base::Unretained(this), true));
-  DialogDelegate::SetCancelCallback(
+  SetAcceptCallback(base::BindOnce(run_callback, base::Unretained(this), true));
+  SetCancelCallback(
       base::BindOnce(run_callback, base::Unretained(this), false));
-  DialogDelegate::SetCloseCallback(
-      base::BindOnce(run_callback, base::Unretained(this), false));
+  SetCloseCallback(base::BindOnce(run_callback, base::Unretained(this), false));
 
   int message_id = 0;
   switch (dialog_type) {
@@ -76,8 +77,8 @@ DownloadInProgressDialogView::DownloadInProgressDialogView(
       break;
   }
   auto message_label = std::make_unique<views::Label>(
-      l10n_util::GetStringUTF16(message_id), CONTEXT_BODY_TEXT_LARGE,
-      views::style::STYLE_SECONDARY);
+      l10n_util::GetStringUTF16(message_id),
+      views::style::CONTEXT_DIALOG_BODY_TEXT, views::style::STYLE_SECONDARY);
   message_label->SetMultiLine(true);
   message_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   AddChildView(message_label.release());
@@ -87,26 +88,5 @@ DownloadInProgressDialogView::DownloadInProgressDialogView(
 
 DownloadInProgressDialogView::~DownloadInProgressDialogView() = default;
 
-gfx::Size DownloadInProgressDialogView::CalculatePreferredSize() const {
-  const int width = ChromeLayoutProvider::Get()->GetDistanceMetric(
-                        DISTANCE_MODAL_DIALOG_PREFERRED_WIDTH) -
-                    margins().width();
-  return gfx::Size(width, GetHeightForWidth(width));
-}
-
-ui::ModalType DownloadInProgressDialogView::GetModalType() const {
-  return app_modal_ ? ui::MODAL_TYPE_SYSTEM : ui::MODAL_TYPE_WINDOW;
-}
-
-bool DownloadInProgressDialogView::ShouldShowCloseButton() const {
-  return false;
-}
-
-base::string16 DownloadInProgressDialogView::GetWindowTitle() const {
-  return l10n_util::GetPluralStringFUTF16(IDS_ABANDON_DOWNLOAD_DIALOG_TITLE,
-                                          download_count_);
-}
-
-BEGIN_METADATA(DownloadInProgressDialogView)
-METADATA_PARENT_CLASS(views::DialogDelegateView);
-END_METADATA()
+BEGIN_METADATA(DownloadInProgressDialogView, views::DialogDelegateView)
+END_METADATA

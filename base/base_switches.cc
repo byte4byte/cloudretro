@@ -4,6 +4,7 @@
 
 #include "base/base_switches.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 
 namespace switches {
 
@@ -117,7 +118,10 @@ const char kDisableHighResTimer[] = "disable-highres-timer";
 const char kDisableUsbKeyboardDetect[]      = "disable-usb-keyboard-detect";
 #endif
 
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
+// TODO(crbug.com/1052397): Revisit the macro expression once build flag switch
+// of lacros-chrome is complete.
+#if defined(OS_LINUX) && !BUILDFLAG(IS_CHROMEOS_ASH) && \
+    !BUILDFLAG(IS_CHROMEOS_LACROS)
 // The /dev/shm partition is too small in certain VM environments, causing
 // Chrome to fail or crash (see http://crbug.com/715363). Use this flag to
 // work-around this issue (a temporary directory will always be used to create
@@ -136,9 +140,23 @@ const char kEnableCrashReporterForTesting[] =
 // Enables the reached code profiler that samples all threads in all processes
 // to determine which functions are almost never executed.
 const char kEnableReachedCodeProfiler[] = "enable-reached-code-profiler";
+
+// Specifies the profiling interval in microseconds for reached code profiler.
+const char kReachedCodeSamplingIntervalUs[] =
+    "reached-code-sampling-interval-us";
+
+// Default country code to be used for search engine localization.
+const char kDefaultCountryCodeAtInstall[] = "default-country-code";
+
+// Adds additional thread idle time information into the trace event output.
+const char kEnableIdleTracing[] = "enable-idle-tracing";
+
+// The field trial parameters and their values when testing changes locally.
+const char kForceFieldTrialParams[] = "force-fieldtrial-params";
+
 #endif
 
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
 // Controls whether or not retired instruction counts are surfaced for threads
 // in trace events on Linux.
 //

@@ -1,13 +1,18 @@
+// Copyright 2020 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
 
 #include "third_party/blink/renderer/platform/mojo/heap_mojo_receiver.h"
 #include "base/test/null_task_runner.h"
+#include "base/test/scoped_feature_list.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "mojo/public/interfaces/bindings/tests/sample_service.mojom-blink.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/platform/context_lifecycle_notifier.h"
 #include "third_party/blink/renderer/platform/heap/heap_test_utilities.h"
 #include "third_party/blink/renderer/platform/heap/persistent.h"
-#include "third_party/blink/renderer/platform/heap_observer_list.h"
+#include "third_party/blink/renderer/platform/heap_observer_set.h"
+#include "third_party/blink/renderer/platform/mojo/features.h"
 #include "third_party/blink/renderer/platform/mojo/heap_mojo_wrapper_mode.h"
 
 namespace blink {
@@ -16,8 +21,6 @@ namespace {
 
 class MockContext final : public GarbageCollected<MockContext>,
                           public ContextLifecycleNotifier {
-  USING_GARBAGE_COLLECTED_MIXIN(MockContext);
-
  public:
   MockContext() = default;
 
@@ -36,13 +39,13 @@ class MockContext final : public GarbageCollected<MockContext>,
     });
   }
 
-  void Trace(Visitor* visitor) override {
+  void Trace(Visitor* visitor) const override {
     visitor->Trace(observers_);
     ContextLifecycleNotifier::Trace(visitor);
   }
 
  private:
-  HeapObserverList<ContextLifecycleObserver> observers_;
+  HeapObserverSet<ContextLifecycleObserver> observers_;
 };
 
 template <HeapMojoWrapperMode Mode>
@@ -64,14 +67,13 @@ class ReceiverOwner : public GarbageCollected<ReceiverOwner<Mode>>,
   void Dispose() {
     if (test_)
       test_->set_is_owner_alive(false);
-    ;
   }
 
   HeapMojoReceiver<sample::blink::Service, ReceiverOwner, Mode>& receiver() {
     return receiver_;
   }
 
-  void Trace(Visitor* visitor) { visitor->Trace(receiver_); }
+  void Trace(Visitor* visitor) const { visitor->Trace(receiver_); }
 
  private:
   // sample::blink::Service implementation
@@ -110,7 +112,7 @@ class HeapMojoReceiverGCBaseTest : public TestSupportingGC {
         },
         WTF::Unretained(this)));
   }
-  void TearDown() {
+  void TearDown() override {
     owner_ = nullptr;
     PreciselyCollectGarbage();
   }
@@ -121,6 +123,35 @@ class HeapMojoReceiverGCBaseTest : public TestSupportingGC {
   base::RunLoop run_loop_;
   mojo::Remote<sample::blink::Service> remote_;
   bool disconnected_ = false;
+};
+
+template <HeapMojoWrapperMode Mode>
+class HeapMojoReceiverDisconnectWithReasonHandlerBaseTest
+    : public HeapMojoReceiverGCBaseTest<Mode> {
+ public:
+  std::string& disconnected_reason() { return disconnected_reason_; }
+
+ protected:
+  void SetUp() override {
+    CHECK(disconnected_reason_.empty());
+    this->disconnected_ = false;
+    this->context_ = MakeGarbageCollected<MockContext>();
+    this->owner_ =
+        MakeGarbageCollected<ReceiverOwner<Mode>>(this->context_, this);
+    scoped_refptr<base::NullTaskRunner> null_task_runner =
+        base::MakeRefCounted<base::NullTaskRunner>();
+    this->remote_ = mojo::Remote<sample::blink::Service>(
+        this->owner_->receiver().BindNewPipeAndPassRemote(null_task_runner));
+    this->remote_.set_disconnect_with_reason_handler(WTF::Bind(
+        [](HeapMojoReceiverDisconnectWithReasonHandlerBaseTest* receiver_test,
+           const uint32_t custom_reason, const std::string& description) {
+          receiver_test->run_loop().Quit();
+          receiver_test->disconnected_reason() = description;
+        },
+        WTF::Unretained(this)));
+  }
+
+  std::string disconnected_reason_;
 };
 
 template <HeapMojoWrapperMode Mode>
@@ -147,13 +178,22 @@ class HeapMojoReceiverGCWithContextObserverTest
           HeapMojoWrapperMode::kWithContextObserver> {};
 class HeapMojoReceiverGCWithoutContextObserverTest
     : public HeapMojoReceiverGCBaseTest<
-          HeapMojoWrapperMode::kWithoutContextObserver> {};
+          HeapMojoWrapperMode::kForceWithoutContextObserver> {};
 class HeapMojoReceiverDestroyContextWithContextObserverTest
     : public HeapMojoReceiverDestroyContextBaseTest<
           HeapMojoWrapperMode::kWithContextObserver> {};
 class HeapMojoReceiverDestroyContextWithoutContextObserverTest
     : public HeapMojoReceiverDestroyContextBaseTest<
           HeapMojoWrapperMode::kWithoutContextObserver> {};
+class HeapMojoReceiverDestroyContextForceWithoutContextObserverTest
+    : public HeapMojoReceiverDestroyContextBaseTest<
+          HeapMojoWrapperMode::kForceWithoutContextObserver> {};
+class HeapMojoReceiverDisconnectWithReasonHandlerWithContextObserverTest
+    : public HeapMojoReceiverDisconnectWithReasonHandlerBaseTest<
+          HeapMojoWrapperMode::kWithContextObserver> {};
+class HeapMojoReceiverDisconnectWithReasonHandlerWithoutContextObserverTest
+    : public HeapMojoReceiverDisconnectWithReasonHandlerBaseTest<
+          HeapMojoWrapperMode::kForceWithoutContextObserver> {};
 
 // Make HeapMojoReceiver with context observer garbage collected and check that
 // the connection is disconnected right after the marking phase.
@@ -198,13 +238,60 @@ TEST_F(HeapMojoReceiverDestroyContextWithContextObserverTest,
   EXPECT_FALSE(owner_->receiver().is_bound());
 }
 
+// Destroy the context with context observer and check that the connection is
+// disconnected.
+TEST_F(HeapMojoReceiverDestroyContextWithoutContextObserverTest,
+       ResetsOnContextDestroyedWhenFinchEnabled) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitWithFeaturesAndParameters(
+      {{kHeapMojoUseContextObserver, {}}}, {});
+  EXPECT_TRUE(owner_->receiver().is_bound());
+  context_->NotifyContextDestroyed();
+  EXPECT_FALSE(owner_->receiver().is_bound());
+}
+
 // Destroy the context without context observer and check that the connection is
 // still connected.
 TEST_F(HeapMojoReceiverDestroyContextWithoutContextObserverTest,
+       ResetsOnContextDestroyedWhenFinchDisabled) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitWithFeaturesAndParameters({}, {kHeapMojoUseContextObserver});
+  EXPECT_TRUE(owner_->receiver().is_bound());
+  context_->NotifyContextDestroyed();
+  EXPECT_TRUE(owner_->receiver().is_bound());
+}
+
+// Destroy the context without context observer and check that the connection is
+// still connected.
+TEST_F(HeapMojoReceiverDestroyContextForceWithoutContextObserverTest,
        ResetsOnContextDestroyed) {
   EXPECT_TRUE(owner_->receiver().is_bound());
   context_->NotifyContextDestroyed();
   EXPECT_TRUE(owner_->receiver().is_bound());
+}
+
+// Reset the receiver with custom reason and check that the specified handler is
+// fired.
+TEST_F(HeapMojoReceiverDisconnectWithReasonHandlerWithContextObserverTest,
+       ResetWithReason) {
+  EXPECT_TRUE(disconnected_reason().empty());
+  const std::string message = "test message";
+  const uint32_t reason = 0;
+  owner_->receiver().ResetWithReason(reason, message);
+  run_loop().Run();
+  EXPECT_EQ(disconnected_reason(), message);
+}
+
+// Reset the receiver with custom reason and check that the specified handler is
+// fired.
+TEST_F(HeapMojoReceiverDisconnectWithReasonHandlerWithoutContextObserverTest,
+       ResetWithReason) {
+  EXPECT_TRUE(disconnected_reason().empty());
+  const std::string message = "test message";
+  const uint32_t reason = 0;
+  owner_->receiver().ResetWithReason(reason, message);
+  run_loop().Run();
+  EXPECT_EQ(disconnected_reason(), message);
 }
 
 }  // namespace blink

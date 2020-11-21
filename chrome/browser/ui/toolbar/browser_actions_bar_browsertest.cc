@@ -8,15 +8,13 @@
 #include <memory>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/run_loop.h"
 #include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
 #include "build/build_config.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/api/extension_action/extension_action_api.h"
-#include "chrome/browser/extensions/extension_action.h"
-#include "chrome/browser/extensions/extension_action_manager.h"
 #include "chrome/browser/extensions/extension_action_runner.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -37,8 +35,11 @@
 #include "components/prefs/pref_service.h"
 #include "components/sessions/content/session_tab_helper.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "content/public/test/test_utils.h"
+#include "extensions/browser/extension_action.h"
+#include "extensions/browser/extension_action_manager.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/notification_types.h"
@@ -90,17 +91,19 @@ class BlockedActionWaiter
 // BrowserActionsBarBrowserTest:
 
 BrowserActionsBarBrowserTest::BrowserActionsBarBrowserTest()
-    : toolbar_model_(nullptr) {
-  // This suite relies on behavior specific to ToolbarActionsBar. See
-  // ExtensionsMenuViewBrowserTest and ExtensionsMenuViewUnitTest for new tests.
-  feature_list_.InitAndDisableFeature(features::kExtensionsToolbarMenu);
-}
+    : toolbar_model_(nullptr) {}
 
 BrowserActionsBarBrowserTest::~BrowserActionsBarBrowserTest() {
 }
 
 void BrowserActionsBarBrowserTest::SetUpCommandLine(
     base::CommandLine* command_line) {
+  // Note: The ScopedFeatureList needs to be instantiated before the rest of
+  // set up happens.
+  // This suite relies on behavior specific to ToolbarActionsBar. See
+  // ExtensionsMenuViewBrowserTest and ExtensionsMenuViewUnitTest for new tests.
+  feature_list_.InitAndDisableFeature(features::kExtensionsToolbarMenu);
+
   extensions::ExtensionBrowserTest::SetUpCommandLine(command_line);
   ToolbarActionsBar::disable_animations_for_testing_ = true;
 }
@@ -164,6 +167,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionsBarBrowserTest, Basic) {
 // move (that's in the toolbar model tests), but just to check our ui.
 IN_PROC_BROWSER_TEST_F(BrowserActionsBarBrowserTest, MoveBrowserActions) {
   LoadExtensions();
+  RunScheduledLayouts();
 
   EXPECT_EQ(3, browser_actions_bar()->VisibleBrowserActions());
   EXPECT_EQ(3, browser_actions_bar()->NumberOfBrowserActions());
@@ -197,10 +201,12 @@ IN_PROC_BROWSER_TEST_F(BrowserActionsBarBrowserTest, Visibility) {
 
   // Change container to show only one action, rest in overflow: A, [B, C].
   toolbar_model()->SetVisibleIconCount(1);
+  RunScheduledLayouts();
   EXPECT_EQ(1, browser_actions_bar()->VisibleBrowserActions());
 
   // Disable extension A (should disappear). State becomes: B [C].
   DisableExtension(extension_a()->id());
+  RunScheduledLayouts();
   EXPECT_EQ(2, browser_actions_bar()->NumberOfBrowserActions());
   EXPECT_EQ(1, browser_actions_bar()->VisibleBrowserActions());
   EXPECT_EQ(extension_b()->id(), browser_actions_bar()->GetExtensionId(0));
@@ -209,46 +215,54 @@ IN_PROC_BROWSER_TEST_F(BrowserActionsBarBrowserTest, Visibility) {
   // should not grow. For details: http://crbug.com/35349.
   // State becomes: A, [B, C].
   EnableExtension(extension_a()->id());
+  RunScheduledLayouts();
   EXPECT_EQ(3, browser_actions_bar()->NumberOfBrowserActions());
   EXPECT_EQ(1, browser_actions_bar()->VisibleBrowserActions());
   EXPECT_EQ(extension_a()->id(), browser_actions_bar()->GetExtensionId(0));
 
   // Disable C (in overflow). State becomes: A, [B].
   DisableExtension(extension_c()->id());
+  RunScheduledLayouts();
   EXPECT_EQ(2, browser_actions_bar()->NumberOfBrowserActions());
   EXPECT_EQ(1, browser_actions_bar()->VisibleBrowserActions());
   EXPECT_EQ(extension_a()->id(), browser_actions_bar()->GetExtensionId(0));
 
   // Enable C again. State becomes: A, [B, C].
   EnableExtension(extension_c()->id());
+  RunScheduledLayouts();
   EXPECT_EQ(3, browser_actions_bar()->NumberOfBrowserActions());
   EXPECT_EQ(1, browser_actions_bar()->VisibleBrowserActions());
   EXPECT_EQ(extension_a()->id(), browser_actions_bar()->GetExtensionId(0));
 
   // Now we have 3 extensions. Make sure they are all visible. State: A, B, C.
   toolbar_model()->SetVisibleIconCount(3);
+  RunScheduledLayouts();
   EXPECT_EQ(3, browser_actions_bar()->VisibleBrowserActions());
 
   // Disable extension A (should disappear). State becomes: B, C.
   DisableExtension(extension_a()->id());
+  RunScheduledLayouts();
   EXPECT_EQ(2, browser_actions_bar()->NumberOfBrowserActions());
   EXPECT_EQ(2, browser_actions_bar()->VisibleBrowserActions());
   EXPECT_EQ(extension_b()->id(), browser_actions_bar()->GetExtensionId(0));
 
   // Disable extension B (should disappear). State becomes: C.
   DisableExtension(extension_b()->id());
+  RunScheduledLayouts();
   EXPECT_EQ(1, browser_actions_bar()->NumberOfBrowserActions());
   EXPECT_EQ(1, browser_actions_bar()->VisibleBrowserActions());
   EXPECT_EQ(extension_c()->id(), browser_actions_bar()->GetExtensionId(0));
 
   // Enable B. State becomes: B, C.
   EnableExtension(extension_b()->id());
+  RunScheduledLayouts();
   EXPECT_EQ(2, browser_actions_bar()->NumberOfBrowserActions());
   EXPECT_EQ(2, browser_actions_bar()->VisibleBrowserActions());
   EXPECT_EQ(extension_b()->id(), browser_actions_bar()->GetExtensionId(0));
 
   // Enable A. State becomes: A, B, C.
   EnableExtension(extension_a()->id());
+  RunScheduledLayouts();
   EXPECT_EQ(3, browser_actions_bar()->NumberOfBrowserActions());
   EXPECT_EQ(3, browser_actions_bar()->VisibleBrowserActions());
   EXPECT_EQ(extension_a()->id(), browser_actions_bar()->GetExtensionId(0));
@@ -257,6 +271,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionsBarBrowserTest, Visibility) {
   // No icons should be visible, but we *should* overflow and have a
   // non-empty size.
   toolbar_model()->SetVisibleIconCount(0);
+  RunScheduledLayouts();
   EXPECT_EQ(0, browser_actions_bar()->VisibleBrowserActions());
   ToolbarActionsBar* toolbar_actions_bar =
       browser_actions_bar()->GetToolbarActionsBar();
@@ -265,6 +280,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionsBarBrowserTest, Visibility) {
   // Reset visibility count to 2. State should be A, B, [C], and we should
   // overflow.
   toolbar_model()->SetVisibleIconCount(2);
+  RunScheduledLayouts();
   EXPECT_EQ(2, browser_actions_bar()->VisibleBrowserActions());
   EXPECT_EQ(extension_a()->id(), browser_actions_bar()->GetExtensionId(0));
   EXPECT_EQ(extension_b()->id(), browser_actions_bar()->GetExtensionId(1));
@@ -273,6 +289,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionsBarBrowserTest, Visibility) {
   // Disable C (the overflowed extension). State should now be A, B, and we
   // should not overflow.
   DisableExtension(extension_c()->id());
+  RunScheduledLayouts();
   EXPECT_EQ(2, browser_actions_bar()->VisibleBrowserActions());
   EXPECT_EQ(extension_a()->id(), browser_actions_bar()->GetExtensionId(0));
   EXPECT_EQ(extension_b()->id(), browser_actions_bar()->GetExtensionId(1));
@@ -281,6 +298,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionsBarBrowserTest, Visibility) {
   // Re-enable C. We should still only have 2 visible icons, still with
   // overflow.
   EnableExtension(extension_c()->id());
+  RunScheduledLayouts();
   EXPECT_EQ(2, browser_actions_bar()->VisibleBrowserActions());
   EXPECT_EQ(extension_a()->id(), browser_actions_bar()->GetExtensionId(0));
   EXPECT_EQ(extension_b()->id(), browser_actions_bar()->GetExtensionId(1));
@@ -300,6 +318,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionsBarBrowserTest,
   ASSERT_TRUE(second_extension);
 
   // Verify state: two actions, in the order of [first, second].
+  RunScheduledLayouts();
   EXPECT_EQ(2, browser_actions_bar()->VisibleBrowserActions());
   EXPECT_EQ(first_extension->id(), browser_actions_bar()->GetExtensionId(0));
   EXPECT_EQ(second_extension->id(), browser_actions_bar()->GetExtensionId(1));
@@ -361,6 +380,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionsBarBrowserTest,
   ASSERT_TRUE(second_extension);
 
   // Verify state: two actions, in the order of [first, second].
+  RunScheduledLayouts();
   EXPECT_EQ(2, browser_actions_bar()->VisibleBrowserActions());
   EXPECT_EQ(first_extension->id(), browser_actions_bar()->GetExtensionId(0));
   EXPECT_EQ(second_extension->id(), browser_actions_bar()->GetExtensionId(1));
@@ -383,7 +403,8 @@ IN_PROC_BROWSER_TEST_F(BrowserActionsBarBrowserTest,
       static_cast<ExtensionActionViewController*>(toolbar_actions[1]);
 
   toolbar_model()->SetVisibleIconCount(0);
-
+  RunScheduledLayouts();
+  overflow_bar->LayoutForOverflowBar();
   EXPECT_EQ(0, browser_actions_bar()->VisibleBrowserActions());
   EXPECT_EQ(2, overflow_bar->VisibleBrowserActions());
 
@@ -400,11 +421,13 @@ IN_PROC_BROWSER_TEST_F(BrowserActionsBarBrowserTest,
   EXPECT_TRUE(second_controller_main->IsShowingPopup());
   EXPECT_FALSE(second_controller_overflow->IsShowingPopup());
 
+  RunScheduledLayouts();
+  overflow_bar->LayoutForOverflowBar();
   EXPECT_EQ(1, browser_actions_bar()->VisibleBrowserActions());
   EXPECT_EQ(1u, main_tab->GetIconCount());
   EXPECT_EQ(second_controller_main->GetId(),
             browser_actions_bar()->GetExtensionId(0));
-  EXPECT_EQ(2, overflow_bar->VisibleBrowserActions());
+  EXPECT_EQ(1, overflow_bar->VisibleBrowserActions());
   EXPECT_EQ(2u, overflow_tab->GetIconCount());
   EXPECT_EQ(first_controller_main->GetId(),
             overflow_bar->GetExtensionId(0));
@@ -417,6 +440,8 @@ IN_PROC_BROWSER_TEST_F(BrowserActionsBarBrowserTest,
     observer.Wait();
   }
 
+  RunScheduledLayouts();
+  overflow_bar->LayoutForOverflowBar();
   EXPECT_FALSE(browser_actions_bar()->HasPopup());
   EXPECT_FALSE(overflow_bar->HasPopup());
   EXPECT_FALSE(second_controller_main->IsShowingPopup());
@@ -453,6 +478,8 @@ IN_PROC_BROWSER_TEST_F(BrowserActionsBarBrowserTest,
       LoadExtension(data_dir.AppendASCII("open_popup"));
   ASSERT_TRUE(extension);
   toolbar_model()->SetVisibleIconCount(0);
+  RunScheduledLayouts();
+  overflow_bar->LayoutForOverflowBar();
   EXPECT_EQ(0, browser_actions_bar()->VisibleBrowserActions());
   EXPECT_EQ(1, overflow_bar->VisibleBrowserActions());
   EXPECT_FALSE(browser_actions_bar()->HasPopup());
@@ -460,6 +487,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionsBarBrowserTest,
   // Click on the overflowed extension, causing it to pop out.
   overflow_bar->Press(0);
   base::RunLoop().RunUntilIdle();
+  RunScheduledLayouts();
   EXPECT_TRUE(browser_actions_bar()->HasPopup());
   EXPECT_EQ(1, browser_actions_bar()->VisibleBrowserActions());
 
@@ -473,6 +501,8 @@ IN_PROC_BROWSER_TEST_F(BrowserActionsBarBrowserTest,
     observer.Wait();
   }
 
+  RunScheduledLayouts();
+  overflow_bar->LayoutForOverflowBar();
   EXPECT_EQ(0, browser_actions_bar()->VisibleBrowserActions());
   EXPECT_EQ(0, overflow_bar->VisibleBrowserActions());
   EXPECT_EQ(0u, toolbar_model()->action_ids().size());
@@ -487,6 +517,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionsBarBrowserTest,
                         AppendASCII("page_action_popup"));
   ASSERT_TRUE(page_action_extension);
   EXPECT_TRUE(listener.WaitUntilSatisfied());
+  RunScheduledLayouts();
   EXPECT_EQ(1, browser_actions_bar()->VisibleBrowserActions());
   EXPECT_EQ(page_action_extension->id(),
             browser_actions_bar()->GetExtensionId(0));
@@ -523,7 +554,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionsBarBrowserTest, RemovePoppedOutAction) {
   extension_service()->AddExtension(extension3.get());
 
   toolbar_model()->SetVisibleIconCount(1);
-
+  RunScheduledLayouts();
   EXPECT_EQ(1, browser_actions_bar()->VisibleBrowserActions());
   EXPECT_EQ(3, browser_actions_bar()->NumberOfBrowserActions());
 
@@ -534,6 +565,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionsBarBrowserTest, RemovePoppedOutAction) {
   EXPECT_EQ(extension3->id(), toolbar_actions_bar->GetActions()[2]->GetId());
   toolbar_actions_bar->PopOutAction(toolbar_actions_bar->GetActions()[2], false,
                                     closure);
+  RunScheduledLayouts();
   EXPECT_EQ(2, browser_actions_bar()->VisibleBrowserActions());
   ASSERT_TRUE(toolbar_actions_bar->GetPoppedOutAction());
   EXPECT_EQ(extension3->id(),
@@ -543,6 +575,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionsBarBrowserTest, RemovePoppedOutAction) {
   // (extension 2) and one left on the main bar (extension 1).
   extension_service()->UnloadExtension(
       extension3->id(), extensions::UnloadedExtensionReason::DISABLE);
+  RunScheduledLayouts();
   EXPECT_EQ(1, browser_actions_bar()->VisibleBrowserActions());
   EXPECT_EQ(2, browser_actions_bar()->NumberOfBrowserActions());
   EXPECT_FALSE(toolbar_actions_bar->GetPoppedOutAction());
@@ -550,6 +583,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionsBarBrowserTest, RemovePoppedOutAction) {
   // Add back extension 3, and reduce visible size to 0.
   extension_service()->AddExtension(extension3.get());
   toolbar_model()->SetVisibleIconCount(0);
+  RunScheduledLayouts();
   EXPECT_EQ(0, browser_actions_bar()->VisibleBrowserActions());
   EXPECT_EQ(3, browser_actions_bar()->NumberOfBrowserActions());
 
@@ -557,6 +591,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionsBarBrowserTest, RemovePoppedOutAction) {
   EXPECT_EQ(extension2->id(), toolbar_actions_bar->GetActions()[1]->GetId());
   toolbar_actions_bar->PopOutAction(toolbar_actions_bar->GetActions()[1], false,
                                     closure);
+  RunScheduledLayouts();
   EXPECT_EQ(1, browser_actions_bar()->VisibleBrowserActions());
   ASSERT_TRUE(toolbar_actions_bar->GetPoppedOutAction());
   EXPECT_EQ(extension2->id(),
@@ -565,6 +600,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionsBarBrowserTest, RemovePoppedOutAction) {
   // Remove extension 2 - the remaining two should both be overflowed.
   extension_service()->UnloadExtension(
       extension2->id(), extensions::UnloadedExtensionReason::DISABLE);
+  RunScheduledLayouts();
   EXPECT_EQ(0, browser_actions_bar()->VisibleBrowserActions());
   EXPECT_EQ(2, browser_actions_bar()->NumberOfBrowserActions());
   EXPECT_FALSE(toolbar_actions_bar->GetPoppedOutAction());
@@ -572,16 +608,19 @@ IN_PROC_BROWSER_TEST_F(BrowserActionsBarBrowserTest, RemovePoppedOutAction) {
   // Finally, set visible count to 1, pop out extension 1, and remove it. There
   // should only be one action left on the bar.
   toolbar_model()->SetVisibleIconCount(1);
+  RunScheduledLayouts();
   EXPECT_EQ(1, browser_actions_bar()->VisibleBrowserActions());
   EXPECT_EQ(extension3->id(), toolbar_actions_bar->GetActions()[1]->GetId());
   toolbar_actions_bar->PopOutAction(toolbar_actions_bar->GetActions()[1], false,
                                     closure);
+  RunScheduledLayouts();
   EXPECT_EQ(2, browser_actions_bar()->VisibleBrowserActions());
   ASSERT_TRUE(toolbar_actions_bar->GetPoppedOutAction());
   EXPECT_EQ(extension3->id(),
             toolbar_actions_bar->GetPoppedOutAction()->GetId());
   extension_service()->UnloadExtension(
       extension3->id(), extensions::UnloadedExtensionReason::DISABLE);
+  RunScheduledLayouts();
   EXPECT_EQ(1, browser_actions_bar()->VisibleBrowserActions());
   EXPECT_EQ(1, browser_actions_bar()->NumberOfBrowserActions());
   EXPECT_FALSE(toolbar_actions_bar->GetPoppedOutAction());

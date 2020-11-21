@@ -30,6 +30,7 @@
 #include "components/policy/core/common/policy_map.h"
 #include "components/policy/core/common/policy_service.h"
 #include "components/policy/policy_constants.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/test_utils.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -105,7 +106,7 @@ IN_PROC_BROWSER_TEST_F(UserCloudExternalDataManagerTest, FetchExternalData) {
       PolicyNamespace(POLICY_DOMAIN_CHROME, std::string()));
   const PolicyMap::Entry* policy_entry = policies.Get(key::kWallpaperImage);
   ASSERT_TRUE(policy_entry);
-  EXPECT_EQ(*metadata_, *policy_entry->value);
+  EXPECT_EQ(*metadata_, *policy_entry->value());
   ASSERT_TRUE(policy_entry->external_data_fetcher);
 
   base::RunLoop run_loop;

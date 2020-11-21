@@ -1,0 +1,191 @@
+// Copyright 2020 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+package org.chromium.chrome.browser.image_descriptions;
+
+import android.content.Context;
+
+import androidx.annotation.VisibleForTesting;
+
+import org.chromium.base.annotations.NativeMethods;
+import org.chromium.chrome.browser.preferences.ChromePreferenceKeys;
+import org.chromium.chrome.browser.preferences.Pref;
+import org.chromium.chrome.browser.preferences.SharedPreferencesManager;
+import org.chromium.chrome.browser.profiles.Profile;
+import org.chromium.chrome.browser.util.ChromeAccessibilityUtil;
+import org.chromium.components.prefs.PrefService;
+import org.chromium.components.user_prefs.UserPrefs;
+import org.chromium.content_public.browser.ContentFeatureList;
+import org.chromium.content_public.browser.WebContents;
+import org.chromium.ui.modaldialog.ModalDialogManager;
+
+/**
+ * Singleton class to control the Image Descriptions feature. This class can be used to initiate the
+ * user flow, to turn the feature on/off and to update settings as needed.
+ */
+public class ImageDescriptionsController {
+    // We display a "Don't ask again" choice if the user has selected the Just Once option 3 times.
+    public static final int DONT_ASK_AGAIN_DISPLAY_LIMIT = 3;
+
+    // Static instance of this singleton, lazily initialized during first getInstance() call.
+    private static ImageDescriptionsController sInstance;
+
+    private ImageDescriptionsControllerDelegate mDelegate;
+
+    /**
+     * Method to return the private instance of this singleton, lazily initialized.
+     * @return      ImageDescriptionController instance
+     */
+    public static ImageDescriptionsController getInstance() {
+        if (sInstance == null) {
+            sInstance = new ImageDescriptionsController();
+        }
+
+        return sInstance;
+    }
+
+    /**
+     * Private constructor to prevent unwanted construction/initialization
+     */
+    private ImageDescriptionsController() {
+        this.mDelegate = defaultDelegate();
+    }
+
+    /**
+     * Creates a default ImageDescriptionsControllerDelegate implementation, used in production.
+     * @return      Default ImageDescriptionsControllerDelegate delegate.
+     */
+    private ImageDescriptionsControllerDelegate defaultDelegate() {
+        return new ImageDescriptionsControllerDelegate() {
+            @Override
+            public void enableImageDescriptions() {
+                getPrefService().setBoolean(Pref.ACCESSIBILITY_IMAGE_LABELS_ENABLED_ANDROID, true);
+            }
+
+            @Override
+            public void disableImageDescriptions() {
+                getPrefService().setBoolean(Pref.ACCESSIBILITY_IMAGE_LABELS_ENABLED_ANDROID, false);
+            }
+
+            @Override
+            public void setOnlyOnWifiRequirement(boolean onlyOnWifi) {
+                getPrefService().setBoolean(
+                        Pref.ACCESSIBILITY_IMAGE_LABELS_ONLY_ON_WIFI, onlyOnWifi);
+            }
+
+            @Override
+            public void getImageDescriptionsJustOnce(
+                    boolean dontAskAgain, WebContents webContents) {
+                // User selected "Just Once", update counter and "Don't ask again" preference as
+                // needed.
+                getSharedPrefs().incrementInt(
+                        ChromePreferenceKeys.IMAGE_DESCRIPTIONS_JUST_ONCE_COUNT);
+                getSharedPrefs().writeBoolean(
+                        ChromePreferenceKeys.IMAGE_DESCRIPTIONS_DONT_ASK_AGAIN, dontAskAgain);
+
+                ImageDescriptionsControllerJni.get().getImageDescriptionsOnce(webContents);
+            }
+        };
+    }
+
+    /**
+     * Set the ImageDescriptionsControllerDelegate delegate one time, used for testing purposes.
+     * @param delegate      The new ImageDescriptionsControllerDelegate delegate to use.
+     */
+    @VisibleForTesting
+    public void setDelegateForTesting(ImageDescriptionsControllerDelegate delegate) {
+        this.mDelegate = delegate;
+    }
+
+    /**
+     * Get the current ImageDescriptionsControllerDelegate in use for this instance.
+     * @return mDelegate    The current ImageDescriptionsControllerDelegate in use.
+     */
+    public ImageDescriptionsControllerDelegate getDelegate() {
+        return mDelegate;
+    }
+
+    /**
+     * Handle user selecting menu item and the potential creation of the image descriptions dialog.
+     */
+    public void onImageDescriptionsMenuItemSelected(
+            Context context, ModalDialogManager modalDialogManager, WebContents webContents) {
+        // If descriptions are enabled, then the menu item option was to stop descriptions. If the
+        // user has the don't ask again option enabled, immediately do a "just once" fetch. In all
+        // other cases, show the dialog to prompt the user.
+        if (imageDescriptionsEnabled()) {
+            disableImageDescriptions();
+        } else if (dontAskAgainEnabled()) {
+            getImageDescriptionsJustOnce(true, webContents);
+        } else {
+            ImageDescriptionsDialog prompt = new ImageDescriptionsDialog(context,
+                    modalDialogManager, getDelegate(), shouldShowDontAskAgainOption(), webContents);
+            prompt.show();
+        }
+    }
+
+    protected boolean dontAskAgainEnabled() {
+        return getSharedPrefs().readBoolean(
+                ChromePreferenceKeys.IMAGE_DESCRIPTIONS_DONT_ASK_AGAIN, false);
+    }
+
+    protected boolean shouldShowDontAskAgainOption() {
+        return getSharedPrefs().readInt(ChromePreferenceKeys.IMAGE_DESCRIPTIONS_JUST_ONCE_COUNT)
+                >= DONT_ASK_AGAIN_DISPLAY_LIMIT;
+    }
+
+    public boolean shouldShowImageDescriptionsMenuItem() {
+        // TODO(mschillaci): Expand this to check touch exploration rather than accessibility
+        return ContentFeatureList.isEnabled(ContentFeatureList.EXPERIMENTAL_ACCESSIBILITY_LABELS)
+                && ChromeAccessibilityUtil.get().isAccessibilityEnabled();
+    }
+
+    public boolean imageDescriptionsEnabled() {
+        return getPrefService().getBoolean(Pref.ACCESSIBILITY_IMAGE_LABELS_ENABLED_ANDROID);
+    }
+
+    public boolean onlyOnWifiEnabled() {
+        return getPrefService().getBoolean(Pref.ACCESSIBILITY_IMAGE_LABELS_ONLY_ON_WIFI);
+    }
+
+    // Pass-through methods to our delegate.
+
+    protected void enableImageDescriptions() {
+        mDelegate.enableImageDescriptions();
+    }
+
+    protected void disableImageDescriptions() {
+        mDelegate.disableImageDescriptions();
+    }
+
+    protected void setOnlyOnWifiRequirement(boolean onlyOnWifi) {
+        mDelegate.setOnlyOnWifiRequirement(onlyOnWifi);
+    }
+
+    protected void getImageDescriptionsJustOnce(boolean dontAskAgain, WebContents webContents) {
+        mDelegate.getImageDescriptionsJustOnce(dontAskAgain, webContents);
+    }
+
+    /**
+     * Helper method to return PrefService for last used regular profile.
+     * @return PrefService
+     */
+    private PrefService getPrefService() {
+        // TODO(mschillaci): Use the correct profile here for Incognito mode etc.
+        return UserPrefs.get(Profile.getLastUsedRegularProfile());
+    }
+
+    /**
+     * Helper method to return SharedPreferencesManager instance.
+     * @return SharedPreferencesManager
+     */
+    private SharedPreferencesManager getSharedPrefs() {
+        return SharedPreferencesManager.getInstance();
+    }
+
+    @NativeMethods
+    interface Natives {
+        void getImageDescriptionsOnce(WebContents webContents);
+    }
+}

@@ -10,6 +10,7 @@
 #include "base/test/task_environment.h"
 #include "build/build_config.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
+#include "components/safe_browsing/buildflags.h"
 #include "components/safe_browsing/core/common/test_task_environment.h"
 #include "components/safe_browsing/core/features.h"
 #include "components/safe_browsing/core/verdict_cache_manager.h"
@@ -22,12 +23,6 @@
 #include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
 #include "services/network/test/test_url_loader_factory.h"
 #include "testing/platform_test.h"
-
-#if defined(OS_ANDROID)
-#include "base/strings/string_number_conversions.h"
-#include "base/system/sys_info.h"
-#include "components/safe_browsing/core/realtime/policy_engine.h"
-#endif
 
 using ::testing::_;
 
@@ -55,7 +50,7 @@ class RealTimeUrlLookupServiceTest : public PlatformTest {
     content_setting_map_ = new HostContentSettingsMap(
         &test_pref_service_, false /* is_off_the_record */,
         false /* store_last_modified */,
-        false /* migrate_requesting_and_top_level_origin_settings */);
+        false /* restore_session */);
     cache_manager_ = std::make_unique<VerdictCacheManager>(
         nullptr, content_setting_map_.get());
 
@@ -63,7 +58,9 @@ class RealTimeUrlLookupServiceTest : public PlatformTest {
     rt_service_ = std::make_unique<RealTimeUrlLookupService>(
         test_shared_loader_factory_, cache_manager_.get(),
         identity_test_env_->identity_manager(), &test_sync_service_,
-        &test_pref_service_, /* is_off_the_record */ false);
+        &test_pref_service_, ChromeUserPopulation::NOT_MANAGED,
+        /*is_under_advanced_protection=*/true,
+        /*is_off_the_record=*/false, /*variations_service=*/nullptr);
   }
 
   void TearDown() override {
@@ -72,7 +69,7 @@ class RealTimeUrlLookupServiceTest : public PlatformTest {
   }
 
   bool CanCheckUrl(const GURL& url) {
-    return RealTimeUrlLookupService::CanCheckUrl(url);
+    return RealTimeUrlLookupServiceBase::CanCheckUrl(url);
   }
   void HandleLookupError() { rt_service_->HandleLookupError(); }
   void HandleLookupSuccess() { rt_service_->HandleLookupSuccess(); }
@@ -134,38 +131,13 @@ class RealTimeUrlLookupServiceTest : public PlatformTest {
     test_pref_service_.SetUserPref(
         unified_consent::prefs::kUrlKeyedAnonymizedDataCollectionEnabled,
         std::make_unique<base::Value>(true));
-#if defined(OS_ANDROID)
-    int system_memory_size = base::SysInfo::AmountOfPhysicalMemoryMB();
-    int memory_size_threshold = system_memory_size - 1;
-    if (is_with_token_enabled) {
-      feature_list_.InitWithFeaturesAndParameters(
-          /* enabled_features */ {{kRealTimeUrlLookupEnabled,
-                                   { {
-                                     kRealTimeUrlLookupMemoryThresholdMb,
-                                     base::NumberToString(memory_size_threshold)
-                                   } }},
-                                  { kRealTimeUrlLookupEnabledWithToken,
-                                    {} }},
-          /* disabled_features */ {});
-    } else {
-      feature_list_.InitWithFeaturesAndParameters(
-          /* enabled_features */ {{
-            kRealTimeUrlLookupEnabled,
-            {
-              { kRealTimeUrlLookupMemoryThresholdMb,
-                base::NumberToString(memory_size_threshold) }
-            }
-          }},
-          /* disabled_features */ {});
-    }
-#else
     if (is_with_token_enabled) {
       feature_list_.InitWithFeatures(
           {kRealTimeUrlLookupEnabled, kRealTimeUrlLookupEnabledWithToken}, {});
     } else {
-      feature_list_.InitWithFeatures({kRealTimeUrlLookupEnabled}, {});
+      feature_list_.InitWithFeatures({kRealTimeUrlLookupEnabled},
+                                     {kRealTimeUrlLookupEnabledWithToken});
     }
-#endif
   }
 
   void SetupPrimaryAccount() {
@@ -206,6 +178,12 @@ TEST_F(RealTimeUrlLookupServiceTest, TestFillRequestProto) {
     EXPECT_EQ(RTLookupRequest::NAVIGATION, result->lookup_type());
     EXPECT_EQ(ChromeUserPopulation::SAFE_BROWSING,
               result->population().user_population());
+    EXPECT_TRUE(result->population().is_history_sync_enabled());
+    EXPECT_EQ(ChromeUserPopulation::NOT_MANAGED,
+              result->population().profile_management_status());
+#if BUILDFLAG(FULL_SAFE_BROWSING)
+    EXPECT_TRUE(result->population().is_under_advanced_protection());
+#endif
   }
 }
 
@@ -490,16 +468,16 @@ TEST_F(RealTimeUrlLookupServiceTest, TestExponentialBackoffWithResetOnSuccess) {
 
 TEST_F(RealTimeUrlLookupServiceTest, TestGetSBThreatTypeForRTThreatType) {
   EXPECT_EQ(SB_THREAT_TYPE_URL_MALWARE,
-            RealTimeUrlLookupService::GetSBThreatTypeForRTThreatType(
+            RealTimeUrlLookupServiceBase::GetSBThreatTypeForRTThreatType(
                 RTLookupResponse::ThreatInfo::WEB_MALWARE));
   EXPECT_EQ(SB_THREAT_TYPE_URL_PHISHING,
-            RealTimeUrlLookupService::GetSBThreatTypeForRTThreatType(
+            RealTimeUrlLookupServiceBase::GetSBThreatTypeForRTThreatType(
                 RTLookupResponse::ThreatInfo::SOCIAL_ENGINEERING));
   EXPECT_EQ(SB_THREAT_TYPE_URL_UNWANTED,
-            RealTimeUrlLookupService::GetSBThreatTypeForRTThreatType(
+            RealTimeUrlLookupServiceBase::GetSBThreatTypeForRTThreatType(
                 RTLookupResponse::ThreatInfo::UNWANTED_SOFTWARE));
   EXPECT_EQ(SB_THREAT_TYPE_BILLING,
-            RealTimeUrlLookupService::GetSBThreatTypeForRTThreatType(
+            RealTimeUrlLookupServiceBase::GetSBThreatTypeForRTThreatType(
                 RTLookupResponse::ThreatInfo::UNCLEAR_BILLING));
 }
 
@@ -517,10 +495,11 @@ TEST_F(RealTimeUrlLookupServiceTest, TestCanCheckUrl) {
                              {"http://10.1.1.1/path", false},
                              {"http://10.1.1.1.1/path", true},
                              {"http://example.test/path", true},
-                             {"https://example.test/path", true}};
-  for (size_t i = 0; i < base::size(can_check_url_cases); i++) {
-    GURL url(can_check_url_cases[i].url);
-    bool expected_can_check = can_check_url_cases[i].can_check;
+                             {"http://nodothost/path", false},
+                             {"http://x.x/shorthost", false}};
+  for (auto& can_check_url_case : can_check_url_cases) {
+    GURL url(can_check_url_case.url);
+    bool expected_can_check = can_check_url_case.can_check;
     EXPECT_EQ(expected_can_check, CanCheckUrl(url));
   }
 }
@@ -564,7 +543,8 @@ TEST_F(RealTimeUrlLookupServiceTest, TestStartLookup_ResponseIsAlreadyCached) {
 
   // |request_callback| should not be called.
   EXPECT_CALL(request_callback, Run(_, _)).Times(0);
-  EXPECT_CALL(response_callback, Run(/* is_rt_lookup_successful */ true, _));
+  EXPECT_CALL(response_callback, Run(/* is_rt_lookup_successful */ true,
+                                     /* is_cached_response */ true, _));
 
   task_environment_->RunUntilIdle();
 
@@ -591,12 +571,14 @@ TEST_F(RealTimeUrlLookupServiceTest,
       url,
       base::BindOnce(
           [](std::unique_ptr<RTLookupRequest> request, std::string token) {
+            EXPECT_FALSE(request->has_dm_token());
             // Check token is attached.
             EXPECT_EQ("access_token_string", token);
           }),
       response_callback.Get());
 
-  EXPECT_CALL(response_callback, Run(/* is_rt_lookup_successful */ true, _));
+  EXPECT_CALL(response_callback, Run(/* is_rt_lookup_successful */ true,
+                                     /* is_cached_response */ false, _));
 
   WaitForAccessTokenRequestIfNecessaryAndRespondWithToken(
       "access_token_string");
@@ -630,7 +612,8 @@ TEST_F(RealTimeUrlLookupServiceTest, TestStartLookup_NoTokenWhenNotSignedIn) {
           }),
       response_callback.Get());
 
-  EXPECT_CALL(response_callback, Run(/* is_rt_lookup_successful */ true, _));
+  EXPECT_CALL(response_callback, Run(/* is_rt_lookup_successful */ true,
+                                     /* is_cached_response */ false, _));
 
   task_environment_->RunUntilIdle();
 
@@ -660,7 +643,8 @@ TEST_F(RealTimeUrlLookupServiceTest,
           }),
       response_callback.Get());
 
-  EXPECT_CALL(response_callback, Run(/* is_rt_lookup_successful */ true, _));
+  EXPECT_CALL(response_callback, Run(/* is_rt_lookup_successful */ true,
+                                     /* is_cached_response */ false, _));
 
   task_environment_->RunUntilIdle();
 

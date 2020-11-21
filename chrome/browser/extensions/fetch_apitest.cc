@@ -10,6 +10,7 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "extensions/common/extension.h"
 #include "extensions/test/test_extension_dir.h"
@@ -324,9 +325,8 @@ IN_PROC_BROWSER_TEST_P(ExtensionFetchPostOriginTest,
       embedded_test_server()->GetURL("example.com", "/echo-origin");
   std::string script = content::JsReplace(kFetchPostScript, destination_url);
   std::string origin_string =
-      network::features::ShouldEnableOutOfBlinkCorsForTesting() && GetParam()
-          ? url::Origin::Create(destination_url).Serialize()
-          : url::Origin::Create(extension->url()).Serialize();
+      GetParam() ? url::Origin::Create(destination_url).Serialize()
+                 : url::Origin::Create(extension->url()).Serialize();
   EXPECT_EQ(origin_string,
             ExecuteScriptInBackgroundPage(extension->id(), script));
 }

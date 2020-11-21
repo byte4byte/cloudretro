@@ -6,39 +6,31 @@
     },
     {
       "name": "LayoutBlockFlow (positioned) DIV class='stacking-context'",
+      "position": [8, 8],
       "contentsOpaque": true,
-      "drawsContent": false,
-      "backgroundColor": "#FF0000",
-      "transform": 1
+      "drawsContent": false
     },
     {
       "name": "LayoutBlockFlow (positioned) DIV class='stacking-context'",
+      "position": [8, 8],
       "bounds": [160, 90],
       "contentsOpaque": true,
-      "backgroundColor": "#008000",
-      "transform": 1
+      "backgroundColor": "#008000"
     },
     {
       "name": "LayoutImage IMG class='accelerated blended'",
-      "bounds": [160, 90],
-      "drawsContent": false,
-      "transform": 1
-    },
-    {
-      "name": "ContentsLayer for LayoutImage IMG class='accelerated blended'",
       "bounds": [160, 90],
       "transform": 1
     },
     {
       "name": "LayoutBlockFlow (positioned) DIV class='stacking-context' (foreground) Layer",
-      "drawsContent": false,
-      "transform": 1
+      "position": [8, 8],
+      "drawsContent": false
     },
     {
       "name": "LayoutBlockFlow (positioned) DIV class='accelerated stacking-context'",
       "contentsOpaque": true,
       "drawsContent": false,
-      "backgroundColor": "#FF0000",
       "transform": 2
     },
     {
@@ -50,12 +42,6 @@
     },
     {
       "name": "LayoutImage IMG class='accelerated blended'",
-      "bounds": [160, 90],
-      "drawsContent": false,
-      "transform": 2
-    },
-    {
-      "name": "ContentsLayer for LayoutImage IMG class='accelerated blended'",
       "bounds": [160, 90],
       "transform": 2
     },

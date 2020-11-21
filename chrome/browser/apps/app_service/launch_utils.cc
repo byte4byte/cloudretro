@@ -16,6 +16,7 @@
 #include "chrome/browser/web_applications/components/app_registrar.h"
 #include "chrome/browser/web_applications/components/web_app_provider_base.h"
 #include "chrome/browser/web_applications/components/web_app_tab_helper_base.h"
+#include "chrome/browser/web_applications/components/web_app_utils.h"
 #include "chrome/browser/web_applications/web_app_tab_helper.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/webui_url_constants.h"
@@ -64,6 +65,9 @@ bool IsInstalledApp(Profile* profile, const std::string& app_id) {
 void SetAppIdForWebContents(Profile* profile,
                             content::WebContents* web_contents,
                             const std::string& app_id) {
+  if (!web_app::AreWebAppsEnabled(profile)) {
+    return;
+  }
   extensions::TabHelper::CreateForWebContents(web_contents);
   web_app::WebAppTabHelper::CreateForWebContents(web_contents);
   const extensions::Extension* extension =
@@ -108,7 +112,7 @@ std::vector<base::FilePath> GetLaunchFilesFromCommandLine(
 
 Browser* CreateBrowserWithNewTabPage(Profile* profile) {
   Browser::CreateParams create_params(profile, /*user_gesture=*/false);
-  Browser* browser = new Browser(create_params);
+  Browser* browser = Browser::Create(create_params);
 
   NavigateParams params(browser, GURL(chrome::kChromeUINewTabURL),
                         ui::PAGE_TRANSITION_AUTO_TOPLEVEL);
@@ -153,22 +157,26 @@ apps::AppLaunchParams CreateAppLaunchParamsForIntent(
     apps::mojom::AppLaunchSource source,
     int64_t display_id,
     apps::mojom::LaunchContainer fallback_container,
-    const apps::mojom::IntentPtr& intent) {
+    apps::mojom::IntentPtr&& intent) {
   auto params = CreateAppIdLaunchParamsWithEventFlags(
       app_id, event_flags, source, display_id, fallback_container);
 
-  if (intent->scheme.has_value() && intent->host.has_value() &&
-      intent->path.has_value()) {
+  if (intent->url.has_value()) {
     params.source = apps::mojom::AppLaunchSource::kSourceIntentUrl;
+    params.override_url = intent->url.value();
+    LOG(ERROR) << "url is:" << params.override_url.spec();
     std::string port;
-    if (intent->port.has_value()) {
-      port = ":" + intent->port.value();
+    if (intent->url->has_port()) {
+      port = ":" + intent->url->port();
     }
     params.override_url =
-        GURL(intent->scheme.value() + url::kStandardSchemeSeparator +
-             intent->host.value() + port + intent->path.value());
+        GURL(intent->url->scheme() + url::kStandardSchemeSeparator +
+             intent->url->host() + port + intent->url->path());
+    LOG(ERROR) << "url is:" << params.override_url.spec();
     DCHECK(params.override_url.is_valid());
   }
+
+  params.intent = std::move(intent);
 
   return params;
 }
@@ -188,12 +196,14 @@ apps::mojom::AppLaunchSource GetAppLaunchSource(
     case apps::mojom::LaunchSource::kFromOmnibox:
     case apps::mojom::LaunchSource::kFromOtherApp:
     case apps::mojom::LaunchSource::kFromMenu:
+    case apps::mojom::LaunchSource::kFromSharesheet:
       return apps::mojom::AppLaunchSource::kSourceAppLauncher;
     case apps::mojom::LaunchSource::kFromKeyboard:
       return apps::mojom::AppLaunchSource::kSourceKeyboard;
     case apps::mojom::LaunchSource::kFromFileManager:
       return apps::mojom::AppLaunchSource::kSourceFileHandler;
     case apps::mojom::LaunchSource::kFromChromeInternal:
+    case apps::mojom::LaunchSource::kFromReleaseNotesNotification:
       return apps::mojom::AppLaunchSource::kSourceChromeInternal;
     case apps::mojom::LaunchSource::kFromInstalledNotification:
       return apps::mojom::AppLaunchSource::kSourceInstalledNotification;

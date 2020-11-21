@@ -41,6 +41,7 @@
 #include "third_party/blink/renderer/core/input_type_names.h"
 #include "third_party/blink/renderer/core/layout/layout_block.h"
 #include "third_party/blink/renderer/core/layout/layout_image.h"
+#include "third_party/blink/renderer/core/layout/ng/ng_physical_box_fragment.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/page/scrolling/top_document_root_scroller_controller.h"
 #include "third_party/blink/renderer/core/scroll/scrollbar.h"
@@ -73,6 +74,7 @@ HitTestResult::HitTestResult(const HitTestResult& other)
       local_point_(other.LocalPoint()),
       inner_url_element_(other.URLElement()),
       scrollbar_(other.GetScrollbar()),
+      box_fragment_(other.box_fragment_),
       is_over_embedded_content_view_(other.IsOverEmbeddedContentView()),
       canvas_region_id_(other.CanvasRegionId()) {
   // Only copy the NodeSet in case of list hit test.
@@ -100,6 +102,7 @@ bool HitTestResult::EqualForCacheability(const HitTestResult& other) const {
          local_point_ == other.LocalPoint() &&
          inner_url_element_ == other.URLElement() &&
          scrollbar_ == other.GetScrollbar() &&
+         box_fragment_ == other.box_fragment_ &&
          is_over_embedded_content_view_ == other.IsOverEmbeddedContentView();
 }
 
@@ -117,6 +120,8 @@ void HitTestResult::PopulateFromCachedResult(const HitTestResult& other) {
   local_point_ = other.LocalPoint();
   inner_url_element_ = other.URLElement();
   scrollbar_ = other.GetScrollbar();
+  box_fragment_ = other.box_fragment_;
+
   is_over_embedded_content_view_ = other.IsOverEmbeddedContentView();
   cacheable_ = other.cacheable_;
   canvas_region_id_ = other.CanvasRegionId();
@@ -128,7 +133,7 @@ void HitTestResult::PopulateFromCachedResult(const HitTestResult& other) {
           : nullptr;
 }
 
-void HitTestResult::Trace(Visitor* visitor) {
+void HitTestResult::Trace(Visitor* visitor) const {
   visitor->Trace(inner_node_);
   visitor->Trace(inert_node_);
   visitor->Trace(inner_element_);
@@ -136,6 +141,20 @@ void HitTestResult::Trace(Visitor* visitor) {
   visitor->Trace(inner_url_element_);
   visitor->Trace(scrollbar_);
   visitor->Trace(list_based_test_result_);
+}
+
+void HitTestResult::SetNodeAndPosition(
+    Node* node,
+    scoped_refptr<const NGPhysicalBoxFragment> box_fragment,
+    const PhysicalOffset& position) {
+  SetBoxFragment(std::move(box_fragment));
+  SetNodeAndPosition(node, position);
+}
+
+void HitTestResult::SetBoxFragment(
+    scoped_refptr<const NGPhysicalBoxFragment> box_fragment) {
+  DCHECK(!box_fragment || !box_fragment->IsInlineBox());
+  box_fragment_ = std::move(box_fragment);
 }
 
 PositionWithAffinity HitTestResult::GetPosition() const {
@@ -149,7 +168,30 @@ PositionWithAffinity HitTestResult::GetPosition() const {
     return PositionWithAffinity(MostForwardCaretPosition(
         Position(inner_node_, PositionAnchorType::kBeforeChildren)));
   }
+  if (box_fragment_ && NGPhysicalBoxFragment::SupportsPositionForPoint())
+    return box_fragment_->PositionForPoint(LocalPoint());
   return layout_object->PositionForPoint(LocalPoint());
+}
+
+PositionWithAffinity HitTestResult::GetPositionForInnerNodeOrImageMapImage()
+    const {
+  Node* node = InnerPossiblyPseudoNode();
+  if (node && !node->IsPseudoElement())
+    node = InnerNodeOrImageMapImage();
+  if (!node)
+    return PositionWithAffinity();
+  LayoutObject* layout_object = node->GetLayoutObject();
+  if (!layout_object)
+    return PositionWithAffinity();
+  PositionWithAffinity position;
+  if (box_fragment_ && NGPhysicalBoxFragment::SupportsPositionForPoint() &&
+      layout_object == GetLayoutObject())
+    position = box_fragment_->PositionForPoint(LocalPoint());
+  else
+    position = layout_object->PositionForPoint(LocalPoint());
+  if (position.IsNull())
+    return PositionWithAffinity(FirstPositionInOrBeforeNode(*node));
+  return position;
 }
 
 LayoutObject* HitTestResult::GetLayoutObject() const {
@@ -230,6 +272,7 @@ void HitTestResult::SetInnerNode(Node* n) {
     inner_possibly_pseudo_node_ = nullptr;
     inner_node_ = nullptr;
     inner_element_ = nullptr;
+    box_fragment_ = nullptr;
     return;
   }
 
@@ -245,6 +288,23 @@ void HitTestResult::SetInnerNode(Node* n) {
       if (inert_node_ && n != inert_node_ &&
           !n->IsShadowIncludingInclusiveAncestorOf(*inert_node_)) {
         return;
+      }
+    }
+  }
+
+  if (NGPhysicalBoxFragment::SupportsPositionForPoint()) {
+    if (const LayoutBox* layout_box = n->GetLayoutBox()) {
+      // Fragmentation-aware code will set the correct box fragment on its own,
+      // but sometimes we enter legacy layout code when hit-testing, e.g. for
+      // replaced content. In such cases we need to set it here.
+      if (box_fragment_) {
+        DCHECK(!box_fragment_->GetLayoutObject() ||
+               layout_box == box_fragment_->GetLayoutObject());
+      } else if (layout_box->PhysicalFragmentCount() > 0) {
+        // If we set the fragment on our own, make sure that there's only one of
+        // them, since there's no way for us to pick the right one here.
+        DCHECK_EQ(layout_box->PhysicalFragmentCount(), 1u);
+        box_fragment_ = layout_box->GetPhysicalFragment(0);
       }
     }
   }
@@ -337,7 +397,7 @@ Image* HitTestResult::GetImage() const {
   LayoutObject* layout_object =
       inner_node_or_image_map_image->GetLayoutObject();
   if (layout_object && layout_object->IsImage()) {
-    LayoutImage* image = ToLayoutImage(layout_object);
+    auto* image = To<LayoutImage>(layout_object);
     if (image->CachedImage() && !image->CachedImage()->ErrorOccurred())
       return image->CachedImage()->GetImage();
   }

@@ -15,8 +15,7 @@
 #include "base/memory/scoped_refptr.h"
 #include "base/single_thread_task_runner.h"
 #include "chrome/browser/previews/previews_https_notification_infobar_decider.h"
-#include "chrome/browser/previews/previews_lite_page_redirect_decider.h"
-#include "components/blacklist/opt_out_blacklist/opt_out_blacklist_data.h"
+#include "components/blocklist/opt_out_blocklist/opt_out_blocklist_data.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "third_party/re2/src/re2/re2.h"
 
@@ -33,8 +32,6 @@ class PreviewsUIService;
 typedef std::vector<std::unique_ptr<re2::RE2>> RegexpList;
 }  // namespace previews
 
-class PreviewsOfflineHelper;
-
 // Keyed service that owns a previews::PreviewsUIService. PreviewsService lives
 // on the UI thread.
 class PreviewsService : public KeyedService {
@@ -48,22 +45,16 @@ class PreviewsService : public KeyedService {
       const scoped_refptr<base::SingleThreadTaskRunner>& ui_task_runner,
       const base::FilePath& profile_path);
 
-  // Allows the |previews_lite_page_redirect_decider_| to remove itself from
-  // observed classes.
+  // Allows members to remove themselves from observed classes.
   void Shutdown() override;
 
-  // Clears the history of the black lists in |previews_ui_service_| and
-  // |previews_lite_page_redirect_decider_| between |begin_time| and |end_time|.
-  void ClearBlackList(base::Time begin_time, base::Time end_time);
+  // Clears the history of the block lists in |previews_ui_service_| and between
+  // |begin_time| and |end_time|.
+  void ClearBlockList(base::Time begin_time, base::Time end_time);
 
   // The previews UI thread service.
   previews::PreviewsUIService* previews_ui_service() {
     return previews_ui_service_.get();
-  }
-
-  // The server lite page preview decider.
-  PreviewsLitePageRedirectDecider* previews_lite_page_redirect_decider() {
-    return previews_lite_page_redirect_decider_.get();
   }
 
   // The https notification infobar decider.
@@ -72,12 +63,8 @@ class PreviewsService : public KeyedService {
     return previews_https_notification_infobar_decider_.get();
   }
 
-  PreviewsOfflineHelper* previews_offline_helper() {
-    return previews_offline_helper_.get();
-  }
-
   // Returns the enabled PreviewsTypes with their version.
-  static blacklist::BlacklistData::AllowedTypesAndVersions GetAllowedPreviews();
+  static blocklist::BlocklistData::AllowedTypesAndVersions GetAllowedPreviews();
 
   // Called when that there is a redirect from |start_url| to |end_url|. Called
   // only when DeferAllScript preview feature is enabled.
@@ -101,16 +88,9 @@ class PreviewsService : public KeyedService {
   // The previews UI thread service.
   std::unique_ptr<previews::PreviewsUIService> previews_ui_service_;
 
-  // The server lite page preview decider.
-  std::unique_ptr<PreviewsLitePageRedirectDecider>
-      previews_lite_page_redirect_decider_;
-
   // The decider for showing the HTTPS Notification InfoBar.
   std::unique_ptr<PreviewsHTTPSNotificationInfoBarDecider>
       previews_https_notification_infobar_decider_;
-
-  // The offline previews helper.
-  std::unique_ptr<PreviewsOfflineHelper> previews_offline_helper_;
 
   // Guaranteed to outlive |this|.
   content::BrowserContext* browser_context_;

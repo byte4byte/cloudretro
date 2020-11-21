@@ -8,15 +8,16 @@
 
 #include "base/bind.h"
 #include "base/location.h"
+#include "base/logging.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "components/signin/public/identity_manager/account_info.h"
 #include "components/sync/base/data_type_histogram.h"
 #include "components/sync/driver/configure_context.h"
-#include "components/sync/driver/sync_merge_result.h"
 #include "components/sync/engine/data_type_activation_response.h"
 #include "components/sync/engine/model_type_configurer.h"
 #include "components/sync/model/data_type_activation_request.h"
 #include "components/sync/model/data_type_error_handler_impl.h"
+#include "components/sync/model/type_entities_count.h"
 
 namespace syncer {
 namespace {
@@ -62,7 +63,7 @@ ModelTypeController::ModelTypeController(
                           std::move(delegate_for_transport_mode));
 }
 
-ModelTypeController::~ModelTypeController() {}
+ModelTypeController::~ModelTypeController() = default;
 
 void ModelTypeController::InitModelTypeController(
     std::unique_ptr<ModelTypeControllerDelegate> delegate_for_full_sync_mode,
@@ -83,14 +84,7 @@ ModelTypeController::ActivateManuallyForNigori() {
   DCHECK_EQ(MODEL_LOADED, state_);
   DCHECK(activation_response_);
   state_ = RUNNING;
-  activated_ = true;  // Not relevant, but for consistency.
   return std::move(activation_response_);
-}
-
-bool ModelTypeController::ShouldLoadModelBeforeConfigure() const {
-  // USS datatypes require loading models because model controls storage where
-  // data type context and progress marker are persisted.
-  return true;
 }
 
 void ModelTypeController::LoadModels(
@@ -128,55 +122,31 @@ void ModelTypeController::LoadModels(
                               base::AsWeakPtr(this)));
 }
 
-void ModelTypeController::BeforeLoadModels(ModelTypeConfigurer* configurer) {}
-
-DataTypeController::RegisterWithBackendResult
-ModelTypeController::RegisterWithBackend(ModelTypeConfigurer* configurer) {
+DataTypeController::ActivateDataTypeResult
+ModelTypeController::ActivateDataType(ModelTypeConfigurer* configurer) {
   DCHECK(CalledOnValidThread());
-  if (activated_)
-    return REGISTRATION_IGNORED;
   DCHECK(configurer);
   DCHECK(activation_response_);
   DCHECK_EQ(MODEL_LOADED, state_);
+
   bool initial_sync_done =
       activation_response_->model_type_state.initial_sync_done();
   // Pass activation context to ModelTypeRegistry, where ModelTypeWorker gets
   // created and connected with the delegate (processor).
-  configurer->ActivateNonBlockingDataType(type(),
-                                          std::move(activation_response_));
-  activated_ = true;
-  return initial_sync_done ? TYPE_ALREADY_DOWNLOADED : TYPE_NOT_YET_DOWNLOADED;
-}
-
-void ModelTypeController::StartAssociating(StartCallback start_callback) {
-  DCHECK(CalledOnValidThread());
-  DCHECK(start_callback);
-  DCHECK_EQ(MODEL_LOADED, state_);
+  configurer->ActivateDataType(type(), std::move(activation_response_));
 
   state_ = RUNNING;
   DVLOG(1) << "Sync running for " << ModelTypeToString(type());
 
-  // There is no association, just call back promptly.
-  SyncMergeResult merge_result(type());
-  std::move(start_callback).Run(OK, merge_result, merge_result);
-}
-
-void ModelTypeController::ActivateDataType(ModelTypeConfigurer* configurer) {
-  DCHECK(CalledOnValidThread());
-  DCHECK(configurer);
-  DCHECK_EQ(RUNNING, state_);
-  // In contrast with directory datatypes, non-blocking data types should be
-  // activated in RegisterWithBackend. activation_response_ should be
-  // passed to backend before call to ActivateDataType.
-  DCHECK(!activation_response_);
+  return initial_sync_done ? TYPE_ALREADY_DOWNLOADED : TYPE_NOT_YET_DOWNLOADED;
 }
 
 void ModelTypeController::DeactivateDataType(ModelTypeConfigurer* configurer) {
   DCHECK(CalledOnValidThread());
   DCHECK(configurer);
-  if (activated_) {
-    configurer->DeactivateNonBlockingDataType(type());
-    activated_ = false;
+  if (state_ == RUNNING) {
+    configurer->DeactivateDataType(type());
+    state_ = MODEL_LOADED;
   }
 }
 
@@ -197,11 +167,6 @@ void ModelTypeController::Stop(ShutdownReason shutdown_reason,
   }
 
   switch (state()) {
-    case ASSOCIATING:
-      // We don't really use this state in this class.
-      NOTREACHED();
-      break;
-
     case NOT_RUNNING:
     case FAILED:
       // Nothing to stop. |metadata_fate| might require CLEAR_METADATA,
@@ -245,14 +210,26 @@ DataTypeController::State ModelTypeController::state() const {
   return state_;
 }
 
+bool ModelTypeController::ShouldRunInTransportOnlyMode() const {
+  // By default, running in transport-only mode is enabled if the corresponding
+  // delegate exists, i.e. the controller is aware of transport-only mode and
+  // supports it in principle. Subclass can still override this with more
+  // specific logic.
+  return delegate_map_.count(SyncMode::kTransportOnly) != 0;
+}
+
 void ModelTypeController::GetAllNodes(AllNodesCallback callback) {
   DCHECK(delegate_);
   delegate_->GetAllNodesForDebugging(std::move(callback));
 }
 
-void ModelTypeController::GetStatusCounters(StatusCountersCallback callback) {
-  DCHECK(delegate_);
-  delegate_->GetStatusCountersForDebugging(std::move(callback));
+void ModelTypeController::GetTypeEntitiesCount(
+    base::OnceCallback<void(const TypeEntitiesCount&)> callback) const {
+  if (delegate_) {
+    delegate_->GetTypeEntitiesCountForDebugging(std::move(callback));
+  } else {
+    std::move(callback).Run(TypeEntitiesCount(type()));
+  }
 }
 
 void ModelTypeController::RecordMemoryUsageAndCountsHistograms() {
@@ -260,9 +237,9 @@ void ModelTypeController::RecordMemoryUsageAndCountsHistograms() {
   delegate_->RecordMemoryUsageAndCountsHistograms();
 }
 
-ModelTypeControllerDelegate*
-ModelTypeController::GetDelegateForTransportModeForTest() {
-  auto it = delegate_map_.find(SyncMode::kTransportOnly);
+ModelTypeControllerDelegate* ModelTypeController::GetDelegateForTesting(
+    SyncMode sync_mode) {
+  auto it = delegate_map_.find(sync_mode);
   return it != delegate_map_.end() ? it->second.get() : nullptr;
 }
 
@@ -295,9 +272,6 @@ void ModelTypeController::ReportModelError(SyncError::ErrorType error_type,
     case FAILED:
       // Do not record for the second time and exit early.
       return;
-    case ASSOCIATING:
-      // Not possible, we do not use associating in this class.
-      NOTREACHED();
   }
 
   state_ = FAILED;
@@ -345,7 +319,6 @@ void ModelTypeController::OnDelegateStarted(
     case MODEL_LOADED:
     case RUNNING:
     case NOT_RUNNING:
-    case ASSOCIATING:
       NOTREACHED() << " type " << ModelTypeToString(type()) << " state "
                    << StateToString(state_);
   }

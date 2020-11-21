@@ -84,6 +84,7 @@ DataReductionProxyService::DataReductionProxyService(
       channel_(channel),
       save_data_savings_estimate_dict_(
           GetSaveDataSavingsPercentEstimateFromFieldTrial()) {
+  DCHECK(data_use_measurement_);
   DCHECK(settings);
   DCHECK(network_quality_tracker_);
   DCHECK(network_connection_tracker_);
@@ -101,8 +102,7 @@ DataReductionProxyService::DataReductionProxyService(
   // It is safe to use base::Unretained here, since it gets executed
   // synchronously on the UI thread, and |this| outlives the caller (since the
   // caller is owned by |this|.
-  if (previews::params::IsLitePageServerPreviewsEnabled() ||
-      params::ForceEnableClientConfigServiceForAllDataSaverUsers()) {
+  if (params::ForceEnableClientConfigServiceForAllDataSaverUsers()) {
     config_client_ = std::make_unique<DataReductionProxyConfigServiceClient>(
         GetBackoffPolicy(), request_options_.get(), this,
         network_connection_tracker_,
@@ -264,7 +264,6 @@ void DataReductionProxyService::SetProxyPrefs(bool enabled, bool at_startup) {
   }
 }
 
-
 net::EffectiveConnectionType
 DataReductionProxyService::GetEffectiveConnectionType() const {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
@@ -297,12 +296,6 @@ void DataReductionProxyService::UpdatePrefetchProxyHosts(
 
 void DataReductionProxyService::OnProxyConfigUpdated() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-}
-
-void DataReductionProxyService::SetIgnoreLongTermBlackListRules(
-    bool ignore_long_term_black_list_rules) {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  settings_->SetIgnoreLongTermBlackListRules(ignore_long_term_black_list_rules);
 }
 
 void DataReductionProxyService::AddCustomProxyConfigClient(
@@ -388,9 +381,7 @@ void DataReductionProxyService::OnServicesDataUse(int32_t service_hash_code,
 void DataReductionProxyService::StoreSerializedConfig(
     const std::string& serialized_config) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  DCHECK(previews::params::IsLitePageServerPreviewsEnabled() ||
-         params::ForceEnableClientConfigServiceForAllDataSaverUsers());
-
+  DCHECK(params::ForceEnableClientConfigServiceForAllDataSaverUsers());
   SetStringPref(prefs::kDataReductionProxyConfig, serialized_config);
   SetInt64Pref(prefs::kDataReductionProxyLastConfigRetrievalTime,
                (base::Time::Now() - base::Time()).InMicroseconds());

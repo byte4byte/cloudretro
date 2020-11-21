@@ -13,6 +13,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/settings_window_manager_chromeos.h"
+#include "chrome/browser/ui/webui/settings/chromeos/constants/routes.mojom.h"
 #include "chrome/common/webui_url_constants.h"
 #include "chrome/grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -80,8 +81,13 @@ void UsbPrinterNotification::Click(
     // Body of notification clicked.
     visible_ = false;
     if (type_ == Type::kConfigurationRequired) {
+      // If we are in guest mode then we need to use the OffTheRecord profile to
+      // open the Settings page. There is a check in Browser::Browser that only
+      // OffTheRecord profiles can open browser windows in guest mode.
       chrome::SettingsWindowManager::GetInstance()->ShowOSSettings(
-          profile_, chrome::kNativePrintingSettingsSubPage);
+          profile_->IsGuestSession() ? profile_->GetPrimaryOTRProfile()
+                                     : profile_,
+          chromeos::settings::mojom::kPrintingDetailsSubpagePath);
     }
     return;
   }

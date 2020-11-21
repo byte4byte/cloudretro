@@ -82,16 +82,21 @@ class WPTManifestUnitTest(unittest.TestCase):
     "items": {
         "testharness": {
             "test.any.js": [
-                ["/test.any.html", {}]
+                "8d4b9a583f484741f4cd4e4940833a890c612656",
+                ["test.any.html", {}]
             ]
         }
     }
 }
         '''
-        manifest = WPTManifest(manifest_json)
+        host = MockHost()
+        host.filesystem.write_text_file(
+            WEB_TEST_DIR + '/external/wpt/MANIFEST.json', manifest_json)
+        manifest = WPTManifest(
+            host, WEB_TEST_DIR + '/external/wpt/MANIFEST.json')
         self.assertTrue(manifest.is_test_file('test.any.js'))
         self.assertEqual(manifest.all_url_items(),
-                         {u'/test.any.html': [u'/test.any.html', {}]})
+                         {u'test.any.html': [u'test.any.html', {}]})
         self.assertEqual(manifest.extract_reference_list('/foo/bar.html'), [])
 
     def test_all_url_items_skips_jsshell_tests(self):
@@ -102,16 +107,21 @@ class WPTManifestUnitTest(unittest.TestCase):
         "reftest": {},
         "testharness": {
             "test.any.js": [
-                ["/test.any.html", {}],
-                ["/test.any.js", {"jsshell": true}]
+                "d23fbb8c66def47e31ad01aa7a311064ba8fddbd",
+                ["test.any.html", {}],
+                [null, {"jsshell": true}]
             ]
         }
     }
 }
         '''
-        manifest = WPTManifest(manifest_json)
+        host = MockHost()
+        host.filesystem.write_text_file(
+            WEB_TEST_DIR + '/external/wpt/MANIFEST.json', manifest_json)
+        manifest = WPTManifest(
+            host, WEB_TEST_DIR + '/external/wpt/MANIFEST.json')
         self.assertEqual(manifest.all_url_items(),
-                         {u'/test.any.html': [u'/test.any.html', {}]})
+                         {u'test.any.html': [u'test.any.html', {}]})
 
     def test_file_for_test(self):
         # Test that we can lookup a test's filename for various cases like
@@ -123,23 +133,28 @@ class WPTManifestUnitTest(unittest.TestCase):
         "reftest": {},
         "testharness": {
             "test.any.js": [
-                ["/test.any.html", {}],
-                ["/test.any.worker.html", {}]
+                "d23fbb8c66def47e31ad01aa7a311064ba8fddbd",
+                ["test.any.html", {}],
+                ["test.any.worker.html", {}]
             ]
         }
     }
 }       '''
-        manifest = WPTManifest(manifest_json)
+        host = MockHost()
+        host.filesystem.write_text_file(
+            WEB_TEST_DIR + '/external/wpt/MANIFEST.json', manifest_json)
+        manifest = WPTManifest(
+            host, WEB_TEST_DIR + '/external/wpt/MANIFEST.json')
         self.assertEqual(
             manifest.all_url_items(), {
-                u'/test.any.html': [u'/test.any.html', {}],
-                u'/test.any.worker.html': [u'/test.any.worker.html', {}]
+                u'test.any.html': [u'test.any.html', {}],
+                u'test.any.worker.html': [u'test.any.worker.html', {}]
             })
         # Ensure that we can get back to `test.any.js` from both of the tests.
         self.assertEqual(
-            manifest.file_path_for_test_url('/test.any.html'), 'test.any.js')
+            manifest.file_path_for_test_url('test.any.html'), 'test.any.js')
         self.assertEqual(
-            manifest.file_path_for_test_url('/test.any.worker.html'),
+            manifest.file_path_for_test_url('test.any.worker.html'),
             'test.any.js')
 
     def test_crash_tests(self):
@@ -152,18 +167,24 @@ class WPTManifestUnitTest(unittest.TestCase):
         "reftest": {},
         "testharness": {
             "test.html": [
-                ["test.html", {}]
+                "d23fbb8c66def47e31ad01aa7a311064ba8fddbd",
+                [null, {}]
             ]
         },
         "crashtest": {
             "test-crash.html": [
-                ["test-crash.html", {}]
+                "d23fbb8c66def47e31ad01aa7a311064ba8fddbd",
+                [null, {}]
             ]
         }
     }
 }
         '''
-        manifest = WPTManifest(manifest_json)
+        host = MockHost()
+        host.filesystem.write_text_file(
+            WEB_TEST_DIR + '/external/wpt/MANIFEST.json', manifest_json)
+        manifest = WPTManifest(
+            host, WEB_TEST_DIR + '/external/wpt/MANIFEST.json')
         self.assertEqual(
             manifest.all_url_items(), {
                 u'test.html': [u'test.html', {}],

@@ -8,6 +8,7 @@
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_view_host.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "extensions/test/extension_test_message_listener.h"
 #include "ui/base/test/ui_controls.h"
@@ -25,7 +26,7 @@ class ExtensionDialogUiTest : public extensions::ExtensionBrowserTest {
 
 }  // namespace
 
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
 // Focusing or input is not completely working on Mac: http://crbug.com/824418
 #define MAYBE_TabFocusLoop DISABLED_TabFocusLoop
 #else

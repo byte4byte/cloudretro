@@ -16,7 +16,7 @@
 #include "chrome/browser/ui/ash/launcher/app_service/app_service_instance_registry_helper.h"
 #include "chrome/browser/ui/ash/launcher/app_window_launcher_controller.h"
 #include "chrome/browser/ui/ash/launcher/arc_app_window_delegate.h"
-#include "chrome/services/app_service/public/cpp/instance_registry.h"
+#include "components/services/app_service/public/cpp/instance_registry.h"
 #include "ui/aura/env_observer.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_observer.h"
@@ -99,6 +99,9 @@ class AppServiceAppWindowLauncherController
 
   AppWindowBase* GetAppWindow(aura::Window* window);
 
+  void ObserveWindow(aura::Window* window);
+  bool IsObservingWindow(aura::Window* window);
+
   std::vector<aura::Window*> GetArcWindows();
 
   ProfileList& GetProfileList() { return profile_list_; }
@@ -123,15 +126,13 @@ class AppServiceAppWindowLauncherController
   // AppWindowLauncherController:
   void OnItemDelegateDiscarded(ash::ShelfItemDelegate* delegate) override;
 
-  // Returns the shelf id for |window|. The window could be teleported from the
-  // inactive user to the active user. When |search_profile_list| is true, we
-  // should check the all proxies for all profiles, otherwise, only check the
-  // current active user profile's proxy.
-  //
-  // When |window|'s visibility or activate status is changed,
-  // |search_profile_list| is false to check the active user profile only. When
-  // |window| is destroyed, |search_profile_list| is true to check all proxies.
-  ash::ShelfID GetShelfId(aura::Window* window, bool search_profile_list) const;
+  // Returns the shelf id for |window|. |window| could be teleported from the
+  // inactive user to the active user, or during the user switch phase, |window|
+  // could belong to one of the profile.
+  ash::ShelfID GetShelfId(aura::Window* window) const;
+
+  // Returns the app type for the given |app_id|.
+  apps::mojom::AppType GetAppType(const std::string& app_id) const;
 
   // Register |window| if the owner of the given |window| has a window
   // teleported of the |window|'s application type to the current desktop.

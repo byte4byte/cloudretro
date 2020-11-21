@@ -7,11 +7,13 @@
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/apps/platform_apps/app_browsertest_util.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/version_info/version_info.h"
+#include "content/public/test/browser_test.h"
 #include "extensions/browser/app_window/app_window.h"
 #include "extensions/browser/app_window/app_window_registry.h"
 #include "extensions/browser/app_window/native_app_window.h"
@@ -24,7 +26,7 @@
 #include "ui/base/win/shell.h"
 #endif
 
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
 #include "base/mac/mac_util.h"
 #endif
 
@@ -55,7 +57,9 @@ IN_PROC_BROWSER_TEST_F(ExperimentalAppWindowApiTest, SetIcon) {
 }
 
 // TODO(crbug.com/794771): These fail on Linux with HEADLESS env var set.
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
+// TODO(crbug.com/1052397): Revisit the macro expression once build flag switch
+// of lacros-chrome is complete.
+#if defined(OS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)
 #define MAYBE_OnMinimizedEvent DISABLED_OnMinimizedEvent
 #define MAYBE_OnMaximizedEvent DISABLED_OnMaximizedEvent
 #define MAYBE_OnRestoredEvent DISABLED_OnRestoredEvent
@@ -63,10 +67,10 @@ IN_PROC_BROWSER_TEST_F(ExperimentalAppWindowApiTest, SetIcon) {
 #define MAYBE_OnMinimizedEvent OnMinimizedEvent
 #define MAYBE_OnMaximizedEvent OnMaximizedEvent
 #define MAYBE_OnRestoredEvent OnRestoredEvent
-#endif  // defined(OS_LINUX)
+#endif  // defined(OS_LINUX) || defined(OS_CHROMEOS)
 
 IN_PROC_BROWSER_TEST_F(AppWindowApiTest, MAYBE_OnMinimizedEvent) {
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
   if (base::mac::IsOS10_10())
     return;  // Fails when swarmed. http://crbug.com/660582,
 #endif
@@ -76,7 +80,7 @@ IN_PROC_BROWSER_TEST_F(AppWindowApiTest, MAYBE_OnMinimizedEvent) {
 }
 
 IN_PROC_BROWSER_TEST_F(AppWindowApiTest, MAYBE_OnMaximizedEvent) {
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
   if (base::mac::IsOS10_10())
     return;  // Fails when swarmed. http://crbug.com/660582,
 #endif
@@ -86,7 +90,7 @@ IN_PROC_BROWSER_TEST_F(AppWindowApiTest, MAYBE_OnMaximizedEvent) {
 }
 
 IN_PROC_BROWSER_TEST_F(AppWindowApiTest, MAYBE_OnRestoredEvent) {
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
   if (base::mac::IsOS10_10())
     return;  // Fails when swarmed. http://crbug.com/660582,
 #endif
@@ -142,7 +146,9 @@ IN_PROC_BROWSER_TEST_F(AppWindowApiTest, AlphaEnabledHasPermissions) {
   ALLOW_UNUSED_LOCAL(kHasAlphaDir);
   const char* test_dir = kNoAlphaDir;
 
-#if defined(USE_AURA) && (defined(OS_CHROMEOS) || !defined(OS_LINUX))
+// TODO(crbug.com/1052397): Revisit the macro expression once build flag switch
+// of lacros-chrome is complete.
+#if defined(USE_AURA) && !(defined(OS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS))
   test_dir = kHasAlphaDir;
 
 #if defined(OS_WIN)
@@ -150,7 +156,7 @@ IN_PROC_BROWSER_TEST_F(AppWindowApiTest, AlphaEnabledHasPermissions) {
     test_dir = kNoAlphaDir;
   }
 #endif  // OS_WIN
-#endif  // USE_AURA && (OS_CHROMEOS || !OS_LINUX)
+#endif  // USE_AURA && !(OS_LINUX || IS_CHROMEOS_LACROS)
 
   EXPECT_TRUE(RunPlatformAppTest(test_dir)) << message_;
 }
@@ -184,7 +190,7 @@ IN_PROC_BROWSER_TEST_F(AppWindowApiTest, VisibleOnAllWorkspacesInStable) {
       << message_;
 }
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 IN_PROC_BROWSER_TEST_F(AppWindowApiTest, ImeWindowHasPermissions) {
   EXPECT_TRUE(RunComponentExtensionTest(
       "platform_apps/windows_api_ime/has_permissions_whitelisted"))
@@ -216,6 +222,6 @@ IN_PROC_BROWSER_TEST_F(AppWindowApiTest, ImeWindowNotFullscreen) {
       "platform_apps/windows_api_ime/forced_app_mode_not_fullscreen"))
       << message_;
 }
-#endif  // OS_CHROMEOS
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 }  // namespace extensions

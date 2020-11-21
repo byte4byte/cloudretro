@@ -7,6 +7,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chromecast/browser/test/cast_browser_test.h"
 #include "chromecast/chromecast_buildflags.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "media/base/test_data_util.h"
 #include "url/gurl.h"
@@ -26,6 +27,12 @@ const char kWebMAudioOnly[] = "audio/webm; codecs=\"vorbis\"";
 class CastNavigationBrowserTest : public CastBrowserTest {
  public:
   CastNavigationBrowserTest() {}
+
+  void SetUpOnMainThread() override {
+    embedded_test_server()->ServeFilesFromSourceDirectory(
+        ::media::GetTestDataPath());
+    ASSERT_TRUE(embedded_test_server()->Start());
+  }
 
   void LoadAboutBlank() {
     content::WebContents* web_contents =
@@ -63,10 +70,8 @@ class CastNavigationBrowserTest : public CastBrowserTest {
   void RunMediaTestPage(const std::string& html_page,
                         const base::StringPairs& query_params,
                         const std::string& expected_title) {
-    std::string query = media::GetURLQueryString(query_params);
-    GURL gurl = content::GetFileUrlWithQuery(
-        media::GetTestDataFilePath(html_page), query);
-
+    std::string query = ::media::GetURLQueryString(query_params);
+    GURL gurl = embedded_test_server()->GetURL("/" + html_page + "?" + query);
     std::string final_title = RunTest(gurl, expected_title);
     EXPECT_EQ(expected_title, final_title);
   }

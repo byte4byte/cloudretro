@@ -11,23 +11,38 @@ from telemetry.timeline import chrome_trace_config
 from telemetry.web_perf import timeline_based_measurement
 import page_sets
 
+V8_BROWSING_BENCHMARK_UMA = [
+    'V8.WasmCompileModuleMicroSeconds.wasm',
+    'V8.WasmCompileModuleAsyncMicroSeconds',
+    'V8.WasmCompileModuleStreamingMicroSeconds',
+    'V8.WasmFinishModuleStreamingMicroSeconds',
+    'V8.WasmTierUpModuleMicroSeconds',
+    'V8.WasmCompileFunctionMicroSeconds.wasm',
+    'V8.WasmInstantiateModuleMicroSeconds.wasm',
+    'V8.WasmModuleCodeSizeTopTierMiB',
+    'V8.WasmCompileFunctionPeakMemoryBytes',
+    'V8.WasmModuleCodeSizeMiB',
+]
+
 
 def AugmentOptionsForV8BrowsingMetrics(options, enable_runtime_call_stats=True):
   categories = [
-    # Disable all categories by default.
-    '-*',
-    # Memory categories.
-    'disabled-by-default-memory-infra',
-    'toplevel',
-    # V8 categories.
-    'disabled-by-default-v8.gc',
-    'v8',
-    'v8.console',
-    'webkit.console',
-    # Blink categories.
-    'blink_gc',
-    # Needed for the metric reported by page.
-    'blink.user_timing'
+      # Disable all categories by default.
+      '-*',
+      # Memory categories.
+      'disabled-by-default-memory-infra',
+      'toplevel',
+      # V8 categories.
+      'disabled-by-default-v8.gc',
+      'v8',
+      'v8.wasm',
+      'v8.console',
+      'webkit.console',
+      # Blink categories.
+      'blink_gc',
+      'partition_alloc',
+      # Needed for the metric reported by page.
+      'blink.user_timing'
   ]
 
   options.ExtendTraceCategoryFilter(categories)
@@ -42,13 +57,18 @@ def AugmentOptionsForV8BrowsingMetrics(options, enable_runtime_call_stats=True):
 
   options.config.chrome_trace_config.SetTraceBufferSizeInKb(400 * 1024)
 
+  options.config.chrome_trace_config.EnableUMAHistograms(
+      *V8_BROWSING_BENCHMARK_UMA)
+
   metrics = [
-    'blinkGcMetric',
-    'consoleErrorMetric',
-    'expectedQueueingTimeMetric',
-    'gcMetric',
-    'memoryMetric',
-    'reportedByPageMetric',
+      'blinkGcMetric',
+      'consoleErrorMetric',
+      'expectedQueueingTimeMetric',
+      'gcMetric',
+      'memoryMetric',
+      'reportedByPageMetric',
+      'umaMetric',
+      'wasmMetric',
   ]
   options.ExtendTimelineBasedMetric(metrics)
   if enable_runtime_call_stats:
@@ -71,8 +91,8 @@ class _V8BrowsingBenchmark(perf_benchmark.PerfBenchmark):
 
 
 @benchmark.Info(
-   emails=['mythria@chromium.org','ulan@chromium.org'],
-   component='Blink>JavaScript')
+    emails=['mythria@chromium.org', 'tmrts@chromium.org'],
+    component='Blink>JavaScript')
 class V8DesktopBrowsingBenchmark(
     _V8BrowsingBenchmark):
   PLATFORM = 'desktop'
@@ -92,8 +112,8 @@ class V8DesktopBrowsingBenchmark(
 
 
 @benchmark.Info(
-   emails=['mythria@chromium.org','ulan@chromium.org'],
-   component='Blink>JavaScript')
+    emails=['mythria@chromium.org', 'tmrts@chromium.org'],
+    component='Blink>JavaScript')
 class V8MobileBrowsingBenchmark(
     _V8BrowsingBenchmark):
   PLATFORM = 'mobile'
@@ -113,8 +133,8 @@ class V8MobileBrowsingBenchmark(
 
 
 @benchmark.Info(
-   emails=['mythria@chromium.org','ulan@chromium.org'],
-   component='Blink>JavaScript')
+    emails=['mythria@chromium.org', 'tmrts@chromium.org'],
+    component='Blink>JavaScript')
 class V8FutureDesktopBrowsingBenchmark(
     _V8BrowsingBenchmark):
   PLATFORM = 'desktop'
@@ -135,8 +155,8 @@ class V8FutureDesktopBrowsingBenchmark(
 
 
 @benchmark.Info(
-   emails=['mythria@chromium.org','ulan@chromium.org'],
-   component='Blink>JavaScript')
+    emails=['mythria@chromium.org', 'tmrts@chromium.org'],
+    component='Blink>JavaScript')
 class V8FutureMobileBrowsingBenchmark(
     _V8BrowsingBenchmark):
   PLATFORM = 'mobile'

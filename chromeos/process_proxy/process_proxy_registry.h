@@ -44,6 +44,9 @@ class CHROMEOS_EXPORT ProcessProxyRegistry {
 
   static ProcessProxyRegistry* Get();
 
+  // Converts the id returned by OpenProcess() to the system pid.
+  static int ConvertToSystemPID(const std::string& id);
+
   // Returns a SequencedTaskRunner where the singleton instance of
   // ProcessProxyRegistry lives.
   static scoped_refptr<base::SequencedTaskRunner> GetTaskRunner();
@@ -68,8 +71,8 @@ class CHROMEOS_EXPORT ProcessProxyRegistry {
   // Shuts down registry, closing all associated processed.
   void ShutDown();
 
-  // Get the process handle for testing purposes.
-  base::ProcessHandle GetProcessHandleForTesting(const std::string& id);
+  // Get the process for testing purposes.
+  const base::Process* GetProcessForTesting(const std::string& id);
 
  private:
   friend struct ::base::LazyInstanceTraitsBase<ProcessProxyRegistry>;

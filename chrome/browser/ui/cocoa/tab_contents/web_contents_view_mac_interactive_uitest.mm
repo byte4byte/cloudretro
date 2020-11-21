@@ -6,7 +6,7 @@
 
 #import "base/mac/scoped_nsobject.h"
 #include "base/run_loop.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -16,6 +16,7 @@
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/test/browser_test.h"
 #import "testing/gtest_mac.h"
 
 using WebContentsViewMacInteractiveTest = InProcessBrowserTest;

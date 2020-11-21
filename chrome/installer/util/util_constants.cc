@@ -11,11 +11,14 @@ namespace switches {
 // Allow an update of Chrome from a higher version to a lower version.
 // Ordinarily, such downgrades are disallowed. An administrator may wish to
 // allow them in circumstances where the potential loss of user data is
-// permissable.
+// permissible.
 const char kAllowDowngrade[] = "allow-downgrade";
 
-// Run the installer for Chrome SxS.
-const char kChromeSxS[] = "chrome-sxs";
+// A channel name specified via administrative policy. This switch sets the
+// channel both of the installer and of the version of Chrome being installed.
+// This switch has no effect for secondary install modes (i.e., installs that
+// use --chrome-sxs or another mode switch).
+const char kChannel[] = "channel";
 
 // Create shortcuts for this user to point to a system-level install (which
 // must already be installed on the machine). The shortcuts created will
@@ -55,7 +58,7 @@ const char kDoNotRemoveSharedItems[] = "do-not-remove-shared-items";
 const char kEnableLogging[] = "enable-logging";
 
 // Same as kConfigureUserSettings above; except the checks to know whether
-// first run already occured are bypassed and shortcuts are created either way
+// first run already occurred are bypassed and shortcuts are created either way
 // (kConfigureUserSettings also needs to be on the command-line for this to have
 // any effect).
 const char kForceConfigureUserSettings[] = "force-configure-user-settings";
@@ -193,7 +196,6 @@ const char kGoogleUpdateIsMachineEnvVar[] = "GoogleUpdateIsMachine";
 // TODO(gab): Rename setup.exe itself altogether and use the same binary for
 // Active Setup.
 const wchar_t kActiveSetupExe[] = L"chrmstp.exe";
-const wchar_t kChromeChildDll[] = L"chrome_child.dll";
 const wchar_t kChromeDll[] = L"chrome.dll";
 const wchar_t kChromeExe[] = L"chrome.exe";
 const wchar_t kChromeNewExe[] = L"new_chrome.exe";

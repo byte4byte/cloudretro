@@ -4,7 +4,7 @@
 
 package org.chromium.weblayer.test;
 
-import android.support.test.filters.SmallTest;
+import androidx.test.filters.SmallTest;
 
 import org.junit.Assert;
 import org.junit.Before;
@@ -12,6 +12,7 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 import org.chromium.weblayer.shell.InstrumentationActivity;
 
@@ -44,6 +45,7 @@ public class FullscreenCallbackTest {
 
     @Test
     @SmallTest
+    @DisabledTest(message = "crbug.com/1133893")
     public void testFullscreen() {
         // Second touch exits.
         EventUtils.simulateTouchCenterOfView(mActivity.getWindow().getDecorView());
@@ -78,5 +80,14 @@ public class FullscreenCallbackTest {
                 () -> { mActivity.getTab().getBrowser().destroyTab(mActivity.getTab()); });
         mDelegate.waitForExitFullscreen();
         Assert.assertEquals(1, mDelegate.mExitFullscreenCount);
+    }
+
+    /**
+     * Verifies there are no crashes when destroying the fragment in fullscreen.
+     */
+    @Test
+    @SmallTest
+    public void testDestroyFragmentWhileFullscreen() {
+        TestThreadUtils.runOnUiThreadBlocking(() -> { mActivity.destroyFragment(); });
     }
 }

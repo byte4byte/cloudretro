@@ -6,9 +6,9 @@
 
 #include "base/strings/sys_string_conversions.h"
 #include "components/strings/grit/components_strings.h"
-#import "ios/chrome/browser/overlays/public/common/alerts/alert_overlay.h"
 #import "ios/chrome/browser/overlays/public/overlay_request.h"
 #import "ios/chrome/browser/overlays/public/overlay_response.h"
+#import "ios/chrome/browser/overlays/public/web_content_area/alert_overlay.h"
 #import "ios/chrome/browser/overlays/public/web_content_area/http_auth_overlay.h"
 #import "ios/chrome/browser/ui/elements/text_field_configuration.h"
 #include "ios/chrome/grit/ios_strings.h"
@@ -80,9 +80,12 @@ TEST_F(HttpAuthOverlayTest, AlertSetup) {
   NSString* sign_in_label =
       l10n_util::GetNSStringWithFixup(IDS_LOGIN_DIALOG_OK_BUTTON_LABEL);
   EXPECT_NSEQ(sign_in_label, ok_button_config.title);
+  EXPECT_EQ(kHttpAuthSignInTappedActionName, ok_button_config.user_action_name);
 
   EXPECT_EQ(UIAlertActionStyleCancel, cancel_button_config.style);
   EXPECT_NSEQ(l10n_util::GetNSString(IDS_CANCEL), cancel_button_config.title);
+  EXPECT_EQ(kHttpAuthCancelTappedActionName,
+            cancel_button_config.user_action_name);
 }
 
 // Tests that an alert response after tapping the OK button successfully creates

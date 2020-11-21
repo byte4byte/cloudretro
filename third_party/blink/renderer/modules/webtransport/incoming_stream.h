@@ -10,7 +10,7 @@
 #include "base/callback.h"
 #include "base/logging.h"
 #include "base/optional.h"
-#include "base/util/type_safety/strong_alias.h"
+#include "base/types/strong_alias.h"
 #include "mojo/public/cpp/system/data_pipe.h"
 #include "mojo/public/cpp/system/simple_watcher.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
@@ -35,8 +35,14 @@ class MODULES_EXPORT IncomingStream final
   USING_PRE_FINALIZER(IncomingStream, Dispose);
 
  public:
+  enum class State {
+    kOpen,
+    kAborted,
+    kClosed,
+  };
+
   IncomingStream(ScriptState*,
-                 base::OnceClosure forget_stream,
+                 base::OnceClosure on_abort,
                  mojo::ScopedDataPipeConsumerHandle);
   ~IncomingStream();
 
@@ -68,12 +74,14 @@ class MODULES_EXPORT IncomingStream final
   // Does not execute JavaScript.
   void ContextDestroyed();
 
-  void Trace(Visitor*);
+  State GetState() const { return state_; }
+
+  void Trace(Visitor*) const;
 
  private:
   class UnderlyingSource;
 
-  using IsLocalAbort = util::StrongAlias<class IsLocalAbortTag, bool>;
+  using IsLocalAbort = base::StrongAlias<class IsLocalAbortTag, bool>;
 
   // Called when |data_pipe_| becomes readable or errored.
   void OnHandleReady(MojoResult, const mojo::HandleSignalsState&);
@@ -119,7 +127,7 @@ class MODULES_EXPORT IncomingStream final
 
   const Member<ScriptState> script_state_;
 
-  base::OnceClosure forget_stream_;
+  base::OnceClosure on_abort_;
 
   mojo::ScopedDataPipeConsumerHandle data_pipe_;
 
@@ -135,6 +143,8 @@ class MODULES_EXPORT IncomingStream final
   // Promise returned by the |readingAborted| attribute.
   ScriptPromise reading_aborted_;
   Member<ScriptPromiseResolver> reading_aborted_resolver_;
+
+  State state_ = State::kOpen;
 
   // This is set when OnIncomingStreamClosed() is called.
   base::Optional<bool> fin_received_;

@@ -15,6 +15,7 @@
 #include "base/time/time.h"
 #include "content/browser/renderer_host/event_with_latency_info.h"
 #include "content/common/content_export.h"
+#include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/mojom/input/input_event_result.mojom-shared.h"
 #include "ui/events/blink/blink_features.h"
 
@@ -65,8 +66,8 @@ class CONTENT_EXPORT PassthroughTouchEventQueue {
           mobile_touch_ack_timeout_delay(
               base::TimeDelta::FromMilliseconds(1000)),
           touch_ack_timeout_supported(false),
-          skip_touch_filter(
-              base::FeatureList::IsEnabled(features::kSkipTouchEventFilter)),
+          skip_touch_filter(base::FeatureList::IsEnabled(
+              blink::features::kSkipTouchEventFilter)),
           events_to_always_forward(kSkipTouchEventFilterType.Get()) {}
 
     // Touch ack timeout delay for desktop sites. If zero, timeout behavior
@@ -101,7 +102,6 @@ class CONTENT_EXPORT PassthroughTouchEventQueue {
                        const ui::LatencyInfo& latency_info,
                        const uint32_t unique_touch_event_id,
                        bool should_stop_timeout_monitor);
-  void OnGestureScrollEvent(const GestureEventWithLatencyInfo& gesture_event);
 
   void OnGestureEventAck(const GestureEventWithLatencyInfo& event,
                          blink::mojom::InputEventResultState ack_result);
@@ -171,7 +171,6 @@ class CONTENT_EXPORT PassthroughTouchEventQueue {
       : public TouchEventWithLatencyInfo {
    public:
     TouchEventWithLatencyInfoAndAckState(const TouchEventWithLatencyInfo&);
-    bool operator<(const TouchEventWithLatencyInfoAndAckState&) const;
     blink::mojom::InputEventResultState ack_state() const { return ack_state_; }
     blink::mojom::InputEventResultSource ack_source() const {
       return ack_source_;
@@ -185,6 +184,22 @@ class CONTENT_EXPORT PassthroughTouchEventQueue {
    private:
     blink::mojom::InputEventResultSource ack_source_;
     blink::mojom::InputEventResultState ack_state_;
+  };
+
+  struct TouchEventWithLatencyInfoAndAckStateComparator {
+    using is_transparent = void;
+    bool operator()(const TouchEventWithLatencyInfoAndAckState& lhs,
+                    const TouchEventWithLatencyInfoAndAckState& rhs) const {
+      return lhs.event.unique_touch_event_id < rhs.event.unique_touch_event_id;
+    }
+    bool operator()(const TouchEventWithLatencyInfoAndAckState& lhs,
+                    const uint32_t rhs) const {
+      return lhs.event.unique_touch_event_id < rhs;
+    }
+    bool operator()(const uint32_t lhs,
+                    const TouchEventWithLatencyInfoAndAckState& rhs) const {
+      return lhs < rhs.event.unique_touch_event_id;
+    }
   };
 
   // These values are logged to UMA. Entries should not be renumbered and
@@ -220,7 +235,8 @@ class CONTENT_EXPORT PassthroughTouchEventQueue {
   // Handles touch event forwarding and ack'ed event dispatch.
   PassthroughTouchEventQueueClient* client_;
 
-  // Whether the renderer has at least one touch handler.
+  // Whether the renderer has at least one consumer of touch events, e.g. a JS
+  // event handler or hit-testable scrollbars
   bool has_handlers_;
 
   // Whether any pointer in the touch sequence may have having a consumer.
@@ -247,7 +263,9 @@ class CONTENT_EXPORT PassthroughTouchEventQueue {
   // Stores outstanding touches that have been sent to the renderer but have
   // not yet been ack'd by the renderer. The set is explicitly ordered based
   // on the unique touch event id.
-  std::set<TouchEventWithLatencyInfoAndAckState> outstanding_touches_;
+  std::set<TouchEventWithLatencyInfoAndAckState,
+           TouchEventWithLatencyInfoAndAckStateComparator>
+      outstanding_touches_;
 
   // Whether we should allow events to bypass normal queue filter rules.
   const bool skip_touch_filter_;

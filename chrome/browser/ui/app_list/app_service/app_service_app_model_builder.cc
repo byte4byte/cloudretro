@@ -10,6 +10,7 @@
 #include "chrome/browser/chromeos/crostini/crostini_util.h"
 #include "chrome/browser/ui/app_list/app_service/app_service_app_item.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/sync/protocol/sync.pb.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace {
@@ -19,7 +20,7 @@ bool ShouldShowInLauncher(const apps::AppUpdate& update) {
   switch (readiness) {
     case apps::mojom::Readiness::kReady:
     case apps::mojom::Readiness::kDisabledByUser:
-    case apps::mojom::Readiness::kDisabledByBlacklist:
+    case apps::mojom::Readiness::kDisabledByBlocklist:
     case apps::mojom::Readiness::kDisabledByPolicy:
     case apps::mojom::Readiness::kTerminated:
       return update.ShowInLauncher() == apps::mojom::OptionalBool::kTrue;
@@ -49,13 +50,12 @@ class AppServiceAppModelBuilder::CrostiniFolderObserver
   void OnAppListItemAdded(ChromeAppListItem* item) override {
     if (item->id() != crostini::kCrostiniFolderId)
       return;
-    // Persistence is not recorded by the sync, so we always set it.
-    item->SetIsPersistent(true);
 
-    // Either the name and position will be in the sync, or we set them
-    // manually.
-    if (parent_->GetSyncItem(crostini::kCrostiniFolderId))
-      return;
+    // We reset the state of the folder whether it's in the sync service or not
+    // to ensure the "Linux apps" string is translated into the current
+    // language, even if that's a different language then the folder was created
+    // with.
+    item->SetIsPersistent(true);
     item->SetName(
         l10n_util::GetStringUTF8(IDS_APP_LIST_CROSTINI_DEFAULT_FOLDER_NAME));
     item->SetDefaultPositionIfApplicable(parent_->model_updater());
@@ -78,15 +78,9 @@ AppServiceAppModelBuilder::~AppServiceAppModelBuilder() {
 void AppServiceAppModelBuilder::BuildModel() {
   apps::AppServiceProxy* proxy =
       apps::AppServiceProxyFactory::GetForProfile(profile());
-  if (proxy) {
-    proxy->AppRegistryCache().ForEachApp(
-        [this](const apps::AppUpdate& update) { OnAppUpdate(update); });
-    Observe(&proxy->AppRegistryCache());
-  } else {
-    // TODO(crbug.com/826982): do we want apps in incognito mode? See the TODO
-    // in AppServiceProxyFactory::GetForProfile about whether
-    // apps::AppServiceProxy::Get should return nullptr for incognito profiles.
-  }
+  proxy->AppRegistryCache().ForEachApp(
+      [this](const apps::AppUpdate& update) { OnAppUpdate(update); });
+  Observe(&proxy->AppRegistryCache());
 
   if (model_updater()) {
     crostini_folder_observer_ = std::make_unique<CrostiniFolderObserver>(this);
@@ -125,7 +119,9 @@ void AppServiceAppModelBuilder::OnAppUpdate(const apps::AppUpdate& update) {
 
   } else if (show) {
     InsertApp(std::make_unique<AppServiceAppItem>(
-        profile(), model_updater(), GetSyncItem(update.AppId()), update));
+        profile(), model_updater(),
+        GetSyncItem(update.AppId(), sync_pb::AppListSpecifics::TYPE_APP),
+        update));
   }
 }
 

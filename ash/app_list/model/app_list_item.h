@@ -19,8 +19,6 @@
 #include "components/sync/model/string_ordinal.h"
 #include "ui/gfx/image/image_skia.h"
 
-class FastShowPickler;
-
 namespace ash {
 enum class AppListConfigType;
 class AppListControllerImpl;
@@ -48,12 +46,6 @@ class APP_LIST_MODEL_EXPORT AppListItem {
   const std::string& name() const { return metadata_->name; }
   // Should only be used in tests; otherwise use GetDisplayName().
   const std::string& short_name() const { return short_name_; }
-
-  void SetIsInstalling(bool is_installing);
-  bool is_installing() const { return is_installing_; }
-
-  void SetPercentDownloaded(int percent_downloaded);
-  int percent_downloaded() const { return percent_downloaded_; }
 
   bool IsInFolder() const { return !folder_id().empty(); }
 
@@ -92,11 +84,16 @@ class APP_LIST_MODEL_EXPORT AppListItem {
   }
   bool is_page_break() const { return metadata_->is_page_break; }
 
+  bool has_notification_badge() const { return has_notification_badge_; }
+
+  void UpdateNotificationBadgeForTesting(bool has_badge) {
+    UpdateNotificationBadge(has_badge);
+  }
+
  protected:
   // Subclasses also have mutable access to the metadata ptr.
   AppListItemMetadata* metadata() { return metadata_.get(); }
 
-  friend class ::FastShowPickler;
   friend class AppListControllerImpl;
   friend class AppListItemList;
   friend class AppListItemListTest;
@@ -112,6 +109,9 @@ class APP_LIST_MODEL_EXPORT AppListItem {
   // if the full name is too long to fit in a view).
   void SetNameAndShortName(const std::string& name,
                            const std::string& short_name);
+
+  // Updates whether the notification badge is shown on the view.
+  void UpdateNotificationBadge(bool has_badge);
 
   void set_position(const syncer::StringOrdinal& new_position) {
     DCHECK(new_position.IsValid());
@@ -138,8 +138,8 @@ class APP_LIST_MODEL_EXPORT AppListItem {
   // A shortened name for the item, used for display.
   std::string short_name_;
 
-  bool is_installing_;
-  int percent_downloaded_;
+  // Whether this item currently has a notification badge that should be shown.
+  bool has_notification_badge_ = false;
 
   base::ObserverList<AppListItemObserver>::Unchecked observers_;
 

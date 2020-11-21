@@ -6,27 +6,25 @@ package org.chromium.chrome.browser.compositor.layouts.phone.stack;
 
 import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
-import android.animation.AnimatorSet;
 import android.content.Context;
 import android.content.res.Resources;
 import android.graphics.RectF;
-import android.util.Pair;
 
 import androidx.annotation.IntDef;
+import androidx.annotation.VisibleForTesting;
 
 import org.chromium.base.MathUtils;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.compositor.animation.CompositorAnimationHandler;
-import org.chromium.chrome.browser.compositor.animation.CompositorAnimator;
-import org.chromium.chrome.browser.compositor.animation.FloatProperty;
 import org.chromium.chrome.browser.compositor.layouts.Layout;
 import org.chromium.chrome.browser.compositor.layouts.Layout.Orientation;
 import org.chromium.chrome.browser.compositor.layouts.components.LayoutTab;
-import org.chromium.chrome.browser.compositor.layouts.eventfilter.ScrollDirection;
 import org.chromium.chrome.browser.compositor.layouts.phone.StackLayoutBase;
 import org.chromium.chrome.browser.compositor.layouts.phone.stack.StackAnimation.OverviewAnimationType;
+import org.chromium.chrome.browser.flags.CachedFeatureFlags;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
+import org.chromium.chrome.browser.layouts.animation.CompositorAnimationHandler;
+import org.chromium.chrome.browser.layouts.animation.FloatProperty;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.TabList;
 import org.chromium.chrome.browser.tabmodel.TabModelUtils;
@@ -34,8 +32,6 @@ import org.chromium.ui.base.LocalizationUtils;
 
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
-import java.util.ArrayList;
-import java.util.Iterator;
 
 /**
  * Handles all the drawing and events of a stack of stackTabs.
@@ -156,6 +152,9 @@ public abstract class Stack {
      */
     private static final float LANDSCAPE_SWIPE_DRAG_TAB_OFFSET_DP = 40.f;
 
+    // TODO(dtrainor): Investigate removing this.
+    private static final float BORDER_THICKNESS_DP = 4.f;
+
     // External References
     protected TabList mTabList;
 
@@ -213,7 +212,7 @@ public abstract class Stack {
     private StackViewAnimation mViewAnimationFactory;
 
     // Running set of animations applied to tabs.
-    private Pair<AnimatorSet, ArrayList<FloatProperty>> mAnimatorSetTabAnimations;
+    private StackAnimation.StackAnimatorSet mStackAnimatorSet;
     private Animator mViewAnimations;
 
     // The parent Layout
@@ -225,6 +224,9 @@ public abstract class Stack {
     // TODO(dtrainor): Expose 9-patch padding from resource manager.
     protected float mBorderTopPadding;
     private float mBorderLeftPadding;
+
+    // The slop amount in dp to detect a touch on the tab.  Cached values from values/dimens.xml.
+    private float mCompositorButtonSlop; // compositor_button_slop
 
     private boolean mIsStackForCurrentTabList;
 
@@ -448,6 +450,8 @@ public abstract class Stack {
      * @return Whether or not the TabList represented by this TabStackState should be displayed.
      */
     public boolean isDisplayable() {
+        if (mTabList == null) return false;
+
         return !mTabList.isIncognito() || (!mIsDying && mTabList.getCount() > 0);
     }
 
@@ -540,18 +544,17 @@ public abstract class Stack {
                 // Build the AnimatorSet using the TabSwitcherAnimationFactory.
                 // This will give us the appropriate AnimatorSet based on the current
                 // state of the tab switcher and the OverviewAnimationType specified.
-                mAnimatorSetTabAnimations = mAnimationFactory.createAnimatorSetForType(type, this,
+                mStackAnimatorSet = mAnimationFactory.createAnimatorSetForType(type, this,
                         mStackTabs, focusIndex, sourceIndex, mSpacing, getDiscardRange());
             }
 
-            if (mAnimatorSetTabAnimations != null) mAnimatorSetTabAnimations.first.start();
+            if (mStackAnimatorSet != null) mStackAnimatorSet.start();
             if (mViewAnimations != null) mViewAnimations.start();
-            if (mAnimatorSetTabAnimations != null || mViewAnimations != null) {
+            if (mStackAnimatorSet != null || mViewAnimations != null) {
                 mLayout.onStackAnimationStarted();
             }
 
-            if ((mAnimatorSetTabAnimations == null && mViewAnimations == null)
-                    || finishImmediately) {
+            if ((mStackAnimatorSet == null && mViewAnimations == null) || finishImmediately) {
                 finishAnimation(time);
             }
         }
@@ -565,9 +568,9 @@ public abstract class Stack {
      * @param time The current time of the app in ms.
      */
     protected void finishAnimation(long time) {
-        if (mAnimatorSetTabAnimations != null) mAnimatorSetTabAnimations.first.end();
+        if (mStackAnimatorSet != null) mStackAnimatorSet.end();
         if (mViewAnimations != null) mViewAnimations.end();
-        if (mAnimatorSetTabAnimations != null || mViewAnimations != null) {
+        if (mStackAnimatorSet != null || mViewAnimations != null) {
             mLayout.onStackAnimationFinished();
         }
 
@@ -622,7 +625,7 @@ public abstract class Stack {
         }
         mOverviewAnimationType = OverviewAnimationType.NONE;
 
-        mAnimatorSetTabAnimations = null;
+        mStackAnimatorSet = null;
         mViewAnimations = null;
     }
 
@@ -703,16 +706,8 @@ public abstract class Stack {
         if (mOverviewAnimationType == OverviewAnimationType.DISCARD
                 || mOverviewAnimationType == OverviewAnimationType.UNDISCARD
                 || mOverviewAnimationType == OverviewAnimationType.DISCARD_ALL) {
-            if (mAnimatorSetTabAnimations != null) {
-                Iterator<FloatProperty> propertyIterator =
-                        mAnimatorSetTabAnimations.second.iterator();
-                Iterator<Animator> animatorIterator =
-                        mAnimatorSetTabAnimations.first.getChildAnimations().iterator();
-
-                while (animatorIterator.hasNext()) {
-                    CompositorAnimator a = (CompositorAnimator) animatorIterator.next();
-                    if (propertyIterator.next() == StackTab.SCROLL_OFFSET) a.cancel();
-                }
+            if (mStackAnimatorSet != null) {
+                mStackAnimatorSet.cancelCancelableAnimators();
             }
             return true;
         }
@@ -744,11 +739,11 @@ public abstract class Stack {
         if (!jumpToEnd) updateScrollOffset(time);
 
         boolean animatorSetFinished = true;
-        if (mAnimatorSetTabAnimations != null) {
-            animatorSetFinished = jumpToEnd ? true : !mAnimatorSetTabAnimations.first.isRunning();
+        if (mStackAnimatorSet != null) {
+            animatorSetFinished = jumpToEnd ? true : !mStackAnimatorSet.isRunning();
         }
 
-        if (mAnimatorSetTabAnimations != null) finishAnimationsIfDone(time, jumpToEnd);
+        if (mStackAnimatorSet != null) finishAnimationsIfDone(time, jumpToEnd);
         if (jumpToEnd) forceScrollStop();
 
         return animatorSetFinished;
@@ -758,9 +753,9 @@ public abstract class Stack {
         boolean hasViewAnimations = mViewAnimations != null;
         boolean isViewFinished = hasViewAnimations ? !mViewAnimations.isRunning() : true;
 
-        boolean hasAnimatorSetTabAnimations = mAnimatorSetTabAnimations != null;
+        boolean hasAnimatorSetTabAnimations = mStackAnimatorSet != null;
         boolean isAnimatorSetTabFinished =
-                hasAnimatorSetTabAnimations ? !mAnimatorSetTabAnimations.first.isRunning() : true;
+                hasAnimatorSetTabAnimations ? !mStackAnimatorSet.isRunning() : true;
 
         boolean hasAnimations = hasViewAnimations || hasAnimatorSetTabAnimations;
 
@@ -878,7 +873,7 @@ public abstract class Stack {
                 cancelDiscardScrollingAnimation();
 
                 // Make sure we are well within the tab in the discard direction.
-                RectF target = mDiscardingTab.getLayoutTab().getClickTargetBounds();
+                RectF target = getClickTargetBoundsForLayoutTab(mDiscardingTab.getLayoutTab());
                 float distanceToEdge;
                 float edgeToEdge;
                 if (mCurrentMode == Orientation.PORTRAIT) {
@@ -1115,11 +1110,11 @@ public abstract class Stack {
                 && mOverviewAnimationType != OverviewAnimationType.DISCARD_ALL) {
             return;
         }
-        int clicked = getTabIndexAtPositon(x, y, LayoutTab.getTouchSlop());
+        int clicked = getTabIndexAtPositon(x, y, mCompositorButtonSlop);
         if (clicked >= 0) {
             // Check if the click was within the boundaries of the close button defined by its
             // visible coordinates.
-            if (mStackTabs[clicked].getLayoutTab().checkCloseHitTest(x, y)) {
+            if (checkCloseHitTestOnLayoutTab(x, y, mStackTabs[clicked].getLayoutTab())) {
                 // Tell the model to close the tab because the close button was pressed.  The
                 // model will then trigger a notification which will start the actual close
                 // process here if necessary.
@@ -1142,6 +1137,51 @@ public abstract class Stack {
                 mLayout.uiSelectingTab(time, mStackTabs[clicked].getId());
             }
         }
+    }
+
+    /**
+     * Tests if a point is inside the closing button of the tab.
+     *
+     * @param x The horizontal coordinate of the hit testing point.
+     * @param y The vertical coordinate of the hit testing point.
+     * @param layoutTab The {@link LayoutTab} to test on.
+     * @return  Whether the hit testing point is inside the tab.
+     */
+    @VisibleForTesting
+    public boolean checkCloseHitTestOnLayoutTab(float x, float y, LayoutTab layoutTab) {
+        RectF closeRectangle = getCloseBoundsOnLayoutTab(layoutTab);
+        return closeRectangle != null ? closeRectangle.contains(x, y) : false;
+    }
+
+    /**
+     * @param layoutTab The {@link LayoutTab} to check.
+     * @return The bounds of the {@link LayoutTab} of the close button. {@code null} if the close
+     *         button is not clickable.
+     */
+    @VisibleForTesting
+    public RectF getCloseBoundsOnLayoutTab(LayoutTab layoutTab) {
+        if (!layoutTab.get(LayoutTab.IS_TITLE_NEEDED) || !layoutTab.get(LayoutTab.IS_VISIBLE)
+                || layoutTab.get(LayoutTab.BORDER_CLOSE_BUTTON_ALPHA) < 0.5f
+                || layoutTab.get(LayoutTab.BORDER_ALPHA) < 0.5f
+                || layoutTab.get(LayoutTab.BORDER_ALPHA) != 1.0f
+                || Math.abs(layoutTab.get(LayoutTab.TILT_X_IN_DEGREES)) > 1.0f
+                || Math.abs(layoutTab.get(LayoutTab.TILT_Y_IN_DEGREES)) > 1.0f) {
+            return null;
+        }
+        RectF closePlacement = layoutTab.get(LayoutTab.CLOSE_PLACEMENT);
+        closePlacement.set(0, 0, LayoutTab.CLOSE_BUTTON_WIDTH_DP, LayoutTab.CLOSE_BUTTON_WIDTH_DP);
+        if (layoutTab.get(LayoutTab.CLOSE_BUTTON_IS_ON_RIGHT)) {
+            closePlacement.offset(layoutTab.getFinalContentWidth() - closePlacement.width(), 0.f);
+        }
+        if (closePlacement.bottom > layoutTab.getFinalContentHeight()
+                || closePlacement.right > layoutTab.getFinalContentWidth()) {
+            return null;
+        }
+        closePlacement.offset(layoutTab.get(LayoutTab.X) + layoutTab.get(LayoutTab.CLIPPED_X),
+                layoutTab.get(LayoutTab.Y) + layoutTab.get(LayoutTab.CLIPPED_Y));
+        closePlacement.inset(-mCompositorButtonSlop, -mCompositorButtonSlop);
+
+        return closePlacement;
     }
 
     /*
@@ -1169,6 +1209,7 @@ public abstract class Stack {
         mBorderTopPadding = res.getDimension(R.dimen.tabswitcher_border_frame_padding_top) * pxToDp;
         mBorderLeftPadding =
                 res.getDimension(R.dimen.tabswitcher_border_frame_padding_left) * pxToDp;
+        mCompositorButtonSlop = res.getDimension(R.dimen.compositor_button_slop) * pxToDp;
 
         // Just in case the density has changed, rebuild the OverScroller.
         mScroller = new StackScroller(context);
@@ -1192,7 +1233,7 @@ public abstract class Stack {
     }
 
     protected float getScrollDimensionSize() {
-        return mCurrentMode == Orientation.PORTRAIT ? mLayout.getHeightMinusBrowserControls()
+        return mCurrentMode == Orientation.PORTRAIT ? mLayout.getHeightMinusContentOffsetsDp()
                                                     : mLayout.getWidth();
     }
 
@@ -1235,7 +1276,7 @@ public abstract class Stack {
                 // This is a fail safe.  We should never have a situation where a dying
                 // {@link LayoutTab} can get accessed (the animation check should catch it).
                 if (!mStackTabs[i].isDying() && mStackTabs[i].getLayoutTab().isVisible()) {
-                    float d = mStackTabs[i].getLayoutTab().computeDistanceTo(x, y);
+                    float d = computeDistanceToLayoutTab(x, y, mStackTabs[i].getLayoutTab());
                     // Strict '<' is very important here because we might have several tab at
                     // the same place and we want the one above.
                     if (d < closestDistance) {
@@ -1247,6 +1288,38 @@ public abstract class Stack {
             }
         }
         return closestDistance <= slop ? closestIndex : -1;
+    }
+
+    /**
+     * Computes the Manhattan-ish distance to the edge of the tab.
+     * This distance is good enough for click detection.
+     *
+     * @param x          X coordinate of the hit testing point.
+     * @param y          Y coordinate of the hit testing point.
+     * @param layoutTab  The targeting tab.
+     * @return           The Manhattan-ish distance to the tab.
+     */
+    private static float computeDistanceToLayoutTab(float x, float y, LayoutTab layoutTab) {
+        final RectF bounds = getClickTargetBoundsForLayoutTab(layoutTab);
+        float dx = Math.max(bounds.left - x, x - bounds.right);
+        float dy = Math.max(bounds.top - y, y - bounds.bottom);
+        return Math.max(0.0f, Math.max(dx, dy));
+    }
+
+    /**
+     * @return The rectangle that represents the click target of the tab.
+     */
+    private static RectF getClickTargetBoundsForLayoutTab(LayoutTab layoutTab) {
+        final float borderScaled = BORDER_THICKNESS_DP * layoutTab.get(LayoutTab.BORDER_SCALE);
+        RectF bounds = layoutTab.get(LayoutTab.BOUNDS);
+        bounds.top = layoutTab.get(LayoutTab.Y) + layoutTab.get(LayoutTab.CLIPPED_Y) - borderScaled;
+        bounds.bottom = layoutTab.get(LayoutTab.Y) + layoutTab.get(LayoutTab.CLIPPED_Y)
+                + layoutTab.getFinalContentHeight() + borderScaled;
+        bounds.left =
+                layoutTab.get(LayoutTab.X) + layoutTab.get(LayoutTab.CLIPPED_X) - borderScaled;
+        bounds.right = layoutTab.get(LayoutTab.X) + layoutTab.get(LayoutTab.CLIPPED_X)
+                + layoutTab.getFinalContentWidth() + borderScaled;
+        return bounds;
     }
 
     /**
@@ -1423,7 +1496,7 @@ public abstract class Stack {
             // Resolve bottom stacking
             stackedCount = 0;
             float maxStackedPosition =
-                    portrait ? mLayout.getHeightMinusBrowserControls() : mLayout.getWidth();
+                    portrait ? mLayout.getHeightMinusContentOffsetsDp() : mLayout.getWidth();
             for (int i = mStackTabs.length - 1; i >= 0; i--) {
                 assert mStackTabs[i] != null;
                 StackTab stackTab = mStackTabs[i];
@@ -1643,6 +1716,8 @@ public abstract class Stack {
      *                     restored if we're calling this while the switcher is already visible.
      */
     private void createStackTabs(boolean restoreState) {
+        if (mTabList == null) return;
+
         final int count = mTabList.getCount();
         if (count == 0) {
             cleanupTabs();
@@ -1651,7 +1726,7 @@ public abstract class Stack {
             mStackTabs = new StackTab[count];
 
             final boolean isIncognito = mTabList.isIncognito();
-            final boolean needTitle = !mLayout.isHiding();
+            final boolean needTitle = !mLayout.isStartingToHide();
             for (int i = 0; i < count; ++i) {
                 Tab tab = mTabList.getTabAt(i);
                 int tabId = tab != null ? tab.getId() : Tab.INVALID_TAB_ID;
@@ -1741,7 +1816,7 @@ public abstract class Stack {
     private float getStackScale(RectF stackRect) {
         return mCurrentMode == Orientation.PORTRAIT
                 ? stackRect.width() / mLayout.getWidth()
-                : stackRect.height() / mLayout.getHeightMinusBrowserControls();
+                : stackRect.height() / mLayout.getHeightMinusContentOffsetsDp();
     }
 
     protected void setScrollTarget(float offset, boolean immediate) {
@@ -1904,7 +1979,7 @@ public abstract class Stack {
     private float getRange(float range) {
         return range
                 * (mCurrentMode == Orientation.PORTRAIT ? mLayout.getWidth()
-                                                        : mLayout.getHeightMinusBrowserControls());
+                                                        : mLayout.getHeightMinusContentOffsetsDp());
     }
 
     /**
@@ -1956,7 +2031,7 @@ public abstract class Stack {
     }
 
     protected void updateCurrentMode(@Orientation int orientation) {
-        if (ChromeFeatureList.isEnabled(ChromeFeatureList.HORIZONTAL_TAB_SWITCHER_ANDROID)) {
+        if (CachedFeatureFlags.isEnabled(ChromeFeatureList.HORIZONTAL_TAB_SWITCHER_ANDROID)) {
             mCurrentMode = Orientation.LANDSCAPE;
         } else {
             mCurrentMode = orientation;
@@ -1965,7 +2040,7 @@ public abstract class Stack {
         mDiscardDirection = getDefaultDiscardDirection();
         final float opaqueTopPadding = mBorderTopPadding - mBorderTransparentTop;
         mAnimationFactory = new StackAnimation(this, mLayout.getWidth(), mLayout.getHeight(),
-                mLayout.getTopBrowserControlsHeight(), mBorderTopPadding, opaqueTopPadding,
+                mLayout.getTopContentOffsetDp(), mBorderTopPadding, opaqueTopPadding,
                 mBorderLeftPadding, mCurrentMode);
         mViewAnimationFactory = new StackViewAnimation(mLayout.getContext().getResources());
         if (mStackTabs == null) return;
@@ -2001,167 +2076,6 @@ public abstract class Stack {
      */
     public void reset() {
         mIsDying = false;
-    }
-
-    /**
-     * Called when the swipe animation get initiated. It gives a chance to initialize
-     * everything.
-     * @param time      The current time of the app in ms.
-     * @param direction The direction the swipe is in.
-     * @param x         The horizontal coordinate the swipe started at in dp.
-     * @param y         The vertical coordinate the swipe started at in dp.
-     */
-    public void swipeStarted(long time, @ScrollDirection int direction, float x, float y) {
-        if (direction != ScrollDirection.DOWN) return;
-
-        // Restart the enter stack animation with the new warp values.
-        startAnimation(time, OverviewAnimationType.ENTER_STACK);
-
-        // Update the scroll offset to put the focused tab at the top.
-        final int index = mTabList.index();
-
-        if (mCurrentMode == Orientation.PORTRAIT
-                || ChromeFeatureList.isEnabled(ChromeFeatureList.HORIZONTAL_TAB_SWITCHER_ANDROID)) {
-            mScrollOffset = -index * mSpacing;
-        } else {
-            mScrollOffset = -index * mSpacing + x - LANDSCAPE_SWIPE_DRAG_TAB_OFFSET_DP;
-            mScrollOffset =
-                    MathUtils.clamp(mScrollOffset, getMinScroll(false), getMaxScroll(false));
-        }
-        setScrollTarget(mScrollOffset, true);
-
-        // Set up the tracking scroll parameters.
-        mSwipeUnboundScrollOffset = mScrollOffset;
-        mSwipeBoundedScrollOffset = mScrollOffset;
-
-        // Reset other state.
-        mSwipeIsCancelable = false;
-        mSwipeCanScroll = false;
-        mInSwipe = true;
-    }
-
-    /**
-     * Updates a swipe gesture.
-     * @param time The current time of the app in ms.
-     * @param x    The horizontal coordinate the swipe is currently at in dp.
-     * @param y    The vertical coordinate the swipe is currently at in dp.
-     * @param dx   The horizontal delta since the last update in dp.
-     * @param dy   The vertical delta since the last update in dp.
-     * @param tx   The horizontal difference between the start and the current position in dp.
-     * @param ty   The vertical difference between the start and the current position in dp.
-     */
-    public void swipeUpdated(long time, float x, float y, float dx, float dy, float tx, float ty) {
-        if (!mInSwipe) return;
-
-        final float toolbarSize = mLayout.getTopBrowserControlsHeight();
-        if (ty > toolbarSize) mSwipeCanScroll = true;
-        if (!mSwipeCanScroll) return;
-
-        final int index = mTabList.index();
-
-        // Check to make sure the index is still valid.
-        if (index < 0 || index >= mStackTabs.length) {
-            assert false : "Tab index out of bounds in Stack#swipeUpdated()";
-            return;
-        }
-
-        final float delta = mCurrentMode == Orientation.PORTRAIT ? dy : dx;
-
-        // Update the unbound scroll offset, tracking delta regardless of constraints.
-        mSwipeUnboundScrollOffset += delta;
-
-        // Figure out the new constrained position.
-        final float minScroll = getMinScroll(true);
-        final float maxScroll = getMaxScroll(true);
-        float offset = MathUtils.clamp(mSwipeUnboundScrollOffset, minScroll, maxScroll);
-
-        final float constrainedDelta = offset - mSwipeBoundedScrollOffset;
-        mSwipeBoundedScrollOffset = offset;
-
-        if (constrainedDelta == 0.f) return;
-
-        if (mCurrentMode == Orientation.PORTRAIT) {
-            dy = constrainedDelta;
-        } else {
-            dx = constrainedDelta;
-        }
-
-        // Propagate the new drag event.
-        drag(time, x, y, dx, dy);
-
-        // Figure out if the user has scrolled down enough that they can scroll back up and
-        // exit.
-        if (mCurrentMode == Orientation.PORTRAIT) {
-            // The cancelable threshold is determined by the top position of the tab in the
-            // stack.
-            final float discardOffset = mStackTabs[index].getScrollOffset();
-            final boolean beyondThreshold = -mScrollOffset < discardOffset;
-
-            // Allow the user to cancel in the future if they're beyond the threshold.
-            mSwipeIsCancelable |= beyondThreshold;
-
-            // If the user can cancel the swipe and they're back behind the threshold, cancel.
-            if (mSwipeIsCancelable && !beyondThreshold) swipeCancelled(time);
-        } else {
-            // The cancelable threshold is determined by the top position of the tab.
-            final float discardOffset = mStackTabs[index].getLayoutTab().getY();
-
-            boolean aboveThreshold = discardOffset < getRange(SWIPE_LANDSCAPE_THRESHOLD);
-
-            mSwipeIsCancelable |= !aboveThreshold;
-
-            if (mSwipeIsCancelable && aboveThreshold) swipeCancelled(time);
-        }
-    }
-
-    /**
-     * Called when the swipe ends; most likely on finger up event. It gives a chance to start
-     * an ending animation to exit the mode gracefully.
-     * @param time The current time of the app in ms.
-     */
-    public void swipeFinished(long time) {
-        if (!mInSwipe) return;
-
-        mInSwipe = false;
-
-        onUpOrCancel(time);
-    }
-
-    /**
-     * Called when the user has cancelled a swipe; most likely if they have dragged their finger
-     * back to the starting position.  Some handlers will throw swipeFinished() instead.
-     * @param time The current time of the app in ms.
-     */
-    public void swipeCancelled(long time) {
-        if (!mInSwipe) return;
-
-        mDiscardingTab = null;
-
-        mInSwipe = false;
-
-        // Select the current tab so we exit the switcher.
-        Tab tab = TabModelUtils.getCurrentTab(mTabList);
-        mLayout.uiSelectingTab(time, tab != null ? tab.getId() : Tab.INVALID_TAB_ID);
-    }
-
-    /**
-     * Fling from a swipe gesture.
-     * @param time The current time of the app in ms.
-     * @param x    The horizontal coordinate the swipe is currently at in dp.
-     * @param y    The vertical coordinate the swipe is currently at in dp.
-     * @param tx   The horizontal difference between the start and the current position in dp.
-     * @param ty   The vertical difference between the start and the current position in dp.
-     * @param vx   The horizontal velocity of the fling.
-     * @param vy   The vertical velocity of the fling.
-     */
-    public void swipeFlingOccurred(
-            long time, float x, float y, float tx, float ty, float vx, float vy) {
-        if (!mInSwipe) return;
-
-        // Propagate the fling data.
-        fling(time, x, y, vx, vy);
-
-        onUpOrCancel(time);
     }
 
     public static final FloatProperty<Stack> SCROLL_OFFSET =

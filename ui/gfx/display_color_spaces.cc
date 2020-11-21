@@ -4,6 +4,8 @@
 
 #include "ui/gfx/display_color_spaces.h"
 
+#include "build/build_config.h"
+
 namespace gfx {
 
 namespace {
@@ -13,6 +15,16 @@ const ContentColorUsage kAllColorUsages[] = {
     ContentColorUsage::kWideColorGamut,
     ContentColorUsage::kHDR,
 };
+
+gfx::BufferFormat DefaultBufferFormat() {
+  // ChromeOS expects the default buffer format be BGRA_8888 in several places.
+  // https://crbug.com/1057501, https://crbug.com/1073237
+#if defined(OS_CHROMEOS)
+  return gfx::BufferFormat::BGRA_8888;
+#else
+  return gfx::BufferFormat::RGBA_8888;
+#endif
+}
 
 size_t GetIndex(ContentColorUsage color_usage, bool needs_alpha) {
   switch (color_usage) {
@@ -31,7 +43,7 @@ DisplayColorSpaces::DisplayColorSpaces() {
   for (auto& color_space : color_spaces_)
     color_space = gfx::ColorSpace::CreateSRGB();
   for (auto& buffer_format : buffer_formats_)
-    buffer_format = gfx::BufferFormat::RGBA_8888;
+    buffer_format = DefaultBufferFormat();
 }
 
 DisplayColorSpaces::DisplayColorSpaces(const gfx::ColorSpace& c)
@@ -83,8 +95,7 @@ BufferFormat DisplayColorSpaces::GetOutputBufferFormat(
 }
 
 gfx::ColorSpace DisplayColorSpaces::GetRasterColorSpace() const {
-  return GetOutputColorSpace(ContentColorUsage::kHDR, false /* needs_alpha */)
-      .GetRasterColorSpace();
+  return GetOutputColorSpace(ContentColorUsage::kHDR, false /* needs_alpha */);
 }
 
 gfx::ColorSpace DisplayColorSpaces::GetCompositingColorSpace(
@@ -99,6 +110,10 @@ gfx::ColorSpace DisplayColorSpaces::GetCompositingColorSpace(
 bool DisplayColorSpaces::SupportsHDR() const {
   return GetOutputColorSpace(ContentColorUsage::kHDR, false).IsHDR() ||
          GetOutputColorSpace(ContentColorUsage::kHDR, true).IsHDR();
+}
+
+ColorSpace DisplayColorSpaces::GetScreenInfoColorSpace() const {
+  return GetOutputColorSpace(ContentColorUsage::kHDR, false /* needs_alpha */);
 }
 
 void DisplayColorSpaces::ToStrings(

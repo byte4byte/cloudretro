@@ -4,9 +4,10 @@
 
 package org.chromium.chrome.browser.webapps;
 
-import android.support.test.filters.MediumTest;
+import android.content.Intent;
 
-import org.junit.After;
+import androidx.test.filters.MediumTest;
+
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Rule;
@@ -14,22 +15,20 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.Callback;
-import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
-import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.ShortcutHelper;
-import org.chromium.chrome.browser.flags.ChromeFeatureList;
+import org.chromium.chrome.browser.app.ChromeActivity;
+import org.chromium.chrome.browser.browserservices.BrowserServicesIntentDataProvider;
 import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.lifecycle.ActivityLifecycleDispatcher;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
-import org.chromium.chrome.test.util.browser.Features;
 import org.chromium.chrome.test.util.browser.webapps.WebappTestPage;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
-import org.chromium.content_public.common.ScreenOrientationValues;
+import org.chromium.device.mojom.ScreenOrientationLockType;
 import org.chromium.net.test.EmbeddedTestServer;
 import org.chromium.net.test.EmbeddedTestServerRule;
 import org.chromium.webapk.lib.client.WebApkVersion;
@@ -72,7 +71,7 @@ public class WebApkUpdateManagerTest {
     private static final String WEBAPK_ICON_URL = "/chrome/test/data/banners/image-512px.png";
     private static final String WEBAPK_ICON_MURMUR2_HASH = "7742433188808797392";
     private static final @WebDisplayMode int WEBAPK_DISPLAY_MODE = WebDisplayMode.STANDALONE;
-    private static final int WEBAPK_ORIENTATION = ScreenOrientationValues.LANDSCAPE;
+    private static final int WEBAPK_ORIENTATION = ScreenOrientationLockType.LANDSCAPE;
     private static final long WEBAPK_THEME_COLOR = 2147483648L;
     private static final long WEBAPK_BACKGROUND_COLOR = 2147483648L;
 
@@ -95,8 +94,8 @@ public class WebApkUpdateManagerTest {
         }
 
         @Override
-        public void onGotManifestData(
-                WebappInfo fetchedInfo, String primaryIconUrl, String splashIconUrl) {
+        public void onGotManifestData(BrowserServicesIntentDataProvider fetchedInfo,
+                String primaryIconUrl, String splashIconUrl) {
             super.onGotManifestData(fetchedInfo, primaryIconUrl, splashIconUrl);
             mWaiter.notifyCalled();
         }
@@ -152,7 +151,6 @@ public class WebApkUpdateManagerTest {
     @Before
     public void setUp() throws Exception {
         mActivityTestRule.startMainActivityOnBlankPage();
-        RecordHistogram.setDisabledForTests(true);
         mActivity = mActivityTestRule.getActivity();
         mTab = mActivity.getActivityTab();
         mTestServer = mTestServerRule.getServer();
@@ -160,11 +158,6 @@ public class WebApkUpdateManagerTest {
         TestFetchStorageCallback callback = new TestFetchStorageCallback();
         WebappRegistry.getInstance().register(WEBAPK_ID, callback);
         callback.waitForCallback(0);
-    }
-
-    @After
-    public void tearDown() {
-        RecordHistogram.setDisabledForTests(false);
     }
 
      /** Checks whether a WebAPK update is needed. */
@@ -176,17 +169,19 @@ public class WebApkUpdateManagerTest {
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             WebappDataStorage storage =
                     WebappRegistry.getInstance().getWebappDataStorage(WEBAPK_ID);
-            WebappInfo info = WebApkInfo.create("", creationData.scope, null, null,
-                    creationData.name, creationData.shortName, creationData.displayMode,
-                    creationData.orientation, 0, creationData.themeColor,
-                    creationData.backgroundColor, 0, creationData.isPrimaryIconMaskable,
-                    false /* isSplashIconMaskable */, "",
-                    WebApkVersion.REQUEST_UPDATE_FOR_SHELL_APK_VERSION, creationData.manifestUrl,
-                    creationData.startUrl, WebApkDistributor.BROWSER,
-                    creationData.iconUrlToMurmur2HashMap, null, false /* forceNavigation */,
-                    false /* isSplashProvidedByWebApk */, null /* shareData */,
-                    creationData.shortcuts, 1 /* webApkVersionCode */);
-            updateManager.updateIfNeeded(storage, info);
+            BrowserServicesIntentDataProvider intentDataProvider =
+                    WebApkIntentDataProviderFactory.create(new Intent(), "", creationData.scope,
+                            null, null, creationData.name, creationData.shortName,
+                            creationData.displayMode, creationData.orientation, 0,
+                            creationData.themeColor, creationData.backgroundColor, 0,
+                            creationData.isPrimaryIconMaskable, false /* isSplashIconMaskable */,
+                            "", WebApkVersion.REQUEST_UPDATE_FOR_SHELL_APK_VERSION,
+                            creationData.manifestUrl, creationData.startUrl,
+                            WebApkDistributor.BROWSER, creationData.iconUrlToMurmur2HashMap, null,
+                            false /* forceNavigation */, false /* isSplashProvidedByWebApk */,
+                            null /* shareData */, creationData.shortcuts,
+                            1 /* webApkVersionCode */);
+            updateManager.updateIfNeeded(storage, intentDataProvider);
         });
         waiter.waitForCallback(0);
 
@@ -246,20 +241,7 @@ public class WebApkUpdateManagerTest {
     @Test
     @MediumTest
     @Feature({"WebApk"})
-    @Features.EnableFeatures(ChromeFeatureList.WEBAPK_ADAPTIVE_ICON)
-    public void testNewMaskableIconShouldUpdateWhenFeatureEnabled() throws Exception {
-        testNewMaskableIconShouldUpdate();
-    }
-
-    @Test
-    @MediumTest
-    @Feature({"WebApk"})
-    @Features.DisableFeatures(ChromeFeatureList.WEBAPK_ADAPTIVE_ICON)
-    public void testNewMaskableIconShouldUpdateWhenFeatureDisabled() throws Exception {
-        testNewMaskableIconShouldUpdate();
-    }
-
-    private void testNewMaskableIconShouldUpdate() throws Exception {
+    public void testMaskableIconShouldUpdate() throws Exception {
         final String maskableManifestUrl = "/chrome/test/data/banners/manifest_maskable.json";
 
         CreationData creationData = new CreationData();
@@ -278,7 +260,7 @@ public class WebApkUpdateManagerTest {
                 mTestServer.getURL("/chrome/test/data/banners/launcher-icon-3x.png"),
                 "16812314236514539104");
         creationData.displayMode = WebDisplayMode.STANDALONE;
-        creationData.orientation = ScreenOrientationValues.LANDSCAPE;
+        creationData.orientation = ScreenOrientationLockType.LANDSCAPE;
         creationData.themeColor = 2147483648L;
         creationData.backgroundColor = 2147483648L;
         creationData.isPrimaryIconMaskable = false;
@@ -302,7 +284,8 @@ public class WebApkUpdateManagerTest {
         creationData.manifestUrl = mTestServer.getURL(WEBAPK_MANIFEST_TOO_MANY_SHORTCUTS_URL);
         for (int i = 0; i < 4; i++) {
             creationData.shortcuts.add(new WebApkExtras.ShortcutItem("name" + String.valueOf(i),
-                    "short_name", mTestServer.getURL(WEBAPK_SCOPE_URL + "launch_url"), "", ""));
+                    "short_name", mTestServer.getURL(WEBAPK_SCOPE_URL + "launch_url"), "", "",
+                    new WebappIcon()));
         }
 
         // The fifth shortcut should be ignored.

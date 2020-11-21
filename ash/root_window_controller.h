@@ -30,7 +30,8 @@ class WindowTreeHost;
 
 namespace views {
 class MenuRunner;
-}
+class Widget;
+}  // namespace views
 
 namespace wm {
 class ScopedCaptureClient;
@@ -55,7 +56,6 @@ class TouchExplorationManager;
 class TouchHudDebug;
 class TouchHudProjection;
 class WallpaperWidgetController;
-class WindowManager;
 class WorkAreaInsets;
 
 // This class maintains the per root window state for ash. This class
@@ -94,8 +94,6 @@ class ASH_EXPORT RootWindowController {
                                     : std::vector<RootWindowController*>();
   }
 
-  // TODO(sky): move these to a separate class or use AshWindowTreeHost in
-  // mash. http://crbug.com/671246.
   AshWindowTreeHost* ash_host() { return ash_host_.get(); }
   const AshWindowTreeHost* ash_host() const { return ash_host_.get(); }
 
@@ -209,6 +207,9 @@ class ASH_EXPORT RootWindowController {
   // currently active desk on this root.
   aura::Window* GetWindowForFullscreenMode();
 
+  // Returns true if window is fulllscreen and the shelf is hidden.
+  bool IsInFullscreenMode();
+
   // If touch exploration is enabled, update the touch exploration
   // controller so that synthesized touch events are anchored at this point.
   void SetTouchAccessibilityAnchorPoint(const gfx::Point& anchor_point);
@@ -222,6 +223,11 @@ class ASH_EXPORT RootWindowController {
   // Called when the login status changes after login (such as lock/unlock).
   void UpdateAfterLoginStatusChange(LoginStatus status);
 
+  void CreateAmbientWidget();
+  void CloseAmbientWidget(bool immediately);
+
+  views::Widget* ambient_widget_for_testing() { return ambient_widget_.get(); }
+
   // Returns accessibility panel layout manager for this root window.
   AccessibilityPanelLayoutManager* GetAccessibilityPanelLayoutManagerForTest();
 
@@ -229,16 +235,8 @@ class ASH_EXPORT RootWindowController {
   FRIEND_TEST_ALL_PREFIXES(RootWindowControllerTest,
                            ContextMenuDisappearsInTabletMode);
 
-  // TODO(sky): remove this. Temporary during ash-mus unification.
-  // http://crbug.com/671246.
-  friend class WindowManager;
-
-  // Creates a new RootWindowController with the specified host. Only one of
-  // |ash_host| or |window_tree_host| should be specified. This takes ownership
-  // of the supplied arguments.
-  // TODO(sky): mash should create AshWindowTreeHost, http://crbug.com/671246.
-  RootWindowController(AshWindowTreeHost* ash_host,
-                       aura::WindowTreeHost* window_tree_host);
+  // Takes ownership of |ash_host|.
+  explicit RootWindowController(AshWindowTreeHost* ash_host);
 
   // Initializes the RootWindowController based on |root_window_type|.
   void Init(RootWindowType root_window_type);
@@ -271,8 +269,7 @@ class ASH_EXPORT RootWindowController {
   void OnFirstWallpaperWidgetSet();
 
   std::unique_ptr<AshWindowTreeHost> ash_host_;
-  std::unique_ptr<aura::WindowTreeHost> mus_window_tree_host_;
-  // This comes from |ash_host_| or |mus_window_tree_host_|.
+  // |ash_host_| as a WindowTreeHost.
   aura::WindowTreeHost* window_tree_host_;
 
   // LayoutManagers are owned by the window they are installed on.
@@ -313,6 +310,8 @@ class ASH_EXPORT RootWindowController {
 
   std::unique_ptr<LockScreenActionBackgroundController>
       lock_screen_action_background_controller_;
+
+  std::unique_ptr<views::Widget> ambient_widget_;
 
   // Whether child windows have been closed during shutdown. Exists to avoid
   // calling related cleanup code more than once.

@@ -13,17 +13,15 @@
 #include "chrome/browser/apps/app_service/app_service_proxy_factory.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/arc/arc_util.h"
-#include "chrome/browser/chromeos/first_run/first_run_controller.h"
 #include "chrome/browser/chromeos/login/ui/login_display_host.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
-#include "chrome/browser/chromeos/web_applications/default_web_app_ids.h"
 #include "chrome/browser/policy/profile_policy_connector.h"
-#include "chrome/browser/prefs/pref_service_syncable_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_observer.h"
 #include "chrome/browser/signin/identity_manager_factory.h"
 #include "chrome/browser/ui/web_applications/system_web_app_ui_utils.h"
+#include "chrome/browser/web_applications/components/web_app_id_constants.h"
 #include "chrome/browser/web_applications/web_app_provider.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_constants.h"
@@ -56,19 +54,47 @@ namespace {
 void LaunchApp(Profile* profile, std::string app_id) {
   apps::AppServiceProxy* proxy =
       apps::AppServiceProxyFactory::GetForProfile(profile);
-  DCHECK(proxy);
-
-  // Any user for whom the Help app launches after OOBE should see the getting
-  // started module.
-  profile->GetPrefs()->SetBoolean(prefs::kHelpAppShouldShowGetStarted, true);
-  // This is only used by the getting started module, so we can set it here.
-  profile->GetPrefs()->SetBoolean(prefs::kHelpAppTabletModeDuringOobe,
-                                  ash::TabletMode::Get()->InTabletMode());
 
   proxy->Launch(app_id, ui::EventFlags::EF_NONE,
                 apps::mojom::LaunchSource::kFromChromeInternal,
                 display::kInvalidDisplayId);
   profile->GetPrefs()->SetBoolean(prefs::kFirstRunTutorialShown, true);
+}
+
+// Returns true if this user type is probably a human who wants to configure
+// their device through the help app. Other user types are robots, guests or
+// public accounts.
+bool IsRegularUserOrSupervisedChild(user_manager::UserManager* user_manager) {
+  switch (user_manager->GetActiveUser()->GetType()) {
+    case user_manager::USER_TYPE_REGULAR:
+    case user_manager::USER_TYPE_SUPERVISED:
+    case user_manager::USER_TYPE_CHILD:
+      return true;
+    default:
+      return false;
+  }
+}
+
+// Getting started module is shown to  unmanaged regular, supervised and child
+// accounts.
+bool ShouldShowGetStarted(Profile* profile,
+                          user_manager::UserManager* user_manager) {
+  // If we are disabling the first run experience, we don't show the getting
+  // started module.
+  if (!base::FeatureList::IsEnabled(chromeos::features::kHelpAppFirstRun))
+    return false;
+
+  // Child users return true for IsManaged. These are not EDU accounts though,
+  // should still see the getting started module.
+  if (profile->IsChild())
+    return true;
+  switch (user_manager->GetActiveUser()->GetType()) {
+    case user_manager::USER_TYPE_REGULAR:
+    case user_manager::USER_TYPE_SUPERVISED:
+      return !profile->GetProfilePolicyConnector()->IsManaged();
+    default:
+      return false;
+  }
 }
 
 // Object of this class waits for system web apps to load. Then it launches the
@@ -100,7 +126,7 @@ class AppLauncher : public ProfileObserver,
   AppLauncher& operator=(const AppLauncher&) = delete;
 
   void LaunchHelpApp() {
-    LaunchApp(this->profile_, default_web_apps::kHelpAppId);
+    LaunchApp(this->profile_, web_app::kHelpAppId);
     delete this;
   }
   Profile* profile_;
@@ -115,15 +141,25 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
   // See crbug.com/752361
   registry->RegisterBooleanPref(prefs::kFirstRunTutorialShown, false);
   registry->RegisterBooleanPref(prefs::kHelpAppShouldShowGetStarted, false);
+  registry->RegisterBooleanPref(prefs::kHelpAppShouldShowParentalControl,
+                                false);
   registry->RegisterBooleanPref(prefs::kHelpAppTabletModeDuringOobe, false);
 }
 
 bool ShouldLaunchHelpApp(Profile* profile) {
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   user_manager::UserManager* user_manager = user_manager::UserManager::Get();
+  // Even if we don't launch the help app now, define the preferences for what
+  // should be shown in the app when it is launched.
+  profile->GetPrefs()->SetBoolean(prefs::kHelpAppShouldShowGetStarted,
+                                  ShouldShowGetStarted(profile, user_manager));
+  profile->GetPrefs()->SetBoolean(prefs::kHelpAppTabletModeDuringOobe,
+                                  ash::TabletMode::Get()->InTabletMode());
 
-  if (user_manager->GetActiveUser()->GetType() !=
-      user_manager::USER_TYPE_REGULAR)
+  if (WizardController::default_controller())
+    WizardController::default_controller()->PrepareFirstRunPrefs();
+
+  if (!IsRegularUserOrSupervisedChild(user_manager))
     return false;
 
   if (chromeos::switches::ShouldSkipOobePostLogin())
@@ -133,11 +169,11 @@ bool ShouldLaunchHelpApp(Profile* profile) {
     return true;
   }
 
-  // ash::TabletMode does not exist in some tests.
-  if (ash::TabletMode::Get() && ash::TabletMode::Get()->InTabletMode())
+  if (!base::FeatureList::IsEnabled(chromeos::features::kHelpAppFirstRun))
     return false;
 
-  if (profile->GetProfilePolicyConnector()->IsManaged())
+  // ash::TabletMode does not exist in some tests.
+  if (ash::TabletMode::Get() && ash::TabletMode::Get()->InTabletMode())
     return false;
 
   if (command_line->HasSwitch(::switches::kTestType))
@@ -149,28 +185,21 @@ bool ShouldLaunchHelpApp(Profile* profile) {
   if (profile->GetPrefs()->GetBoolean(prefs::kFirstRunTutorialShown))
     return false;
 
-  bool is_pref_synced =
-      PrefServiceSyncableFromProfile(profile)->IsPrioritySyncing();
-  bool is_user_ephemeral =
-      user_manager->IsCurrentUserNonCryptohomeDataEphemeral();
-  if (!is_pref_synced && is_user_ephemeral)
+  if (user_manager->IsCurrentUserNonCryptohomeDataEphemeral())
+    return false;
+
+  // Child accounts show up as managed, so check this first.
+  if (profile->IsChild())
+    return true;
+
+  if (profile->GetProfilePolicyConnector()->IsManaged())
     return false;
 
   return true;
 }
 
 void LaunchHelpApp(Profile* profile) {
-  if (base::FeatureList::IsEnabled(chromeos::features::kHelpAppV2)) {
-    AppLauncher::LaunchHelpAfterSWALoad(profile);
-    return;
-  }
-
-  LaunchApp(profile, extension_misc::kGeniusAppId);
-}
-
-void LaunchTutorial() {
-  UMA_HISTOGRAM_BOOLEAN("CrosFirstRun.TutorialLaunched", true);
-  FirstRunController::Start();
+  AppLauncher::LaunchHelpAfterSWALoad(profile);
 }
 
 }  // namespace first_run

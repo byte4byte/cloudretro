@@ -13,27 +13,24 @@ import androidx.annotation.VisibleForTesting;
 import com.google.android.gms.common.ConnectionResult;
 import com.google.android.gms.common.GoogleApiAvailability;
 
-import org.chromium.base.Callback;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.chrome.browser.banners.AppDetailsDelegate;
 import org.chromium.chrome.browser.customtabs.CustomTabsConnection;
 import org.chromium.chrome.browser.directactions.DirectActionCoordinator;
 import org.chromium.chrome.browser.externalauth.ExternalAuthUtils;
-import org.chromium.chrome.browser.feedback.AsyncFeedbackSource;
-import org.chromium.chrome.browser.feedback.FeedbackCollector;
 import org.chromium.chrome.browser.feedback.FeedbackReporter;
-import org.chromium.chrome.browser.feedback.FeedbackSource;
-import org.chromium.chrome.browser.feedback.FeedbackSourceProvider;
+import org.chromium.chrome.browser.feedback.HelpAndFeedbackLauncher;
+import org.chromium.chrome.browser.feedback.HelpAndFeedbackLauncherImpl;
 import org.chromium.chrome.browser.gsa.GSAHelper;
-import org.chromium.chrome.browser.help.HelpAndFeedback;
 import org.chromium.chrome.browser.historyreport.AppIndexingReporter;
+import org.chromium.chrome.browser.init.ChromeStartupDelegate;
 import org.chromium.chrome.browser.init.ProcessInitializationHandler;
 import org.chromium.chrome.browser.instantapps.InstantAppsHandler;
+import org.chromium.chrome.browser.lens.LensController;
 import org.chromium.chrome.browser.locale.LocaleManager;
 import org.chromium.chrome.browser.metrics.VariationsSession;
-import org.chromium.chrome.browser.multiwindow.MultiWindowUtils;
-import org.chromium.chrome.browser.offlinepages.CCTRequestStatus;
+import org.chromium.chrome.browser.notifications.chime.ChimeDelegate;
 import org.chromium.chrome.browser.omaha.RequestGenerator;
 import org.chromium.chrome.browser.partnerbookmarks.PartnerBookmark;
 import org.chromium.chrome.browser.partnerbookmarks.PartnerBookmarksProviderIterator;
@@ -47,14 +44,15 @@ import org.chromium.chrome.browser.sync.TrustedVaultClient;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.usage_stats.DigitalWellbeingClient;
 import org.chromium.chrome.browser.webapps.GooglePlayWebApkInstallDelegate;
-import org.chromium.chrome.browser.webauth.Fido2ApiHandler;
-import org.chromium.chrome.browser.xsurface.SurfaceDependencyProvider;
-import org.chromium.chrome.browser.xsurface.SurfaceRenderer;
+import org.chromium.chrome.browser.xsurface.ProcessScope;
+import org.chromium.chrome.browser.xsurface.ProcessScopeDependencyProvider;
+import org.chromium.chrome.modules.image_editor.ImageEditorModuleProvider;
 import org.chromium.components.browser_ui.widget.FeatureHighlightProvider;
+import org.chromium.components.external_intents.AuthenticatorNavigationInterceptor;
+import org.chromium.components.policy.AppRestrictionsProvider;
+import org.chromium.components.policy.CombinedPolicyProvider;
 import org.chromium.components.signin.AccountManagerDelegate;
 import org.chromium.components.signin.SystemAccountManagerDelegate;
-import org.chromium.policy.AppRestrictionsProvider;
-import org.chromium.policy.CombinedPolicyProvider;
 
 import java.util.Collections;
 import java.util.List;
@@ -66,6 +64,9 @@ import java.util.List;
  */
 public abstract class AppHooks {
     private static AppHooksImpl sInstance;
+
+    @Nullable
+    private ExternalAuthUtils mExternalAuthUtils;
 
     /**
      * Sets a mocked instance for testing.
@@ -108,22 +109,8 @@ public abstract class AppHooks {
     /**
      * Return a {@link AuthenticatorNavigationInterceptor} for the given {@link Tab}.
      * This can be null if there are no applicable interceptor to be built.
-     * NOTE: This method will be transitioned to talk in terms of the //components-level interface
-     * once downstream has been transitioned.
      */
-    public org.chromium.chrome.browser.tab.AuthenticatorNavigationInterceptor
-    createAuthenticatorNavigationInterceptor(Tab tab) {
-        return null;
-    }
-
-    /**
-     * Return a {@link AuthenticatorNavigationInterceptor} for the given {@link Tab}.
-     * This can be null if there are no applicable interceptor to be built.
-     * NOTE: This method exists only to allow downstream to transition to talking in terms of the
-     * //components-level interface. It will be deleted once the transition is complete.
-     */
-    public org.chromium.components.external_intents.AuthenticatorNavigationInterceptor
-    createAuthenticatorNavigationInterceptorV2(Tab tab) {
+    public AuthenticatorNavigationInterceptor createAuthenticatorNavigationInterceptor(Tab tab) {
         return null;
     }
 
@@ -154,8 +141,19 @@ public abstract class AppHooks {
     /**
      * @return An instance of ExternalAuthUtils to be installed as a singleton.
      */
-    public ExternalAuthUtils createExternalAuthUtils() {
+    protected ExternalAuthUtils createExternalAuthUtils() {
         return new ExternalAuthUtils();
+    }
+
+    /**
+     * @return The singleton instance of ExternalAuthUtils.
+     */
+    public ExternalAuthUtils getExternalAuthUtils() {
+        if (mExternalAuthUtils == null) {
+            mExternalAuthUtils = createExternalAuthUtils();
+        }
+
+        return mExternalAuthUtils;
     }
 
     /**
@@ -181,14 +179,18 @@ public abstract class AppHooks {
     }
 
     /**
-     * Returns a new instance of HelpAndFeedback.
+     * Returns a new instance of HelpAndFeedbackLauncher.
      */
-    public HelpAndFeedback createHelpAndFeedback() {
-        return new HelpAndFeedback();
+    public HelpAndFeedbackLauncher createHelpAndFeedbackLauncher() {
+        return new HelpAndFeedbackLauncherImpl();
     }
 
     public InstantAppsHandler createInstantAppsHandler() {
         return new InstantAppsHandler();
+    }
+
+    public LensController createLensController() {
+        return new LensController();
     }
 
     /**
@@ -204,13 +206,6 @@ public abstract class AppHooks {
      */
     public GooglePasswordManagerUIProvider createGooglePasswordManagerUIProvider() {
         return null;
-    }
-
-    /**
-     * @return An instance of MultiWindowUtils to be installed as a singleton.
-     */
-    public MultiWindowUtils createMultiWindowUtils() {
-        return new MultiWindowUtils();
     }
 
     /**
@@ -262,25 +257,16 @@ public abstract class AppHooks {
     }
 
     /**
-     * @return A callback that will be run each time an offline page is saved in the custom tabs
-     * namespace.
-     */
-    @CalledByNative
-    public Callback<CCTRequestStatus> getOfflinePagesCCTRequestDoneCallback() {
-        return null;
-    }
-
-    /**
-     * @return A list of whitelisted apps that are allowed to receive notification when the
+     * @return A list of allowlisted apps that are allowed to receive notification when the
      * set of offlined pages downloaded on their behalf has changed. Apps are listed by their
      * package name.
      */
-    public List<String> getOfflinePagesCctWhitelist() {
+    public List<String> getOfflinePagesCctAllowlist() {
         return Collections.emptyList();
     }
 
     /**
-     * @return A list of whitelisted app package names whose completed notifications
+     * @return A list of allowlisted app package names whose completed notifications
      * we should suppress.
      */
     public List<String> getOfflinePagesSuppressNotificationPackages() {
@@ -301,22 +287,6 @@ public abstract class AppHooks {
      */
     public PartnerBrowserCustomizations.Provider getCustomizationProvider() {
         return new PartnerBrowserCustomizations.ProviderPackage();
-    }
-
-    /**
-     * @return A {@link FeedbackSourceProvider} that can provide additional {@link FeedbackSource}s
-     * and {@link AsyncFeedbackSource}s to be used by a {@link FeedbackCollector}.
-     */
-    public FeedbackSourceProvider getAdditionalFeedbackSources() {
-        return new FeedbackSourceProvider() {};
-    }
-
-    /**
-     * @return a new {@link Fido2ApiHandler} instance.
-     */
-    public Fido2ApiHandler createFido2ApiHandler() {
-        // TODO(nsatragno): remove after cleaning up Fido2ApiHandlerInternal.
-        return new Fido2ApiHandler();
     }
 
     /**
@@ -369,8 +339,8 @@ public abstract class AppHooks {
      * Returns a new {@link SurfaceRenderer} if the xsurface implementation is included in the
      * apk. Otherwise null is returned.
      */
-    public @Nullable SurfaceRenderer createExternalSurfaceRenderer(
-            SurfaceDependencyProvider dependencies) {
+    public @Nullable ProcessScope getExternalSurfaceProcessScope(
+            ProcessScopeDependencyProvider dependencies) {
         return null;
     }
 
@@ -379,5 +349,20 @@ public abstract class AppHooks {
      */
     public String getWebApkServerUrl() {
         return "";
+    }
+
+    /**
+     * Returns a Chime Delegate if the chime module is defined.
+     */
+    public ChimeDelegate getChimeDelegate() {
+        return new ChimeDelegate();
+    }
+
+    public @Nullable ImageEditorModuleProvider getImageEditorModuleProvider() {
+        return null;
+    }
+
+    public ChromeStartupDelegate createChromeStartupDelegate() {
+        return new ChromeStartupDelegate();
     }
 }

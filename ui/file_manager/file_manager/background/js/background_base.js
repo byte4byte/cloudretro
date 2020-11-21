@@ -2,13 +2,20 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-/** @typedef {function(!Array<string>):!Promise} */
-let LaunchHandler;
+// clang-format off
+// #import {BackgroundBase, LaunchHandler} from '../../../externs/background/background_base.m.js';
+// #import {VolumeManager} from '../../../externs/volume_manager.m.js';
+// #import * as wrappedVolumeManagerFactory from './volume_manager_factory.m.js'; const {volumeManagerFactory} = wrappedVolumeManagerFactory;
+// #import * as wrappedUtil from '../../common/js/util.m.js'; const {util} = wrappedUtil;
+// #import {assert} from 'chrome://resources/js/assert.m.js';
+// #import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
+// clang-format on
 
 /**
  * Root class of the background page.
+ * @implements {BackgroundBase}
  */
-class BackgroundBase {
+/* #export */ class BackgroundBaseImpl {
   constructor() {
     /**
      * Map of all currently open file dialogs. The key is an app ID.
@@ -34,6 +41,13 @@ class BackgroundBase {
     // Initialize handlers.
     chrome.app.runtime.onLaunched.addListener(this.onLaunched_.bind(this));
     chrome.app.runtime.onRestarted.addListener(this.onRestarted_.bind(this));
+  }
+
+  /**
+   * @return {!Promise<!VolumeManager>}
+   */
+  async getVolumeManager() {
+    return volumeManagerFactory.getInstance();
   }
 
   /**

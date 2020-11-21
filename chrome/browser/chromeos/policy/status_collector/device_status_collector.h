@@ -17,6 +17,7 @@
 #include "base/callback_list.h"
 #include "base/compiler_specific.h"
 #include "base/containers/circular_deque.h"
+#include "base/time/default_clock.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
@@ -24,6 +25,7 @@
 #include "base/task/cancelable_task_tracker.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
+#include "chrome/browser/chromeos/policy/status_collector/app_info_generator.h"
 #include "chrome/browser/chromeos/policy/status_collector/status_collector.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chromeos/dbus/cryptohome/cryptohome_client.h"
@@ -34,7 +36,6 @@
 #include "ui/base/idle/idle.h"
 
 namespace chromeos {
-class CrosSettings;
 namespace system {
 class StatisticsProvider;
 }
@@ -62,6 +63,9 @@ namespace policy {
 class EnterpriseActivityStorage;
 struct DeviceLocalAccount;
 class DeviceStatusCollectorState;
+
+// Enum used to define which data the CrosHealthdDataFetcher should collect.
+enum class CrosHealthdCollectionMode { kFull, kBattery };
 
 // Holds TPM status info.  Cf. TpmStatusInfo in device_management_backend.proto.
 struct TpmStatusInfo {
@@ -141,7 +145,8 @@ class DeviceStatusCollector : public StatusCollector,
       const base::circular_deque<std::unique_ptr<SampledData>>&)>;
   // Gets the data from cros_healthd and passes it to CrosHealthdDataReceiver.
   using CrosHealthdDataFetcher =
-      base::RepeatingCallback<void(CrosHealthdDataReceiver)>;
+      base::RepeatingCallback<void(CrosHealthdCollectionMode,
+                                   CrosHealthdDataReceiver)>;
 
   // Asynchronously receives the graphics status.
   using GraphicsStatusReceiver =
@@ -184,7 +189,8 @@ class DeviceStatusCollector : public StatusCollector,
       const StatefulPartitionInfoFetcher& stateful_partition_info_fetcher,
       const CrosHealthdDataFetcher& cros_healthd_data_fetcher,
       const GraphicsStatusFetcher& graphics_status_fetcher,
-      const CrashReportInfoFetcher& crash_report_info_fetcher);
+      const CrashReportInfoFetcher& crash_report_info_fetcher,
+      base::Clock* clock = base::DefaultClock::GetInstance());
 
   // Constructor with default callbacks. These callbacks are always executed on
   // Blocking Pool. Caller is responsible for passing already initialized
@@ -202,8 +208,13 @@ class DeviceStatusCollector : public StatusCollector,
   bool ShouldReportUsers() const override;
   bool ShouldReportHardwareStatus() const override;
   bool ShouldReportCrashReportInfo() const override;
+  bool ShouldReportAppInfoAndActivity() const override;
 
   static void RegisterPrefs(PrefRegistrySimple* registry);
+
+  AffiliatedSessionService* GetAffiliatedSessionServiceForTesting() {
+    return &affiliated_session_service_;
+  }
 
   // How often to poll to see if the user is idle.
   static constexpr base::TimeDelta kIdlePollInterval =
@@ -318,8 +329,10 @@ class DeviceStatusCollector : public StatusCollector,
                      SamplingCallback callback);
 
   // CrosHealthdDataReceiver interface implementation, fetches data from
-  // cros_healthd and passes it to |callback|.
-  void FetchCrosHealthdData(CrosHealthdDataReceiver callback);
+  // cros_healthd and passes it to |callback|. The data collected depends on the
+  // collection |mode|.
+  void FetchCrosHealthdData(CrosHealthdCollectionMode mode,
+                            CrosHealthdDataReceiver callback);
 
   // Callback for CrosHealthd that performs final sampling and
   // actually invokes |callback|.
@@ -354,6 +367,11 @@ class DeviceStatusCollector : public StatusCollector,
   // OnSubmittedSuccessfully(). Trimming is delayed so unsuccessful uploads
   // don't result in dropped data.
   int64_t last_reported_end_timestamp_ = 0;
+
+  // Time when GetStatusAsync() is called. Used to close open app
+  // activity just prior to reporting so the report can include the most
+  // up-to-date activity.
+  base::Time last_requested_;
 
   base::RepeatingTimer idle_poll_timer_;
   base::RepeatingTimer resource_usage_sampling_timer_;
@@ -432,6 +450,11 @@ class DeviceStatusCollector : public StatusCollector,
   bool report_memory_info_ = false;
   bool report_backlight_info_ = false;
   bool report_crash_report_info_ = false;
+  bool report_bluetooth_info_ = false;
+  bool report_fan_info_ = false;
+  bool report_vpd_info_ = false;
+  bool report_app_info_ = false;
+  bool report_system_info_ = false;
   bool stat_reporting_pref_ = false;
 
   std::unique_ptr<chromeos::CrosSettings::ObserverSubscription>
@@ -467,7 +490,21 @@ class DeviceStatusCollector : public StatusCollector,
   std::unique_ptr<chromeos::CrosSettings::ObserverSubscription>
       crash_report_info_subscription_;
   std::unique_ptr<chromeos::CrosSettings::ObserverSubscription>
+      bluetooth_info_subscription_;
+  std::unique_ptr<chromeos::CrosSettings::ObserverSubscription>
+      fan_info_subscription_;
+  std::unique_ptr<chromeos::CrosSettings::ObserverSubscription>
+      vpd_info_subscription_;
+  std::unique_ptr<chromeos::CrosSettings::ObserverSubscription>
+      system_info_subscription_;
+  std::unique_ptr<chromeos::CrosSettings::ObserverSubscription>
+      app_info_subscription_;
+  std::unique_ptr<chromeos::CrosSettings::ObserverSubscription>
       stats_reporting_pref_subscription_;
+
+  AffiliatedSessionService affiliated_session_service_;
+
+  AppInfoGenerator app_info_generator_;
 
   std::unique_ptr<PrefChangeRegistrar> pref_change_registrar_;
 

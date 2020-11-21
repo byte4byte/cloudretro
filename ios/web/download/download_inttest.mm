@@ -59,7 +59,7 @@ std::unique_ptr<net::test_server::HttpResponse> GetDownloadResponse(
 class DownloadTest : public WebTestWithWebState {
  protected:
   DownloadTest() : delegate_(download_controller()) {
-    server_.RegisterRequestHandler(base::Bind(&GetDownloadResponse));
+    server_.RegisterRequestHandler(base::BindRepeating(&GetDownloadResponse));
   }
 
   DownloadController* download_controller() {
@@ -95,8 +95,6 @@ TEST_F(DownloadTest, SucessfullDownload) {
   EXPECT_EQ(-1, task->GetPercentComplete());
   EXPECT_EQ(kContentDisposition, task->GetContentDisposition());
   EXPECT_EQ(kMimeType, task->GetMimeType());
-  EXPECT_TRUE(ui::PageTransitionTypeIncludingQualifiersIs(
-      task->GetTransitionType(), ui::PageTransition::PAGE_TRANSITION_TYPED));
   EXPECT_EQ("download.test", base::UTF16ToUTF8(task->GetSuggestedFilename()));
 
   // Start the download task and wait for completion.

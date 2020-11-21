@@ -46,6 +46,15 @@
   width: 100%;
 }
 
+body.files-ng .cws-widget-buttons {
+  align-items: center;
+  background: var(--cros-bg-color);
+  display: flex;
+  /* subtract the bottom padding from the container outside */
+  height: calc(64px - 20px);
+  margin-top: 16px;
+}
+
 .cws-widget-webstore-button {
   color: rgb(0, 0, 255);
   cursor: pointer;
@@ -55,6 +64,12 @@
   padding-inline-end: 10px;
   padding-inline-start: 12px;
   padding-top: 10px;
+}
+
+body.files-ng .cws-widget-webstore-button {
+  color: var(--cros-button-background-color-primary);
+  height: 24px;
+  padding-inline-start: 0;
 }
 
 .cws-widget-webstore-button-icon {
@@ -68,9 +83,19 @@
   width: 16px;
 }
 
+body.files-ng .cws-widget-webstore-button-icon {
+  background-position: center;
+  height: 24px;
+  width: 24px;
+}
+
 .cws-widget-webstore-button-label {
   flex: 1;
   line-height: 16px;
+}
+
+body.files-ng .cws-widget-webstore-button-label {
+  line-height: 24px;
 }
 
 .cr-dialog-frame.cws-widget-error-dialog-frame {
@@ -81,9 +106,14 @@
   background-image: -webkit-image-set(
     url(chrome://theme/IDR_ERROR_NETWORK_GENERIC) 1x,
     url(chrome://theme/IDR_ERROR_NETWORK_GENERIC@2x) 2x);
-  background-position: center;
+  background-position: center top;
   background-repeat: no-repeat;
-  height: 40px;
+  height: 100px;
+  margin-inline-start: 35px;
+}
+
+:root[dir=rtl] .cws-widget-error-dialog-frame .cws-widget-error-dialog-img {
+  margin-inline-start: -35px;
 }
 
 .cws-widget-error-dialog-text {

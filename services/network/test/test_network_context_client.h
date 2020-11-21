@@ -6,8 +6,10 @@
 #define SERVICES_NETWORK_TEST_TEST_NETWORK_CONTEXT_CLIENT_H_
 
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/receiver.h"
+#include "services/network/public/cpp/network_service_buildflags.h"
 #include "services/network/public/mojom/network_context.mojom.h"
 
 namespace network {
@@ -69,22 +71,6 @@ class TestNetworkContextClient : public network::mojom::NetworkContextClient {
                        const std::string& header_value,
                        int32_t load_flags,
                        OnClearSiteDataCallback callback) override {}
-  void OnCookiesChanged(
-      bool is_service_worker,
-      int32_t process_id,
-      int32_t routing_id,
-      const GURL& url,
-      const net::SiteForCookies& site_for_cookies,
-      const std::vector<net::CookieWithStatus>& cookie_list,
-      const base::Optional<std::string>& devtools_request_id) override {}
-  void OnCookiesRead(
-      bool is_service_worker,
-      int32_t process_id,
-      int32_t routing_id,
-      const GURL& url,
-      const net::SiteForCookies& site_for_cookies,
-      const std::vector<net::CookieWithStatus>& cookie_list,
-      const base::Optional<std::string>& devtools_request_id) override {}
 #if defined(OS_ANDROID)
   void OnGenerateHttpNegotiateAuthToken(
       const std::string& server_auth_token,
@@ -93,9 +79,14 @@ class TestNetworkContextClient : public network::mojom::NetworkContextClient {
       const std::string& spn,
       OnGenerateHttpNegotiateAuthTokenCallback callback) override {}
 #endif
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_ASH)
   void OnTrustAnchorUsed() override {}
 #endif
+#if BUILDFLAG(IS_CT_SUPPORTED)
+#endif
+  void OnTrustTokenIssuanceDivertedToSystem(
+      mojom::FulfillTrustTokenIssuanceRequestPtr request,
+      OnTrustTokenIssuanceDivertedToSystemCallback callback) override {}
 
  private:
   mojo::Receiver<mojom::NetworkContextClient> receiver_;

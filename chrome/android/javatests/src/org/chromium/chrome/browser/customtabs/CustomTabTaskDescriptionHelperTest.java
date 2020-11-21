@@ -6,16 +6,15 @@ package org.chromium.chrome.browser.customtabs;
 
 import static org.junit.Assert.assertEquals;
 
-import android.annotation.TargetApi;
 import android.app.Activity;
 import android.app.ActivityManager;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.Color;
 import android.os.Build;
-import android.support.test.filters.MediumTest;
 
 import androidx.annotation.NonNull;
+import androidx.test.filters.MediumTest;
 
 import org.junit.Before;
 import org.junit.Rule;
@@ -27,8 +26,8 @@ import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.MinAndroidSdkLevel;
 import org.chromium.base.test.util.Restriction;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.ShortcutHelper;
+import org.chromium.chrome.browser.app.ChromeActivity;
 import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabThemeColorHelper;
@@ -199,14 +198,11 @@ public class CustomTabTaskDescriptionHelperTest {
     private WebappActivity launchWebappAndWaitTillPageLoaded(Intent launchIntent, String url) {
         launchIntent.putExtra(ShortcutHelper.EXTRA_URL, url);
         mWebappActivityTestRule.startWebappActivity(launchIntent);
-
-        WebappActivity webappActivity = mWebappActivityTestRule.getActivity();
-        ChromeTabUtils.waitForTabPageLoaded(webappActivity.getActivityTab(), url);
-        return webappActivity;
+        return mWebappActivityTestRule.getActivity();
     }
 
     private void waitForTitle(Tab tab, String expectedTitle) throws Exception {
-        if (tab.getTitle().equals(expectedTitle)) return;
+        if (ChromeTabUtils.getTitleOnUiThread(tab).equals(expectedTitle)) return;
 
         ChromeTabUtils.waitForTitle(tab, expectedTitle);
     }
@@ -219,7 +215,6 @@ public class CustomTabTaskDescriptionHelperTest {
     /**
      * Fetches the task description color from the ActivityManager.
      */
-    @TargetApi(Build.VERSION_CODES.LOLLIPOP)
     private static int fetchTaskDescriptionColor(Activity activity) throws Exception {
         ActivityManager.TaskDescription taskDescription =
                 (ActivityManager.TaskDescription) fetchTaskDescription(activity);
@@ -229,14 +224,12 @@ public class CustomTabTaskDescriptionHelperTest {
     /**
      * Fetches the task description label from the ActivityManager.
      */
-    @TargetApi(Build.VERSION_CODES.LOLLIPOP)
     private static String fetchTaskDescriptionLabel(Activity activity) throws Exception {
         ActivityManager.TaskDescription taskDescription =
                 (ActivityManager.TaskDescription) fetchTaskDescription(activity);
         return (taskDescription == null) ? null : taskDescription.getLabel();
     }
 
-    @TargetApi(Build.VERSION_CODES.LOLLIPOP)
     private static Object fetchTaskDescription(Activity activity) throws Exception {
         return TestThreadUtils.runOnUiThreadBlocking(() -> {
             try {

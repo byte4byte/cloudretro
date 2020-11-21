@@ -8,8 +8,10 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/memory/ptr_util.h"
+#include "base/metrics/histogram_macros.h"
+#include "base/trace_event/trace_event.h"
 #include "media/base/bind_to_current_loop.h"
 #include "media/base/format_utils.h"
 #include "media/base/video_frame.h"
@@ -20,9 +22,20 @@
 #include "media/gpu/macros.h"
 #include "media/gpu/vaapi/h264_vaapi_video_decoder_delegate.h"
 #include "media/gpu/vaapi/va_surface.h"
+#include "media/gpu/vaapi/vaapi_utils.h"
 #include "media/gpu/vaapi/vaapi_wrapper.h"
 #include "media/gpu/vaapi/vp8_vaapi_video_decoder_delegate.h"
 #include "media/gpu/vaapi/vp9_vaapi_video_decoder_delegate.h"
+#include "media/media_buildflags.h"
+
+#if BUILDFLAG(ENABLE_PLATFORM_HEVC)
+#include "media/gpu/vaapi/h265_vaapi_video_decoder_delegate.h"
+#endif
+
+#if BUILDFLAG(IS_ASH)
+#include "media/gpu/av1_decoder.h"
+#include "media/gpu/vaapi/av1_vaapi_video_decoder_delegate.h"
+#endif  // BUILDFLAG(IS_ASH)
 
 namespace media {
 
@@ -33,17 +46,15 @@ constexpr size_t kTimestampCacheSize = 128;
 
 // Returns the preferred VA_RT_FORMAT for the given |profile|.
 unsigned int GetVaFormatForVideoCodecProfile(VideoCodecProfile profile) {
-  switch (profile) {
-    case VP9PROFILE_PROFILE2:
-    case VP9PROFILE_PROFILE3:
-      return VA_RT_FORMAT_YUV420_10BPP;
-    default:
-      return VA_RT_FORMAT_YUV420;
-  }
+  if (profile == VP9PROFILE_PROFILE2 || profile == VP9PROFILE_PROFILE3)
+    return VA_RT_FORMAT_YUV420_10BPP;
+  return VA_RT_FORMAT_YUV420;
 }
 
-gfx::BufferFormat GetBufferFormat() {
+gfx::BufferFormat GetBufferFormat(VideoCodecProfile profile) {
 #if defined(USE_OZONE)
+  if (profile == VP9PROFILE_PROFILE2 || profile == VP9PROFILE_PROFILE3)
+    return gfx::BufferFormat::P010;
   return gfx::BufferFormat::YUV_420_BIPLANAR;
 #else
   return gfx::BufferFormat::RGBX_8888;
@@ -72,9 +83,15 @@ std::unique_ptr<DecoderInterface> VaapiVideoDecoder::Create(
 }
 
 // static
-SupportedVideoDecoderConfigs VaapiVideoDecoder::GetSupportedConfigs() {
+SupportedVideoDecoderConfigs VaapiVideoDecoder::GetSupportedConfigs(
+    const gpu::GpuDriverBugWorkarounds& workarounds) {
   return ConvertFromSupportedProfiles(
-      VaapiWrapper::GetSupportedDecodeProfiles(), false);
+      VaapiWrapper::GetSupportedDecodeProfiles(workarounds),
+#if BUILDFLAG(USE_CHROMEOS_PROTECTED_MEDIA)
+      true /* allow_encrypted */);
+#else
+      false /* allow_encrypted */);
+#endif
 }
 
 VaapiVideoDecoder::VaapiVideoDecoder(
@@ -83,29 +100,49 @@ VaapiVideoDecoder::VaapiVideoDecoder(
     : DecoderInterface(std::move(decoder_task_runner), std::move(client)),
       buffer_id_to_timestamp_(kTimestampCacheSize),
       weak_this_factory_(this) {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(decoder_sequence_checker_);
   VLOGF(2);
+  DCHECK(decoder_task_runner_->RunsTasksInCurrentSequence());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   weak_this_ = weak_this_factory_.GetWeakPtr();
 }
 
 VaapiVideoDecoder::~VaapiVideoDecoder() {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(decoder_sequence_checker_);
   VLOGF(2);
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   // Abort all currently scheduled decode tasks.
   ClearDecodeTaskQueue(DecodeStatus::ABORTED);
 
   weak_this_factory_.InvalidateWeakPtrs();
+
+  // Notify |decoder_delegate_| of an imminent VAContextID destruction, so it
+  // can destroy any internal structures making use of it.
+  if (decoder_delegate_)
+    decoder_delegate_->OnVAContextDestructionSoon();
+
+  // Destroy explicitly to DCHECK() that |vaapi_wrapper_| references are held
+  // inside the accelerator in |decoder_|, by the |allocated_va_surfaces_| and
+  // of course by this class. To clear |allocated_va_surfaces_| we have to first
+  // DestroyContext().
+  decoder_ = nullptr;
+  if (vaapi_wrapper_) {
+    vaapi_wrapper_->DestroyContext();
+    allocated_va_surfaces_.clear();
+
+    DCHECK(vaapi_wrapper_->HasOneRef());
+    vaapi_wrapper_ = nullptr;
+  }
 }
 
 void VaapiVideoDecoder::Initialize(const VideoDecoderConfig& config,
+                                   CdmContext* cdm_context,
                                    InitCB init_cb,
                                    const OutputCB& output_cb) {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(decoder_sequence_checker_);
+  DVLOGF(2) << config.AsHumanReadableString();
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(config.IsValidConfig());
   DCHECK(state_ == State::kUninitialized || state_ == State::kWaitingForInput);
-  DVLOGF(3);
 
   // Reinitializing the decoder is allowed if there are no pending decodes.
   if (current_decode_task_ || !decode_task_queue_.empty()) {
@@ -113,6 +150,29 @@ void VaapiVideoDecoder::Initialize(const VideoDecoderConfig& config,
         << "Don't call Initialize() while there are pending decode tasks";
     std::move(init_cb).Run(StatusCode::kVaapiReinitializedDuringDecode);
     return;
+  }
+
+  if (config.is_encrypted()) {
+#if !BUILDFLAG(IS_CHROMEOS_ASH)
+    std::move(init_cb).Run(StatusCode::kEncryptedContentUnsupported);
+    return;
+#else
+    if (!cdm_context || !cdm_context->GetChromeOsCdmContext()) {
+      LOG(ERROR) << "Cannot support encrypted stream w/out ChromeOsCdmContext";
+      std::move(init_cb).Run(StatusCode::kDecoderMissingCdmForEncryptedContent);
+      return;
+    }
+    if (config.codec() != kCodecH264 && config.codec() != kCodecVP9) {
+      VLOGF(1)
+          << "Vaapi decoder does not support this codec for encrypted content";
+      std::move(init_cb).Run(StatusCode::kEncryptedContentUnsupported);
+      return;
+    }
+    cdm_context_ = cdm_context;
+    cdm_event_cb_registration_ = cdm_context_->RegisterEventCB(
+        base::BindRepeating(&VaapiVideoDecoder::OnCdmContextEvent,
+                            weak_this_factory_.GetWeakPtr()));
+#endif
   }
 
   // We expect the decoder to have released all output buffers (by the client
@@ -123,16 +183,35 @@ void VaapiVideoDecoder::Initialize(const VideoDecoderConfig& config,
   if (state_ != State::kUninitialized) {
     DVLOGF(3) << "Reinitializing decoder";
 
+    // Notify |decoder_delegate_| of an imminent VAContextID destruction, so it
+    // can destroy any internal structures making use of it.
+    decoder_delegate_->OnVAContextDestructionSoon();
+
     decoder_ = nullptr;
+    DCHECK(vaapi_wrapper_);
+    // To clear |allocated_va_surfaces_| we have to first DestroyContext().
+    vaapi_wrapper_->DestroyContext();
+    allocated_va_surfaces_.clear();
+
+    DCHECK(vaapi_wrapper_->HasOneRef());
     vaapi_wrapper_ = nullptr;
     decoder_delegate_ = nullptr;
     SetState(State::kUninitialized);
   }
 
   // Initialize VAAPI wrapper.
-  VideoCodecProfile profile = config.profile();
+  const VideoCodecProfile profile = config.profile();
   vaapi_wrapper_ = VaapiWrapper::CreateForVideoCodec(
-      VaapiWrapper::kDecode, profile, base::DoNothing());
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+      !cdm_context_ ? VaapiWrapper::kDecode : VaapiWrapper::kDecodeProtected,
+#else
+      VaapiWrapper::kDecode,
+#endif
+      profile,
+      base::BindRepeating(&ReportVaapiErrorToUMA,
+                          "Media.VaapiVideoDecoder.VAAPIError"));
+  UMA_HISTOGRAM_BOOLEAN("Media.VaapiVideoDecoder.VaapiWrapperCreationSuccess",
+                        vaapi_wrapper_.get());
   if (!vaapi_wrapper_.get()) {
     VLOGF(1) << "Failed initializing VAAPI for profile "
              << GetProfileName(profile);
@@ -142,8 +221,9 @@ void VaapiVideoDecoder::Initialize(const VideoDecoderConfig& config,
 
   profile_ = profile;
   color_space_ = config.color_space_info();
-  if (!CreateAcceleratedVideoDecoder()) {
-    std::move(init_cb).Run(StatusCode::kVaapiFailedAcceleratorCreation);
+  auto accel_status = CreateAcceleratedVideoDecoder();
+  if (!accel_status.is_ok()) {
+    std::move(init_cb).Run(std::move(accel_status));
     return;
   }
 
@@ -160,9 +240,20 @@ void VaapiVideoDecoder::Initialize(const VideoDecoderConfig& config,
   std::move(init_cb).Run(OkStatus());
 }
 
+void VaapiVideoDecoder::OnCdmContextEvent(CdmContext::Event event) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  if (event != CdmContext::Event::kHasAdditionalUsableKey)
+    return;
+
+  // Invoke the callback we'd get for a protected session update because this is
+  // the same thing, it's a trigger that there are new keys, so if we were
+  // waiting for a key we should fetch them again.
+  ProtectedSessionUpdate(true);
+}
+
 void VaapiVideoDecoder::Decode(scoped_refptr<DecoderBuffer> buffer,
                                DecodeCB decode_cb) {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(decoder_sequence_checker_);
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DVLOGF(4) << "Queuing input buffer, id: " << next_buffer_id_ << ", size: "
             << (buffer->end_of_stream() ? 0 : buffer->data_size());
 
@@ -190,7 +281,7 @@ void VaapiVideoDecoder::Decode(scoped_refptr<DecoderBuffer> buffer,
 }
 
 void VaapiVideoDecoder::ScheduleNextDecodeTask() {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(decoder_sequence_checker_);
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK_EQ(state_, State::kDecoding);
   DCHECK(!current_decode_task_);
   DCHECK(!decode_task_queue_.empty());
@@ -209,8 +300,8 @@ void VaapiVideoDecoder::ScheduleNextDecodeTask() {
 }
 
 void VaapiVideoDecoder::HandleDecodeTask() {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(decoder_sequence_checker_);
   DVLOGF(4);
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   if (state_ == State::kError || state_ == State::kResetting)
     return;
@@ -220,11 +311,13 @@ void VaapiVideoDecoder::HandleDecodeTask() {
 
   // Check whether a flush was requested.
   if (current_decode_task_->buffer_->end_of_stream()) {
-    FlushTask();
+    Flush();
     return;
   }
 
+  TRACE_EVENT_BEGIN0("media,gpu", "VaapiVideoDecoder::Decode");
   AcceleratedVideoDecoder::DecodeResult decode_result = decoder_->Decode();
+  TRACE_EVENT_END0("media,gpu", "VaapiVideoDecoder::Decode");
   switch (decode_result) {
     case AcceleratedVideoDecoder::kRanOutOfStreamData:
       // Decoding was successful, notify client and try to schedule the next
@@ -257,18 +350,19 @@ void VaapiVideoDecoder::HandleDecodeTask() {
       break;
     case AcceleratedVideoDecoder::kDecodeError:
       LOG(ERROR) << "Error decoding stream";
+      UMA_HISTOGRAM_BOOLEAN("Media.VaapiVideoDecoder.DecodeError", true);
       SetState(State::kError);
       break;
     case AcceleratedVideoDecoder::kTryAgain:
-      LOG(ERROR) << "Encrypted streams not supported";
-      SetState(State::kError);
+      DVLOG(1) << "Decoder going into the waiting for protected state";
+      SetState(State::kWaitingForProtected);
       break;
   }
 }
 
 void VaapiVideoDecoder::ClearDecodeTaskQueue(DecodeStatus status) {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(decoder_sequence_checker_);
   DVLOGF(4);
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   if (current_decode_task_) {
     std::move(current_decode_task_->decode_done_cb_).Run(status);
@@ -282,37 +376,51 @@ void VaapiVideoDecoder::ClearDecodeTaskQueue(DecodeStatus status) {
 }
 
 scoped_refptr<VASurface> VaapiVideoDecoder::CreateSurface() {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(decoder_sequence_checker_);
+  DVLOGF(4);
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK_EQ(state_, State::kDecoding);
   DCHECK(current_decode_task_);
-  DVLOGF(4);
 
   // Get a video frame from the video frame pool.
   scoped_refptr<VideoFrame> frame = frame_pool_->GetFrame();
   if (!frame) {
     // Ask the video frame pool to notify us when new frames are available, so
     // we can retry the current decode task.
-    frame_pool_->NotifyWhenFrameAvailable(base::BindOnce(
-        &VaapiVideoDecoder::NotifyFrameAvailableTask, weak_this_));
+    frame_pool_->NotifyWhenFrameAvailable(
+        base::BindOnce(&VaapiVideoDecoder::NotifyFrameAvailable, weak_this_));
     return nullptr;
   }
 
-  scoped_refptr<gfx::NativePixmap> pixmap =
-      CreateNativePixmapDmaBuf(frame.get());
-  if (!pixmap) {
-    LOG(ERROR) << "Failed to create NativePixmap from VideoFrame";
-    SetState(State::kError);
-    return nullptr;
-  }
+  // |frame|s coming from ARC++ are not GpuMemoryBuffer-backed, but they have
+  // DmaBufs whose fd numbers are consistent along the lifetime of the VA
+  // surfaces they back.
+  DCHECK(frame->GetGpuMemoryBuffer() || frame->HasDmaBufs());
+  const gfx::GpuMemoryBufferId frame_id =
+      frame->GetGpuMemoryBuffer()
+          ? frame->GetGpuMemoryBuffer()->GetId()
+          : gfx::GpuMemoryBufferId(frame->DmabufFds()[0].get());
 
-  // Create VASurface from the native pixmap.
-  scoped_refptr<VASurface> va_surface =
-      vaapi_wrapper_->CreateVASurfaceForPixmap(std::move(pixmap));
+  scoped_refptr<VASurface> va_surface;
+  if (!base::Contains(allocated_va_surfaces_, frame_id)) {
+    scoped_refptr<gfx::NativePixmap> pixmap =
+        CreateNativePixmapDmaBuf(frame.get());
+    if (!pixmap) {
+      LOG(ERROR) << "Failed to create NativePixmap from VideoFrame";
+      SetState(State::kError);
+      return nullptr;
+    }
 
-  if (!va_surface || va_surface->id() == VA_INVALID_ID) {
-    LOG(ERROR) << "Failed to create VASurface from VideoFrame";
-    SetState(State::kError);
-    return nullptr;
+    va_surface = vaapi_wrapper_->CreateVASurfaceForPixmap(std::move(pixmap));
+    if (!va_surface || va_surface->id() == VA_INVALID_ID) {
+      LOG(ERROR) << "Failed to create VASurface from VideoFrame";
+      SetState(State::kError);
+      return nullptr;
+    }
+
+    allocated_va_surfaces_[frame_id] = va_surface;
+  } else {
+    va_surface = allocated_va_surfaces_[frame_id];
+    DCHECK_EQ(frame->coded_size(), va_surface->size());
   }
 
   // Store the mapping between surface and video frame, so we know which video
@@ -324,14 +432,12 @@ scoped_refptr<VASurface> VaapiVideoDecoder::CreateSurface() {
   output_frames_[surface_id] = frame;
 
   // When the decoder is done using the frame for output or reference, it will
-  // drop its reference to the surface. We can then safely destroy the surface
-  // and remove the associated video frame from |output_frames_|. To be notified
-  // when this happens we wrap the surface in another surface that calls
-  // ReleaseFrameTask() on destruction. The |va_surface| object is bound to the
-  // destruction callback to keep it alive, since the associated VAAPI surface
-  // will be automatically destroyed when we drop the reference.
-  VASurface::ReleaseCB release_frame_cb = base::BindOnce(
-      &VaapiVideoDecoder::ReleaseFrameTask, weak_this_, std::move(va_surface));
+  // drop its reference to the surface. We can then safely remove the associated
+  // video frame from |output_frames_|. To be notified when this happens we wrap
+  // the surface in another surface with ReleaseVideoFrame() as destruction
+  // observer.
+  VASurface::ReleaseCB release_frame_cb =
+      base::BindOnce(&VaapiVideoDecoder::ReleaseVideoFrame, weak_this_);
 
   return new VASurface(surface_id, frame->layout().coded_size(),
                        GetVaFormatForVideoCodecProfile(profile_),
@@ -341,10 +447,10 @@ scoped_refptr<VASurface> VaapiVideoDecoder::CreateSurface() {
 void VaapiVideoDecoder::SurfaceReady(scoped_refptr<VASurface> va_surface,
                                      int32_t buffer_id,
                                      const gfx::Rect& visible_rect,
-                                     const VideoColorSpace& /*color_space*/) {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(decoder_sequence_checker_);
+                                     const VideoColorSpace& color_space) {
+  DVLOGF(4);
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK_EQ(state_, State::kDecoding);
-  DVLOGF(3);
 
   // Find the timestamp associated with |buffer_id|. It's possible that a
   // surface is output multiple times for different |buffer_id|s (e.g. VP9
@@ -360,16 +466,7 @@ void VaapiVideoDecoder::SurfaceReady(scoped_refptr<VASurface> va_surface,
   // Find the frame associated with the surface. We won't erase it from
   // |output_frames_| yet, as the decoder might still be using it for reference.
   DCHECK_EQ(output_frames_.count(va_surface->id()), 1u);
-  OutputFrameTask(output_frames_[va_surface->id()], visible_rect, timestamp);
-}
-
-void VaapiVideoDecoder::OutputFrameTask(scoped_refptr<VideoFrame> video_frame,
-                                        const gfx::Rect& visible_rect,
-                                        base::TimeDelta timestamp) {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(decoder_sequence_checker_);
-  DCHECK_EQ(state_, State::kDecoding);
-  DCHECK(video_frame);
-  DVLOGF(4);
+  scoped_refptr<VideoFrame> video_frame = output_frames_[va_surface->id()];
 
   // Set the timestamp at which the decode operation started on the
   // |video_frame|. If the frame has been outputted before (e.g. because of VP9
@@ -389,34 +486,60 @@ void VaapiVideoDecoder::OutputFrameTask(scoped_refptr<VideoFrame> video_frame,
     video_frame = std::move(wrapped_frame);
   }
 
+  const auto gfx_color_space = color_space.ToGfxColorSpace();
+  if (gfx_color_space.IsValid())
+    video_frame->set_color_space(gfx_color_space);
+
   output_cb_.Run(std::move(video_frame));
 }
 
 void VaapiVideoDecoder::ApplyResolutionChange() {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(decoder_sequence_checker_);
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(state_ == State::kChangingResolution ||
          state_ == State::kWaitingForInput);
   DCHECK(output_frames_.empty());
   VLOGF(2);
 
   const gfx::Rect visible_rect = decoder_->GetVisibleRect();
-  gfx::Size natural_size = GetNaturalSize(visible_rect, pixel_aspect_ratio_);
-  pic_size_ = decoder_->GetPicSize();
+  const gfx::Size natural_size =
+      GetNaturalSize(visible_rect, pixel_aspect_ratio_);
+  const gfx::Size pic_size = decoder_->GetPicSize();
   const base::Optional<VideoPixelFormat> format =
-      GfxBufferFormatToVideoPixelFormat(GetBufferFormat());
+      GfxBufferFormatToVideoPixelFormat(
+          GetBufferFormat(decoder_->GetProfile()));
   CHECK(format);
   auto format_fourcc = Fourcc::FromVideoPixelFormat(*format);
   CHECK(format_fourcc);
-  frame_pool_->Initialize(*format_fourcc, pic_size_, visible_rect, natural_size,
-                          decoder_->GetRequiredNumOfPictures());
+  if (!frame_pool_->Initialize(
+          *format_fourcc, pic_size, visible_rect, natural_size,
+          decoder_->GetRequiredNumOfPictures(), !!cdm_context_)) {
+    DLOG(WARNING) << "Failed Initialize()ing the frame pool.";
+    SetState(State::kError);
+    return;
+  }
+
+  // Notify |decoder_delegate_| of an imminent VAContextID destruction, so it
+  // can destroy any internal structures making use of it.
+  decoder_delegate_->OnVAContextDestructionSoon();
 
   // All pending decode operations will be completed before triggering a
-  // resolution change, so we can safely destroy the context here.
+  // resolution change, so we can safely DestroyContext() here; that, in turn,
+  // allows for clearing the |allocated_va_surfaces_|.
+  vaapi_wrapper_->DestroyContext();
+  allocated_va_surfaces_.clear();
+
   if (profile_ != decoder_->GetProfile()) {
     // When a profile is changed, we need to re-initialize VaapiWrapper.
     profile_ = decoder_->GetProfile();
     auto new_vaapi_wrapper = VaapiWrapper::CreateForVideoCodec(
-        VaapiWrapper::kDecode, profile_, base::DoNothing());
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+        !cdm_context_ ? VaapiWrapper::kDecode : VaapiWrapper::kDecodeProtected,
+#else
+        VaapiWrapper::kDecode,
+#endif
+        profile_,
+        base::BindRepeating(&ReportVaapiErrorToUMA,
+                            "Media.VaapiVideoDecoder.VAAPIError"));
     if (!new_vaapi_wrapper.get()) {
       DLOG(WARNING) << "Failed creating VaapiWrapper";
       SetState(State::kError);
@@ -424,11 +547,13 @@ void VaapiVideoDecoder::ApplyResolutionChange() {
     }
     decoder_delegate_->set_vaapi_wrapper(new_vaapi_wrapper.get());
     vaapi_wrapper_ = std::move(new_vaapi_wrapper);
-  } else {
-    vaapi_wrapper_->DestroyContext();
   }
 
-  vaapi_wrapper_->CreateContext(pic_size_);
+  if (!vaapi_wrapper_->CreateContext(pic_size)) {
+    VLOGF(1) << "Failed creating context";
+    SetState(State::kError);
+    return;
+  }
 
   // If we reset during resolution change, then there is no decode tasks. In
   // this case we do nothing and wait for next input. Otherwise, continue
@@ -442,11 +567,9 @@ void VaapiVideoDecoder::ApplyResolutionChange() {
   }
 }
 
-void VaapiVideoDecoder::ReleaseFrameTask(scoped_refptr<VASurface> va_surface,
-                                         VASurfaceID surface_id) {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(decoder_sequence_checker_);
-  DCHECK_EQ(va_surface->id(), surface_id);
+void VaapiVideoDecoder::ReleaseVideoFrame(VASurfaceID surface_id) {
   DVLOGF(4);
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   // The decoder has finished using the frame associated with |surface_id| for
   // output or reference, so it's safe to drop our reference here. Once the
@@ -456,9 +579,9 @@ void VaapiVideoDecoder::ReleaseFrameTask(scoped_refptr<VASurface> va_surface,
   DCHECK_EQ(num_erased, 1u);
 }
 
-void VaapiVideoDecoder::NotifyFrameAvailableTask() {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(decoder_sequence_checker_);
+void VaapiVideoDecoder::NotifyFrameAvailable() {
   DVLOGF(4);
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   // If we were waiting for output buffers, retry the current decode task.
   if (state_ == State::kWaitingForOutput) {
@@ -470,13 +593,34 @@ void VaapiVideoDecoder::NotifyFrameAvailableTask() {
   }
 }
 
-void VaapiVideoDecoder::FlushTask() {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(decoder_sequence_checker_);
+void VaapiVideoDecoder::ProtectedSessionUpdate(bool success) {
+  DVLOGF(4);
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+  if (!success) {
+    LOG(ERROR) << "Terminating decoding after failed protected update";
+    SetState(State::kError);
+    return;
+  }
+
+  // If we were waiting for a protected update, retry the current decode task.
+  if (state_ != State::kWaitingForProtected)
+    return;
+
+  DCHECK(current_decode_task_);
+  SetState(State::kDecoding);
+  decoder_task_runner_->PostTask(
+      FROM_HERE,
+      base::BindOnce(&VaapiVideoDecoder::HandleDecodeTask, weak_this_));
+}
+
+void VaapiVideoDecoder::Flush() {
+  DVLOGF(2);
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK_EQ(state_, State::kDecoding);
   DCHECK(current_decode_task_);
   DCHECK(current_decode_task_->buffer_->end_of_stream());
   DCHECK(decode_task_queue_.empty());
-  DVLOGF(2);
 
   // Flush will block until SurfaceReady() has been called for every frame
   // currently decoding.
@@ -500,8 +644,8 @@ void VaapiVideoDecoder::FlushTask() {
 }
 
 void VaapiVideoDecoder::Reset(base::OnceClosure reset_cb) {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(decoder_sequence_checker_);
   DVLOGF(2);
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   // If we encountered an error, skip reset and notify client.
   if (state_ == State::kError) {
@@ -510,9 +654,13 @@ void VaapiVideoDecoder::Reset(base::OnceClosure reset_cb) {
   }
 
   if (state_ == State::kChangingResolution) {
-    // If we reset during resolution change, re-create AVD. Then the new AVD
-    // will trigger resolution change again after reset.
-    if (!CreateAcceleratedVideoDecoder()) {
+    // Recreate |decoder_| and |decoder_delegate_| if we are Reset() in the
+    // interim between calling |client_|s PrepareChangeResolution() and being
+    // called back on ApplyResolutionChange(), so the latter will find a fresh
+    // |decoder_|. Also give a chance to |decoder_delegate_| to release its
+    // internal data structures.
+    decoder_delegate_->OnVAContextDestructionSoon();
+    if (!CreateAcceleratedVideoDecoder().is_ok()) {
       SetState(State::kError);
       std::move(reset_cb).Run();
       return;
@@ -529,19 +677,20 @@ void VaapiVideoDecoder::Reset(base::OnceClosure reset_cb) {
 
   // Wait until any pending decode task has been aborted.
   decoder_task_runner_->PostTask(
-      FROM_HERE, base::BindOnce(&VaapiVideoDecoder::ResetDoneTask, weak_this_,
+      FROM_HERE, base::BindOnce(&VaapiVideoDecoder::ResetDone, weak_this_,
                                 std::move(reset_cb)));
 }
 
-bool VaapiVideoDecoder::CreateAcceleratedVideoDecoder() {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(decoder_sequence_checker_);
-  DVLOGF(3);
-
-  pic_size_ = gfx::Size();
+Status VaapiVideoDecoder::CreateAcceleratedVideoDecoder() {
+  DVLOGF(2);
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   if (profile_ >= H264PROFILE_MIN && profile_ <= H264PROFILE_MAX) {
-    auto accelerator =
-        std::make_unique<H264VaapiVideoDecoderDelegate>(this, vaapi_wrapper_);
+    auto accelerator = std::make_unique<H264VaapiVideoDecoderDelegate>(
+        this, vaapi_wrapper_,
+        BindToCurrentLoop(base::BindRepeating(
+            &VaapiVideoDecoder::ProtectedSessionUpdate, weak_this_)),
+        cdm_context_);
     decoder_delegate_ = accelerator.get();
 
     decoder_.reset(
@@ -553,34 +702,57 @@ bool VaapiVideoDecoder::CreateAcceleratedVideoDecoder() {
 
     decoder_.reset(new VP8Decoder(std::move(accelerator)));
   } else if (profile_ >= VP9PROFILE_MIN && profile_ <= VP9PROFILE_MAX) {
-    auto accelerator =
-        std::make_unique<VP9VaapiVideoDecoderDelegate>(this, vaapi_wrapper_);
+    auto accelerator = std::make_unique<VP9VaapiVideoDecoderDelegate>(
+        this, vaapi_wrapper_,
+        BindToCurrentLoop(base::BindRepeating(
+            &VaapiVideoDecoder::ProtectedSessionUpdate, weak_this_)),
+        cdm_context_);
     decoder_delegate_ = accelerator.get();
 
     decoder_.reset(
         new VP9Decoder(std::move(accelerator), profile_, color_space_));
-  } else {
-    VLOGF(1) << "Unsupported profile " << GetProfileName(profile_);
-    return false;
   }
-  return true;
+#if BUILDFLAG(ENABLE_PLATFORM_HEVC)
+  else if (profile_ >= HEVCPROFILE_MIN && profile_ <= HEVCPROFILE_MAX) {
+    auto accelerator =
+        std::make_unique<H265VaapiVideoDecoderDelegate>(this, vaapi_wrapper_);
+    decoder_delegate_ = accelerator.get();
+
+    decoder_.reset(
+        new H265Decoder(std::move(accelerator), profile_, color_space_));
+  }
+#endif  // BUILDFLAG(ENABLE_PLATFORM_HEVC)
+#if BUILDFLAG(IS_ASH)
+  else if (profile_ >= AV1PROFILE_MIN && profile_ <= AV1PROFILE_MAX) {
+    auto accelerator =
+        std::make_unique<AV1VaapiVideoDecoderDelegate>(this, vaapi_wrapper_);
+    decoder_delegate_ = accelerator.get();
+
+    decoder_.reset(new AV1Decoder(std::move(accelerator), profile_));
+  }
+#endif  // BUILDFLAG(IS_ASH)
+  else {
+    return Status(StatusCode::kDecoderUnsupportedProfile)
+        .WithData("profile", profile_);
+  }
+  return OkStatus();
 }
 
-void VaapiVideoDecoder::ResetDoneTask(base::OnceClosure reset_cb) {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(decoder_sequence_checker_);
+void VaapiVideoDecoder::ResetDone(base::OnceClosure reset_cb) {
+  DVLOGF(2);
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK_EQ(state_, State::kResetting);
   DCHECK(!current_decode_task_);
   DCHECK(decode_task_queue_.empty());
-  DVLOGF(2);
 
   std::move(reset_cb).Run();
   SetState(State::kWaitingForInput);
 }
 
 void VaapiVideoDecoder::SetState(State state) {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(decoder_sequence_checker_);
-  DVLOGF(4) << static_cast<int>(state)
+  DVLOGF(3) << static_cast<int>(state)
             << ", current state: " << static_cast<int>(state_);
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   // Check whether the state change is valid.
   switch (state) {
@@ -593,6 +765,9 @@ void VaapiVideoDecoder::SetState(State state) {
       DCHECK(state_ == State::kUninitialized || state_ == State::kDecoding ||
              state_ == State::kResetting);
       break;
+    case State::kWaitingForProtected:
+      DCHECK(!!cdm_context_);
+      FALLTHROUGH;
     case State::kWaitingForOutput:
       DCHECK(current_decode_task_);
       DCHECK_EQ(state_, State::kDecoding);

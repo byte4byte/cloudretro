@@ -52,7 +52,6 @@ class DownloadDangerPromptViews : public DownloadDangerPrompt,
   void InvokeActionForTesting(Action action) override;
 
   // views::DialogDelegateView:
-  gfx::Size CalculatePreferredSize() const override;
   base::string16 GetWindowTitle() const override;
   ui::ModalType GetModalType() const override;
 
@@ -83,12 +82,14 @@ DownloadDangerPromptViews::DownloadDangerPromptViews(
       done_(done) {
   // Note that this prompt is asking whether to cancel a dangerous download, so
   // the accept path is titled "Cancel".
-  DialogDelegate::SetButtonLabel(ui::DIALOG_BUTTON_OK,
-                                   l10n_util::GetStringUTF16(IDS_CANCEL));
-  DialogDelegate::SetButtonLabel(
-      ui::DIALOG_BUTTON_CANCEL,
-      show_context_ ? l10n_util::GetStringUTF16(IDS_CONFIRM_DOWNLOAD)
-                    : l10n_util::GetStringUTF16(IDS_CONFIRM_DOWNLOAD_AGAIN));
+  SetButtonLabel(ui::DIALOG_BUTTON_OK, l10n_util::GetStringUTF16(IDS_CANCEL));
+  SetButtonLabel(ui::DIALOG_BUTTON_CANCEL,
+                 show_context_
+                     ? l10n_util::GetStringUTF16(IDS_CONFIRM_DOWNLOAD)
+                     : l10n_util::GetStringUTF16(IDS_CONFIRM_DOWNLOAD_AGAIN));
+
+  set_fixed_width(views::LayoutProvider::Get()->GetDistanceMetric(
+      views::DISTANCE_BUBBLE_PREFERRED_WIDTH));
 
   auto make_done_callback = [&](DownloadDangerPrompt::Action action) {
     return base::BindOnce(&DownloadDangerPromptViews::RunDone,
@@ -98,9 +99,9 @@ DownloadDangerPromptViews::DownloadDangerPromptViews(
   // Note that the presentational concept of "Accept/Cancel" is inverted from
   // the model's concept of ACCEPT/CANCEL. In the UI, the safe path is "Accept"
   // and the dangerous path is "Cancel".
-  DialogDelegate::SetAcceptCallback(make_done_callback(CANCEL));
-  DialogDelegate::SetCancelCallback(make_done_callback(ACCEPT));
-  DialogDelegate::SetCloseCallback(make_done_callback(DISMISS));
+  SetAcceptCallback(make_done_callback(CANCEL));
+  SetCancelCallback(make_done_callback(ACCEPT));
+  SetCloseCallback(make_done_callback(DISMISS));
 
   download_->AddObserver(this);
 
@@ -181,13 +182,6 @@ void DownloadDangerPromptViews::OnDownloadUpdated(
     RunDone(DISMISS);
     Cancel();
   }
-}
-
-gfx::Size DownloadDangerPromptViews::CalculatePreferredSize() const {
-  int preferred_width = ChromeLayoutProvider::Get()->GetDistanceMetric(
-                            DISTANCE_BUBBLE_PREFERRED_WIDTH) -
-                        margins().width();
-  return gfx::Size(preferred_width, GetHeightForWidth(preferred_width));
 }
 
 base::string16 DownloadDangerPromptViews::GetMessageBody() const {
@@ -271,7 +265,7 @@ void DownloadDangerPromptViews::RunDone(Action action) {
   // the window to close, and |callback| refers to a member variable.
   OnDone done = done_;
   done_.Reset();
-  if (download_ != NULL) {
+  if (download_) {
     // If this download is no longer dangerous, is already canceled or
     // completed, don't send any report.
     if (download_->IsDangerous() && !download_->IsDone()) {
@@ -288,7 +282,7 @@ void DownloadDangerPromptViews::RunDone(Action action) {
       }
     }
     download_->RemoveObserver(this);
-    download_ = NULL;
+    download_ = nullptr;
   }
   if (!done.is_null())
     done.Run(action);

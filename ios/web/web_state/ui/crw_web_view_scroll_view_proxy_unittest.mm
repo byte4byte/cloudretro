@@ -39,6 +39,36 @@
 
 @end
 
+@interface CRWTestObserver : NSObject
+
+- (instancetype)initWithProxy:(CRWWebViewScrollViewProxy*)proxy
+    NS_DESIGNATED_INITIALIZER;
+- (instancetype)init NS_UNAVAILABLE;
+
+@end
+
+@implementation CRWTestObserver {
+  CRWWebViewScrollViewProxy* _proxy;
+}
+
+- (instancetype)initWithProxy:(CRWWebViewScrollViewProxy*)proxy {
+  self = [super init];
+  if (self) {
+    _proxy = proxy;
+    [_proxy addObserver:self
+             forKeyPath:@"contentSize"
+                options:NSKeyValueObservingOptionNew
+                context:nullptr];
+  }
+  return self;
+}
+
+- (void)dealloc {
+  [_proxy removeObserver:self forKeyPath:@"contentSize"];
+}
+
+@end
+
 namespace {
 
 class CRWWebViewScrollViewProxyTest : public PlatformTest {
@@ -730,6 +760,16 @@ TEST_F(CRWWebViewScrollViewProxyTest, RemoveKVObserverWithContext) {
                                       context:&context2];
 }
 
+// Verifies that it is safe to call -removeObserver:forKeyPath: against the
+// proxy during -dealloc of the observer.
+TEST_F(CRWWebViewScrollViewProxyTest,
+       RemoveKVObserverWhileDeallocatingObserver) {
+  // CRWTestObserver adds itself as a key-value observer of the proxy in its
+  // initializer, and removes itself as a observer during its -dealloc.
+  CRWTestObserver* observer __attribute__((unused)) =
+      [[CRWTestObserver alloc] initWithProxy:web_view_scroll_view_proxy_];
+}
+
 // Verifies that properties registered to |propertiesStore| are preserved if:
 //   - the setter is called when the underlying scroll view is not set
 //   - the getter is called after the underlying scroll view is still not set
@@ -858,6 +898,31 @@ TEST_F(CRWWebViewScrollViewProxyTest,
 
   EXPECT_EQ(1,
             [[web_view_scroll_view_proxy_ asUIScrollView] crw_categoryMethod]);
+}
+
+// Verifies that the scroll view backgound color is not preserved between
+// scroll views.  Used to prevent regression of crbug.com/1078790.
+TEST_F(CRWWebViewScrollViewProxyTest, DontPreserveBackgroundColor) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndEnableFeature(
+      web::features::kPreserveScrollViewProperties);
+
+  // Recreate CRWWebViewScrollViewProxy with the updated feature flags.
+  web_view_scroll_view_proxy_ = [[CRWWebViewScrollViewProxy alloc] init];
+
+  // Set an underlying UIScrollView, and update its background color to red.
+  UIScrollView* underlying_scroll_view1 = [[UIScrollView alloc] init];
+  [web_view_scroll_view_proxy_ setScrollView:underlying_scroll_view1];
+  [web_view_scroll_view_proxy_ asUIScrollView].backgroundColor =
+      UIColor.redColor;
+
+  // Create a second UIScrollView and set its background color to black.
+  UIScrollView* underlying_scroll_view2 = [[UIScrollView alloc] init];
+  underlying_scroll_view2.backgroundColor = UIColor.blackColor;
+  [web_view_scroll_view_proxy_ setScrollView:underlying_scroll_view2];
+
+  // Verify that the second scroll view's background color remains black.
+  EXPECT_EQ(UIColor.blackColor, underlying_scroll_view2.backgroundColor);
 }
 
 }  // namespace

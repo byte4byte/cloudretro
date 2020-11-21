@@ -9,7 +9,7 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -190,8 +190,8 @@ void FlagsDOMHandler::HandleResetAllFlags(const base::ListValue* args) {
 //
 ///////////////////////////////////////////////////////////////////////////////
 
-FlagsUI::FlagsUI(web::WebUIIOS* web_ui)
-    : web::WebUIIOSController(web_ui), weak_factory_(this) {
+FlagsUI::FlagsUI(web::WebUIIOS* web_ui, const std::string& host)
+    : web::WebUIIOSController(web_ui, host), weak_factory_(this) {
   FlagsDOMHandler* handler = new FlagsDOMHandler();
   web_ui->AddMessageHandler(base::WrapUnique(handler));
 

@@ -17,11 +17,24 @@ IOSTrustedVaultClient::IOSTrustedVaultClient() {}
 
 IOSTrustedVaultClient::~IOSTrustedVaultClient() = default;
 
-std::unique_ptr<IOSTrustedVaultClient::Subscription>
-IOSTrustedVaultClient::AddKeysChangedObserver(
-    const base::RepeatingClosure& closure) {
-  // TODO(crbug.com/1019685): observers need to be implemented.
-  return nullptr;
+void IOSTrustedVaultClient::AddObserver(Observer* observer) {
+  ios::ChromeBrowserProvider* browser_provider =
+      ios::GetChromeBrowserProvider();
+  ios::ChromeTrustedVaultService* trusted_vault_service =
+      browser_provider->GetChromeTrustedVaultService();
+  if (trusted_vault_service) {
+    trusted_vault_service->AddObserver(observer);
+  }
+}
+
+void IOSTrustedVaultClient::RemoveObserver(Observer* observer) {
+  ios::ChromeBrowserProvider* browser_provider =
+      ios::GetChromeBrowserProvider();
+  ios::ChromeTrustedVaultService* trusted_vault_service =
+      browser_provider->GetChromeTrustedVaultService();
+  if (trusted_vault_service) {
+    trusted_vault_service->RemoveObserver(observer);
+  }
 }
 
 void IOSTrustedVaultClient::FetchKeys(
@@ -32,10 +45,12 @@ void IOSTrustedVaultClient::FetchKeys(
       ios::GetChromeBrowserProvider();
   ios::ChromeIdentityService* identity_service =
       browser_provider->GetChromeIdentityService();
+  identity_service->WaitUntilCacheIsPopulated();
   ChromeIdentity* identity =
       identity_service->GetIdentityWithGaiaID(account_info.gaia);
   ios::ChromeTrustedVaultService* trusted_vault_service =
       browser_provider->GetChromeTrustedVaultService();
+  DCHECK(trusted_vault_service);
   trusted_vault_service->FetchKeys(identity, std::move(callback));
 }
 
@@ -55,6 +70,21 @@ void IOSTrustedVaultClient::RemoveAllStoredKeys() {
 void IOSTrustedVaultClient::MarkKeysAsStale(
     const CoreAccountInfo& account_info,
     base::OnceCallback<void(bool)> callback) {
-  // TODO(crbug.com/1019685): needs implementation.
+  // TODO(crbug.com/1100278): Needs implementation.
   std::move(callback).Run(false);
+}
+
+void IOSTrustedVaultClient::GetIsRecoverabilityDegraded(
+    const CoreAccountInfo& account_info,
+    base::OnceCallback<void(bool)> callback) {
+  // TODO(crbug.com/1100278): Needs implementation.
+  std::move(callback).Run(false);
+}
+
+void IOSTrustedVaultClient::AddTrustedRecoveryMethod(
+    const std::string& gaia_id,
+    const std::vector<uint8_t>& public_key,
+    base::OnceClosure callback) {
+  // TODO(crbug.com/1100278): Needs implementation.
+  std::move(callback).Run();
 }

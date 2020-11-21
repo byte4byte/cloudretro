@@ -86,10 +86,10 @@ class LoginHandlerViews : public LoginHandler {
            const base::string16& explanation,
            LoginHandler::LoginModelData* login_model_data)
         : handler_(handler), login_view_(nullptr), widget_(nullptr) {
-      DialogDelegate::SetButtonLabel(
+      SetButtonLabel(
           ui::DIALOG_BUTTON_OK,
           l10n_util::GetStringUTF16(IDS_LOGIN_DIALOG_OK_BUTTON_LABEL));
-      DialogDelegate::SetAcceptCallback(base::BindOnce(
+      SetAcceptCallback(base::BindOnce(
           [](Dialog* dialog) {
             if (!dialog->handler_)
               return;
@@ -97,13 +97,14 @@ class LoginHandlerViews : public LoginHandler {
                                       dialog->login_view_->GetPassword());
           },
           base::Unretained(this)));
-      DialogDelegate::SetCancelCallback(base::BindOnce(
+      SetCancelCallback(base::BindOnce(
           [](Dialog* dialog) {
             if (!dialog->handler_)
               return;
             dialog->handler_->CancelAuth();
           },
           base::Unretained(this)));
+      SetOwnedByWidget(true);
 
       // Create a new LoginView and set the model for it.  The model (password
       // manager) is owned by the WebContents, but the view is parented to the
@@ -111,9 +112,6 @@ class LoginHandlerViews : public LoginHandler {
       // manager. The view listens for model destruction and unobserves
       // accordingly.
       login_view_ = new LoginView(authority, explanation, login_model_data);
-
-      // ShowWebModalDialogViews takes ownership of this, by way of the
-      // DeleteDelegate method.
       widget_ = constrained_window::ShowWebModalDialogViews(this, web_contents);
     }
 
@@ -137,8 +135,6 @@ class LoginHandlerViews : public LoginHandler {
       if (handler_)
         handler_->CancelAuth();
     }
-
-    void DeleteDelegate() override { delete this; }
 
     ui::ModalType GetModalType() const override { return ui::MODAL_TYPE_CHILD; }
 

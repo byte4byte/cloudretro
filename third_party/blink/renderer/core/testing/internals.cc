@@ -32,12 +32,12 @@
 #include "base/optional.h"
 #include "cc/layers/picture_layer.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
+#include "third_party/blink/public/common/widget/device_emulation_params.h"
 #include "third_party/blink/public/mojom/devtools/inspector_issue.mojom-blink.h"
 #include "third_party/blink/public/mojom/favicon/favicon_url.mojom-blink.h"
 #include "third_party/blink/public/mojom/input/focus_type.mojom-blink.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_graphics_context_3d_provider.h"
-#include "third_party/blink/public/web/web_device_emulation_params.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_function.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
@@ -112,7 +112,6 @@
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/input/event_handler.h"
 #include "third_party/blink/renderer/core/input/keyboard_event_manager.h"
-#include "third_party/blink/renderer/core/inspector/inspector_issue.h"
 #include "third_party/blink/renderer/core/inspector/main_thread_debugger.h"
 #include "third_party/blink/renderer/core/intersection_observer/intersection_observer.h"
 #include "third_party/blink/renderer/core/layout/layout_object.h"
@@ -127,12 +126,10 @@
 #include "third_party/blink/renderer/core/page/print_context.h"
 #include "third_party/blink/renderer/core/page/scrolling/root_scroller_controller.h"
 #include "third_party/blink/renderer/core/page/scrolling/scroll_state.h"
-#include "third_party/blink/renderer/core/page/scrolling/scrolling_coordinator_context.h"
 #include "third_party/blink/renderer/core/page/spatial_navigation_controller.h"
 #include "third_party/blink/renderer/core/page/validation_message_client.h"
 #include "third_party/blink/renderer/core/page/viewport_description.h"
 #include "third_party/blink/renderer/core/paint/compositing/composited_layer_mapping.h"
-#include "third_party/blink/renderer/core/paint/compositing/graphics_layer_tree_as_text.h"
 #include "third_party/blink/renderer/core/paint/compositing/paint_layer_compositor.h"
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
 #include "third_party/blink/renderer/core/paint/paint_layer_scrollable_area.h"
@@ -189,7 +186,7 @@
 #include "third_party/blink/renderer/platform/wtf/text/string_buffer.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_encoding_registry.h"
 #include "ui/base/cursor/cursor.h"
-#include "ui/base/mojom/cursor_type.mojom-blink.h"
+#include "ui/base/cursor/mojom/cursor_type.mojom-blink.h"
 #include "ui/base/ui_base_features.h"
 #include "v8/include/v8.h"
 
@@ -215,7 +212,7 @@ class UseCounterHelperObserverImpl final : public UseCounterHelper::Observer {
     return true;
   }
 
-  void Trace(Visitor* visitor) override {
+  void Trace(Visitor* visitor) const override {
     UseCounterHelper::Observer::Trace(visitor);
     visitor->Trace(resolver_);
   }
@@ -265,11 +262,9 @@ static ScrollableArea* ScrollableAreaForNode(Node* node) {
   if (!node)
     return nullptr;
 
-  LayoutObject* layout_object = node->GetLayoutObject();
-  if (!layout_object || !layout_object->IsBox())
-    return nullptr;
-
-  return ToLayoutBox(layout_object)->GetScrollableArea();
+  if (auto* box = DynamicTo<LayoutBox>(node->GetLayoutObject()))
+    return box->GetScrollableArea();
+  return nullptr;
 }
 
 void Internals::ResetToConsistentState(Page* page) {
@@ -277,9 +272,7 @@ void Internals::ResetToConsistentState(Page* page) {
 
   page->SetIsCursorVisible(true);
   // Ensure the PageScaleFactor always stays within limits, if the test changed
-  // the limits. BlinkTestRunner will reset the limits to those set by
-  // LayoutTestDefaultPreferences when preferences are reapplied after this
-  // call.
+  // the limits.
   page->SetDefaultPageScaleLimits(1, 4);
   page->SetPageScaleFactor(1);
   page->GetChromeClient().GetWebView()->DisableDeviceEmulation();
@@ -309,6 +302,8 @@ void Internals::ResetToConsistentState(Page* page) {
 
   IntersectionObserver::SetThrottleDelayEnabledForTesting(true);
   g_mock_overlay_scrollbars.reset();
+
+  Page::SetMaxNumberOfFramesToTenForTesting(false);
 }
 
 Internals::Internals(ExecutionContext* context)
@@ -477,9 +472,11 @@ bool Internals::isPreloadedBy(const String& url, Document* document) {
 bool Internals::isLoading(const String& url) {
   if (!document_)
     return false;
-  const String cache_identifier = document_->Fetcher()->GetCacheIdentifier();
-  Resource* resource = GetMemoryCache()->ResourceForURL(
-      document_->CompleteURL(url), cache_identifier);
+  const KURL full_url = document_->CompleteURL(url);
+  const String cache_identifier =
+      document_->Fetcher()->GetCacheIdentifier(full_url);
+  Resource* resource =
+      GetMemoryCache()->ResourceForURL(full_url, cache_identifier);
   // We check loader() here instead of isLoading(), because a multipart
   // ImageResource lies isLoading() == false after the first part is loaded.
   return resource && resource->Loader();
@@ -488,9 +485,11 @@ bool Internals::isLoading(const String& url) {
 bool Internals::isLoadingFromMemoryCache(const String& url) {
   if (!document_)
     return false;
-  const String cache_identifier = document_->Fetcher()->GetCacheIdentifier();
-  Resource* resource = GetMemoryCache()->ResourceForURL(
-      document_->CompleteURL(url), cache_identifier);
+  const KURL full_url = document_->CompleteURL(url);
+  const String cache_identifier =
+      document_->Fetcher()->GetCacheIdentifier(full_url);
+  Resource* resource =
+      GetMemoryCache()->ResourceForURL(full_url, cache_identifier);
   return resource && resource->GetStatus() == ResourceStatus::kCached;
 }
 
@@ -598,7 +597,7 @@ void Internals::pauseAnimations(double pause_time,
   if (!GetFrame())
     return;
 
-  GetFrame()->View()->UpdateAllLifecyclePhases(DocumentUpdateReason::kTest);
+  GetFrame()->View()->UpdateAllLifecyclePhasesForTest();
   GetFrame()->GetDocument()->Timeline().PauseAnimationsForTesting(pause_time);
 }
 
@@ -614,11 +613,11 @@ void Internals::advanceImageAnimation(Element* image,
                                       ExceptionState& exception_state) {
   DCHECK(image);
 
-  ImageResourceContent* resource = nullptr;
+  ImageResourceContent* content = nullptr;
   if (auto* html_image = DynamicTo<HTMLImageElement>(*image)) {
-    resource = html_image->CachedImage();
+    content = html_image->CachedImage();
   } else if (auto* svg_image = DynamicTo<SVGImageElement>(*image)) {
-    resource = svg_image->CachedImage();
+    content = svg_image->CachedImage();
   } else {
     exception_state.ThrowDOMException(
         DOMExceptionCode::kInvalidAccessError,
@@ -626,13 +625,13 @@ void Internals::advanceImageAnimation(Element* image,
     return;
   }
 
-  if (!resource || !resource->HasImage()) {
+  if (!content || !content->HasImage()) {
     exception_state.ThrowDOMException(DOMExceptionCode::kInvalidAccessError,
                                       "The image resource is not available.");
     return;
   }
 
-  Image* image_data = resource->GetImage();
+  Image* image_data = content->GetImage();
   image_data->AdvanceAnimationForTesting();
 }
 
@@ -734,8 +733,7 @@ Node* Internals::previousInFlatTree(Node* node,
 String Internals::elementLayoutTreeAsText(Element* element,
                                           ExceptionState& exception_state) {
   DCHECK(element);
-  element->GetDocument().View()->UpdateAllLifecyclePhases(
-      DocumentUpdateReason::kTest);
+  element->GetDocument().View()->UpdateAllLifecyclePhasesForTest();
 
   String representation = ExternalRepresentation(element);
   if (representation.IsEmpty()) {
@@ -1475,6 +1473,23 @@ void Internals::setAutofilled(Element* element,
       enabled ? WebAutofillState::kAutofilled : WebAutofillState::kNotFilled);
 }
 
+void Internals::setSelectionRangeForNumberType(
+    Element* input_element,
+    uint32_t start,
+    uint32_t end,
+    ExceptionState& exception_state) {
+  DCHECK(input_element);
+  auto* html_input_element = DynamicTo<HTMLInputElement>(input_element);
+  if (!html_input_element) {
+    exception_state.ThrowDOMException(
+        DOMExceptionCode::kInvalidNodeTypeError,
+        "The element provided is not an input element.");
+    return;
+  }
+
+  html_input_element->SetSelectionRangeForTesting(start, end, exception_state);
+}
+
 Range* Internals::rangeFromLocationAndLength(Element* scope,
                                              int range_location,
                                              int range_length) {
@@ -1803,7 +1818,9 @@ unsigned Internals::touchEndOrCancelEventHandlerCount(
 
 unsigned Internals::pointerEventHandlerCount(Document* document) const {
   DCHECK(document);
-  return EventHandlerCount(*document, EventHandlerRegistry::kPointerEvent);
+  return EventHandlerCount(*document, EventHandlerRegistry::kPointerEvent) +
+         EventHandlerCount(*document,
+                           EventHandlerRegistry::kPointerRawUpdateEvent);
 }
 
 // Given a vector of rects, merge those that are adjacent, leaving empty rects
@@ -1852,35 +1869,6 @@ static void MergeRects(Vector<IntRect>& rects) {
   }
 }
 
-static void AccumulateTouchActionRectList(
-    PaintLayerCompositor* compositor,
-    GraphicsLayer* graphics_layer,
-    HitTestLayerRectList* hit_test_rects) {
-  const cc::TouchActionRegion& touch_action_region =
-      graphics_layer->CcLayer()->touch_action_region();
-  if (!touch_action_region.GetAllRegions().IsEmpty()) {
-    const auto& layer_position = graphics_layer->GetOffsetFromTransformNode();
-    const auto& layer_bounds = graphics_layer->CcLayer()->bounds();
-    IntRect layer_rect(layer_position.X(), layer_position.Y(),
-                       layer_bounds.width(), layer_bounds.height());
-
-    Vector<IntRect> layer_hit_test_rects;
-    for (const gfx::Rect& hit_test_rect : touch_action_region.GetAllRegions())
-      layer_hit_test_rects.push_back(IntRect(hit_test_rect));
-    MergeRects(layer_hit_test_rects);
-
-    for (const IntRect& hit_test_rect : layer_hit_test_rects) {
-      if (!hit_test_rect.IsEmpty()) {
-        hit_test_rects->Append(DOMRectReadOnly::FromIntRect(layer_rect),
-                               DOMRectReadOnly::FromIntRect(hit_test_rect));
-      }
-    }
-  }
-
-  for (GraphicsLayer* child_layer : graphics_layer->Children())
-    AccumulateTouchActionRectList(compositor, child_layer, hit_test_rects);
-}
-
 HitTestLayerRectList* Internals::touchEventTargetLayerRects(
     Document* document,
     ExceptionState& exception_state) {
@@ -1891,60 +1879,31 @@ HitTestLayerRectList* Internals::touchEventTargetLayerRects(
     return nullptr;
   }
 
-  if (RuntimeEnabledFeatures::CompositeAfterPaintEnabled()) {
-    auto* pac = document->View()->GetPaintArtifactCompositor();
-    document->View()->UpdateAllLifecyclePhases(DocumentUpdateReason::kTest);
+  document->View()->UpdateAllLifecyclePhasesForTest();
 
-    auto* hit_test_rects = MakeGarbageCollected<HitTestLayerRectList>();
-    for (const auto& layer : pac->RootLayer()->children()) {
-      const cc::TouchActionRegion& touch_action_region =
-          layer->touch_action_region();
-      if (!touch_action_region.GetAllRegions().IsEmpty()) {
-        const auto& offset = layer->offset_to_transform_parent();
-        IntRect layer_rect(RoundedIntPoint(FloatPoint(offset.x(), offset.y())),
-                           IntSize(layer->bounds()));
+  auto* hit_test_rects = MakeGarbageCollected<HitTestLayerRectList>();
+  for (const auto& layer : document->View()->RootCcLayer()->children()) {
+    const cc::TouchActionRegion& touch_action_region =
+        layer->touch_action_region();
+    if (!touch_action_region.GetAllRegions().IsEmpty()) {
+      const auto& offset = layer->offset_to_transform_parent();
+      IntRect layer_rect(RoundedIntPoint(FloatPoint(offset.x(), offset.y())),
+                         IntSize(layer->bounds()));
 
-        Vector<IntRect> layer_hit_test_rects;
-        for (const auto& hit_test_rect : touch_action_region.GetAllRegions())
-          layer_hit_test_rects.push_back(IntRect(hit_test_rect));
-        MergeRects(layer_hit_test_rects);
+      Vector<IntRect> layer_hit_test_rects;
+      for (const auto& hit_test_rect : touch_action_region.GetAllRegions())
+        layer_hit_test_rects.push_back(IntRect(hit_test_rect));
+      MergeRects(layer_hit_test_rects);
 
-        for (const IntRect& hit_test_rect : layer_hit_test_rects) {
-          if (!hit_test_rect.IsEmpty()) {
-            hit_test_rects->Append(DOMRectReadOnly::FromIntRect(layer_rect),
-                                   DOMRectReadOnly::FromIntRect(hit_test_rect));
-          }
+      for (const IntRect& hit_test_rect : layer_hit_test_rects) {
+        if (!hit_test_rect.IsEmpty()) {
+          hit_test_rects->Append(DOMRectReadOnly::FromIntRect(layer_rect),
+                                 DOMRectReadOnly::FromIntRect(hit_test_rect));
         }
       }
     }
-    return hit_test_rects;
   }
-
-  if (ScrollingCoordinator* scrolling_coordinator =
-          document->GetPage()->GetScrollingCoordinator()) {
-    FrameView* view = document->GetPage()->MainFrame()->View();
-    if (view->IsLocalFrameView()) {
-      scrolling_coordinator->UpdateAfterPaint(
-          static_cast<LocalFrameView*>(view));
-    } else {
-      NOTREACHED();
-    }
-  }
-
-  if (auto* view = document->GetLayoutView()) {
-    if (PaintLayerCompositor* compositor = view->Compositor()) {
-      // Use the paint-root since we sometimes want to know about touch rects
-      // on layers outside the document hierarchy (e.g. when we replace the
-      // document with a video layer).
-      if (GraphicsLayer* root_layer = compositor->PaintRootGraphicsLayer()) {
-        auto* hit_test_rects = MakeGarbageCollected<HitTestLayerRectList>();
-        AccumulateTouchActionRectList(compositor, root_layer, hit_test_rects);
-        return hit_test_rects;
-      }
-    }
-  }
-
-  return nullptr;
+  return hit_test_rects;
 }
 
 bool Internals::executeCommand(Document* document,
@@ -1967,7 +1926,7 @@ void Internals::triggerTestInspectorIssue(Document* document) {
   auto info = mojom::blink::InspectorIssueInfo::New(
       mojom::InspectorIssueCode::kSameSiteCookieIssue,
       mojom::blink::InspectorIssueDetails::New());
-  document->AddInspectorIssue(InspectorIssue::Create(std::move(info)));
+  document->GetFrame()->AddInspectorIssue(std::move(info));
 }
 
 AtomicString Internals::htmlNamespace() {
@@ -2163,8 +2122,7 @@ bool Internals::scrollsWithRespectTo(Element* element1,
                                      ExceptionState& exception_state) {
   DCHECK(!RuntimeEnabledFeatures::CompositeAfterPaintEnabled());
   DCHECK(element1 && element2);
-  element1->GetDocument().View()->UpdateAllLifecyclePhases(
-      DocumentUpdateReason::kTest);
+  element1->GetDocument().View()->UpdateAllLifecyclePhasesForTest();
 
   LayoutObject* layout_object1 = element1->GetLayoutObject();
   LayoutObject* layout_object2 = element2->GetLayoutObject();
@@ -2185,8 +2143,8 @@ bool Internals::scrollsWithRespectTo(Element* element1,
     return false;
   }
 
-  PaintLayer* layer1 = ToLayoutBox(layout_object1)->Layer();
-  PaintLayer* layer2 = ToLayoutBox(layout_object2)->Layer();
+  PaintLayer* layer1 = To<LayoutBox>(layout_object1)->Layer();
+  PaintLayer* layer2 = To<LayoutBox>(layout_object2)->Layer();
   if (!layer1 || !layer2) {
     exception_state.ThrowDOMException(
         DOMExceptionCode::kInvalidAccessError,
@@ -2209,7 +2167,7 @@ String Internals::layerTreeAsText(Document* document,
     return String();
   }
 
-  document->View()->UpdateAllLifecyclePhases(DocumentUpdateReason::kTest);
+  document->View()->UpdateAllLifecyclePhasesForTest();
 
   return document->GetFrame()->GetLayerTreeAsTextForTesting(flags);
 }
@@ -2228,20 +2186,9 @@ String Internals::mainThreadScrollingReasons(
     return String();
   }
 
-  document->GetFrame()->View()->UpdateAllLifecyclePhases(
-      DocumentUpdateReason::kTest);
+  document->GetFrame()->View()->UpdateAllLifecyclePhasesForTest();
 
   return document->GetFrame()->View()->MainThreadScrollingReasonsAsText();
-}
-
-void Internals::markGestureScrollRegionDirty(
-    Document* document,
-    ExceptionState& exception_state) const {
-  FrameView* frame_view = document->View();
-  if (!frame_view || !frame_view->IsLocalFrameView())
-    return;
-  LocalFrameView* lfv = static_cast<LocalFrameView*>(frame_view);
-  lfv->GetScrollingContext()->SetScrollGestureRegionIsDirty(true);
 }
 
 DOMRectList* Internals::nonFastScrollableRects(
@@ -2255,11 +2202,7 @@ DOMRectList* Internals::nonFastScrollableRects(
     return nullptr;
   }
 
-  // Update lifecycle. This includes the compositing update and
-  // ScrollingCoordinator::UpdateAfterPaint, which computes the non-fast
-  // scrollable region. For CompositeAfterPaint, this includes running
-  // PaintArtifactCompositor which updates the non-fast regions.
-  frame->View()->UpdateAllLifecyclePhases(DocumentUpdateReason::kTest);
+  frame->View()->UpdateAllLifecyclePhasesForTest();
 
   auto* pac = document->View()->GetPaintArtifactCompositor();
   auto* layer_tree_host = pac->RootLayer()->layer_tree_host();
@@ -2360,7 +2303,7 @@ int Internals::numberOfPages(float page_width,
 }
 
 String Internals::pageProperty(String property_name,
-                               int page_number,
+                               unsigned page_number,
                                ExceptionState& exception_state) const {
   if (!GetFrame()) {
     exception_state.ThrowDOMException(DOMExceptionCode::kInvalidAccessError,
@@ -2373,7 +2316,7 @@ String Internals::pageProperty(String property_name,
 }
 
 String Internals::pageSizeAndMarginsInPixels(
-    int page_number,
+    unsigned page_number,
     int width,
     int height,
     int margin_top,
@@ -2431,6 +2374,17 @@ void Internals::setPageScaleFactorLimits(float min_scale_factor,
   page->SetDefaultPageScaleLimits(min_scale_factor, max_scale_factor);
 }
 
+float Internals::pageZoomFactor(ExceptionState& exception_state) {
+  if (!document_->GetPage()) {
+    exception_state.ThrowDOMException(
+        DOMExceptionCode::kInvalidAccessError,
+        "The document's page cannot be retrieved.");
+    return 0;
+  }
+  // Page zoom without Device Scale Factor.
+  return document_->GetPage()->GetChromeClient().UserZoomFactor();
+}
+
 void Internals::setIsCursorVisible(Document* document,
                                    bool is_visible,
                                    ExceptionState& exception_state) {
@@ -2441,6 +2395,11 @@ void Internals::setIsCursorVisible(Document* document,
     return;
   }
   document->GetPage()->SetIsCursorVisible(is_visible);
+}
+
+void Internals::setMaxNumberOfFramesToTen(bool enabled) {
+  // This gets reset by Internals::ResetToConsistentState
+  Page::SetMaxNumberOfFramesToTenForTesting(enabled);
 }
 
 String Internals::effectivePreload(HTMLMediaElement* media_element) {
@@ -2578,7 +2537,7 @@ void Internals::startTrackingRepaints(Document* document,
   }
 
   LocalFrameView* frame_view = document->View();
-  frame_view->UpdateAllLifecyclePhases(DocumentUpdateReason::kTest);
+  frame_view->UpdateAllLifecyclePhasesForTest();
   frame_view->SetTracksRasterInvalidations(true);
 }
 
@@ -2592,7 +2551,7 @@ void Internals::stopTrackingRepaints(Document* document,
   }
 
   LocalFrameView* frame_view = document->View();
-  frame_view->UpdateAllLifecyclePhases(DocumentUpdateReason::kTest);
+  frame_view->UpdateAllLifecyclePhasesForTest();
   frame_view->SetTracksRasterInvalidations(false);
 }
 
@@ -2627,9 +2586,8 @@ void Internals::forceFullRepaint(Document* document,
     return;
   }
 
-  auto* layout_view = document->GetLayoutView();
-  if (layout_view)
-    layout_view->InvalidatePaintForViewAndCompositedLayers();
+  if (auto* layout_view = document->GetLayoutView())
+    layout_view->InvalidatePaintForViewAndDescendants();
 }
 
 DOMRectList* Internals::draggableRegions(Document* document,
@@ -2838,7 +2796,7 @@ ScriptValue Internals::deserializeBuffer(v8::Isolate* isolate,
                                          DOMArrayBuffer* buffer) const {
   scoped_refptr<SerializedScriptValue> serialized_value =
       SerializedScriptValue::Create(static_cast<const char*>(buffer->Data()),
-                                    buffer->ByteLengthAsSizeT());
+                                    buffer->ByteLength());
   return ScriptValue(isolate, serialized_value->Deserialize(isolate));
 }
 
@@ -2923,6 +2881,8 @@ DOMRect* Internals::selectionBounds(ExceptionState& exception_state) {
     return nullptr;
   }
 
+  GetFrame()->View()->UpdateLifecycleToLayoutClean(
+      DocumentUpdateReason::kSelection);
   return DOMRect::FromFloatRect(
       FloatRect(GetFrame()->Selection().AbsoluteUnclippedBounds()));
 }
@@ -3026,8 +2986,7 @@ void Internals::forceCompositingUpdate(Document* document,
     return;
   }
 
-  document->GetFrame()->View()->UpdateAllLifecyclePhases(
-      DocumentUpdateReason::kTest);
+  document->GetFrame()->View()->UpdateAllLifecyclePhasesForTest();
 }
 
 void Internals::setShouldRevealPassword(Element* element,
@@ -3141,7 +3100,7 @@ ScriptPromise Internals::promiseCheckOverload(ScriptState* script_state,
                              V8String(script_state->GetIsolate(), "done"));
 }
 
-void Internals::Trace(Visitor* visitor) {
+void Internals::Trace(Visitor* visitor) const {
   visitor->Trace(runtime_flags_);
   visitor->Trace(document_);
   ScriptWrappable::Trace(visitor);
@@ -3186,6 +3145,13 @@ Element* Internals::interestedElement() {
       .GetInterestedElement();
 }
 
+bool Internals::isActivated() {
+  if (!GetFrame())
+    return false;
+
+  return GetFrame()->GetPage()->GetFocusController().IsActive();
+}
+
 bool Internals::isInCanvasFontCache(Document* document,
                                     const String& font_string) {
   return document->GetCanvasFontCache()->IsInCache(font_string);
@@ -3202,14 +3168,6 @@ void Internals::setScrollChain(ScrollState* scroll_state,
   for (wtf_size_t i = 0; i < elements.size(); ++i)
     scroll_chain.push_back(DOMNodeIds::IdForNode(elements[i].Get()));
   scroll_state->SetScrollChain(scroll_chain);
-}
-
-void Internals::revealSelection() {
-  GetFrame()->Selection().RevealSelection(ScrollAlignment::ToEdgeIfNeeded());
-}
-
-void Internals::scheduleBlinkGC() {
-  ThreadState::Current()->ScheduleForcedGCForTesting();
 }
 
 String Internals::selectedHTMLForClipboard() {
@@ -3368,6 +3326,11 @@ double Internals::monotonicTimeToZeroBasedDocumentTime(
       .InSecondsF();
 }
 
+int64_t Internals::zeroBasedDocumentTimeToMonotonicTime(double dom_event_time) {
+  return document_->Loader()->GetTiming().ZeroBasedDocumentTimeToMonotonicTime(
+      dom_event_time);
+}
+
 int64_t Internals::currentTimeTicks() {
   return base::TimeTicks::Now().since_origin().InMicroseconds();
 }
@@ -3382,14 +3345,6 @@ String Internals::getProgrammaticScrollAnimationState(Node* node) const {
   if (ScrollableArea* scrollable_area = ScrollableAreaForNode(node))
     return scrollable_area->GetProgrammaticScrollAnimator().RunStateAsText();
   return String();
-}
-
-DOMRect* Internals::visualRect(Node* node) {
-  if (!node || !node->GetLayoutObject())
-    return DOMRect::Create();
-
-  return DOMRect::FromFloatRect(
-      FloatRect(node->GetLayoutObject()->FragmentsVisualRectBoundingBox()));
 }
 
 void Internals::crash() {
@@ -3438,6 +3393,10 @@ bool Internals::isTrackingOcclusionForIFrame(HTMLIFrameElement* iframe) const {
     return false;
   RemoteFrame* remote_frame = To<RemoteFrame>(iframe->ContentFrame());
   return remote_frame->View()->NeedsOcclusionTracking();
+}
+
+void Internals::DisableFrequencyCappingForOverlayPopupDetection() const {
+  OverlayInterstitialAdDetector::DisableFrequencyCappingForTesting();
 }
 
 void Internals::addEmbedderCustomElementName(const AtomicString& name,
@@ -3502,7 +3461,7 @@ void Internals::setDeviceEmulationScale(float scale,
         "The document's page cannot be retrieved.");
     return;
   }
-  WebDeviceEmulationParams params;
+  DeviceEmulationParams params;
   params.scale = scale;
   page->GetChromeClient().GetWebView()->EnableDeviceEmulation(params);
 }
@@ -3545,7 +3504,22 @@ void Internals::generateTestReport(const String& message) {
       MakeGarbageCollected<Report>("test", document_->Url().GetString(), body);
 
   // Send the test report to any ReportingObservers.
-  ReportingContext::From(document_->ExecutingWindow())->QueueReport(report);
+  ReportingContext::From(document_->domWindow())->QueueReport(report);
+}
+
+void Internals::setIsAdSubframe(HTMLIFrameElement* iframe,
+                                ExceptionState& exception_state) {
+  if (!iframe->ContentFrame() || !iframe->ContentFrame()->IsLocalFrame()) {
+    exception_state.ThrowDOMException(DOMExceptionCode::kNotSupportedError,
+                                      "Frame cannot be accessed.");
+    return;
+  }
+  LocalFrame* parent_frame = iframe->GetDocument().GetFrame();
+  LocalFrame* child_frame = To<LocalFrame>(iframe->ContentFrame());
+  bool parent_is_ad = parent_frame && parent_frame->IsAdSubframe();
+  child_frame->SetIsAdSubframe(parent_is_ad
+                                   ? blink::mojom::AdFrameType::kChildAd
+                                   : blink::mojom::AdFrameType::kRootAd);
 }
 
 }  // namespace blink

@@ -6,8 +6,8 @@
 #include "chrome/browser/apps/app_service/app_service_proxy.h"
 #include "chrome/browser/apps/app_service/app_service_proxy_factory.h"
 #include "chrome/browser/apps/app_service/browser_app_launcher.h"
-#include "chrome/browser/chromeos/web_applications/default_web_app_ids.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/web_applications/components/web_app_id_constants.h"
 #include "chrome/browser/web_applications/system_web_app_manager.h"
 #include "chrome/browser/web_applications/web_app_provider.h"
 #include "chrome/common/chrome_switches.h"
@@ -17,6 +17,7 @@
 #include "components/account_id/account_id.h"
 #include "components/services/app_service/public/mojom/types.mojom.h"
 #include "components/user_manager/user_names.h"
+#include "content/public/test/browser_test.h"
 #include "ui/base/window_open_disposition.h"
 #include "url/gurl.h"
 
@@ -42,7 +43,7 @@ IN_PROC_BROWSER_TEST_F(WebAppGuestSessionBrowserTest, LaunchOsSettings) {
 
   Profile* profile = browser()->profile();
   apps::AppLaunchParams params(
-      chromeos::default_web_apps::kOsSettingsAppId,
+      web_app::kOsSettingsAppId,
       apps::mojom::LaunchContainer::kLaunchContainerWindow,
       WindowOpenDisposition::NEW_FOREGROUND_TAB,
       apps::mojom::AppLaunchSource::kSourceTest);
@@ -50,7 +51,7 @@ IN_PROC_BROWSER_TEST_F(WebAppGuestSessionBrowserTest, LaunchOsSettings) {
   content::WebContents* contents =
       apps::AppServiceProxyFactory::GetForProfile(profile)
           ->BrowserAppLauncher()
-          .LaunchAppWithParams(params);
+          ->LaunchAppWithParams(std::move(params));
   EXPECT_EQ(GURL(chrome::kChromeUIOSSettingsURL), contents->GetVisibleURL());
 }
 

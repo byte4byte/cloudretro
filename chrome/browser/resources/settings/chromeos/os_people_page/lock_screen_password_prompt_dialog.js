@@ -16,10 +16,6 @@
  *   id="lockScreenPasswordPrompt"
  * </settings-lock-screen-password-prompt-dialog>
  */
-
-(function() {
-'use strict';
-
 Polymer({
   is: 'settings-lock-screen-password-prompt-dialog',
 
@@ -45,7 +41,7 @@ Polymer({
 
   /** @override */
   attached() {
-    this.writeUma_(LockScreenProgress.START_SCREEN_LOCK);
+    this.writeUma_(settings.LockScreenProgress.START_SCREEN_LOCK);
   },
 
   /**
@@ -54,7 +50,7 @@ Polymer({
    */
   onTokenObtained_(e) {
     // The user successfully authenticated.
-    this.writeUma_(LockScreenProgress.ENTER_PASSWORD_CORRECTLY);
+    this.writeUma_(settings.LockScreenProgress.ENTER_PASSWORD_CORRECTLY);
     this.fire('auth-token-obtained', e.detail);
   },
 
@@ -71,4 +67,3 @@ Polymer({
     return this.i18n('passwordPromptEnterPasswordLock');
   },
 });
-})();

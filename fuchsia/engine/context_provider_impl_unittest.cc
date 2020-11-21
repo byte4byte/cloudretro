@@ -19,8 +19,8 @@
 #include "base/base_paths_fuchsia.h"
 #include "base/base_switches.h"
 #include "base/bind.h"
-#include "base/bind_helpers.h"
 #include "base/callback.h"
+#include "base/callback_helpers.h"
 #include "base/command_line.h"
 #include "base/files/file.h"
 #include "base/files/file_util.h"
@@ -29,12 +29,13 @@
 #include "base/fuchsia/file_utils.h"
 #include "base/fuchsia/fuchsia_logging.h"
 #include "base/path_service.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "base/test/multiprocess_test.h"
 #include "base/test/task_environment.h"
 #include "base/test/test_timeouts.h"
 #include "fuchsia/engine/context_provider_impl.h"
 #include "fuchsia/engine/fake_context.h"
+#include "fuchsia/engine/switches.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/multiprocess_func_list.h"
 
@@ -103,10 +104,19 @@ base::Process LaunchFakeContextProcess(const base::CommandLine& command_line,
 fuchsia::web::CreateContextParams BuildCreateContextParams() {
   fuchsia::web::CreateContextParams output;
   zx_status_t result = fdio_service_connect(
-      base::fuchsia::kServiceDirectoryPath,
+      base::kServiceDirectoryPath,
       output.mutable_service_directory()->NewRequest().TakeChannel().release());
   ZX_CHECK(result == ZX_OK, result) << "Failed to open /svc";
   return output;
+}
+
+fidl::InterfaceHandle<fuchsia::io::Directory> OpenCacheDirectory() {
+  fidl::InterfaceHandle<fuchsia::io::Directory> cache_handle;
+  zx_status_t result =
+      fdio_service_connect(base::kPersistedCacheDirectoryPath,
+                           cache_handle.NewRequest().TakeChannel().release());
+  ZX_CHECK(result == ZX_OK, result) << "Failed to open /cache";
+  return cache_handle;
 }
 
 }  // namespace
@@ -253,6 +263,7 @@ TEST_F(ContextProviderImplTest, CreateValidatesDrmFlags) {
         BuildCreateContextParams();
     *create_params.mutable_features() =
         fuchsia::web::ContextFeatureFlags::WIDEVINE_CDM;
+    *create_params.mutable_cdm_data_directory() = OpenCacheDirectory();
     provider_ptr_->Create(std::move(create_params), context.NewRequest());
     base::RunLoop run_loop;
     context.set_error_handler([&run_loop](zx_status_t status) {
@@ -268,6 +279,7 @@ TEST_F(ContextProviderImplTest, CreateValidatesDrmFlags) {
     fuchsia::web::CreateContextParams create_params =
         BuildCreateContextParams();
     create_params.set_playready_key_system("foo");
+    *create_params.mutable_cdm_data_directory() = OpenCacheDirectory();
     provider_ptr_->Create(std::move(create_params), context.NewRequest());
     base::RunLoop run_loop;
     context.set_error_handler([&run_loop](zx_status_t status) {
@@ -285,6 +297,7 @@ TEST_F(ContextProviderImplTest, CreateValidatesDrmFlags) {
     *create_params.mutable_features() =
         fuchsia::web::ContextFeatureFlags::WIDEVINE_CDM |
         fuchsia::web::ContextFeatureFlags::HEADLESS;
+    *create_params.mutable_cdm_data_directory() = OpenCacheDirectory();
     provider_ptr_->Create(std::move(create_params), context.NewRequest());
     base::RunLoop run_loop;
     context.set_error_handler([&run_loop](zx_status_t status) {
@@ -337,7 +350,7 @@ TEST_F(ContextProviderImplTest, WithProfileDir) {
 
   // Pass a handle data dir to the context.
   create_params.set_data_directory(
-      base::fuchsia::OpenDirectory(profile_temp_dir.GetPath()));
+      base::OpenDirectoryHandle(profile_temp_dir.GetPath()));
 
   provider_ptr_->Create(std::move(create_params), context.NewRequest());
 
@@ -357,8 +370,7 @@ TEST_F(ContextProviderImplTest, FailsDataDirectoryIsFile) {
 
   // Pass in a handle to a file instead of a directory.
   CHECK(base::CreateTemporaryFile(&temp_file_path));
-  create_params.set_data_directory(
-      base::fuchsia::OpenDirectory(temp_file_path));
+  create_params.set_data_directory(base::OpenDirectoryHandle(temp_file_path));
 
   provider_ptr_->Create(std::move(create_params), context.NewRequest());
 
@@ -421,7 +433,7 @@ TEST(ContextProviderImplConfigTest, WithConfigWithCommandLineArgs) {
 
   base::RunLoop loop;
   ContextProviderImpl context_provider;
-  context_provider.set_config_override_for_test(std::move(config_dict));
+  context_provider.set_config_for_test(std::move(config_dict));
   context_provider.SetLaunchCallbackForTest(
       base::BindLambdaForTesting([&loop](const base::CommandLine& command,
                                          const base::LaunchOptions& options) {
@@ -454,7 +466,7 @@ TEST(ContextProviderImplConfigTest, WithConfigWithDisallowedCommandLineArgs) {
 
   base::RunLoop loop;
   ContextProviderImpl context_provider;
-  context_provider.set_config_override_for_test(std::move(config_dict));
+  context_provider.set_config_for_test(std::move(config_dict));
   context_provider.SetLaunchCallbackForTest(
       base::BindLambdaForTesting([&loop](const base::CommandLine& command,
                                          const base::LaunchOptions& options) {
@@ -487,7 +499,7 @@ TEST(ContextProviderImplConfigTest, WithConfigWithWronglyTypedCommandLineArgs) {
 
   base::RunLoop loop;
   ContextProviderImpl context_provider;
-  context_provider.set_config_override_for_test(std::move(config_dict));
+  context_provider.set_config_for_test(std::move(config_dict));
   context_provider.SetLaunchCallbackForTest(
       base::BindLambdaForTesting([&](const base::CommandLine& command,
                                      const base::LaunchOptions& options) {

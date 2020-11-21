@@ -4,13 +4,12 @@
 
 package org.chromium.chrome.browser.omnibox.suggestions;
 
-import org.chromium.chrome.browser.omnibox.suggestions.editurl.EditUrlSuggestionProcessor;
 import org.chromium.ui.base.PageTransition;
 
 /**
  * Provides the additional functionality to trigger and interact with autocomplete suggestions.
  */
-public interface AutocompleteDelegate extends EditUrlSuggestionProcessor.LocationBarDelegate {
+public interface AutocompleteDelegate extends UrlBarDelegate {
     /**
      * Notified that the URL text has changed.
      */
@@ -32,8 +31,16 @@ public interface AutocompleteDelegate extends EditUrlSuggestionProcessor.Locatio
      * Requests the keyboard visibility update.
      *
      * @param shouldShow When true, keyboard should be made visible.
+     * @param delayHide when true, hiding will commence after brief delay.
      */
-    void setKeyboardVisibility(boolean shouldShow);
+    void setKeyboardVisibility(boolean shouldShow, boolean delayHide);
+
+    /**
+     * @return Reports whether keyboard (whether software or hardware) is active.
+     * Software keyboard is reported as active whenever it is visible on screen; hardware keyboard
+     * is reported as active when it is connected.
+     */
+    boolean isKeyboardActive();
 
     /**
      * Requests that the given URL be loaded in the current tab.
@@ -66,4 +73,9 @@ public interface AutocompleteDelegate extends EditUrlSuggestionProcessor.Locatio
      * @return Whether the URL currently has focus.
      */
     boolean isUrlBarFocused();
+
+    /**
+     * @return Whether the omnibox was focused because of tapping on query tiles.
+     */
+    boolean didFocusUrlFromQueryTiles();
 }

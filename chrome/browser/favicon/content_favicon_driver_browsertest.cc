@@ -32,6 +32,7 @@
 #include "components/network_session_configurator/common/network_switches.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/url_loader_interceptor.h"
 #include "net/base/load_flags.h"
@@ -118,6 +119,7 @@ class PendingTaskWaiter : public content::WebContentsObserver {
  private:
   // content::WebContentsObserver:
   void DidUpdateFaviconURL(
+      content::RenderFrameHost* rfh,
       const std::vector<blink::mojom::FaviconURLPtr>& candidates) override {
     TestUrlAndTitle();
   }
@@ -162,7 +164,7 @@ class PendingTaskWaiter : public content::WebContentsObserver {
     }
   }
 
-  base::Closure quit_closure_;
+  base::RepeatingClosure quit_closure_;
   GURL required_url_;
   base::Optional<base::string16> required_title_;
   base::WeakPtrFactory<PendingTaskWaiter> weak_factory_{this};
@@ -193,6 +195,7 @@ class PageLoadStopper : public content::WebContentsObserver {
   }
 
   void DidUpdateFaviconURL(
+      content::RenderFrameHost* rfh,
       const std::vector<blink::mojom::FaviconURLPtr>& candidates) override {
     last_favicon_candidates_.clear();
     for (const auto& candidate : candidates)
@@ -750,9 +753,8 @@ IN_PROC_BROWSER_TEST_F(ContentFaviconDriverTestWithAutoupgradesDisabled,
       "/favicon/page_with_favicon_by_url.html?url=" + favicon_url.spec());
 
   // Observe the message for a blocked favicon.
-  content::ConsoleObserverDelegate console_observer(web_contents(),
-                                                    "*icon.png*");
-  web_contents()->SetDelegate(&console_observer);
+  content::WebContentsConsoleObserver console_observer(web_contents());
+  console_observer.SetPattern("*icon.png*");
 
   // Observe if the favicon URL is requested.
   TestURLLoaderInterceptor url_interceptor;
@@ -762,9 +764,9 @@ IN_PROC_BROWSER_TEST_F(ContentFaviconDriverTestWithAutoupgradesDisabled,
   console_observer.Wait();
   waiter.Wait();
 
-  EXPECT_TRUE(
-      base::MatchPattern(console_observer.message(), "*insecure favicon*"));
-  EXPECT_TRUE(base::MatchPattern(console_observer.message(),
+  EXPECT_TRUE(base::MatchPattern(console_observer.GetMessageAt(0u),
+                                 "*insecure favicon*"));
+  EXPECT_TRUE(base::MatchPattern(console_observer.GetMessageAt(0u),
                                  "*request has been blocked*"));
   EXPECT_FALSE(url_interceptor.was_loaded(favicon_url));
 }

@@ -11,13 +11,19 @@
 #include "ash/shell_observer.h"
 #include "ash/system/tray/tray_bubble_view.h"
 #include "ui/views/controls/button/button.h"
+#include "ui/views/layout/box_layout_view.h"
+#include "ui/views/metadata/metadata_header_macros.h"
+#include "ui/views/metadata/view_factory.h"
 
 namespace ash {
 
 class FloatingMenuButton;
+class TrayBackgroundView;
 
 class FloatingAccessibilityBubbleView : public TrayBubbleView {
  public:
+  METADATA_HEADER(FloatingAccessibilityBubbleView);
+
   explicit FloatingAccessibilityBubbleView(
       const TrayBubbleView::InitParams& init_params);
   FloatingAccessibilityBubbleView(const FloatingAccessibilityBubbleView&) =
@@ -28,10 +34,13 @@ class FloatingAccessibilityBubbleView : public TrayBubbleView {
 
   // TrayBubbleView:
   bool IsAnchoredToStatusArea() const override;
-
-  // views::View:
-  const char* GetClassName() const override;
+  bool AcceleratorPressed(const ui::Accelerator& accelerator) override;
 };
+
+BEGIN_VIEW_BUILDER(/* no export */,
+                   FloatingAccessibilityBubbleView,
+                   TrayBubbleView)
+END_VIEW_BUILDER
 
 // This floating view displays the currently enabled accessibility options,
 // along with buttons to configure them.
@@ -39,9 +48,11 @@ class FloatingAccessibilityBubbleView : public TrayBubbleView {
 // ----  ?[Dictation] ?[SelectToSpeak] ?[VirtualKeyboard]
 // ----  | [Open settings list]
 // ----  | [Change menu location]
-class FloatingAccessibilityView : public views::View,
-                                  public views::ButtonListener {
+class FloatingAccessibilityView : public views::BoxLayoutView,
+                                  public views::ViewObserver {
  public:
+  METADATA_HEADER(FloatingAccessibilityView);
+
   // Used for testing. Starts 1 because views IDs should not be 0.
   enum ButtonId {
     kPosition = 1,
@@ -54,6 +65,9 @@ class FloatingAccessibilityView : public views::View,
    public:
     // When the user click on the settings list button.
     virtual void OnDetailedMenuEnabled(bool enabled) {}
+    // When the layout of the view changes and we may need to reposition
+    // ourselves.
+    virtual void OnLayoutChanged() {}
     virtual ~Delegate() = default;
   };
 
@@ -63,15 +77,26 @@ class FloatingAccessibilityView : public views::View,
   ~FloatingAccessibilityView() override;
   FloatingAccessibilityView(const FloatingAccessibilityView&) = delete;
 
+  // Initizlizes feature button views. Should be called after the view is
+  // connected to a widget.
+  void Initialize();
+
   void SetMenuPosition(FloatingMenuPosition position);
   void SetDetailedViewShown(bool shown);
 
- private:
-  // views::ButtonListener:
-  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
+  void FocusOnDetailedViewButton();
 
-  // views::View:
-  const char* GetClassName() const override;
+ private:
+  void OnA11yTrayButtonPressed();
+  void OnPositionButtonPressed();
+
+  // views::ViewObserver:
+  void OnViewVisibilityChanged(views::View* observed_view,
+                               views::View* starting_view) override;
+  // Feature buttons:
+  TrayBackgroundView* dictation_button_ = nullptr;
+  TrayBackgroundView* select_to_speak_button_ = nullptr;
+  TrayBackgroundView* virtual_keyboard_button_ = nullptr;
 
   // Button to list all available features.
   FloatingMenuButton* a11y_tray_button_ = nullptr;
@@ -81,6 +106,14 @@ class FloatingAccessibilityView : public views::View,
   Delegate* const delegate_;
 };
 
+BEGIN_VIEW_BUILDER(/* no export */,
+                   FloatingAccessibilityView,
+                   views::BoxLayoutView)
+END_VIEW_BUILDER
+
 }  // namespace ash
+
+DEFINE_VIEW_BUILDER(/* no export */, ash::FloatingAccessibilityBubbleView)
+DEFINE_VIEW_BUILDER(/* no export */, ash::FloatingAccessibilityView)
 
 #endif  // ASH_SYSTEM_ACCESSIBILITY_FLOATING_ACCESSIBILITY_VIEW_H_

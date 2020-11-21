@@ -94,15 +94,28 @@ struct UserInitiatedInfo {
 // Information about how the page rendered during the browsing session.
 // Derived from the FrameRenderDataUpdate that is sent via UpdateTiming IPC.
 struct PageRenderData {
-  PageRenderData()
-      : layout_shift_score(0), layout_shift_score_before_input_or_scroll(0) {}
+  PageRenderData() = default;
 
   // How much visible elements on the page shifted (bit.ly/lsm-explainer).
-  float layout_shift_score;
+  float layout_shift_score = 0;
 
   // How much visible elements on the page shifted (bit.ly/lsm-explainer),
-  // before user input or document scroll.
-  float layout_shift_score_before_input_or_scroll;
+  // before user input or document scroll. This field's meaning is context-
+  // dependent (see comments on page_render_data_ and main_frame_render_data_
+  // in PageLoadMetricsUpdateDispatcher).
+  float layout_shift_score_before_input_or_scroll = 0;
+
+  // How many LayoutBlock instances were created.
+  uint64_t all_layout_block_count = 0;
+
+  // How many LayoutNG-based LayoutBlock instances were created.
+  uint64_t ng_layout_block_count = 0;
+
+  // How many times LayoutObject::UpdateLayout() is called.
+  uint64_t all_layout_call_count = 0;
+
+  // How many times LayoutNG-based LayoutObject::UpdateLayout() is called.
+  uint64_t ng_layout_call_count = 0;
 };
 
 // Container for various information about a completed request within a page
@@ -183,10 +196,12 @@ class PageLoadMetricsObserver {
 
   // These values are persisted to logs. Entries should not be renumbered and
   // numeric values should never be reused.
-  enum class LargestContentType {
-    kImage = 0,
-    kText = 1,
-    kMaxValue = kText,
+  enum class LargestContentState {
+    kReported = 0,
+    kLargestImageLoading = 1,
+    kNotFound = 2,
+    kFoundButNotReported = 3,
+    kMaxValue = kFoundButNotReported,
   };
 
   using FrameTreeNodeId = int;
@@ -194,13 +209,6 @@ class PageLoadMetricsObserver {
   virtual ~PageLoadMetricsObserver() {}
 
   static bool IsStandardWebPageMimeType(const std::string& mime_type);
-
-  // Returns true if the out parameters are assigned values.
-  static bool AssignTimeAndSizeForLargestContentfulPaint(
-      const page_load_metrics::mojom::PaintTimingPtr& paint_timing,
-      base::Optional<base::TimeDelta>* largest_content_paint_time,
-      uint64_t* largest_content_paint_size,
-      LargestContentType* largest_content_type);
 
   // Gets/Sets the delegate. The delegate must outlive the observer and is
   // normally set when the observer is first registered for the page load. The
@@ -296,7 +304,8 @@ class PageLoadMetricsObserver {
   // OnRestoreFromBackForwardCache is triggered when a page is restored from
   // the back-forward cache.
   virtual void OnRestoreFromBackForwardCache(
-      const mojom::PageLoadTiming& timing) {}
+      const mojom::PageLoadTiming& timing,
+      content::NavigationHandle* navigation_handle) {}
 
   // Called before OnCommit. The observer should return whether it wishes to
   // observe navigations whose main resource has MIME type |mine_type|. The
@@ -357,6 +366,15 @@ class PageLoadMetricsObserver {
   virtual void OnFirstContentfulPaintInPage(
       const mojom::PageLoadTiming& timing) {}
 
+  // These are called once every time when the page is restored from the
+  // back-forward cache. |index| indicates |index|-th restore.
+  virtual void OnFirstPaintAfterBackForwardCacheRestoreInPage(
+      const mojom::BackForwardCacheTiming& timing,
+      size_t index) {}
+  virtual void OnFirstInputAfterBackForwardCacheRestoreInPage(
+      const mojom::BackForwardCacheTiming& timing,
+      size_t index) {}
+
   // Unlike other paint callbacks, OnFirstMeaningfulPaintInMainFrameDocument is
   // tracked per document, and is reported for the main frame document only.
   virtual void OnFirstMeaningfulPaintInMainFrameDocument(
@@ -373,6 +391,12 @@ class PageLoadMetricsObserver {
   virtual void OnFeaturesUsageObserved(
       content::RenderFrameHost* rfh,
       const mojom::PageLoadFeatures& features) {}
+
+  // The smoothness metrics is shared over shared-memory. The observer should
+  // create a mapping (by calling |shared_memory.Map()|) so that they are able
+  // to read from the shared memory.
+  virtual void SetUpSharedMemoryForSmoothness(
+      const base::ReadOnlySharedMemoryRegion& shared_memory) {}
 
   // Invoked when there is data use for loading a resource on the page
   // for a given render frame host. This only contains resources that have had
@@ -482,6 +506,10 @@ class PageLoadMetricsObserver {
   // Called when the event corresponding to |event_key| occurs in this page
   // load.
   virtual void OnEventOccurred(const void* const event_key) {}
+
+  // Called when the page tracked was just activated after being loaded inside a
+  // portal.
+  virtual void DidActivatePortal(base::TimeTicks activation_time) {}
 
  private:
   PageLoadMetricsObserverDelegate* delegate_ = nullptr;

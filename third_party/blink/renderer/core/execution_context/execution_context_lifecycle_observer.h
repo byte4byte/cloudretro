@@ -33,9 +33,7 @@
 namespace blink {
 
 class ExecutionContext;
-class Document;
 class LocalDOMWindow;
-class LocalFrame;
 
 // ExecutionContextClient and ExecutionContextLifecycleObserver are helpers to
 // associate an object with an ExecutionContext. It is unsafe to access an
@@ -74,15 +72,10 @@ class CORE_EXPORT ExecutionContextClient : public GarbageCollectedMixin {
   // execution context is not a window or if it has been detached.
   LocalDOMWindow* DomWindow() const;
 
-  // If associated with a live window, returns the associated frame.
-  // Returns null otherwise.
-  LocalFrame* GetFrame() const;
-
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
 
  protected:
   explicit ExecutionContextClient(ExecutionContext*);
-  explicit ExecutionContextClient(LocalFrame*);
 
  private:
   WeakMember<ExecutionContext> execution_context_;
@@ -112,9 +105,9 @@ class CORE_EXPORT ExecutionContextLifecycleObserver
   ExecutionContext* GetExecutionContext() const;
   virtual void SetExecutionContext(ExecutionContext*);
 
-  // If associated with a live document, returns the associated frame.
-  // Returns null otherwise.
-  LocalFrame* GetFrame() const;
+  // If the execution context is a window, returns it. Returns nullptr if the
+  // execution context is not a window or if it has been detached.
+  LocalDOMWindow* DomWindow() const;
 
   enum Type {
     kGenericType,
@@ -125,14 +118,9 @@ class CORE_EXPORT ExecutionContextLifecycleObserver
 
   bool IsExecutionContextLifecycleObserver() const override { return true; }
 
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
 
  protected:
-  // TODO(crbug.com/1029822): This is a shim to enable migrating
-  // ExecutionContext to LocalDOMWindow.
-  explicit ExecutionContextLifecycleObserver(Document*,
-                                             Type type = kGenericType);
-
   explicit ExecutionContextLifecycleObserver(
       ExecutionContext* execution_context,
       Type type = kGenericType);

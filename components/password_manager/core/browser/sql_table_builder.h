@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/macros.h"
 #include "base/strings/string_piece.h"
 
@@ -49,6 +49,9 @@ class SQLTableBuilder {
  public:
   // Create the builder for an arbitrary table name.
   explicit SQLTableBuilder(const std::string& table_name);
+
+  SQLTableBuilder(const SQLTableBuilder& rhs) = delete;
+  SQLTableBuilder& operator=(const SQLTableBuilder& rhs) = delete;
 
   ~SQLTableBuilder();
 
@@ -186,8 +189,6 @@ class SQLTableBuilder {
 
   // The name of the table.
   const std::string table_name_;
-
-  DISALLOW_COPY_AND_ASSIGN(SQLTableBuilder);
 };
 
 }  // namespace password_manager

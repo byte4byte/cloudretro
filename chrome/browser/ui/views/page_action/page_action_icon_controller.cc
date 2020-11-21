@@ -26,10 +26,11 @@
 #include "chrome/browser/ui/views/send_tab_to_self/send_tab_to_self_icon_view.h"
 #include "chrome/browser/ui/views/sharing/sharing_dialog_view.h"
 #include "chrome/browser/ui/views/sharing/sharing_icon_view.h"
+#include "chrome/browser/ui/views/toolbar/toolbar_icon_container_view.h"
 #include "chrome/browser/ui/views/translate/translate_icon_view.h"
 #include "ui/views/layout/box_layout.h"
 
-PageActionIconController::PageActionIconController() : zoom_observer_(this) {}
+PageActionIconController::PageActionIconController() = default;
 PageActionIconController::~PageActionIconController() = default;
 
 void PageActionIconController::Init(const PageActionIconParams& params,
@@ -160,21 +161,19 @@ void PageActionIconController::Init(const PageActionIconParams& params,
 
   for (PageActionIconView* icon : page_action_icons_) {
     icon->SetVisible(false);
-    icon->set_ink_drop_visible_opacity(
+    icon->SetInkDropVisibleOpacity(
         params.page_action_icon_delegate->GetPageActionInkDropVisibleOpacity());
     if (params.icon_color)
       icon->SetIconColor(*params.icon_color);
     if (params.font_list)
       icon->SetFontList(*params.font_list);
     if (params.button_observer)
-      icon->AddButtonObserver(params.button_observer);
-    if (params.view_observer)
-      icon->views::View::AddObserver(params.view_observer);
+      params.button_observer->ObserveButton(icon);
     icon_container_->AddPageActionIcon(icon);
   }
 
   if (params.browser) {
-    zoom_observer_.Add(zoom::ZoomEventManager::GetForBrowserContext(
+    zoom_observation_.Observe(zoom::ZoomEventManager::GetForBrowserContext(
         params.browser->profile()));
   }
 }

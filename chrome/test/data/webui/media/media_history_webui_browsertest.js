@@ -8,6 +8,7 @@
 
 GEN('#include "build/build_config.h"');
 GEN('#include "chrome/browser/ui/browser.h"');
+GEN('#include "content/public/test/browser_test.h"');
 GEN('#include "media/base/media_switches.h"');
 
 function MediaHistoryWebUIBrowserTest() {}
@@ -56,6 +57,9 @@ TEST_F('MediaHistoryStatsWebUIBrowserTest', 'MAYBE_All', function() {
 
     assertDeepEquals(
         [
+          ['kaleidoscopeData', '0'],
+          ['mediaFeed', '0'],
+          ['mediaFeedItem', '0'],
           ['mediaImage', '0'],
           ['meta', '3'],
           ['origin', '0'],

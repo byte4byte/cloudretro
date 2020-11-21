@@ -27,14 +27,13 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 """A helper class for reading in and dealing with tests expectations for web tests."""
 
+import copy
 import logging
-import itertools
 import re
 
 from collections import defaultdict
 from collections import OrderedDict
 
-from blinkpy.common import path_finder
 from blinkpy.common.memoized import memoized
 from blinkpy.web_tests.models import typ_types
 
@@ -45,8 +44,7 @@ _log = logging.getLogger(__name__)
 SPECIAL_PREFIXES = ('# tags:', '# results:', '# conflicts_allowed:')
 
 _PLATFORM_TOKENS_LIST = [
-    'Android', 'Fuchsia', 'IOS', 'IOS12.2', 'IOS13.0', 'Linux', 'Mac',
-    'Mac10.10', 'Mac10.11', 'Retina', 'Mac10.12', 'Mac10.13', 'Mac10.14',
+    'Android', 'Fuchsia', 'Linux', 'Mac', 'Mac10.12', 'Mac10.13', 'Mac10.14',
     'Win', 'Win7', 'Win10'
 ]
 
@@ -94,23 +92,19 @@ class TestExpectations(object):
         self._port = port
         self._system_condition_tags = self._port.get_platform_tags()
         self._expectations = []
-        self._expectations_dict = expectations_dict or port.expectations_dict()
+        self._expectations_dict = OrderedDict(
+            expectations_dict or port.expectations_dict())
         filesystem = self._port.host.filesystem
         expectation_errors = []
 
-        # Separate expectations from flag specific files into a base expectations list and
-        # flag expectations list. We will also store the blink flags in a list.
+        # Separate expectations from flag specific files into a base
+        # expectations list and flag expectations list. We will also store
+        # the blink flags in a list.
         self._flags = []
         self._flag_expectations = []
         self._base_expectations = []
-        # Map each expectations file to a list of Expectation instances representing each line.
-        self._file_to_lines = defaultdict(list)
-        # Map each file to flags which represent if its list of Expectation instances were
-        # modified
-        self._was_modified = {}
-        # Map each file to flags which represent if the changes made to the file's lines were
-        # written to the file.
-        self._file_changes_committed = {}
+        # map file paths to sets of line numbers
+        self._expectation_file_linenos = defaultdict(set)
 
         for path, content in self._expectations_dict.items():
             test_expectations = typ_types.TestExpectations(
@@ -126,10 +120,10 @@ class TestExpectations(object):
                 '.*' + port.FLAG_EXPECTATIONS_PREFIX + '(.*)', path)
 
             self._reset_lines(path)
-            self._file_changes_committed[path] = False
 
             # If file is a flag specific file, store the typ.TestExpectation
-            # instance in _flag_expectations list, otherwise store it in _base_expectations
+            # instance in _flag_expectations list, otherwise store it in
+            # _base_expectations
             if flag_match:
                 self._flags.append(flag_match.group(1))
                 self._flag_expectations.append(test_expectations)
@@ -154,18 +148,10 @@ class TestExpectations(object):
             raise ParseError(expectation_errors)
         self._add_expectations_from_bot()
 
-    def get_updated_lines(self, path):
-        """This method returns the Expectation instances for each line
-        in an expectations file. If there were any modifications made
-        through the remove_expectations or add_expectations member methods
-        then this method will call the _reset_lines method in order to update
-        the list of lines for the expectations file.
-
-        args:
-            path: Absolute path of expectations file."""
-        if self._was_modified[path]:
-            self._reset_lines(path)
-        return self._file_to_lines[path]
+    def set_system_condition_tags(self, tags):
+        for test_exps in self._expectations:
+            test_exps.set_tags(tags)
+        self._system_condition_tags = tags
 
     @staticmethod
     def _maybe_remove_comments_and_whitespace(lines):
@@ -185,23 +171,18 @@ class TestExpectations(object):
         while lines and lines[-1].to_string().strip() == '':
             lines.pop()
 
+    def get_updated_lines(self, path):
+        return copy.deepcopy(self._reset_lines(path))
+
     def _reset_lines(self, path):
-        """This method resets Expectation instances for each line in
-        a file whenever they are requested via the get_updated_lines member method
-        and there were modifications made to the lines.
+        """This method returns the Expectation instances for each line
+        in an expectations file. If there were any modifications made
+        through the remove_expectations or add_expectations member methods
+        then this method will update the in memory view of the expectations
+        file.
 
         args:
-            path: Absolute path of the expectations file."""
-        baseline_linenos = {
-            e.lineno
-            for e in self._file_to_lines[path]
-            if not isinstance(e, _NotExpectation)
-        }
-        not_expectation_linenos = {
-            e.lineno: e
-            for e in self._file_to_lines[path]
-            if e.lineno not in baseline_linenos
-        }
+            path: Absolute path of expectations file."""
         content = self._expectations_dict[path]
         idx = self._expectations_dict.keys().index(path)
         typ_expectations = self._expectations[idx]
@@ -212,65 +193,81 @@ class TestExpectations(object):
 
         for pattern_to_exps in (typ_expectations.individual_exps,
                                 typ_expectations.glob_exps):
-            for exps in pattern_to_exps.values():
+            for test in sorted(pattern_to_exps.keys()):
+                exps = pattern_to_exps[test]
                 for exp in exps:
                     lineno_to_exps[exp.lineno].append(exp)
 
-        removed_linenos = baseline_linenos - set(lineno_to_exps.keys())
+        removed_linenos = (self._expectation_file_linenos[path] -
+                           set(lineno_to_exps.keys()))
+        content_lines = content.splitlines()
 
-        for lineno, line in enumerate(content.splitlines(), 1):
-            if lineno not in lineno_to_exps and lineno not in removed_linenos:
+        for lineno, line in enumerate(content_lines, 1):
+            if not line.strip() or line.strip().startswith('#'):
                 lines.append(_NotExpectation(line, lineno))
+                if lineno in lineno_to_exps:
+                    lines.extend(lineno_to_exps[lineno])
+                    lineno_to_exps.pop(lineno)
             elif lineno in removed_linenos:
-                if lineno + 1 not in lineno_to_exps:
+                next_line = ''
+                if lineno < len(content_lines):
+                    next_line = content_lines[lineno].strip()
+
+                if not next_line or next_line.startswith('#'):
                     self._maybe_remove_comments_and_whitespace(lines)
             else:
-                if lineno in not_expectation_linenos:
-                    lines.append(not_expectation_linenos[lineno])
                 lines.extend(lineno_to_exps[lineno])
                 lineno_to_exps.pop(lineno)
 
-            # set the lineno of each Expectation or _NotExpectation instance
-            if lines:
-                lines[-1].lineno = len(lines)
-
-        # Add new expectations that were not part of the file before
+        # Handle Expectation instances with line numbers outside of the
+        # [1, total file line count] range. There are two cases for
+        # Expectation instances with line numbers outside the valid range.
+        #
+        # 1, If line number is 0 then the Expectation instance will be appended
+        #    to the file.
+        # 2, If the line number is greater than the total number of lines then
+        #    an exception will be raised.
         if lineno_to_exps:
-            lines.append(_NotExpectation('', len(lines) + 1))
-        for lineno, extras in lineno_to_exps.items():
-            for line in extras:
-                lines.append(line)
-                lines[-1].lineno = len(lines)
+            lines.append(_NotExpectation('', len(content_lines) + 1))
 
-        self._file_to_lines[path] = lines
-        self._was_modified[path] = False
+            for line in sorted(
+                    reduce(lambda x,y: x+y, lineno_to_exps.values()),
+                    key=lambda e: e.test):
+                if line.lineno:
+                    raise ValueError(
+                        "Expectation '%s' was given a line number that "
+                        "is greater than the total line count of file %s."
+                        % (line.to_string(), path))
+                lines.append(line)
+
+        self._expectation_file_linenos[path] = {
+            line.lineno for line in lines
+            if not isinstance(line, _NotExpectation)}
+
+        return lines
 
     def commit_changes(self):
         """Writes to the expectations files any modifications made
         through the remove_expectations or add_expectations member
         methods"""
-        for path, commited in self._file_changes_committed.items():
-            if commited:
-                continue
+        for path in self._expectations_dict:
+            exp_lines = self._reset_lines(path)
             new_content = '\n'.join(
-                [e.to_string() for e in self.get_updated_lines(path)]) + '\n'
-            self._expectations_dict[path] = new_content
-            self._port.host.filesystem.write_text_file(path, new_content)
-            self._file_changes_committed[path] = True
+                [e.to_string() for e in exp_lines]) + '\n'
 
-    @property
-    def expectations(self):
-        return self._expectations[:]
+            self._expectations_dict[path] = new_content
+            self._expectation_file_linenos[path] = set()
+
+            for lineno, exp in enumerate(exp_lines, 1):
+                exp.lineno = lineno
+                if not isinstance(exp, _NotExpectation):
+                    self._expectation_file_linenos[path].add(lineno)
+
+            self._port.host.filesystem.write_text_file(path, new_content)
 
     @property
     def flag_name(self):
         return ' '.join(self._flags)
-
-    @property
-    def general_expectations(self):
-        # Get typ.TestExpectations instance for general
-        # test expectations file
-        return self._expectations[0]
 
     @property
     def port(self):
@@ -305,8 +302,7 @@ class TestExpectations(object):
         test_expectations.parse_tagged_list(content)
         self._expectations.append(test_expectations)
 
-    @staticmethod
-    def _get_expectations(expectations, test):
+    def _get_expectations(self, expectations, test, original_test=None):
         results = set()
         reasons = set()
         is_slow_test = False
@@ -318,8 +314,7 @@ class TestExpectations(object):
             # file and there are expected results in the second file, then the JSON
             # results will show an expected per test field with PASS and whatever the
             # expected results in the second file are.
-            if not (len(expected_results.results) == 1
-                    and ResultType.Pass in expected_results.results):
+            if not expected_results.is_default_pass:
                 results.update(expected_results.results)
             is_slow_test |= expected_results.is_slow_test
             reasons.update(expected_results.reason.split())
@@ -327,26 +322,59 @@ class TestExpectations(object):
             # can just concatenate here and still have comments from different
             # files be separated by newlines.
             trailing_comments += expected_results.trailing_comments
+
         # If the results set is empty then the Expectation constructor
         # will set the expected result to Pass.
-        return typ_types.Expectation(
-            test=test,
-            results=results,
-            is_slow_test=is_slow_test,
-            reason=' '.join(reasons),
-            trailing_comments=trailing_comments)
+        return typ_types.Expectation(test=original_test or test,
+                                     results=results,
+                                     is_slow_test=is_slow_test,
+                                     reason=' '.join(reasons),
+                                     trailing_comments=trailing_comments)
+
+    def get_expectations_from_file(self, path, test_name):
+        idx = self._expectations_dict.keys().index(path)
+        return copy.deepcopy(
+            self._expectations[idx].individual_exps.get(test_name) or [])
+
+    @staticmethod
+    def _override_or_fallback_expectations(override, fallback):
+        if override.is_default_pass:
+            fallback.is_slow_test |= override.is_slow_test
+            return fallback
+        override.is_slow_test |= fallback.is_slow_test
+        return override
+
+    def _get_expectations_with_fallback(self,
+                                        expectations,
+                                        fallback_expectations,
+                                        test,
+                                        original_test=None):
+        exp = self._override_or_fallback_expectations(
+            self._get_expectations(expectations, test, original_test),
+            self._get_expectations(fallback_expectations, test, original_test))
+        base_test = self.port.lookup_virtual_test_base(test)
+        if base_test:
+            return self._override_or_fallback_expectations(
+                exp,
+                self._get_expectations_with_fallback(expectations,
+                                                     fallback_expectations,
+                                                     base_test, test))
+        return exp
 
     def get_expectations(self, test):
-        return self._get_expectations(self._expectations, test)
+        return self._get_expectations_with_fallback(self._flag_expectations,
+                                                    self._expectations, test)
 
     def get_flag_expectations(self, test):
-        exp = self._get_expectations(self._flag_expectations, test)
-        if exp.is_slow_test or exp.results != set([ResultType.Pass]):
-            return exp
-        return None
+        exp = self._get_expectations_with_fallback(self._flag_expectations, [],
+                                                   test)
+        if exp.is_default_pass:
+            return None
+        return exp
 
     def get_base_expectations(self, test):
-        return self._get_expectations(self._base_expectations, test)
+        return self._get_expectations_with_fallback(self._base_expectations,
+                                                    [], test)
 
     def get_tests_with_expected_result(self, result):
         """This method will return a list of tests and directories which
@@ -355,9 +383,8 @@ class TestExpectations(object):
         args:
             result: ResultType value, i.e ResultType.Skip"""
         tests = []
-        for test_exp in self.expectations:
-            tests.extend(
-                [test_name for test_name in test_exp.individual_exps.keys()])
+        for test_exp in self._expectations:
+            tests.extend(test_exp.individual_exps)
             tests.extend([
                 dir_name[:-1] for dir_name in test_exp.glob_exps.keys()
                 if self.port.test_isdir(dir_name[:-1])
@@ -373,14 +400,18 @@ class TestExpectations(object):
         return result in expected_results
 
     def _add_expectations_from_bot(self):
-        # FIXME: With mode 'very-flaky' and 'maybe-flaky', this will show the expectations entry in the flakiness
-        # dashboard rows for each test to be whatever the bot thinks they should be. Is this a good thing?
+        # FIXME: With mode 'very-flaky' and 'maybe-flaky', this will show
+        # the expectations entry in the flakiness dashboard rows for each
+        # test to be whatever the bot thinks they should be. Is this a
+        # good thing?
         bot_expectations = self._port.bot_expectations()
-        raw_expectations = '# results: [ Failure Pass Crash Skip Timeout ]\n'
-        for test, results in bot_expectations.items():
-            raw_expectations += typ_types.Expectation(
-                test=test, results=results).to_string() + '\n'
-        self.merge_raw_expectations(raw_expectations)
+        if bot_expectations:
+            raw_expectations = (
+                '# results: [ Failure Pass Crash Skip Timeout ]\n')
+            for test, results in bot_expectations.items():
+                raw_expectations += typ_types.Expectation(
+                    test=test, results=results).to_string() + '\n'
+            self.merge_raw_expectations(raw_expectations)
 
     def remove_expectations(self, path, exps):
         """This method removes Expectation instances from an expectations file.
@@ -403,10 +434,7 @@ class TestExpectations(object):
             if not pattern_to_exps[exp.test]:
                 pattern_to_exps.pop(exp.test)
 
-        self._was_modified[path] = True
-        self._file_changes_committed[path] = False
-
-    def add_expectations(self, path, exps, lineno=0):
+    def add_expectations(self, path, exps, lineno=0, append_to_end_of_file=False):
         """This method adds Expectation instances to an expectations file. It will
         add the new instances after the line number passed through the lineno parameter.
         If the lineno is set to a value outside the range of line numbers in the file
@@ -420,6 +448,14 @@ class TestExpectations(object):
         idx = self._expectations_dict.keys().index(path)
         typ_expectations = self._expectations[idx]
         added_glob = False
+
+        if lineno < 0:
+            raise ValueError('lineno cannot be negative.')
+        if (append_to_end_of_file and lineno or
+                not append_to_end_of_file and not lineno):
+            raise ValueError('If append_to_end_of_file is set then lineno '
+                             'must be 0. Also if lineno is 0 then '
+                             'append_to_end_of_file must be set to True.')
 
         for exp in exps:
             exp.lineno = lineno
@@ -439,9 +475,6 @@ class TestExpectations(object):
             typ_expectations.glob_exps = OrderedDict()
             for exp in glob_exps:
                 typ_expectations.glob_exps.setdefault(exp.test, []).append(exp)
-
-        self._was_modified[path] = True
-        self._file_changes_committed[path] = False
 
 
 class SystemConfigurationRemover(object):
@@ -517,16 +550,15 @@ class SystemConfigurationRemover(object):
         versions_to_remove = frozenset(
             specifier.lower() for specifier in versions_to_remove)
         if not versions_to_remove:
-            # This will prevent making changes to test expectations which have no OS versions to remove.
+            # This will prevent making changes to test expectations which
+            # have no OS versions to remove.
             return
 
-        exp_lines = self._test_expectations.get_updated_lines(
-            self._generic_exp_file_path)
+        expectations = self._test_expectations.get_expectations_from_file(
+            self._generic_exp_file_path, test_name)
         delete_exps = []
 
-        for exp in exp_lines:
-            if exp.test != test_name:
-                continue
+        for exp in expectations:
             if exp.tags & versions_to_remove:
                 self._test_expectations.remove_expectations(
                     self._generic_exp_file_path, [exp])

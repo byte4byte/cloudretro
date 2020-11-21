@@ -2,22 +2,24 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ash/public/cpp/immersive/immersive_fullscreen_controller.h"
+#include "chromeos/ui/frame/immersive/immersive_fullscreen_controller.h"
 
 #include "ash/frame/header_view.h"
 #include "ash/frame/non_client_frame_view_ash.h"
 #include "ash/public/cpp/ash_features.h"
-#include "ash/public/cpp/immersive/immersive_fullscreen_controller_delegate.h"
-#include "ash/public/cpp/immersive/immersive_fullscreen_controller_test_api.h"
+#include "ash/public/cpp/shelf_config.h"
 #include "ash/public/cpp/shelf_types.h"
 #include "ash/root_window_controller.h"
 #include "ash/shelf/shelf.h"
+#include "ash/shelf/shelf_widget.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/wm/splitview/split_view_controller.h"
 #include "ash/wm/tablet_mode/tablet_mode_controller.h"
 #include "ash/wm/window_state.h"
 #include "base/test/scoped_feature_list.h"
+#include "chromeos/ui/frame/immersive/immersive_fullscreen_controller_delegate.h"
+#include "chromeos/ui/frame/immersive/immersive_fullscreen_controller_test_api.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/client/cursor_client.h"
 #include "ui/aura/env.h"
@@ -39,6 +41,11 @@
 namespace ash {
 
 namespace {
+
+using ::chromeos::ImmersiveFullscreenController;
+using ::chromeos::ImmersiveFullscreenControllerDelegate;
+using ::chromeos::ImmersiveFullscreenControllerTestApi;
+using ::chromeos::ImmersiveRevealedLock;
 
 class TestBubbleDialogDelegate : public views::BubbleDialogDelegateView {
  public:
@@ -112,16 +119,17 @@ class ConsumeEventHandler : public ui::test::TestEventHandler {
 
 class TestWidgetDelegate : public views::WidgetDelegateView {
  public:
-  TestWidgetDelegate() = default;
+  TestWidgetDelegate() {
+    SetCanMaximize(true);
+    SetCanResize(true);
+  }
   ~TestWidgetDelegate() override = default;
 
   // views::WidgetDelegateView:
-  bool CanResize() const override { return true; }
-  bool CanMaximize() const override { return true; }
   bool CanActivate() const override { return true; }
-  views::NonClientFrameView* CreateNonClientFrameView(
+  std::unique_ptr<views::NonClientFrameView> CreateNonClientFrameView(
       views::Widget* widget) override {
-    return new NonClientFrameViewAsh(widget);
+    return std::make_unique<NonClientFrameViewAsh>(widget);
   }
 
  private:
@@ -815,9 +823,9 @@ TEST_F(ImmersiveFullscreenControllerTest, EventsDoNotLeakToWindowUnderneath) {
   EXPECT_EQ(behind->GetBoundsInScreen().y(), window()->GetBoundsInScreen().y());
   int top = behind->GetBoundsInScreen().y();
 
-  ui::TouchEvent touch(
-      ui::ET_TOUCH_MOVED, gfx::Point(10, top), ui::EventTimeForNow(),
-      ui::PointerDetails(ui::EventPointerType::POINTER_TYPE_TOUCH, 0));
+  ui::TouchEvent touch(ui::ET_TOUCH_MOVED, gfx::Point(10, top),
+                       ui::EventTimeForNow(),
+                       ui::PointerDetails(ui::EventPointerType::kTouch, 0));
   aura::Window* root = window()->GetRootWindow();
   ui::EventTargeter* targeter =
       root->GetHost()->dispatcher()->GetDefaultEventTargeter();
@@ -828,9 +836,9 @@ TEST_F(ImmersiveFullscreenControllerTest, EventsDoNotLeakToWindowUnderneath) {
   // Make sure the windows are still aligned on top.
   EXPECT_EQ(behind->GetBoundsInScreen().y(), window()->GetBoundsInScreen().y());
   top = behind->GetBoundsInScreen().y();
-  ui::TouchEvent touch2(
-      ui::ET_TOUCH_MOVED, gfx::Point(10, top), ui::EventTimeForNow(),
-      ui::PointerDetails(ui::EventPointerType::POINTER_TYPE_TOUCH, 0));
+  ui::TouchEvent touch2(ui::ET_TOUCH_MOVED, gfx::Point(10, top),
+                        ui::EventTimeForNow(),
+                        ui::PointerDetails(ui::EventPointerType::kTouch, 0));
   // The event should still be targeted to window().
   EXPECT_EQ(window(), targeter->FindTargetForEvent(root, &touch2));
 }
@@ -1103,6 +1111,23 @@ TEST_F(ImmersiveFullscreenControllerTest, Shelf) {
   SetWindowShowState(ui::SHOW_STATE_FULLSCREEN);
   SetEnabled(true);
   EXPECT_EQ(SHELF_AUTO_HIDE, shelf->GetVisibilityState());
+  EXPECT_EQ(SHELF_AUTO_HIDE_HIDDEN, shelf->GetAutoHideState());
+
+  // Verify the shelf can be pulled up.
+  const gfx::Point start =
+      shelf->shelf_widget()->GetWindowBoundsInScreen().top_center();
+  GetEventGenerator()->GestureScrollSequence(
+      start, start + gfx::Vector2d(0, -ShelfConfig::Get()->shelf_size()),
+      base::TimeDelta::FromMilliseconds(200), /*steps=*/5);
+
+  EXPECT_EQ(SHELF_AUTO_HIDE, shelf->GetVisibilityState());
+  EXPECT_EQ(SHELF_AUTO_HIDE_SHOWN, shelf->GetAutoHideState());
+
+  // Setting the same immersive fullscreen active property should not hide the
+  // shelf.
+  SetEnabled(true);
+  EXPECT_EQ(SHELF_AUTO_HIDE, shelf->GetVisibilityState());
+  EXPECT_EQ(SHELF_AUTO_HIDE_SHOWN, shelf->GetAutoHideState());
 
   // Disabling immersive fullscreen puts it back.
   SetEnabled(false);

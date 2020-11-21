@@ -10,27 +10,43 @@
 
 class Profile;
 
+namespace base {
+class Time;
+}
+
 namespace extensions {
 
 class Extension;
 
+class BookmarkAppRegistrar;
+
 class BookmarkAppRegistryController : public web_app::AppRegistryController {
  public:
-  explicit BookmarkAppRegistryController(Profile* profile);
+  explicit BookmarkAppRegistryController(Profile* profile,
+                                         BookmarkAppRegistrar* registrar);
   ~BookmarkAppRegistryController() override;
 
   // AppRegistryController:
   void Init(base::OnceClosure callback) override;
   void SetAppUserDisplayMode(const web_app::AppId& app_id,
-                             web_app::DisplayMode display_mode) override;
+                             web_app::DisplayMode display_mode,
+                             bool is_user_action) override;
   void SetAppIsDisabled(const web_app::AppId& app_id,
                         bool is_disabled) override;
-  void SetAppIsLocallyInstalledForTesting(const web_app::AppId& app_id,
-                                          bool is_locally_installed) override;
+  void SetAppIsLocallyInstalled(const web_app::AppId& app_id,
+                                bool is_locally_installed) override;
+  void SetAppLastLaunchTime(const web_app::AppId& app_id,
+                            const base::Time& time) override;
+  void SetAppInstallTime(const web_app::AppId& app_id,
+                         const base::Time& time) override;
+  void SetAppRunOnOsLoginMode(const web_app::AppId& app_id,
+                              web_app::RunOnOsLoginMode mode) override;
   web_app::WebAppSyncBridge* AsWebAppSyncBridge() override;
 
  private:
   const Extension* GetExtension(const web_app::AppId& app_id) const;
+
+  BookmarkAppRegistrar* registrar_;
 };
 
 }  // namespace extensions

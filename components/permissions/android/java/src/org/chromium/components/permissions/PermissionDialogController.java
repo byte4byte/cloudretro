@@ -5,15 +5,18 @@
 package org.chromium.components.permissions;
 
 import android.annotation.SuppressLint;
-import android.app.Activity;
+import android.content.Context;
 
 import androidx.annotation.IntDef;
 import androidx.annotation.VisibleForTesting;
 
+import org.chromium.base.BuildInfo;
+import org.chromium.base.ContextUtils;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.ui.modaldialog.DialogDismissalCause;
 import org.chromium.ui.modaldialog.ModalDialogManager;
 import org.chromium.ui.modaldialog.ModalDialogProperties;
+import org.chromium.ui.modaldialog.SimpleModalDialogController;
 import org.chromium.ui.modelutil.PropertyModel;
 
 import java.lang.annotation.Retention;
@@ -45,6 +48,7 @@ public class PermissionDialogController
     }
 
     private PropertyModel mDialogModel;
+    private PropertyModel mOverlayDetectedDialogModel;
     private PermissionDialogDelegate mDialogDelegate;
     private ModalDialogManager mModalDialogManager;
 
@@ -137,12 +141,14 @@ public class PermissionDialogController
         assert mState == State.NOT_SHOWING;
 
         mDialogDelegate = mRequestQueue.remove(0);
-        Activity activity = mDialogDelegate.getWindow().getActivity().get();
+        // Use the context to access resources instead of the activity because the activity may not
+        // have the correct resources in some cases (e.g. WebLayer).
+        Context context = mDialogDelegate.getWindow().getContext().get();
 
         // It's possible for the activity to be null if we reach here just after the user
         // backgrounds the browser and cleanup has happened. In that case, we can't show a prompt,
         // so act as though the user dismissed it.
-        if (activity == null) {
+        if (ContextUtils.activityFromContext(context) == null) {
             // TODO(timloh): This probably doesn't work, as this happens synchronously when creating
             // the PermissionPromptAndroid, so the PermissionRequestManager won't be ready yet.
             mDialogDelegate.onDismiss();
@@ -158,9 +164,46 @@ public class PermissionDialogController
         }
 
         mModalDialogManager = mDialogDelegate.getWindow().getModalDialogManager();
-        mDialogModel = PermissionDialogModel.getModel(this, mDialogDelegate);
+
+        mDialogModel = PermissionDialogModel.getModel(
+                this, mDialogDelegate, () -> showFilteredTouchEventDialog(context));
         mModalDialogManager.showDialog(mDialogModel, ModalDialogManager.ModalDialogType.TAB);
         mState = State.PROMPT_OPEN;
+    }
+
+    /**
+     * Displays the dialog explaining that Chrome has detected an overlay. Offers the user to close
+     * the overlay window and try again.
+     */
+    private void showFilteredTouchEventDialog(Context context) {
+        // Don't show another dialog if one is already displayed.
+        if (mOverlayDetectedDialogModel != null) return;
+
+        ModalDialogProperties.Controller overlayDetectedDialogController =
+                new SimpleModalDialogController(mModalDialogManager, (Integer dismissalCause) -> {
+                    if (dismissalCause == DialogDismissalCause.POSITIVE_BUTTON_CLICKED
+                            && mDialogModel != null) {
+                        mModalDialogManager.dismissDialog(
+                                mDialogModel, DialogDismissalCause.NAVIGATE_BACK_OR_TOUCH_OUTSIDE);
+                    }
+                    mOverlayDetectedDialogModel = null;
+                });
+        mOverlayDetectedDialogModel =
+                new PropertyModel.Builder(ModalDialogProperties.ALL_KEYS)
+                        .with(ModalDialogProperties.CONTROLLER, overlayDetectedDialogController)
+                        .with(ModalDialogProperties.TITLE,
+                                context.getString(R.string.overlay_detected_dialog_title,
+                                        BuildInfo.getInstance().hostPackageLabel))
+                        .with(ModalDialogProperties.MESSAGE, context.getResources(),
+                                R.string.overlay_detected_dialog_message)
+                        .with(ModalDialogProperties.POSITIVE_BUTTON_TEXT, context.getResources(),
+                                R.string.cancel)
+                        .with(ModalDialogProperties.NEGATIVE_BUTTON_TEXT, context.getResources(),
+                                R.string.try_again)
+                        .with(ModalDialogProperties.CANCEL_ON_TOUCH_OUTSIDE, true)
+                        .build();
+        mModalDialogManager.showDialog(
+                mOverlayDetectedDialogModel, ModalDialogManager.ModalDialogType.APP, true);
     }
 
     public void dismissFromNative(PermissionDialogDelegate delegate) {

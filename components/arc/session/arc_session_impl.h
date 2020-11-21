@@ -162,7 +162,7 @@ class ArcSessionImpl
     using GetLcdDensityCallback = base::OnceCallback<void(int32_t)>;
 
     // Gets the lcd density via callback. The callback may be invoked
-    // immediately if its already available, or called asynchronosly later if
+    // immediately if it's already available, or called asynchronously later if
     // it's not yet available. Calling this method while there is a pending
     // callback will cancel the pending callback.
     virtual void GetLcdDensity(GetLcdDensityCallback callback) = 0;
@@ -180,7 +180,9 @@ class ArcSessionImpl
 
   ArcSessionImpl(std::unique_ptr<Delegate> delegate,
                  chromeos::SchedulerConfigurationManagerBase*
-                     scheduler_configuration_manager);
+                     scheduler_configuration_manager,
+                 AdbSideloadingAvailabilityDelegate*
+                     adb_sideloading_availability_delegate);
   ~ArcSessionImpl() override;
 
   // Returns default delegate implementation used for the production.
@@ -215,6 +217,15 @@ class ArcSessionImpl
   // Called when arcbridge socket is created.
   void OnSocketCreated(base::ScopedFD fd);
 
+  // Loads ARC data/ snapshot if necessary.
+  // |callback| is called once the load process is finished.
+  void StartLoadingDataSnapshot(base::OnceClosure callback);
+
+  // Called when ARC data/ snapshot step is done: either snapshot is loaded or
+  // skipped.
+  // |socket_fd| should be a socket to be passed to OnUpgraded.
+  void OnDataSnapshotLoaded(base::ScopedFD scoped_fd);
+
   // D-Bus callback for UpgradeArcContainer(). |socket_fd| should be a socket
   // which should be accept(2)ed to connect ArcBridgeService Mojo channel.
   void OnUpgraded(base::ScopedFD socket_fd, bool result);
@@ -247,6 +258,9 @@ class ArcSessionImpl
 
   // Free disk space under /home in bytes.
   void OnFreeDiskSpace(int64_t space);
+
+  // Whether adb sideloading can be changed
+  void OnCanChangeAdbSideloading(bool can_change_adb_sideloading);
 
   // Checks whether a function runs on the thread where the instance is
   // created.
@@ -283,6 +297,10 @@ class ArcSessionImpl
   int lcd_density_ = 0;
   chromeos::SchedulerConfigurationManagerBase* const
       scheduler_configuration_manager_;
+
+  // Owned by ArcSessionManager.
+  AdbSideloadingAvailabilityDelegate* const
+      adb_sideloading_availability_delegate_;
 
   // WeakPtrFactory to use callbacks.
   base::WeakPtrFactory<ArcSessionImpl> weak_factory_{this};

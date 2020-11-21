@@ -9,16 +9,15 @@
 #include "ash/public/cpp/kiosk_app_menu.h"
 #include "ash/public/cpp/login_screen.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/app_mode/arc/arc_kiosk_app_data.h"
 #include "chrome/browser/chromeos/app_mode/arc/arc_kiosk_app_manager.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_launch_error.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_manager.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_manager_observer.h"
+#include "chrome/browser/chromeos/app_mode/kiosk_app_types.h"
 #include "chrome/browser/chromeos/app_mode/web_app/web_kiosk_app_manager.h"
 #include "chrome/browser/chromeos/login/ui/login_display_host.h"
 #include "chrome/browser/ui/ash/login_screen_client.h"
-#include "content/public/browser/notification_service.h"
 #include "extensions/grit/extensions_browser_resources.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image_skia.h"
@@ -73,13 +72,11 @@ void KioskAppMenuController::SendKioskApps() {
   }
 
   ash::KioskAppMenu::Get()->SetKioskApps(
-      output, base::BindRepeating(&KioskAppMenuController::LaunchApp,
-                                  weak_factory_.GetWeakPtr()));
-  content::NotificationService::current()->Notify(
-      chrome::NOTIFICATION_KIOSK_APPS_LOADED,
-      content::NotificationService::AllSources(),
-      content::NotificationService::NoDetails());
-
+      output,
+      base::BindRepeating(&KioskAppMenuController::LaunchApp,
+                          weak_factory_.GetWeakPtr()),
+      base::BindRepeating(&KioskAppMenuController::OnMenuWillShow,
+                          weak_factory_.GetWeakPtr()));
   KioskAppLaunchError::Error error = KioskAppLaunchError::Get();
   if (error == KioskAppLaunchError::NONE)
     return;
@@ -101,21 +98,29 @@ void KioskAppMenuController::LaunchApp(const ash::KioskAppMenuEntry& app) {
     NOTREACHED();
     return;
   }
+
   switch (type) {
     case policy::DeviceLocalAccount::TYPE_KIOSK_APP:
-      host->StartAppLaunch(app.app_id, /*diagnostic_mode=*/false,
-                           /*is_auto_launch=*/false);
+      host->StartKiosk(KioskAppId::ForChromeApp(app.app_id),
+                       /*is_auto_launch=*/false);
       return;
     case policy::DeviceLocalAccount::TYPE_ARC_KIOSK_APP:
-      host->StartArcKiosk(app.account_id);
+      host->StartKiosk(KioskAppId::ForArcApp(app.account_id),
+                       /*is_auto_launch=*/false);
       return;
     case policy::DeviceLocalAccount::TYPE_WEB_KIOSK_APP:
-      host->StartWebKiosk(app.account_id);
+      host->StartKiosk(KioskAppId::ForWebApp(app.account_id),
+                       /*is_auto_launch=*/false);
       return;
     default:
       break;
   }
   NOTREACHED();
+}
+
+void KioskAppMenuController::OnMenuWillShow() {
+  // Web app based kiosk app will want to load their icons.
+  WebKioskAppManager::Get()->LoadIcons();
 }
 
 }  // namespace chromeos

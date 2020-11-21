@@ -25,6 +25,9 @@
 
 #include "third_party/blink/renderer/modules/filesystem/dom_window_file_system.h"
 
+#include "services/metrics/public/cpp/mojo_ukm_recorder.h"
+#include "services/metrics/public/cpp/ukm_builders.h"
+#include "services/metrics/public/cpp/ukm_source_id.h"
 #include "third_party/blink/public/mojom/filesystem/file_system.mojom-blink.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/fileapi/file_error.h"
@@ -74,17 +77,26 @@ void DOMWindowFileSystem::webkitRequestFileSystem(
     return;
   }
 
+  auto* ukm_recorder = window.document()->UkmRecorder();
+  const ukm::SourceId source_id = window.document()->UkmSourceID();
+
   if (file_system_type == mojom::blink::FileSystemType::kTemporary) {
     UseCounter::Count(window, WebFeature::kRequestedFileSystemTemporary);
+    ukm::builders::FileSystemAPI_WebRequest(source_id)
+        .SetTemporary(true)
+        .Record(ukm_recorder->Get());
   } else if (file_system_type == mojom::blink::FileSystemType::kPersistent) {
     UseCounter::Count(window, WebFeature::kRequestedFileSystemPersistent);
+    ukm::builders::FileSystemAPI_WebRequest(source_id)
+        .SetPersistent(true)
+        .Record(ukm_recorder->Get());
   }
 
   auto success_callback_wrapper =
       AsyncCallbackHelper::SuccessCallback<DOMFileSystem>(success_callback);
 
   LocalFileSystem::From(window)->RequestFileSystem(
-      &window, file_system_type, size,
+      file_system_type, size,
       std::make_unique<FileSystemCallbacks>(std::move(success_callback_wrapper),
                                             std::move(error_callback_wrapper),
                                             &window, file_system_type),
@@ -123,7 +135,7 @@ void DOMWindowFileSystem::webkitResolveLocalFileSystemURL(
       AsyncCallbackHelper::SuccessCallback<Entry>(success_callback);
 
   LocalFileSystem::From(window)->ResolveURL(
-      &window, completed_url,
+      completed_url,
       std::make_unique<ResolveURICallbacks>(std::move(success_callback_wrapper),
                                             std::move(error_callback_wrapper),
                                             &window),

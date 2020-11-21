@@ -10,6 +10,8 @@
 
 #include <string>
 
+#include "build/chromeos_buildflags.h"
+
 namespace content {
 
 // static
@@ -20,7 +22,7 @@ TtsPlatform* TtsPlatform::GetInstance() {
     return result;
 #endif
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   // On Chrome OS, the platform TTS definition is provided by the content
   // client.
   //
@@ -54,5 +56,7 @@ void TtsPlatformImpl::ClearError() {
 void TtsPlatformImpl::SetError(const std::string& error) {
   error_ = error;
 }
+
+void TtsPlatformImpl::Shutdown() {}
 
 }  // namespace content

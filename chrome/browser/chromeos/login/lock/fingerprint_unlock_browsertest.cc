@@ -20,6 +20,7 @@
 #include "components/prefs/pref_service.h"
 #include "components/session_manager/core/session_manager.h"
 #include "components/user_manager/user_names.h"
+#include "content/public/test/browser_test.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/compositor/scoped_animation_duration_scale_mode.h"
 
@@ -227,6 +228,21 @@ IN_PROC_BROWSER_TEST_F(FingerprintUnlockTest, TimeoutIncludesSuspendedTime) {
             session_manager::SessionManager::Get()->session_state());
   EXPECT_EQ(0, FakeSessionManagerClient::Get()
                    ->notify_lock_screen_dismissed_call_count());
+}
+
+IN_PROC_BROWSER_TEST_F(InProcessBrowserTest, PRE_FingerprintRecordsGone) {
+  // Pretend that user has a fingerprint enrolled. Number of enrolled
+  // fingerprints is cached in the prefs. But the actual fingerprint records
+  // are gone.
+  Profile* profile = browser()->profile();
+  profile->GetPrefs()->SetInteger(prefs::kQuickUnlockFingerprintRecord, 1);
+}
+
+IN_PROC_BROWSER_TEST_F(InProcessBrowserTest, FingerprintRecordsGone) {
+  base::RunLoop().RunUntilIdle();
+  Profile* profile = browser()->profile();
+  EXPECT_EQ(
+      profile->GetPrefs()->GetInteger(prefs::kQuickUnlockFingerprintRecord), 0);
 }
 
 }  // namespace chromeos

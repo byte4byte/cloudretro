@@ -13,7 +13,7 @@ import android.widget.FrameLayout;
 import androidx.annotation.Nullable;
 
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.widget.bottomsheet.BottomSheetContent;
+import org.chromium.components.browser_ui.bottomsheet.BottomSheetContent;
 import org.chromium.content_public.browser.RenderCoordinates;
 import org.chromium.content_public.browser.WebContents;
 
@@ -29,6 +29,7 @@ import org.chromium.content_public.browser.WebContents;
     private final View mThinWebView;
     private final WebContents mWebContents;
     private final int mToolbarHeightPx;
+    private Runnable mBackPressCallback;
 
     /**
      * Construct the PaymentHandlerView.
@@ -50,6 +51,14 @@ import org.chromium.content_public.browser.WebContents;
         mContentView.setPadding(
                 /*left=*/0, /*top=*/mToolbarHeightPx, /*right=*/0, /*bottom=*/0);
         mContentView.addView(thinWebView, /*index=*/0);
+    }
+
+    /**
+     * Set the callback to be invoked when the system back button is pressed.
+     * @param callback the callback to be invoked
+     */
+    /* package */ void setBackPressCallback(Runnable callback) {
+        mBackPressCallback = callback;
     }
 
     /**
@@ -115,6 +124,12 @@ import org.chromium.content_public.browser.WebContents;
     @Override
     public int getPeekHeight() {
         return BottomSheetContent.HeightMode.DISABLED;
+    }
+
+    @Override
+    public boolean handleBackPress() {
+        mBackPressCallback.run();
+        return true; // Prevent further handling of the back press.
     }
 
     @Override

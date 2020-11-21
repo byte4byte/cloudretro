@@ -24,7 +24,6 @@
 #include "chrome/browser/chromeos/file_manager/file_tasks_notifier.h"
 #include "chrome/browser/chromeos/file_manager/file_tasks_notifier_factory.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
-#include "chrome/browser/chromeos/web_applications/default_web_app_ids.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/app_list/search/chrome_search_result.h"
@@ -33,8 +32,6 @@
 #include "chrome/browser/ui/app_list/search/search_result_ranker/histogram_util.h"
 #include "chrome/browser/ui/app_list/search/search_result_ranker/ranking_item_util.h"
 #include "chrome/browser/ui/app_list/search/search_result_ranker/recurrence_ranker.h"
-#include "chromeos/constants/chromeos_features.h"
-#include "extensions/common/constants.h"
 #include "url/gurl.h"
 
 namespace app_list {
@@ -205,29 +202,23 @@ void SearchResultRanker::InitializeRankers(
 
   app_launch_event_logger_ = std::make_unique<app_list::AppLaunchEventLogger>();
 
-  bool apps_enabled = app_list_features::IsAppRankerEnabled();
-  if (app_list_features::IsAggregatedMlAppRankingEnabled() ||
-      (apps_enabled &&
-       GetFieldTrialParamByFeatureAsBool(app_list_features::kEnableAppRanker,
-                                         "use_topcat_ranker", false))) {
-    using_aggregated_app_inference_ = true;
-    app_launch_event_logger_->CreateRankings();
-  } else if (apps_enabled) {
-    RecurrenceRankerConfigProto config;
-    config.set_min_seconds_between_saves(240u);
-    config.set_condition_limit(1u);
-    config.set_condition_decay(0.5);
-    config.set_target_limit(200);
-    config.set_target_decay(0.8);
-    config.mutable_predictor()->mutable_default_predictor();
+  // Initialize on-device app ranking model.
+  RecurrenceRankerConfigProto config;
+  config.set_min_seconds_between_saves(240u);
+  config.set_condition_limit(1u);
+  config.set_condition_decay(0.5);
+  config.set_target_limit(200);
+  config.set_target_decay(0.8);
+  config.mutable_predictor()->mutable_default_predictor();
 
-    app_ranker_ = std::make_unique<RecurrenceRanker>(
-        "AppRanker", profile_->GetPath().AppendASCII("app_ranker.pb"), config,
-        chromeos::ProfileHelper::IsEphemeralUserProfile(profile_));
-  }
+  app_ranker_ = std::make_unique<RecurrenceRanker>(
+      "AppRanker", profile_->GetPath().AppendASCII("app_ranker.pb"), config,
+      chromeos::ProfileHelper::IsEphemeralUserProfile(profile_));
 }
 
 void SearchResultRanker::FetchRankings(const base::string16& query) {
+  last_query_ = query;
+
   // The search controller potentially calls SearchController::FetchResults
   // several times for each user's search, so we cache the results of querying
   // the models for a short time, to prevent unecessary queries.
@@ -235,7 +226,6 @@ void SearchResultRanker::FetchRankings(const base::string16& query) {
   if (now - time_of_last_fetch_ < kMinSecondsBetweenFetches)
     return;
   time_of_last_fetch_ = now;
-  last_query_ = query;
 
   if (query.empty() && zero_state_group_ranker_) {
     zero_state_group_ranks_.clear();
@@ -254,24 +244,8 @@ void SearchResultRanker::FetchRankings(const base::string16& query) {
     zero_state_group_ranks_ = zero_state_group_ranker_->Rank();
   }
 
-  if (app_ranker_) {
-    // The Help app is being replaced with the Discover app, and we want to keep
-    // ranking consistent by swapping the app IDs. The rename is a no-op if the
-    // Help app ID doesn't exist, so it's safe to do it several times.
-    // Unfortunately we can't do this on initialization though, as the model
-    // won't have been loaded from disk. Instead, do it on the first rank.
-    // TODO(1052154): Remove this special case after M84, to give all devices
-    // time to swap IDs.
-    if (app_ranker_->is_initialized() && !have_renamed_help_app_ &&
-        base::FeatureList::IsEnabled(chromeos::features::kHelpAppV2)) {
-      app_ranker_->RenameTarget(extension_misc::kGeniusAppId,
-                                chromeos::default_web_apps::kHelpAppId);
-      app_ranker_->SaveToDisk();
-      have_renamed_help_app_ = true;
-    }
-
+  if (app_ranker_)
     app_ranks_ = app_ranker_->Rank();
-  }
 }
 
 void SearchResultRanker::Rank(Mixer::SortedResults* results) {
@@ -282,21 +256,11 @@ void SearchResultRanker::Rank(Mixer::SortedResults* results) {
             [](const Mixer::SortData& a, const Mixer::SortData& b) {
               return a.score > b.score;
             });
-  std::map<std::string, float> search_ranker_score_map;
-  if (!last_query_.empty() && use_aggregated_search_ranking_inference_) {
-    search_ranking_event_logger_->CreateRankings(results, last_query_.size());
-    search_ranker_score_map = search_ranking_event_logger_->RetrieveRankings();
-  }
-
-  std::map<std::string, float> ranking_map;
-  if (using_aggregated_app_inference_)
-    ranking_map = app_launch_event_logger_->RetrieveRankings();
-  int aggregated_app_rank_success_count = 0;
-  int aggregated_app_rank_fail_count = 0;
 
   // Counts how many times a given type has been seen so far in the results
   // list.
   base::flat_map<RankingItemType, int> zero_state_type_counts;
+
   for (auto& result : *results) {
     const auto& type = RankingItemTypeFromSearchResult(*result.result);
     const auto& model = ModelForType(type);
@@ -305,43 +269,19 @@ void SearchResultRanker::Rank(Mixer::SortedResults* results) {
       if (last_query_.empty() && zero_state_group_ranker_) {
         LogZeroStateResultScore(type, result.score);
         ScoreZeroStateItem(&result, type, &zero_state_type_counts);
-      } else if (!last_query_.empty() &&
-                 use_aggregated_search_ranking_inference_) {
-        result.score = search_ranker_score_map[result.result->id()];
       }
     } else if (model == Model::APPS) {
       // Do not rerank apps for a query-based search.
       if (!last_query_.empty())
         continue;
 
-      if (using_aggregated_app_inference_) {
-        const std::string id = NormalizeAppId(result.result->id());
-
-        const auto& ranked = ranking_map.find(id);
-        if (ranked != ranking_map.end()) {
-          result.score =
-              kBoostOfApps + ReRange((ranked->second + 4.0) / 8.0, 0.67, 1.0);
-          ++aggregated_app_rank_success_count;
-        } else {
-          ++aggregated_app_rank_fail_count;
-        }
-      } else {
-        if (app_ranker_) {
-          const auto& it = app_ranks_.find(NormalizeAppId(result.result->id()));
-          if (it != app_ranks_.end()) {
-            result.score = kBoostOfApps + ReRange(it->second, 0.67, 1.0);
-          }
+      if (app_ranker_) {
+        const auto& it = app_ranks_.find(NormalizeAppId(result.result->id()));
+        if (it != app_ranks_.end()) {
+          result.score = kBoostOfApps + ReRange(it->second, 0.67, 1.0);
         }
       }
     }
-  }
-  if (using_aggregated_app_inference_ &&
-      (aggregated_app_rank_success_count != 0 ||
-       aggregated_app_rank_fail_count != 0)) {
-    UMA_HISTOGRAM_COUNTS_1000("Apps.AppList.AggregatedMlAppRankSuccess",
-                              aggregated_app_rank_success_count);
-    UMA_HISTOGRAM_COUNTS_1000("Apps.AppList.AggregatedMlAppRankFail",
-                              aggregated_app_rank_fail_count);
   }
 }
 
@@ -386,10 +326,6 @@ void SearchResultRanker::Train(const AppLaunchData& app_launch_data) {
         app_launch_data.id, app_launch_data.suggestion_index,
         static_cast<int>(app_launch_data.launched_from));
   }
-
-  // Update rankings after logging the click.
-  if (using_aggregated_app_inference_)
-    app_launch_event_logger_->CreateRankings();
 
   auto model = ModelForType(app_launch_data.ranking_item_type);
   if (model == Model::MIXED_TYPES) {

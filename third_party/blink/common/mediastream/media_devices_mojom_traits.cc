@@ -4,48 +4,9 @@
 
 #include "third_party/blink/public/common/mediastream/media_devices_mojom_traits.h"
 
-#include "base/logging.h"
+#include "base/notreached.h"
 
 namespace mojo {
-
-// static
-blink::mojom::MediaDeviceType
-EnumTraits<blink::mojom::MediaDeviceType, blink::MediaDeviceType>::ToMojom(
-    blink::MediaDeviceType type) {
-  switch (type) {
-    case blink::MediaDeviceType::MEDIA_DEVICE_TYPE_AUDIO_INPUT:
-      return blink::mojom::MediaDeviceType::MEDIA_AUDIO_INPUT;
-    case blink::MediaDeviceType::MEDIA_DEVICE_TYPE_VIDEO_INPUT:
-      return blink::mojom::MediaDeviceType::MEDIA_VIDEO_INPUT;
-    case blink::MediaDeviceType::MEDIA_DEVICE_TYPE_AUDIO_OUTPUT:
-      return blink::mojom::MediaDeviceType::MEDIA_AUDIO_OUTPUT;
-    default:
-      break;
-  }
-  NOTREACHED();
-  return blink::mojom::MediaDeviceType::NUM_MEDIA_DEVICE_TYPES;
-}
-
-// static
-bool EnumTraits<blink::mojom::MediaDeviceType, blink::MediaDeviceType>::
-    FromMojom(blink::mojom::MediaDeviceType input,
-              blink::MediaDeviceType* out) {
-  switch (input) {
-    case blink::mojom::MediaDeviceType::MEDIA_AUDIO_INPUT:
-      *out = blink::MediaDeviceType::MEDIA_DEVICE_TYPE_AUDIO_INPUT;
-      return true;
-    case blink::mojom::MediaDeviceType::MEDIA_VIDEO_INPUT:
-      *out = blink::MediaDeviceType::MEDIA_DEVICE_TYPE_VIDEO_INPUT;
-      return true;
-    case blink::mojom::MediaDeviceType::MEDIA_AUDIO_OUTPUT:
-      *out = blink::MediaDeviceType::MEDIA_DEVICE_TYPE_AUDIO_OUTPUT;
-      return true;
-    default:
-      break;
-  }
-  NOTREACHED();
-  return false;
-}
 
 // static
 blink::mojom::FacingMode

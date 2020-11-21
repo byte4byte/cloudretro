@@ -34,21 +34,6 @@ class COMPONENT_EXPORT(UI_BASE_IME_CHROMEOS) InputMethodUtil {
   explicit InputMethodUtil(InputMethodDelegate* delegate);
   ~InputMethodUtil();
 
-  // Converts a string sent from IBus IME engines, which is written in English,
-  // into Chrome's string ID, then pulls internationalized resource string from
-  // the resource bundle and returns it. These functions are not thread-safe.
-  // Non-UI threads are not allowed to call them.
-  // The english_string to should be a xkb id with "xkb:...:...:..." format.
-  // TODO(shuchen): this method should be removed when finish the wrapping of
-  // xkb to extension.
-  base::string16 TranslateString(const std::string& english_string) const;
-
-  // Converts an input method ID to a language code of the IME. Returns "Eng"
-  // when |input_method_id| is unknown.
-  // Example: "hangul" => "ko"
-  std::string GetLanguageCodeFromInputMethodId(
-      const std::string& input_method_id) const;
-
   // Converts an input method ID to a display name of the IME. Returns
   // an empty strng when |input_method_id| is unknown.
   // Examples: "pinyin" => "Pinyin"
@@ -77,7 +62,7 @@ class COMPONENT_EXPORT(UI_BASE_IME_CHROMEOS) InputMethodUtil {
   // Note that the function might return false or |language_code| is unknown.
   //
   // The retured input method IDs are sorted by populalirty per
-  // chromeos/platform/assets/input_methods/whitelist.txt.
+  // chromeos/platform/assets/input_methods/allowlist.txt.
   bool GetInputMethodIdsFromLanguageCode(
       const std::string& language_code,
       InputMethodType type,
@@ -159,11 +144,8 @@ class COMPONENT_EXPORT(UI_BASE_IME_CHROMEOS) InputMethodUtil {
   void InitXkbInputMethodsForTesting(const InputMethodDescriptors& imes);
 
   // Map from input method ID to associated input method descriptor.
-  typedef std::map<
-    std::string, InputMethodDescriptor> InputMethodIdToDescriptorMap;
-
-  // Gets the id to desctiptor map for testing.
-  const InputMethodIdToDescriptorMap& GetIdToDesciptorMapForTesting();
+  using InputMethodIdToDescriptorMap =
+      std::map<std::string, InputMethodDescriptor>;
 
   // Returns the fallback input method descriptor (the very basic US
   // keyboard). This function is mostly used for testing, but may be used
@@ -178,19 +160,19 @@ class COMPONENT_EXPORT(UI_BASE_IME_CHROMEOS) InputMethodUtil {
       InputMethodType type,
       std::vector<std::string>* out_input_method_ids) const;
 
-  // Gets the keyboard layout name from the given input method ID.
-  // If the ID is invalid, an empty string will be returned.
-  // This function only supports xkb layouts.
-  //
-  // Examples:
-  //
-  // "xkb:us::eng"       => "us"
-  // "xkb:us:dvorak:eng" => "us(dvorak)"
-  // "xkb:gb::eng"       => "gb"
-  // "pinyin"            => "us" (because Pinyin uses US keyboard layout)
-  std::string GetKeyboardLayoutName(const std::string& input_method_id) const;
+  // Gets the id to descriptor map for testing.
+  const InputMethodIdToDescriptorMap& GetIdToDescriptorMapForTesting();
 
  private:
+  // Converts a string sent from IBus IME engines, which is written in English,
+  // into Chrome's string ID, then pulls internationalized resource string from
+  // the resource bundle and returns it. These functions are not thread-safe.
+  // Non-UI threads are not allowed to call them.
+  // The english_string to should be a xkb id with "xkb:...:...:..." format.
+  // TODO(shuchen): this method should be removed when finish the wrapping of
+  // xkb to extension.
+  base::string16 TranslateString(const std::string& english_string) const;
+
   bool TranslateStringInternal(const std::string& english_string,
                                base::string16 *out_string) const;
 
@@ -201,7 +183,7 @@ class COMPONENT_EXPORT(UI_BASE_IME_CHROMEOS) InputMethodUtil {
       const InputMethodDescriptor& input_method, bool short_name) const;
 
   // Map from language code to associated input method IDs, etc.
-  typedef std::multimap<std::string, std::string> LanguageCodeToIdsMap;
+  using LanguageCodeToIdsMap = std::multimap<std::string, std::string>;
 
   LanguageCodeToIdsMap language_code_to_ids_;
   InputMethodIdToDescriptorMap id_to_descriptor_;

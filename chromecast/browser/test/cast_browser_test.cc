@@ -4,8 +4,8 @@
 
 #include "chromecast/browser/test/cast_browser_test.h"
 
+#include "base/check_op.h"
 #include "base/command_line.h"
-#include "base/logging.h"
 #include "base/run_loop.h"
 #include "chromecast/base/chromecast_switches.h"
 #include "chromecast/base/metrics/cast_metrics_helper.h"
@@ -36,7 +36,6 @@ void CastBrowserTest::SetUp() {
 }
 
 void CastBrowserTest::SetUpCommandLine(base::CommandLine* command_line) {
-  command_line->AppendSwitch(switches::kNoWifi);
   command_line->AppendSwitchASCII(switches::kTestType, "browser");
 }
 

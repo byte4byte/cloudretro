@@ -9,7 +9,7 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/command_line.h"
 #include "base/macros.h"
 #include "base/run_loop.h"
@@ -115,8 +115,6 @@ class EmbeddedWorkerInstanceTest : public testing::Test,
   RegistrationAndVersionPair PrepareRegistrationAndVersion(
       const GURL& scope,
       const GURL& script_url) {
-    context()->storage()->LazyInitializeForTest();
-
     RegistrationAndVersionPair pair;
     blink::mojom::ServiceWorkerRegistrationOptions options;
     options.scope = scope;
@@ -173,7 +171,7 @@ class EmbeddedWorkerInstanceTest : public testing::Test,
       scoped_refptr<ServiceWorkerVersion> version) {
     auto provider_info =
         blink::mojom::ServiceWorkerProviderInfoForStartWorker::New();
-    version->provider_host_ = std::make_unique<ServiceWorkerProviderHost>(
+    version->worker_host_ = std::make_unique<ServiceWorkerHost>(
         provider_info->host_remote.InitWithNewEndpointAndPassReceiver(),
         version.get(), context()->AsWeakPtr());
     return provider_info;
@@ -594,6 +592,10 @@ class RecordCacheStorageInstanceClient
 
 // Test that the worker is given a CacheStoragePtr during startup.
 TEST_F(EmbeddedWorkerInstanceTest, CacheStorageOptimization) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndEnableFeature(
+      blink::features::kEagerCacheStorageSetupForServiceWorkers);
+
   const GURL scope("http://example.com/");
   const GURL url("http://example.com/worker.js");
 
