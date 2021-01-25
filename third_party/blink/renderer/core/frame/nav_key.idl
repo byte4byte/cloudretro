@@ -1,0 +1,4 @@
+dictionary NavKey {
+        long key;
+        boolean pressed;
+};

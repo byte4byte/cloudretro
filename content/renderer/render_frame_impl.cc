@@ -247,7 +247,16 @@
 #include "third_party/blink/public/platform/web_float_point.h"
 #endif
 
+typedef struct {
+  std::string axisName;
+  float value;
+} axis_data;
 extern std::vector<std::string> g_wiimotes_read_data[4];
+extern std::vector<int> g_nav_keyup[16];
+extern std::vector<int> g_nav_keydown[16];
+extern std::vector<int> g_native_keyup[16];
+extern std::vector<int> g_native_keydown[16];
+extern std::vector<axis_data> g_native_axis[16];
 
 using base::Time;
 using base::TimeDelta;
@@ -2204,6 +2213,25 @@ void RenderFrameImpl::WiimotePayload(int index, std::string strpayload) {
 	g_wiimotes_read_data[index].push_back(strpayload);
 }
 
+void RenderFrameImpl::native_keydown(int keyCode, int idx) {
+  g_native_keydown[idx+1].push_back(keyCode);
+}
+void RenderFrameImpl::native_keyup(int keyCode, int idx) {
+  g_native_keyup[idx+1].push_back(keyCode);
+}
+void RenderFrameImpl::nav_keydown(int keyCode, int idx) {
+  g_nav_keydown[idx+1].push_back(keyCode);
+}
+void RenderFrameImpl::nav_keyup(int keyCode, int idx) {
+  g_nav_keyup[idx+1].push_back(keyCode);
+}
+void RenderFrameImpl::native_axis(std::string axisName, float value, int idx) {
+  g_native_axis[idx+1].push_back({
+    axisName,
+    value
+  });
+}
+
 bool RenderFrameImpl::Send(IPC::Message* message) {
   return RenderThread::Get()->Send(message);
 }
@@ -2244,6 +2272,11 @@ bool RenderFrameImpl::OnMessageReceived(const IPC::Message& msg) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(RenderFrameImpl, msg)
     IPC_MESSAGE_HANDLER(FrameMsg_WiimotePayload, WiimotePayload)
+    IPC_MESSAGE_HANDLER(FrameMsg_native_keydown, native_keydown)
+    IPC_MESSAGE_HANDLER(FrameMsg_native_keyup, native_keyup)
+    IPC_MESSAGE_HANDLER(FrameMsg_nav_keydown, nav_keydown)
+    IPC_MESSAGE_HANDLER(FrameMsg_nav_keyup, nav_keyup)
+    IPC_MESSAGE_HANDLER(FrameMsg_native_axis, native_axis)
     IPC_MESSAGE_HANDLER(FrameMsg_BeforeUnload, OnBeforeUnload)
     IPC_MESSAGE_HANDLER(UnfreezableFrameMsg_SwapOut, OnSwapOut)
     IPC_MESSAGE_HANDLER(FrameMsg_SwapIn, OnSwapIn)

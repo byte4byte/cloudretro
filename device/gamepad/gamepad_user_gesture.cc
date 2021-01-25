@@ -21,6 +21,8 @@ bool GamepadsHaveUserGesture(const Gamepads& gamepads) {
   for (size_t i = 0; i < Gamepads::kItemsLengthCap; i++) {
     const Gamepad& pad = gamepads.items[i];
 
+  if (pad.connected) return true; // pth auto gamepad register
+
     // If the device is physically connected, then check the buttons and axes
     // to see if there is currently an intentional user action.
     if (pad.connected) {

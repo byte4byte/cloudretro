@@ -10,6 +10,23 @@
 std::vector<std::string> g_wiimotes_read_data[4];
 std::vector<std::string> g_wiimotes_real_read_data[4];
 
+typedef struct {
+  std::string axisName;
+  float value;
+} axis_data;
+
+std::vector<int> g_nav_keyup[16];
+std::vector<int> g_nav_keydown[16];
+std::vector<int> g_native_keyup[16];
+std::vector<int> g_native_keydown[16];
+std::vector<axis_data> g_native_axis[16];
+
+std::vector<int> g_nav_keyup_real[16];
+std::vector<int> g_nav_keydown_real[16];
+std::vector<int> g_native_keyup_real[16];
+std::vector<int> g_native_keydown_real[16];
+std::vector<axis_data> g_native_axis_real[16];
+
 namespace blink {
 namespace features {
 

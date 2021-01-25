@@ -1,0 +1,4 @@
+dictionary NativeAxis {
+        DOMString axisName;
+        float value;
+};

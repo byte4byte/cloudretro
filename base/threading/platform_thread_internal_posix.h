@@ -22,7 +22,7 @@ struct ThreadPriorityToNiceValuePair {
 // priority first), that is, in the order of decreasing nice values (highest
 // nice value first).
 BASE_EXPORT extern
-const ThreadPriorityToNiceValuePair kThreadPriorityToNiceValueMap[4];
+const ThreadPriorityToNiceValuePair kThreadPriorityToNiceValueMap[5];
 
 // Returns the nice value matching |priority| based on the platform-specific
 // implementation of kThreadPriorityToNiceValueMap.

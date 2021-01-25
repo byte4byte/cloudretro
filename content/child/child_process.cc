@@ -57,7 +57,7 @@ ChildProcess::ChildProcess(base::ThreadPriority io_thread_priority,
 #if defined(OS_ANDROID)
   // TODO(reveman): Remove this in favor of setting it explicitly for each type
   // of process.
-  thread_options.priority = base::ThreadPriority::DISPLAY;
+  //thread_options.priority = base::ThreadPriority::DISPLAY; 
 #endif
   CHECK(io_thread_.StartWithOptions(thread_options));
 }

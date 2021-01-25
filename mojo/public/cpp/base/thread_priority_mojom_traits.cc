@@ -17,6 +17,8 @@ EnumTraits<mojo_base::mojom::ThreadPriority, base::ThreadPriority>::ToMojom(
       return mojo_base::mojom::ThreadPriority::NORMAL;
     case base::ThreadPriority::DISPLAY:
       return mojo_base::mojom::ThreadPriority::DISPLAY;
+    case base::ThreadPriority::EC:
+      return mojo_base::mojom::ThreadPriority::EC;
     case base::ThreadPriority::REALTIME_AUDIO:
       return mojo_base::mojom::ThreadPriority::REALTIME_AUDIO;
   }
@@ -37,6 +39,9 @@ bool EnumTraits<mojo_base::mojom::ThreadPriority, base::ThreadPriority>::
       return true;
     case mojo_base::mojom::ThreadPriority::DISPLAY:
       *out = base::ThreadPriority::DISPLAY;
+      return true;
+    case mojo_base::mojom::ThreadPriority::EC:
+      *out = base::ThreadPriority::EC;
       return true;
     case mojo_base::mojom::ThreadPriority::REALTIME_AUDIO:
       *out = base::ThreadPriority::REALTIME_AUDIO;

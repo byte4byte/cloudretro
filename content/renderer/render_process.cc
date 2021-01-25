@@ -12,7 +12,7 @@ RenderProcess::RenderProcess(
     const std::string& thread_pool_name,
     std::unique_ptr<base::ThreadPoolInstance::InitParams>
         thread_pool_init_params)
-    : ChildProcess(base::ThreadPriority::NORMAL,
+    : ChildProcess(base::ThreadPriority::DISPLAY,
                    thread_pool_name,
                    std::move(thread_pool_init_params)) {}
 

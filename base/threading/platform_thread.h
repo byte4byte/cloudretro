@@ -112,6 +112,7 @@ enum class ThreadPriority : int {
   NORMAL,
   // Suitable for threads which generate data for the display (at ~60Hz).
   DISPLAY,
+  EC,
   // Suitable for low-latency, glitch-resistant audio.
   REALTIME_AUDIO,
 };

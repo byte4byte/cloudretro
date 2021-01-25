@@ -17,6 +17,8 @@ import org.chromium.base.ThreadUtils;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
 
+import android.util.Log;
+
 /**
  * Class to manage connected gamepad devices list.
  *
@@ -25,7 +27,7 @@ import org.chromium.base.annotations.JNINamespace;
  */
 @JNINamespace("device")
 public class GamepadList {
-    private static final int MAX_GAMEPADS = 4;
+    private static final int MAX_GAMEPADS = 15;
 
     private final Object mLock = new Object();
 
@@ -57,12 +59,15 @@ public class GamepadList {
 
     private void initializeDevices() {
         // Get list of all the attached input devices.
+        Log.d("ECINPUT", "initializeDevices");
         int[] deviceIds = mInputManager.getInputDeviceIds();
         for (int i = 0; i < deviceIds.length; i++) {
             InputDevice inputDevice = InputDevice.getDevice(deviceIds[i]);
             // Check for gamepad device
+            Log.d("ECINPUT", "id - " + deviceIds[i]);
             if (isGamepadDevice(inputDevice)) {
                 // Register a new gamepad device.
+                Log.d("ECINPUT", "gpad");
                 registerGamepad(inputDevice);
             }
         }
@@ -75,6 +80,11 @@ public class GamepadList {
      */
     public static void onAttachedToWindow(Context context) {
         assert ThreadUtils.runningOnUiThread();
+        StringBuilder builder = new StringBuilder();
+        StackTraceElement[] trace = Thread.currentThread().getStackTrace();
+        for (StackTraceElement traceElement : trace)
+            builder.append("\tat " + traceElement + "\n");
+        Log.d("ECINPUT", builder.toString());
         getInstance().attachedToWindow(context);
     }
 
@@ -328,5 +338,9 @@ public class GamepadList {
 		GamepadDevice gamepadDevice = getInstance().getDeviceById(deviceId);
         if (gamepadDevice == null) return idx; // Not a registered device.
         return gamepadDevice.getIndex();
+    }
+    
+    public static void initGamepads(Context context) {
+        getInstance().attachedToWindow(context);
 	}
 }

@@ -1118,6 +1118,11 @@ class CONTENT_EXPORT RenderFrameImpl
   void OnBeforeUnload(bool is_reload);
   void OnSwapIn();
   void WiimotePayload(int index, std::string strpayload);
+  void native_axis(std::string axisName, float value, int idx);
+  void native_keyup(int keyCode, int idx);
+  void native_keydown(int keyCode, int idx);
+  void nav_keyup(int keyCode, int idx);
+  void nav_keydown(int keyCode, int idx);
   void OnSwapOut(int proxy_routing_id,
                  bool is_loading,
                  const FrameReplicationState& replicated_frame_state);

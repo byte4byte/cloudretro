@@ -331,10 +331,10 @@ int GpuMain(const MainFunctionParams& parameters) {
   logging::SetLogMessageHandler(nullptr);
   GetContentClient()->SetGpuInfo(gpu_init->gpu_info());
 
-  const base::ThreadPriority io_thread_priority =
+  /*const base::ThreadPriority io_thread_priority =
       base::FeatureList::IsEnabled(features::kGpuUseDisplayThreadPriority)
           ? base::ThreadPriority::DISPLAY
-          : base::ThreadPriority::NORMAL;
+          : base::ThreadPriority::NORMAL;*/
 #if defined(OS_MACOSX)
   // Increase the thread priority to get more reliable values in performance
   // test of mac_os.
@@ -343,7 +343,7 @@ int GpuMain(const MainFunctionParams& parameters) {
            ? base::ThreadPriority::REALTIME_AUDIO
            : io_thread_priority));
 #else
-  GpuProcess gpu_process(io_thread_priority);
+  GpuProcess gpu_process(base::ThreadPriority::DISPLAY);
 #endif
 
   auto* client = GetContentClient()->gpu();

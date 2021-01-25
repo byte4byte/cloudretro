@@ -24,11 +24,24 @@ extern content::Shell *g_shell;
 	#define SetCommandLineFlagsName Java_com_byte4byte_cloudretro64_ContentShellActivity_SetCommandLineFlags
 	#define setEcUrlName Java_com_byte4byte_cloudretro64_ContentShellActivity_setEcUrl
 	#define nativeSendWiimotePayload Java_com_byte4byte_cloudretro64_ContentShellActivity_nativeSendWiimotePayload
+
+  
+  #define native_keydown Java_com_byte4byte_cloudretro64_ContentShellActivity_native_1keydown
+  #define native_keyup Java_com_byte4byte_cloudretro64_ContentShellActivity_native_1keyup
+  #define nav_keydown Java_com_byte4byte_cloudretro64_ContentShellActivity_nav_1keydown
+  #define nav_keyup Java_com_byte4byte_cloudretro64_ContentShellActivity_nav_1keyup
+  #define native_axis Java_com_byte4byte_cloudretro64_ContentShellActivity_native_1axis
 #else
 	#define setpriorityName Java_com_byte4byte_cloudretro32_ContentShellActivity_setpriority
 	#define SetCommandLineFlagsName Java_com_byte4byte_cloudretro32_ContentShellActivity_SetCommandLineFlags
 	#define setEcUrlName Java_com_byte4byte_cloudretro32_ContentShellActivity_setEcUrl
 	#define nativeSendWiimotePayload Java_com_byte4byte_cloudretro32_ContentShellActivity_nativeSendWiimotePayload
+
+  #define native_keydown Java_com_byte4byte_cloudretro32_ContentShellActivity_native_1keydown
+  #define native_keyup Java_com_byte4byte_cloudretro32_ContentShellActivity_native_1keyup
+  #define nav_keydown Java_com_byte4byte_cloudretro32_ContentShellActivity_nav_1keydown
+  #define nav_keyup Java_com_byte4bytez_cloudretro32_ContentShellActivity_nav_1keyup
+  #define native_axis Java_com_byte4byte_cloudretro32_ContentShellActivity_native_1axis
 #endif
 
 extern "C" {
@@ -44,6 +57,40 @@ JNIEXPORT void JNICALL nativeSendWiimotePayload(JNIEnv* env,
         std::string payload_str = str;
         env->ReleaseStringUTFChars(strpayload, str); //
 	g_shell->web_contents()->GetMainFrame()->GetProcess()->Send(new FrameMsg_WiimotePayload(g_shell->web_contents()->GetMainFrame()->GetRoutingID(), (int)idx, payload_str));
+	
+}
+
+JNIEXPORT void JNICALL native_keydown(JNIEnv* env,
+    jclass, jint keyCode, jint idx) {
+      if (! g_shell) return;
+g_shell->web_contents()->GetMainFrame()->GetProcess()->Send(new FrameMsg_native_keydown(g_shell->web_contents()->GetMainFrame()->GetRoutingID(), (int)keyCode, (int) idx));
+}
+JNIEXPORT void JNICALL native_keyup(JNIEnv* env,
+    jclass, jint keyCode, jint idx) {
+      if (! g_shell) return;
+g_shell->web_contents()->GetMainFrame()->GetProcess()->Send(new FrameMsg_native_keyup(g_shell->web_contents()->GetMainFrame()->GetRoutingID(), (int)keyCode, (int) idx));
+}
+
+JNIEXPORT void JNICALL nav_keydown(JNIEnv* env,
+    jclass, jint keyCode, jint idx) {
+      if (! g_shell) return;
+g_shell->web_contents()->GetMainFrame()->GetProcess()->Send(new FrameMsg_nav_keydown(g_shell->web_contents()->GetMainFrame()->GetRoutingID(), (int)keyCode, (int) idx));
+}
+JNIEXPORT void JNICALL nav_keyup(JNIEnv* env,
+    jclass, jint keyCode, jint idx) {
+      if (! g_shell) return;
+g_shell->web_contents()->GetMainFrame()->GetProcess()->Send(new FrameMsg_nav_keyup(g_shell->web_contents()->GetMainFrame()->GetRoutingID(), (int)keyCode, (int) idx));
+}
+
+JNIEXPORT void JNICALL native_axis(JNIEnv* env,
+    jclass, jstring axisName, jfloat value, jint idx) {
+      if (! g_shell) return;
+	const char *str;
+    	str = env->GetStringUTFChars(axisName, NULL); //1
+        //printf("Hello %s\n", str);
+        std::string payload_str = str;
+        env->ReleaseStringUTFChars(axisName, str); //
+	g_shell->web_contents()->GetMainFrame()->GetProcess()->Send(new FrameMsg_native_axis(g_shell->web_contents()->GetMainFrame()->GetRoutingID(), payload_str, (float)value, (int) idx));
 	
 }
 

@@ -31,8 +31,13 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_NAVIGATOR_ID_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_NAVIGATOR_ID_H_
 
+
+
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
+#include "third_party/blink/renderer/core/frame/native_axis.h"
+#include "third_party/blink/renderer/core/frame/native_key.h"
+#include "third_party/blink/renderer/core/frame/nav_key.h"
 
 namespace blink {
 
@@ -46,6 +51,14 @@ class CORE_EXPORT NavigatorID {
   virtual String userAgent() const = 0;
   void saveWiimotePayloads(unsigned long index);
   String readWiimotePayload(unsigned long index);
+
+  void saveNativeAxis( long index);
+  void saveNativeKeys( long index);
+  void saveNavKeys( long index);
+
+    NavKey *readNavKey( long index);
+    NativeKey *readNativeKey( long index);
+    NativeAxis *readNativeAxis( long index);
 };
 
 }  // namespace blink

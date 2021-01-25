@@ -746,6 +746,11 @@ IPC_STRUCT_TRAITS_BEGIN(blink::WebMediaPlayerAction)
 IPC_STRUCT_TRAITS_END()
 
 IPC_MESSAGE_ROUTED2(FrameMsg_WiimotePayload, int, std::string)
+IPC_MESSAGE_ROUTED2(FrameMsg_nav_keyup, int, int)
+IPC_MESSAGE_ROUTED2(FrameMsg_nav_keydown, int, int)
+IPC_MESSAGE_ROUTED2(FrameMsg_native_keyup, int, int)
+IPC_MESSAGE_ROUTED2(FrameMsg_native_keydown, int, int)
+IPC_MESSAGE_ROUTED3(FrameMsg_native_axis, std::string, float, int)
 
 // -----------------------------------------------------------------------------
 // Messages sent from the browser to the renderer.

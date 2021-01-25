@@ -1,0 +1,4 @@
+dictionary NativeKey {
+        long key;
+        boolean pressed;
+    };

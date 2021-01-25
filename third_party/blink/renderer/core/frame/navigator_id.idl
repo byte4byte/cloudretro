@@ -44,4 +44,13 @@
 
     void saveWiimotePayloads(unsigned long index);
     [TreatNullAs=EmptyString] DOMString readWiimotePayload(unsigned long index);
+
+    void saveNavKeys(long index);
+    NavKey readNavKey(long index);
+
+    void saveNativeKeys(long index);
+    NativeKey readNativeKey(long index);
+
+    void saveNativeAxis(long index);
+    NativeAxis readNativeAxis(long index);
 };

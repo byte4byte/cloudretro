@@ -60,8 +60,8 @@ void SetContentCommandLineFlags(bool single_process,
   // to having an extra process with similar priority as the foreground renderer
   // and given that the system will often be looking for a process to be killed
   // on such systems.
-  if (base::SysInfo::IsLowEndDevice())
-    parsed_command_line->AppendSwitch(switches::kInProcessGPU);
+  //if (base::SysInfo::IsLowEndDevice())
+  //  parsed_command_line->AppendSwitch(switches::kInProcessGPU);
 
   parsed_command_line->AppendSwitch(
       switches::kMainFrameResizesAreOrientationChanges);
@@ -69,6 +69,26 @@ void SetContentCommandLineFlags(bool single_process,
   // Disable anti-aliasing.
   parsed_command_line->AppendSwitch(
       cc::switches::kDisableCompositedAntialiasing);
+
+//parsed_command_line->AppendSwitch(switches::kForceCompositingMode);
+ // parsed_command_line->AppendSwitch(switches::kAllowWebUICompositing);
+  parsed_command_line->AppendSwitch(switches::kEnableThreadedCompositing);
+
+  parsed_command_line->AppendSwitch(switches::kForceGpuRasterization);
+  //parsed_command_line->AppendSwitch(switches::kDisableGpuVsync);
+
+ // parsed_command_line->AppendSwitch(switches::kDisableAcceleratedVideoDecode);
+  //parsed_command_line->AppendSwitch(
+   //   switches::kEnableCompositingForFixedPosition);
+//  parsed_command_line->AppendSwitch(switches::kEnableAcceleratedOverflowScroll);
+ /* parsed_command_line->AppendSwitch(
+      switches::kEnableAcceleratedScrollableFrames);
+  parsed_command_line->AppendSwitch(
+      switches::kEnableCompositedScrollingForFrames);*/
+    // Run the GPU service as a thread in the browser instead of as a
+  // standalone process.
+  parsed_command_line->AppendSwitch(switches::kInProcessGPU);
+
 	  
   if (!plugin_descriptor.empty()) {
     parsed_command_line->AppendSwitchNative(

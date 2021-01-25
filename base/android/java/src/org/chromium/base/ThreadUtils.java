@@ -309,6 +309,11 @@ public class ThreadUtils {
         Process.setThreadPriority(tid, Process.THREAD_PRIORITY_AUDIO);
     }
 
+    @CalledByNative
+    public static void setThreadPriorityEc(int tid) {
+        //Process.setThreadPriority(tid, Process.THREAD_PRIORITY_URGENT_DISPLAY);
+    }
+
     /**
      * Checks whether Thread priority is THREAD_PRIORITY_AUDIO or not.
      * @param tid Thread id.

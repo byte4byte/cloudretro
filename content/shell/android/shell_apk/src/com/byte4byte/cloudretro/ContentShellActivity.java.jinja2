@@ -102,6 +102,9 @@ import android.app.admin.DevicePolicyManager;
 import android.content.ComponentName;
 import android.annotation.SuppressLint;
 
+import org.chromium.content.common.ContentSwitchUtils;
+import org.chromium.content_public.common.ContentSwitches;
+
 import java.util.Locale;
 
 /**
@@ -660,7 +663,15 @@ private void toastIt(String msg) {
 
 	public static native void setEcUrl(String url);
     public static native void SetCommandLineFlags(String libs, String files_dir, String eclibpath, String wwwpath);
-	public static native void setpriority(int prio);
+    public static native void setpriority(int prio);
+    
+    public static native void native_keydown(int keyCode, int idx); 
+    public static native void native_keyup(int keyCode, int idx);
+
+    public static native void nav_keydown(int keyCode, int idx);
+    public static native void nav_keyup(int keyCode, int idx);
+
+    public static native void native_axis(String axisName, float value, int idx);
 
     private static ContentShellActivity ctx;
 
@@ -697,6 +708,13 @@ LocalBroadcastManager.getInstance(this).registerReceiver(mReloadReceiver,
             Log.i("PEPPER", "SETTING SWITCH");
 
             String[] commandLineParams = getCommandLineParamsFromIntent(getIntent());
+            String processtype = ContentSwitchUtils.getSwitchValue(commandLineParams, ContentSwitches.SWITCH_PROCESS_TYPE);
+            if (processtype != null) {
+                    Log.i("PEPPPER PROCESS", processtype);
+            }
+            else {
+                Log.i("PEPPPER PROCESS", "null");
+            }
             if (commandLineParams != null) {
                 CommandLine.getInstance().appendSwitchesAndArguments(commandLineParams);
             }
@@ -720,7 +738,7 @@ LocalBroadcastManager.getInstance(this).registerReceiver(mReloadReceiver,
         String loadlibs[] = {
             files_dir + "/libecemu.cr.so;application/x-ppapi-ecemu," + files_dir + "/libecbridge.cr.so;application/x-ppapi-ecfs"
         };
-		setpriority(-20);
+		//setpriority(-20);
 		
 		String eclibpath = Environment.getExternalStorageDirectory().getAbsolutePath();
 		eclibpath += "/CloudRetro";
@@ -786,7 +804,9 @@ LocalBroadcastManager.getInstance(this).registerReceiver(mReloadReceiver,
             }
         }
 		
-		}
+        }
+        
+        org.chromium.device.gamepad.GamepadList.initGamepads(getApplicationContext());
 
     }
 	
@@ -942,7 +962,7 @@ g_wiimote_threads_created = false;
 		
 		if (Build.VERSION.SDK_INT >= 24) 
 		{ 
-		  //getWindow().setSustainedPerformanceMode(true); 
+		  getWindow().setSustainedPerformanceMode(true); 
 		} 
 
         setContentView(R.layout.splashscreen);
@@ -1406,7 +1426,7 @@ g_wiimote_threads_created = false;
         mShellManager.launchShell(shellUrl);
 		
 		
-		//wiimote_inited = false;
+        //wiimote_inited = false;
 		
 		if (! g_wiimote_threads_created) {
 			g_wiimote_threads_created = true;
@@ -1538,10 +1558,31 @@ g_wiimote_threads_created = false;
 		}
 	}
 	
-	private HashMap<Integer, GamepadValues> gpad_vals = new HashMap<Integer, GamepadValues>();
+    private HashMap<Integer, GamepadValues> gpad_vals = new HashMap<Integer, GamepadValues>();
+    
+    public static float round(float value, int scale) {
+        int pow = 10;
+        for (int i = 1; i < scale; i++) {
+            pow *= 10;
+        }
+        float tmp = value * pow;
+        float tmpSub = tmp - (int) tmp;
+    
+        return ( (float) ( (int) (
+                value >= 0
+                ? (tmpSub >= 0.5f ? tmp + 1 : tmp)
+                : (tmpSub >= -0.5f ? tmp : tmp - 1)
+                ) ) ) / pow;
+    
+        // Below will only handles +ve values
+        // return ( (float) ( (int) ((tmp - (int) tmp) >= 0.5f ? tmp + 1 : tmp) ) ) / pow;
+    }
 
     @Override
     public boolean dispatchGenericMotionEvent(MotionEvent ev) {
+
+        if (! g_wiimote_threads_created) return super.dispatchGenericMotionEvent(ev);
+
         // if (event.getAction() == KeyEvent.ACTION_DOWN) {
 
         //callJS("printStr('" + ev.getAxisValue(MotionEvent.AXIS_X) +" | " + ev.getAxisValue(MotionEvent.AXIS_Y )+ "');");
@@ -1572,19 +1613,19 @@ g_wiimote_threads_created = false;
 	
 		
 	
-		float lx = ev.getAxisValue(MotionEvent.AXIS_X);
-		float ly = ev.getAxisValue(MotionEvent.AXIS_Y);
-		float rx = ev.getAxisValue(MotionEvent.AXIS_Z);
-		float ry = ev.getAxisValue(MotionEvent.AXIS_RZ);
-		float ltrig = ev.getAxisValue(MotionEvent.AXIS_LTRIGGER);
-		float rtrig = ev.getAxisValue(MotionEvent.AXIS_RTRIGGER);
-		float hatx = ev.getAxisValue(MotionEvent.AXIS_HAT_X);
-		float haty = ev.getAxisValue(MotionEvent.AXIS_HAT_Y);
+		float lx = round(ev.getAxisValue(MotionEvent.AXIS_X), 6);
+		float ly = round(ev.getAxisValue(MotionEvent.AXIS_Y), 6);
+		float rx = round(ev.getAxisValue(MotionEvent.AXIS_Z), 6);
+		float ry = round(ev.getAxisValue(MotionEvent.AXIS_RZ), 6);
+		float ltrig = round(ev.getAxisValue(MotionEvent.AXIS_LTRIGGER), 6);
+		float rtrig = round(ev.getAxisValue(MotionEvent.AXIS_RTRIGGER), 6);
+		float hatx = round(ev.getAxisValue(MotionEvent.AXIS_HAT_X), 6);
+		float haty = round(ev.getAxisValue(MotionEvent.AXIS_HAT_Y), 6);
 
-        float left_stick_x = cleanMotionValues(lx);
-        float left_stick_y = cleanMotionValues(ly);
-        float right_stick_x = cleanMotionValues(rx);
-        float right_stick_y = cleanMotionValues(ry);
+        float left_stick_x = round(cleanMotionValues(lx), 6);
+        float left_stick_y = round(cleanMotionValues(ly), 6);
+        float right_stick_x = round(cleanMotionValues(rx), 6);
+        float right_stick_y = round(cleanMotionValues(ry), 6);
         float left_trigger = ltrig;
         float right_trigger = rtrig;
         boolean dpad_down = haty > dpadThreshold;
@@ -1599,44 +1640,44 @@ g_wiimote_threads_created = false;
 		boolean r = Math.abs(right_trigger )>= 0.5f;
 
         if (dpad_left || left_stick_x < 0 || right_stick_x < 0) {
-            if (! gvals.navleft || newidx) callJS("setNavKeyDown(37,"+ idx + ");");
+            if (! gvals.navleft || newidx) nav_keydown(37, idx);
 			gvals.navleft = true;
         } else {
-            if (gvals.navleft || newidx) callJS("setNavKeyUp(37,"+ idx + ");");
+            if (gvals.navleft || newidx) nav_keyup(37, idx);
 			gvals.navleft = false;
         }
         if (dpad_right || left_stick_x > 0 || right_stick_x > 0) {
-            if (! gvals.navright || newidx) callJS("setNavKeyDown(39,"+ idx + ");");
+            if (! gvals.navright || newidx) nav_keydown(39, idx);
 			gvals.navright = true;
         } else {
-            if (gvals.navright || newidx) callJS("setNavKeyUp(39,"+ idx + ");");
+            if (gvals.navright || newidx) nav_keyup(39, idx);
 			gvals.navright = false;
 
         }
         if (dpad_up || left_stick_y < 0 || right_stick_y < 0) {
-            if (! gvals.navup || newidx) callJS("setNavKeyDown(38,"+ idx + ");");
+            if (! gvals.navup || newidx) nav_keydown(38, idx);
 			gvals.navup = true;
         } else {
-            if (gvals.navup || newidx) callJS("setNavKeyUp(38,"+ idx + ");");
+            if (gvals.navup || newidx) nav_keyup(38, idx);
 			gvals.navup = false;
         }
         if (dpad_down || left_stick_y > 0 || right_stick_y > 0) {
-            if (!gvals.navdown || newidx) callJS("setNavKeyDown(40,"+ idx + ");");
+            if (!gvals.navdown || newidx) nav_keydown(40, idx);
 			gvals.navdown = true;
         } else {
-            if (gvals.navdown || newidx) callJS("setNavKeyUp(40,"+ idx + ");");
+            if (gvals.navdown || newidx) nav_keyup(40, idx);
 			gvals.navdown = false;
         }
 		
 		
-		if (ltrig != gvals.LTRIG || newidx) callJS("native_axis('LTRIG'," + ltrig + "," + idx + ");");
-		if (rtrig != gvals.RTRIG || newidx) callJS("native_axis('RTRIG'," + rtrig + "," + idx + ");");
-		if (lx != gvals.LX || newidx) callJS("native_axis('LX'," + lx + "," + idx + ");");
-		if (ly != gvals.LY || newidx) callJS("native_axis('LY'," + ly + "," + idx + ");");
-		if (rx != gvals.RX || newidx) callJS("native_axis('RX'," + rx + "," + idx + ");");
-		if (ry != gvals.RY || newidx) callJS("native_axis('RY'," + ry + "," + idx + ");");
-		if (hatx != gvals.HATX || newidx) callJS("native_axis('HATX'," + hatx + "," + idx + ");");
-		if (haty != gvals.HATY || newidx) callJS("native_axis('HATY'," + haty + "," + idx + ");");
+		if (ltrig != gvals.LTRIG || newidx) native_axis("LTRIG", ltrig, idx);
+		if (rtrig != gvals.RTRIG || newidx) native_axis("RTRIG", rtrig, idx);
+		if (lx != gvals.LX || newidx) native_axis("LX", lx, idx);
+		if (ly != gvals.LY || newidx) native_axis("LY", ly, idx);
+		if (rx != gvals.RX || newidx) native_axis("RX", rx, idx);
+		if (ry != gvals.RY || newidx) native_axis("RY", ry, idx);
+		if (hatx != gvals.HATX || newidx) native_axis("HATX", hatx, idx);
+		if (haty != gvals.HATY || newidx) native_axis("HATY", haty, idx);
 		
 		/*if (l) {
 			if (l != gvals.g_L || newidx) callJS("native_keydown(-3000,"+ idx + ");");
@@ -1680,93 +1721,95 @@ public int getDeviceIndex(int deviceId) {
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
 		//toast("KeyCode: " + event.getKeyCode());
-		//Toast.makeText(ctx, "KeyCode: " + event.getKeyCode(),  Toast.LENGTH_SHORT).show();
+        //Toast.makeText(ctx, "KeyCode: " + event.getKeyCode(),  Toast.LENGTH_SHORT).show();
+        
+        if (! g_wiimote_threads_created) return super.dispatchKeyEvent(event);
 		
 		int idx = getDeviceIndex(event.getDeviceId());
 		
 		if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
-			callJS("native_keydown(" + event.getKeyCode() + "," + idx + ");");
+			native_keydown(event.getKeyCode(), idx);
 		} else if (event.getAction() == KeyEvent.ACTION_UP) {
-			callJS("native_keyup(" + event.getKeyCode() + "," + idx + ");");
+			native_keyup(event.getKeyCode(), idx);
 		}
         
         if (event.getKeyCode() == KeyEvent.KEYCODE_DPAD_DOWN) {
             if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
-                callJS("setNavKeyDown(40,"+ idx + ");");
+                nav_keydown(40, idx);
             } else if (event.getAction() == KeyEvent.ACTION_UP) {
-                callJS("setNavKeyUp(40,"+ idx + ");");
+                nav_keyup(40, idx);
             }
             //return true;
         }
         else if (event.getKeyCode() == KeyEvent.KEYCODE_DPAD_LEFT) {
             if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
-                callJS("setNavKeyDown(37,"+ idx + ");");
+                nav_keydown(37, idx);
             } else if (event.getAction() == KeyEvent.ACTION_UP) {
-                callJS("setNavKeyUp(37,"+ idx + ");");
+                nav_keyup(37, idx);
             }
             // return true;
         }
         else if (event.getKeyCode() == KeyEvent.KEYCODE_DPAD_RIGHT) {
             if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
-                callJS("setNavKeyDown(39,"+ idx + ");");
+                nav_keydown(39, idx);
             } else if (event.getAction() == KeyEvent.ACTION_UP) {
-                callJS("setNavKeyUp(39,"+ idx + ");");
+                nav_keyup(39, idx);
             }
             //return true;
         }
         else if (event.getKeyCode() == KeyEvent.KEYCODE_DPAD_UP) {
             if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
-                callJS("setNavKeyDown(38,"+ idx + ");");
+                nav_keydown(38, idx);
             } else if (event.getAction() == KeyEvent.ACTION_UP) {
-                callJS("setNavKeyUp(38,"+ idx + ");");
+                nav_keyup(38, idx);
             }
             //return true;
         }
         else if (event.getKeyCode() == KeyEvent.KEYCODE_BACK) {
             if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
-                callJS("setNavKeyDown(-1000,"+ idx + ");");
+                nav_keydown(-1000, idx);
             } else if (event.getAction() == KeyEvent.ACTION_UP) {
-                callJS("setNavKeyUp(-1000,"+ idx + ");");
+                nav_keyup(-1000, idx);
             }
             return true;
         }
         else if (event.getKeyCode() == KeyEvent.KEYCODE_BUTTON_A) {
             if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
-                callJS("setNavKeyDown(13,"+ idx + ");");
+                nav_keydown(13, idx);
             } else if (event.getAction() == KeyEvent.ACTION_UP) {
-                callJS("setNavKeyUp(13,"+ idx + ");");
+                nav_keyup(13, idx);
             }
             //return true;
         }
         else if (event.getKeyCode() == KeyEvent.KEYCODE_BUTTON_X) {
             if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
-                callJS("setNavKeyDown(32,"+ idx + ");");
+                nav_keydown(32, idx);
             } else if (event.getAction() == KeyEvent.ACTION_UP) {
-                callJS("setNavKeyUp(32,"+ idx + ");");
+                nav_keyup(32, idx);
             }
             //return true;
         }
         else if (event.getKeyCode() == KeyEvent.KEYCODE_BUTTON_B) {
             if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
-                callJS("setNavKeyDown(27,"+ idx + ");");
+                nav_keydown(27, idx);
             } else if (event.getAction() == KeyEvent.ACTION_UP) {
-                callJS("setNavKeyUp(27,"+ idx + ");");
+                nav_keyup(27, idx);
             }
             //return true;
         }
         else if (event.getKeyCode() == KeyEvent.KEYCODE_BUTTON_Y) {
             if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
-                callJS("setNavKeyDown(46,"+ idx + ");");
+                nav_keydown(46, idx);
             } else if (event.getAction() == KeyEvent.ACTION_UP) {
-                callJS("setNavKeyUp(46,"+ idx + ");");
+                nav_keyup(46, idx);
             }
             //return true;
         }
         else if (event.getKeyCode() == KeyEvent.KEYCODE_MENU) {
             if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
-                callJS("setNavKeyDown(-1001,"+ idx + ");");
+                nav_keydown(-1001, idx);
             } else if (event.getAction() == KeyEvent.ACTION_UP) {
-                callJS("setNavKeyUp(-1001,"+ idx + ");");
+                nav_keyup(-1001, idx);
             }
 
             return true;
@@ -1837,6 +1880,11 @@ private BroadcastReceiver mReloadReceiver = new BroadcastReceiver() {
 	@Override
 	protected void onResume() {
 		super.onResume();
+
+        if (Build.VERSION.SDK_INT >= 24) 
+		{ 
+		  getWindow().setSustainedPerformanceMode(true); 
+		}
 		
 		callJS("setAppPause(false);");
 

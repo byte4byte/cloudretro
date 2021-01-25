@@ -18,7 +18,7 @@ namespace device {
 // browser.
 class COMPONENT_EXPORT(GAMEPAD_PUBLIC) Gamepads {
  public:
-  static constexpr size_t kItemsLengthCap = 4;
+  static constexpr size_t kItemsLengthCap = 15;
 
   // Gamepad data for N separate gamepad devices.
   Gamepad items[kItemsLengthCap];

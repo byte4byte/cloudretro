@@ -55,6 +55,8 @@
 #include <stdlib.h>
 #endif
 
+#include <sys/resource.h>
+
 #if defined(OS_WIN)
 sandbox::TargetServices* g_target_services = NULL;
 #else
@@ -99,6 +101,8 @@ int PpapiPluginMain(const MainFunctionParams& parameters) {
     locale.append(".UTF-8");
     setlocale(LC_ALL, locale.c_str());
     setenv("LANG", locale.c_str(), 0);
+
+    
 #endif
   }
 
@@ -128,7 +132,9 @@ int PpapiPluginMain(const MainFunctionParams& parameters) {
       service_manager::SandboxLinux::Options());
 #endif
 
-  ChildProcess ppapi_process;
+setpriority(PRIO_PROCESS, 0, -15);
+
+  ChildProcess ppapi_process(base::ThreadPriority::EC);
   base::RunLoop run_loop;
   ppapi_process.set_main_thread(new PpapiThread(run_loop.QuitClosure(),
                                                 parameters.command_line,

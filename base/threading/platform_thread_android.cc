@@ -27,10 +27,11 @@ namespace internal {
 // big.LITTLE devices.
 // - DISPLAY corresponds to Android's PRIORITY_DISPLAY = -4 value.
 // - REALTIME_AUDIO corresponds to Android's PRIORITY_AUDIO = -16 value.
-const ThreadPriorityToNiceValuePair kThreadPriorityToNiceValueMap[4] = {
+const ThreadPriorityToNiceValuePair kThreadPriorityToNiceValueMap[5] = {
     {ThreadPriority::BACKGROUND, 10},
     {ThreadPriority::NORMAL, 0},
     {ThreadPriority::DISPLAY, -4},
+    {ThreadPriority::EC, -14},
     {ThreadPriority::REALTIME_AUDIO, -16},
 };
 
@@ -47,6 +48,11 @@ bool SetCurrentThreadPriorityForPlatform(ThreadPriority priority) {
   if (priority == ThreadPriority::REALTIME_AUDIO) {
     JNIEnv* env = base::android::AttachCurrentThread();
     Java_ThreadUtils_setThreadPriorityAudio(env, PlatformThread::CurrentId());
+    return true;
+  }
+  else if (priority == ThreadPriority::EC) {
+    JNIEnv* env = base::android::AttachCurrentThread();
+    Java_ThreadUtils_setThreadPriorityEc(env, PlatformThread::CurrentId());
     return true;
   }
   return false;

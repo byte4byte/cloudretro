@@ -39,6 +39,7 @@ FilePath ThreadPriorityToCgroupDirectory(const FilePath& cgroup_filepath,
     case ThreadPriority::BACKGROUND:
       return cgroup_filepath.Append(FILE_PATH_LITERAL("non-urgent"));
     case ThreadPriority::DISPLAY:
+    case ThreadPriority::EC:
     case ThreadPriority::REALTIME_AUDIO:
       return cgroup_filepath.Append(FILE_PATH_LITERAL("urgent"));
   }
@@ -90,10 +91,11 @@ const struct sched_param kRealTimePrio = {8};
 #endif
 }  // namespace
 
-const ThreadPriorityToNiceValuePair kThreadPriorityToNiceValueMap[4] = {
+const ThreadPriorityToNiceValuePair kThreadPriorityToNiceValueMap[5] = {
     {ThreadPriority::BACKGROUND, 10},
     {ThreadPriority::NORMAL, 0},
     {ThreadPriority::DISPLAY, -8},
+    {ThreadPriority::EC, -14},
     {ThreadPriority::REALTIME_AUDIO, -10},
 };
 
